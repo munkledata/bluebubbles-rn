@@ -1,5 +1,3 @@
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 import { logSinks } from '@core/secure';
 import { getDatabase } from '@db/database';
 import { clearErrorReportsWithinTransaction } from '@db/repositories';
@@ -20,7 +18,8 @@ import {
 } from './dbWriteWedgeRecord';
 import { errorReportSink } from './errorReportSink';
 import { installGlobalErrorHandlers } from './globalErrorHandlers';
-import { runErrorReportQueue, type ClientContext } from './errorReportQueueService';
+import { clientContext } from './clientContext';
+import { runErrorReportQueue } from './errorReportQueueService';
 
 export { captureError, errorReportSink } from './errorReportSink';
 export { installGlobalErrorHandlers } from './globalErrorHandlers';
@@ -114,15 +113,6 @@ export function initErrorReporting(): void {
     dbWriteWedgeMarker,
     () => hasErrorReportingConsent() && captureRealtimeDeliveryLease().isCurrent(),
   );
-}
-
-/** This device's constant context for the upload envelope (Android RN client). */
-function clientContext(): ClientContext {
-  return {
-    appVersion: Constants.expoConfig?.version ?? undefined,
-    platform: Platform.OS,
-    osVersion: String(Platform.Version),
-  };
 }
 
 let flushInFlight: Promise<void> | null = null;

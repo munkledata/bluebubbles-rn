@@ -15,6 +15,7 @@ import { ERROR_REPORTING_CONSENT_KEY, useFeatureSettingsStore } from '@state/fea
 import type { BackgroundTaskExecution } from '@/native/backgroundTaskExecution';
 import { accountRevocationMarker, vault } from '../clients';
 import { ensureDatabase } from '../databaseControl';
+import { clientContext } from '../errors/clientContext';
 import { runErrorReportQueue } from '../errors/errorReportQueueService';
 import { flushPersistentLogsForHeadlessCompletion } from '../logging/fileLogSink';
 import {
@@ -220,7 +221,7 @@ async function flushBackgroundDiagnostics(
 
   try {
     if (!consentCurrent || !scope.isCurrent()) return;
-    await runErrorReportQueue(db, http, Date.now(), {}, asRealtimeLease(scope), {
+    await runErrorReportQueue(db, http, Date.now(), clientContext(), asRealtimeLease(scope), {
       isUploadAllowed: () => consentCurrent && scope.isCurrent(),
       signal: controller.signal,
     });

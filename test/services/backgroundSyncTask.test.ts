@@ -65,6 +65,10 @@ jest.mock('@/services/clients', () => ({
   accountRevocationMarker: {},
 }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn() }));
+// The real context reads react-native, which the node project cannot load.
+jest.mock('@/services/errors/clientContext', () => ({
+  clientContext: () => ({ appVersion: '9.8.7', platform: 'android', osVersion: '36' }),
+}));
 jest.mock('@/services/errors/errorReportQueueService', () => ({
   runErrorReportQueue: mockRunErrorReportQueue,
 }));
@@ -385,11 +389,12 @@ describe('the Expo background task adapter', () => {
     await task?.();
 
     expect(mockRunErrorReportQueue).toHaveBeenCalledTimes(1);
+    // Background reports carry the same app and Android version as foreground ones (review M218).
     expect(mockRunErrorReportQueue).toHaveBeenCalledWith(
       db,
       client,
       expect.any(Number),
-      {},
+      { appVersion: '9.8.7', platform: 'android', osVersion: '36' },
       scope,
       expect.objectContaining({
         isUploadAllowed: expect.any(Function),

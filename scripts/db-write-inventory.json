@@ -13316,7 +13316,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>:mutator-call:a0022079e125",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 177,
+      "line": 178,
       "symbol": "recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#runDueScheduled",
@@ -13327,9 +13327,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/syncControlTracking.test.ts; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/services/syncedBackgroundAccountScope.test.ts"
     },
     {
-      "id": "src/services/background/backgroundSync.ts#flushBackgroundDiagnostics:mutator-call:145fd58a6e05",
+      "id": "src/services/background/backgroundSync.ts#flushBackgroundDiagnostics:mutator-call:7d9cca7cc854",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 223,
+      "line": 224,
       "symbol": "flushBackgroundDiagnostics",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportQueueService.ts#runErrorReportQueue",
@@ -13342,7 +13342,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#executeBackgroundSyncTask:mutator-reference:c97a4dc21610",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 274,
+      "line": 275,
       "symbol": "executeBackgroundSyncTask",
       "operation": "mutator-reference",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -13355,7 +13355,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:cdab1e96e395",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 278,
+      "line": 279,
       "symbol": "executeBackgroundSyncTask.synchronize",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#incrementalSync",
@@ -13368,7 +13368,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:a20f74733af0",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 289,
+      "line": 290,
       "symbol": "executeBackgroundSyncTask.drainOutgoing",
       "operation": "mutator-call",
       "target": "src/services/send/outgoingQueueService.ts#runOutgoingQueue",
@@ -13381,7 +13381,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#executeBackgroundSyncTask.flushDiagnostics:mutator-call:18bb7af02cb5",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 319,
+      "line": 320,
       "symbol": "executeBackgroundSyncTask.flushDiagnostics",
       "operation": "mutator-call",
       "target": "src/services/background/backgroundSync.ts#flushBackgroundDiagnostics",
@@ -19296,7 +19296,7 @@
     {
       "id": "src/services/errors/index.ts#revokeErrorReporting:mutator-call:df9a116f1f15",
       "path": "src/services/errors/index.ts",
-      "line": 63,
+      "line": 62,
       "symbol": "revokeErrorReporting",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>",
@@ -19309,7 +19309,7 @@
     {
       "id": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>:mutator-call:00b329553e04",
       "path": "src/services/errors/index.ts",
-      "line": 68,
+      "line": 67,
       "symbol": "revokeErrorReporting.<callback:6ba16ab0fa>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19322,7 +19322,7 @@
     {
       "id": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>:mutator-call:3cd60f103698",
       "path": "src/services/errors/index.ts",
-      "line": 68,
+      "line": 67,
       "symbol": "revokeErrorReporting.<callback:6ba16ab0fa>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>.<callback:df5455005c>",
@@ -19335,7 +19335,7 @@
     {
       "id": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>.<callback:df5455005c>:mutator-call:0af467bde68f",
       "path": "src/services/errors/index.ts",
-      "line": 70,
+      "line": 69,
       "symbol": "revokeErrorReporting.<callback:6ba16ab0fa>.<callback:df5455005c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#clearErrorReportsWithinTransaction",
@@ -19348,7 +19348,7 @@
     {
       "id": "src/services/errors/index.ts#ensureConsentObserver.<callback:a350d282b8>:mutator-call:81274b260511",
       "path": "src/services/errors/index.ts",
-      "line": 96,
+      "line": 95,
       "symbol": "ensureConsentObserver.<callback:a350d282b8>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting",
@@ -19361,7 +19361,7 @@
     {
       "id": "src/services/errors/index.ts#ensureConsentObserver:mutator-call:5631fb0106eb",
       "path": "src/services/errors/index.ts",
-      "line": 100,
+      "line": 99,
       "symbol": "ensureConsentObserver",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting",
@@ -19374,7 +19374,7 @@
     {
       "id": "src/services/errors/index.ts#initErrorReporting:mutator-call:e859266a73cf",
       "path": "src/services/errors/index.ts",
-      "line": 110,
+      "line": 109,
       "symbol": "initErrorReporting",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#ensureConsentObserver",
@@ -19387,7 +19387,7 @@
     {
       "id": "src/services/errors/index.ts#flushErrorReports:mutator-call:1ae42da375cc",
       "path": "src/services/errors/index.ts",
-      "line": 137,
+      "line": 127,
       "symbol": "flushErrorReports",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#ensureConsentObserver",
@@ -19400,7 +19400,7 @@
     {
       "id": "src/services/errors/index.ts#flushErrorReports:mutator-call:a82e15453f42",
       "path": "src/services/errors/index.ts",
-      "line": 173,
+      "line": 163,
       "symbol": "flushErrorReports",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting",
@@ -19413,7 +19413,7 @@
     {
       "id": "src/services/errors/index.ts#flushErrorReports:mutator-call:4c82a62c3bba",
       "path": "src/services/errors/index.ts",
-      "line": 190,
+      "line": 180,
       "symbol": "flushErrorReports",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb",
@@ -19426,7 +19426,7 @@
     {
       "id": "src/services/errors/index.ts#flushErrorReports:mutator-call:35b3c74315d6",
       "path": "src/services/errors/index.ts",
-      "line": 193,
+      "line": 183,
       "symbol": "flushErrorReports",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportQueueService.ts#runErrorReportQueue",

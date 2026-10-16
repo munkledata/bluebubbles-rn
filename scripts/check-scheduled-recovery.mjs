@@ -36,7 +36,7 @@ const OUTGOING_QUEUE_SERVICE_PATH = 'src/services/send/outgoingQueueService.ts';
 const ATTACHMENT_UPLOAD_PATH = 'src/services/send/attachmentUpload.ts';
 const HTTP_CLIENT_PATH = 'src/core/api/http.ts';
 const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
-  [BACKGROUND_SYNC_PATH, '7774ba77caba813d6789f9982e5f7a838b4809db4e6fd56ffd8f741f269b0338'],
+  [BACKGROUND_SYNC_PATH, '71b48504c85cf9ddd65f476e25fb1d0033541501b4be41dd9ace6cb2ffa4dbdd'],
   [
     'src/native/backgroundTaskExecution.ts',
     '81a55c2b984ad740c0160dbce50ecc71d711c10ac18f8d83c8da9fe1e4576541',
