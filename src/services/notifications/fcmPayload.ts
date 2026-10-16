@@ -15,12 +15,6 @@ export interface ParsedFcm {
   eventName: string;
   body: unknown;
   /**
-   * Optional compatibility metadata carried beside `data`. The current Gator server normally
-   * keeps chat identity inside the serialized body, but retaining this sibling lets the caller
-   * merge it back after decrypting an envelope produced by another compatible server build.
-   */
-  envelopeChatGuid: string | undefined;
-  /**
    * The envelope says the server encrypted the `data` body. When true, `body` is the base64
    * ciphertext frame (not JSON) and the caller must decrypt it before dispatch — see
    * {@link encryptionType}. An UNSUPPORTED scheme is logged + skipped rather than failing
@@ -35,55 +29,16 @@ export interface ParsedFcm {
   encryptionType: string;
 }
 
+/**
+ * Chat identity travels inside `data` only. An envelope-level `chatGuid` sibling is ignored: the
+ * Gator server never sends one, and an accepted push is encrypted, so merging it into the body
+ * could never apply (review M099).
+ */
 export function parseFcmData(data: Record<string, unknown> | undefined): ParsedFcm {
-  const envelopeChatGuid = nonEmptyString(data?.chatGuid);
   return {
     eventName: String(data?.type ?? ''),
-    body: rehydrateFcmEnvelopeChatGuid(data?.data ?? data, envelopeChatGuid),
-    envelopeChatGuid,
+    body: data?.data ?? data,
     encrypted: String(data?.encrypted ?? '').toLowerCase() === 'true',
     encryptionType: String(data?.encryptionType ?? ''),
   };
-}
-
-/**
- * Fold an optional envelope `chatGuid` INTO a plaintext body, where the Message schema reads it.
- * The current Gator server sends only `{ type, data }` and normally includes chat identity inside
- * `data`; the sibling is compatibility tolerance for other builds, not a required server field.
- *
- * This helper is also called AFTER decryption. Calling it only in {@link parseFcmData} cannot work
- * for an encrypted lean body because the ciphertext is not JSON yet. A body-owned `chatGuid`
- * always wins, and the original string/object representation is preserved.
- */
-export function rehydrateFcmEnvelopeChatGuid(
-  body: unknown,
-  envelopeChatGuid: string | undefined,
-): unknown {
-  if (!envelopeChatGuid) return body;
-  const obj = asObject(body);
-  if (!obj || typeof obj.chatGuid === 'string') return body;
-  const merged = { ...obj, chatGuid: envelopeChatGuid };
-  // Preserve the JSON-string form the realtime normalizer expects to re-parse.
-  return typeof body === 'string' ? JSON.stringify(merged) : merged;
-}
-
-function nonEmptyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-/** Parse a JSON string (or accept an object) into a plain record; null on anything else. */
-function asObject(body: unknown): Record<string, unknown> | null {
-  if (typeof body === 'string') {
-    try {
-      const parsed: unknown = JSON.parse(body);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : null;
-    } catch {
-      return null;
-    }
-  }
-  return body && typeof body === 'object' && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : null;
 }

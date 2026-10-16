@@ -10,7 +10,6 @@ type NativeHandler = (message: NativeMessage) => void | Promise<void>;
 interface MockParsedFcm {
   eventName: string;
   body: unknown;
-  envelopeChatGuid: string | undefined;
   encrypted: boolean;
   encryptionType: string;
 }
@@ -37,7 +36,6 @@ const mockPersistAuthenticatedLockedFcmV3Event = jest.fn(
 const mockParseFcmData = jest.fn((): MockParsedFcm => ({
   eventName: 'new-message',
   body: { guid: 'm1' },
-  envelopeChatGuid: undefined as string | undefined,
   encrypted: false,
   encryptionType: '',
 }));
@@ -138,8 +136,6 @@ jest.mock('@/services/realtimeControl', () => ({
 }));
 jest.mock('@/services/notifications/fcmPayload', () => ({
   parseFcmData: mockParseFcmData,
-  rehydrateFcmEnvelopeChatGuid: jest.requireActual('@/services/notifications/fcmPayload')
-    .rehydrateFcmEnvelopeChatGuid,
 }));
 jest.mock('@/services/notifications/fcmDecrypt', () => ({
   FCM_V2_ENCRYPTION_TYPE: 'AEAD_GCM_V2_DEVICE',
@@ -224,7 +220,6 @@ function configureV3Delivery(options: {
   mockParseFcmData.mockReturnValue({
     eventName: options.eventName ?? 'new-message',
     body: 'v3-frame',
-    envelopeChatGuid: undefined,
     encrypted: true,
     encryptionType: 'AEAD_GCM_V3_IDENTITY',
   });
@@ -254,7 +249,6 @@ beforeEach(() => {
   mockParseFcmData.mockReturnValue({
     eventName: 'new-message',
     body: 'v2-frame',
-    envelopeChatGuid: undefined,
     encrypted: true,
     encryptionType: 'AEAD_GCM_V2_DEVICE',
   });
@@ -455,7 +449,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'encrypted-frame',
-      envelopeChatGuid: 'encrypted-chat',
       encrypted: true,
       encryptionType: 'AEAD_GCM_V2_DEVICE',
     });
@@ -703,7 +696,6 @@ describe('FCM native callback ownership', () => {
     );
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
-      envelopeChatGuid: undefined,
       ...shape,
     });
 
@@ -736,7 +728,6 @@ describe('FCM native callback ownership', () => {
         eventName: 'message-send-error',
         body: 'v2-frame',
         // Current V2 does not authenticate this sibling, so it must not be merged into plaintext.
-        envelopeChatGuid: 'unauthenticated-outer-chat',
         encrypted: true,
         encryptionType: 'AEAD_GCM_V2_DEVICE',
       });
@@ -781,7 +772,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'v2-frame',
-      envelopeChatGuid: undefined,
       encrypted: true,
       encryptionType: 'AEAD_GCM_V2_DEVICE',
     });
@@ -808,7 +798,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'v3-frame',
-      envelopeChatGuid: 'unauthenticated-outer-chat',
       encrypted: true,
       encryptionType: 'AEAD_GCM_V3_IDENTITY',
     });
@@ -856,7 +845,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'v3-frame',
-      envelopeChatGuid: undefined,
       encrypted: true,
       encryptionType: 'AEAD_GCM_V3_IDENTITY',
     });
@@ -895,7 +883,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'v3-frame',
-      envelopeChatGuid: undefined,
       encrypted: true,
       encryptionType: 'AEAD_GCM_V3_IDENTITY',
     });
@@ -932,7 +919,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'v3-frame',
-      envelopeChatGuid: undefined,
       encrypted: true,
       encryptionType: 'AEAD_GCM_V3_IDENTITY',
     });
@@ -986,7 +972,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'v3-frame',
-      envelopeChatGuid: undefined,
       encrypted: true,
       encryptionType: 'AEAD_GCM_V3_IDENTITY',
     });
@@ -1017,7 +1002,6 @@ describe('FCM native callback ownership', () => {
     );
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
-      envelopeChatGuid: undefined,
       ...shape,
     });
 
@@ -1054,7 +1038,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'v2-frame',
-      envelopeChatGuid: undefined,
       encrypted: true,
       encryptionType: 'AEAD_GCM_V2_DEVICE',
     });
@@ -1083,7 +1066,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'bad-frame',
-      envelopeChatGuid: 'encrypted-chat',
       encrypted: true,
       encryptionType: 'AEAD_GCM_V2_DEVICE',
     });
@@ -1104,7 +1086,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'valid-frame',
-      envelopeChatGuid: undefined,
       encrypted: true,
       encryptionType: 'AEAD_GCM_V2_DEVICE',
     });
@@ -1257,7 +1238,6 @@ describe('FCM native callback ownership', () => {
     configureV3Delivery({ locked: true });
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
-      envelopeChatGuid: undefined,
       ...shape,
     });
 
@@ -1318,7 +1298,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'v2-frame',
-      envelopeChatGuid: undefined,
       encrypted: true,
       encryptionType: 'AEAD_GCM_V2_DEVICE',
     });
@@ -1350,7 +1329,6 @@ describe('FCM native callback ownership', () => {
       mockParseFcmData.mockReturnValueOnce({
         eventName,
         body: 'v2-frame',
-        envelopeChatGuid: undefined,
         encrypted: true,
         encryptionType: 'AEAD_GCM_V2_DEVICE',
       });
@@ -1392,7 +1370,6 @@ describe('FCM native callback ownership', () => {
     );
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
-      envelopeChatGuid: undefined,
       ...shape,
     });
     if (decryptFails) {
@@ -1418,7 +1395,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'encrypted-private-frame',
-      envelopeChatGuid: 'private-chat',
       encrypted: true,
       encryptionType: 'aes-gcm',
     });
@@ -1445,7 +1421,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'encrypted-private-frame',
-      envelopeChatGuid: 'private-chat',
       encrypted: true,
       encryptionType: 'aes-gcm',
     });
@@ -1464,7 +1439,6 @@ describe('FCM native callback ownership', () => {
     mockParseFcmData.mockReturnValueOnce({
       eventName: 'new-message',
       body: 'encrypted-private-frame',
-      envelopeChatGuid: 'private-chat',
       encrypted: true,
       encryptionType: 'aes-gcm',
     });

@@ -8646,10 +8646,6 @@ function incomingIngressCertifiedNodes({
   const captureFcm = fn(fcmPath, 'captureFcmDelivery');
   const storedAppLockRequiresProtection = fn(fcmPath, 'storedAppLockRequiresProtection');
   const parseFcmData = fn(fcmPath.replace('fcmMessaging.ts', 'fcmPayload.ts'), 'parseFcmData');
-  const rehydrateFcmEnvelopeChatGuid = fn(
-    fcmPath.replace('fcmMessaging.ts', 'fcmPayload.ts'),
-    'rehydrateFcmEnvelopeChatGuid',
-  );
   const decryptFcmV2Payload = fn(
     fcmPath.replace('fcmMessaging.ts', 'fcmDecrypt.ts'),
     'decryptFcmV2Payload',
@@ -8776,7 +8772,6 @@ function incomingIngressCertifiedNodes({
     captureFcm,
     storedAppLockRequiresProtection,
     parseFcmData,
-    rehydrateFcmEnvelopeChatGuid,
     decryptFcmV2Payload,
     decryptFcmV3Payload,
     fcmPushDecryptionKeyCandidates,

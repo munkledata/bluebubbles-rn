@@ -49,11 +49,9 @@ jest.mock('@/services/notifications/fcmPayload', () => ({
   parseFcmData: jest.fn(() => ({
     eventName: 'new-message',
     body: { guid: 'coordinator-integration' },
-    envelopeChatGuid: undefined,
     encrypted: false,
     encryptionType: '',
   })),
-  rehydrateFcmEnvelopeChatGuid: jest.fn((value: string) => value),
 }));
 jest.mock('@/services/notifications/fcmDecrypt', () => ({
   FCM_V2_ENCRYPTION_TYPE: 'AEAD_GCM_V2_DEVICE',

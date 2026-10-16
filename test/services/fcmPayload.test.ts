@@ -1,5 +1,5 @@
 import { EventRouter, type EventSink, type NormalizedEvent } from '@core/realtime';
-import { parseFcmData, rehydrateFcmEnvelopeChatGuid } from '@/services/notifications/fcmPayload';
+import { parseFcmData } from '@/services/notifications/fcmPayload';
 
 function collector() {
   const events: NormalizedEvent[] = [];
@@ -25,7 +25,6 @@ describe('parseFcmData', () => {
     expect(parseFcmData(undefined)).toEqual({
       eventName: '',
       body: undefined,
-      envelopeChatGuid: undefined,
       encrypted: false,
       encryptionType: '',
     });
@@ -69,59 +68,13 @@ describe('parseFcmData', () => {
     }
   });
 
-  it('F-1: tolerates an envelope `chatGuid` from a compatible server build', async () => {
-    // Current Gator normally keeps this identity inside data; retain sibling compatibility for
-    // other builds so a lean message still reaches the chats-less fallback.
-    const fcm = {
-      type: 'new-message',
-      data: JSON.stringify({ guid: 'srv-3', text: 'hi' }),
-      chatGuid: 'cFallback',
-    };
-    const { body } = parseFcmData(fcm);
-    expect(typeof body).toBe('string');
-    const parsed = JSON.parse(body as string) as { guid: string; chatGuid?: string };
-    expect(parsed.chatGuid).toBe('cFallback'); // folded into the message body
-
-    // …and it round-trips through the router into a parsed message carrying chatGuid.
-    const { events, sink } = collector();
-    const router = new EventRouter(sink);
-    const out = await router.handle('new-message', body, 'fcm');
-    if (out?.type === 'new-message') {
-      expect(out.message.chatGuid).toBe('cFallback');
-    }
-    expect(events).toHaveLength(1);
-  });
-
-  it('retains an envelope chatGuid while encrypted and rehydrates it only after decrypt', () => {
-    const encrypted = parseFcmData({
-      type: 'new-message',
-      data: 'ciphertext-is-not-json',
-      encrypted: 'true',
-      encryptionType: 'AEAD_GCM_V1',
-      chatGuid: 'cEncryptedFallback',
-    });
-
-    expect(encrypted.body).toBe('ciphertext-is-not-json');
-    expect(encrypted.envelopeChatGuid).toBe('cEncryptedFallback');
-    expect(
-      rehydrateFcmEnvelopeChatGuid(
-        JSON.stringify({ guid: 'encrypted-lean', text: 'decrypted' }),
-        encrypted.envelopeChatGuid,
-      ),
-    ).toBe(
-      JSON.stringify({ guid: 'encrypted-lean', text: 'decrypted', chatGuid: 'cEncryptedFallback' }),
-    );
-  });
-
-  it('F-1: does NOT override a chatGuid the body already carries', () => {
-    const fcm = {
-      type: 'new-message',
-      data: JSON.stringify({ guid: 'srv-4', chatGuid: 'cInner' }),
-      chatGuid: 'cEnvelope',
-    };
-    const { body } = parseFcmData(fcm);
-    const parsed = JSON.parse(body as string) as { chatGuid?: string };
-    expect(parsed.chatGuid).toBe('cInner');
+  it('ignores an envelope chatGuid: the body alone carries chat identity (review M099)', () => {
+    // The Gator server never sends this sibling, and an accepted push is encrypted, so a merge
+    // into the still-encrypted body could never apply.
+    const data = JSON.stringify({ guid: 'srv-3', text: 'hi' });
+    const parsed = parseFcmData({ type: 'new-message', data, chatGuid: 'cFallback' });
+    expect(parsed.body).toBe(data);
+    expect(parsed).not.toHaveProperty('envelopeChatGuid');
   });
 
   it('the OLD behavior — dispatching the whole envelope — would NOT route (guid is nested)', async () => {

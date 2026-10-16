@@ -182,10 +182,11 @@ helper rather than adding a fourth copy.
   37)". These are two _distinct tokens_, i.e. two distinct installs — the phone under test is API 36.
   The registry dedups by token, so this is correct behaviour, not duplicate delivery. Purging would
   have deregistered a live device.
-- **`hoistChatGuid`** (`fcmPayload.ts`) folds a top-level envelope `chatGuid` into the body, but the
-  Gator server does not send that sibling key. Modern keyed FCM may also carry the separate
-  `encrypted` and `encryptionType` routing fields; they do not change this `chatGuid` invariant. The
-  helper is harmless and remains as tolerance for other server builds.
+- **No envelope `chatGuid`** (`fcmPayload.ts`). The Gator server keeps chat identity inside `data`
+  and never sends a top-level `chatGuid` sibling. The helper that merged such a sibling into the body
+  was removed (review M099): an accepted push is encrypted, so the merge could never apply. Modern
+  keyed FCM also carries the `encrypted` and `encryptionType` routing fields; they do not change
+  this.
 
 ### 2.6 Attempt-aware RCS send-error fanout (2026-09-04)
 
