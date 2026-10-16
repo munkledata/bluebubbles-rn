@@ -218,7 +218,106 @@ async function expectForeignKeyRejection(promise: Promise<unknown>): Promise<voi
   });
 }
 
+/**
+ * Schema-wide coverage (review M076). `clearLocalCache` and `localCacheDirty` keep static per-table
+ * statements because the DB-write scanner reads them. These lists check them against the real
+ * schema: every table the migrations create is classified here, so a new table fails the
+ * classification test until someone decides what Disconnect does with it.
+ */
+const ACCOUNT_TABLES = [
+  'incoming_event_queue',
+  'message_guid_aliases',
+  'message_deletion_ledger',
+  'message_server_states',
+  'attachment_media_exports',
+  'attachment_cache_entries',
+  'attachments',
+  'messages',
+  'chat_handles',
+  'custom_folder_members',
+  'custom_folders',
+  'chats',
+  'handles',
+  'outgoing_queue',
+  'scheduled_messages',
+  'reminders',
+  'url_previews',
+  'error_reports',
+] as const;
+type AccountTable = (typeof ACCOUNT_TABLES)[number];
+/** Emptied by ON DELETE CASCADE when their chat row goes (production enables foreign keys). */
+const CASCADED_TABLES = ['inbox_search_postings', 'inbox_search_state'] as const;
+/** The message search index and its shadow tables, emptied of text by the `messages_ad` trigger. */
+const FTS_TABLES = [
+  'messages_fts',
+  'messages_fts_config',
+  'messages_fts_data',
+  'messages_fts_docsize',
+  'messages_fts_idx',
+] as const;
+/** Kept on purpose: device state, not account state. */
+const DEVICE_TABLES = ['_migrations', 'sqlite_sequence', 'contacts', 'themes'] as const;
+/** Account keys and the sync cursor are reset in place; device rows stay (tested below). */
+const SCOPED_TABLES = ['kv', 'sync_markers'] as const;
+
+/** One valid row per account table, inserted alone (foreign keys off for child tables). */
+const ISOLATED_ACCOUNT_ROWS: Record<AccountTable, string> = {
+  incoming_event_queue: `INSERT INTO incoming_event_queue
+      (event_key, payload_digest, ordering_key, event_name, source, payload,
+       received_at, expires_at)
+    VALUES ('isolated-event', '${INCOMING_DIGEST}', 'isolated-order', 'new-message',
+            'fcm', '{}', 5000, 6000)`,
+  message_guid_aliases: `INSERT INTO message_guid_aliases (alias_guid, canonical_guid)
+    VALUES ('temp-isolated-alias', 'real-isolated-alias')`,
+  message_deletion_ledger: `INSERT INTO message_deletion_ledger (guid, date_deleted)
+    VALUES ('isolated-deleted-message', 5000)`,
+  message_server_states: `INSERT INTO message_server_states
+      (guid, chat_guid, provider_epoch, ledger_epoch, sequence, kind, date_deleted)
+    VALUES ('isolated-server-state', NULL, 'provider', 'ledger', '1', 'deleted', 0)`,
+  attachment_media_exports: `INSERT INTO attachment_media_exports
+      (attachment_guid, destination, created_at, expires_at)
+    VALUES ('isolated-export-attachment', 'gallery', 5000, 6000)`,
+  attachment_cache_entries: `INSERT INTO attachment_cache_entries (path, bytes, last_used_at)
+    VALUES ('file:///documents/attachments/isolated', 1, 1)`,
+  attachments: `INSERT INTO attachments (guid) VALUES ('isolated-attachment')`,
+  messages: `INSERT INTO messages (guid, chat_id) VALUES ('isolated-message', 999)`,
+  chat_handles: `INSERT INTO chat_handles (chat_id, handle_id) VALUES (999, 999)`,
+  custom_folder_members: `INSERT INTO custom_folder_members (folder_id, chat_guid)
+    VALUES (999, 'isolated-member')`,
+  custom_folders: `INSERT INTO custom_folders (name, sort_order) VALUES ('Isolated folder', 0)`,
+  chats: `INSERT INTO chats (guid) VALUES ('isolated-chat')`,
+  handles: `INSERT INTO handles (address) VALUES ('isolated@example.com')`,
+  outgoing_queue: `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload)
+    VALUES ('temp-isolated', 'chat-isolated', 'text', '{}')`,
+  scheduled_messages: `INSERT INTO scheduled_messages (chat_guid, payload, scheduled_for)
+    VALUES ('chat-isolated', '{}', 9000)`,
+  reminders: `INSERT INTO reminders (message_guid, chat_guid, scheduled_for, notification_id)
+    VALUES ('message-isolated', 'chat-isolated', 9000, 'notification-isolated')`,
+  url_previews: `INSERT INTO url_previews (url) VALUES ('https://isolated.example')`,
+  error_reports: `INSERT INTO error_reports (level, message, created_at)
+    VALUES ('error', 'isolated diagnostic', 5000)`,
+};
+
 describe('clearLocalCache', () => {
+  it('classifies every table the migrations create (M076)', async () => {
+    const { raw } = await createTestDb();
+    const tables = (
+      raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+        name: string;
+      }[]
+    ).map((row) => row.name);
+
+    expect(tables.sort()).toEqual(
+      [
+        ...ACCOUNT_TABLES,
+        ...CASCADED_TABLES,
+        ...FTS_TABLES,
+        ...DEVICE_TABLES,
+        ...SCOPED_TABLES,
+      ].sort(),
+    );
+  });
+
   it('empties every server-derived table', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
@@ -234,33 +333,17 @@ describe('clearLocalCache', () => {
          VALUES ('temp-old-account', 'real-old-account')`,
       )
       .run();
+    raw.prepare(ISOLATED_ACCOUNT_ROWS.message_server_states).run();
     expect(await rebuildInboxSearchIndexBatch(db)).toMatchObject({ settled: 1 });
-    expect(count(raw, 'inbox_search_postings')).toBeGreaterThan(0);
-    expect(count(raw, 'messages')).toBeGreaterThan(0);
+    const wiped = [...ACCOUNT_TABLES, ...CASCADED_TABLES];
+    // Every table starts populated, so "empty afterwards" is never vacuously true.
+    for (const table of wiped) {
+      expect({ table, populated: count(raw, table) > 0 }).toEqual({ table, populated: true });
+    }
 
     await clearLocalCache(db);
 
-    for (const table of [
-      'incoming_event_queue',
-      'message_deletion_ledger',
-      'message_guid_aliases',
-      'attachment_media_exports',
-      'attachment_cache_entries',
-      'attachments',
-      'messages',
-      'chat_handles',
-      'inbox_search_postings',
-      'inbox_search_state',
-      'custom_folder_members',
-      'custom_folders',
-      'chats',
-      'handles',
-      'outgoing_queue',
-      'scheduled_messages',
-      'reminders',
-      'url_previews',
-      'error_reports',
-    ]) {
+    for (const table of wiped) {
       expect({ table, rows: count(raw, table) }).toEqual({ table, rows: 0 });
     }
   });
@@ -736,56 +819,29 @@ describe('clearLocalCache', () => {
       }
     });
 
+    it.each(ACCOUNT_TABLES)(
+      'answers true when a lone %s row survives, and the wipe removes it (M076)',
+      async (table) => {
+        const { db, raw } = await createTestDb();
+        await clearLocalCache(db);
+        // A lone child row has no parent, so foreign keys are off for this one insert.
+        raw.pragma('foreign_keys = OFF');
+        try {
+          raw.prepare(ISOLATED_ACCOUNT_ROWS[table]).run();
+        } finally {
+          raw.pragma('foreign_keys = ON');
+        }
+        expect(count(raw, table)).toBe(1);
+
+        expect(await localCacheDirty(db)).toBe(true);
+
+        await clearLocalCache(db);
+        expect(count(raw, table)).toBe(0);
+        expect(await localCacheDirty(db)).toBe(false);
+      },
+    );
+
     it.each([
-      ['attachment', `INSERT INTO attachments (guid) VALUES ('isolated-attachment')`],
-      [
-        'attachment cache ledger',
-        `INSERT INTO attachment_cache_entries (path, bytes, last_used_at)
-         VALUES ('file:///documents/attachments/isolated', 1, 1)`,
-      ],
-      [
-        'outgoing send',
-        `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload)
-         VALUES ('temp-isolated', 'chat-isolated', 'text', '{}')`,
-      ],
-      [
-        'scheduled message',
-        `INSERT INTO scheduled_messages (chat_guid, payload, scheduled_for)
-         VALUES ('chat-isolated', '{}', 9000)`,
-      ],
-      [
-        'reminder',
-        `INSERT INTO reminders (message_guid, chat_guid, scheduled_for, notification_id)
-         VALUES ('message-isolated', 'chat-isolated', 9000, 'notification-isolated')`,
-      ],
-      ['URL preview', `INSERT INTO url_previews (url) VALUES ('https://isolated.example')`],
-      [
-        'error report',
-        `INSERT INTO error_reports (level, message, created_at)
-         VALUES ('error', 'isolated diagnostic', 5000)`,
-      ],
-      [
-        'incoming event',
-        `INSERT INTO incoming_event_queue
-           (event_key, payload_digest, ordering_key, event_name, source, payload,
-            received_at, expires_at)
-         VALUES ('isolated-event', '${INCOMING_DIGEST}', 'isolated-order', 'new-message',
-                 'fcm', '{}', 5000, 6000)`,
-      ],
-      [
-        'message deletion ledger',
-        `INSERT INTO message_deletion_ledger (guid, date_deleted)
-         VALUES ('isolated-deleted-message', 5000)`,
-      ],
-      [
-        'message GUID alias',
-        `INSERT INTO message_guid_aliases (alias_guid, canonical_guid)
-         VALUES ('temp-isolated-alias', 'real-isolated-alias')`,
-      ],
-      [
-        'custom folder',
-        `INSERT INTO custom_folders (name, sort_order) VALUES ('Isolated folder', 0)`,
-      ],
       [
         'composer draft',
         `INSERT INTO kv (key, value) VALUES ('${DRAFT_KV_PREFIX}isolated', 'private draft')`,
@@ -805,7 +861,7 @@ describe('clearLocalCache', () => {
          VALUES ('${NOTIFICATION_ROUTE_KV_PREFIX}00000000-0000-4000-8000-000000000000',
                  'old-account-call-uuid')`,
       ],
-    ])('answers true when an isolated %s row survives', async (_label, insertSql) => {
+    ])('answers true when an isolated %s key survives', async (_label, insertSql) => {
       const { db, raw } = await createTestDb();
       await clearLocalCache(db);
       raw.prepare(insertSql).run();
