@@ -3,7 +3,7 @@ jest.mock('@/services/clients', () => ({ http: {} }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 
 import type { UrlPreviewResult } from '@core/api/endpoints/urlPreviews';
-import type { UrlPreviewRow } from '@db/repositories';
+import { getUrlPreview, type UrlPreviewRow } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import {
   isUrlPreviewCacheFresh,
@@ -13,6 +13,13 @@ import {
   type UrlPreviewLoaderDependencies,
   type UrlPreviewSessionIdentity,
 } from '@/services/urlPreviewLoader';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+  subscribeRealtimeGenerationInvalidation,
+} from '@/services/realtime/deliveryCoordinator';
+import { createTestDb } from '../support/testDb';
 /* eslint-enable import/first */
 
 const INPUT_URL = 'https://example.com/original';
@@ -432,5 +439,65 @@ describe('isUrlPreviewCacheFresh', () => {
         1_001,
       ),
     ).toBe(true);
+  });
+});
+
+/**
+ * Every test above injects runTrackedWork/writePreview. Production omits both, so its commit runs
+ * through the real realtime work tracker and the repository transaction (review M216).
+ */
+describe('UrlPreviewLoader production commit path', () => {
+  async function productionLoader() {
+    const { db } = await createTestDb();
+    const fetchPreview = jest.fn(
+      async (url: string, _signal: AbortSignal): Promise<UrlPreviewResult> => preview(url),
+    );
+    const loader = new UrlPreviewLoader({
+      captureSessionIdentity: () => ({ accountEpoch: 1, transportRevision: 1 }),
+      captureLease: captureRealtimeDeliveryLease,
+      subscribeInvalidation: subscribeRealtimeGenerationInvalidation,
+      subscribeTransportInvalidation: () => () => undefined,
+      captureTransport: () => ({ key: 'transport-1', isCurrent: () => true, fetch: fetchPreview }),
+      getDatabase: () => db,
+      readPreview: getUrlPreview,
+      now: () => 5_000,
+    });
+    return { db, loader, fetchPreview };
+  }
+
+  it('stores a fetched preview through the real tracked transaction', async () => {
+    const { db, loader } = await productionLoader();
+
+    await expect(loader.load(INPUT_URL)).resolves.toBe('stored');
+
+    await expect(getUrlPreview(db, INPUT_URL)).resolves.toMatchObject({
+      url: INPUT_URL,
+      title: 'Example title',
+      description: 'Example description',
+      siteName: 'Example',
+      fetchedAt: 5_000,
+      error: 0,
+    });
+  });
+
+  it('writes nothing once Disconnect has paused realtime work', async () => {
+    const { db, loader, fetchPreview } = await productionLoader();
+    const fetched = deferred<UrlPreviewResult>();
+    fetchPreview.mockImplementationOnce(() => fetched.promise);
+    try {
+      const outcome = loader.load(INPUT_URL);
+      for (let turn = 0; turn < 20 && fetchPreview.mock.calls.length === 0; turn += 1) {
+        await nextTurn();
+      }
+      expect(fetchPreview).toHaveBeenCalledTimes(1);
+
+      await pauseRealtimeDeliveries();
+      fetched.resolve(preview());
+
+      await expect(outcome).resolves.toBe('stale');
+      await expect(getUrlPreview(db, INPUT_URL)).resolves.toBeNull();
+    } finally {
+      resumeRealtimeDeliveries();
+    }
   });
 });
