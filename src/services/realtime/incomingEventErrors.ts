@@ -11,3 +11,16 @@ export class IncomingEventDependencyPendingError extends Error {
     this.name = 'IncomingEventDependencyPendingError';
   }
 }
+
+/**
+ * A durable event whose payload can never be applied: a deterministic defect, not a transient
+ * failure. The drain poisons it on the first attempt instead of retrying it four more times over
+ * minutes while it blocks its ordering key (review M112). The message is fixed for the same reason
+ * as above.
+ */
+export class IncomingEventPermanentPayloadError extends Error {
+  constructor() {
+    super('incoming event payload can never be applied');
+    this.name = 'IncomingEventPermanentPayloadError';
+  }
+}

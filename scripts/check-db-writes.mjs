@@ -2627,7 +2627,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [dbEventSinkConstructor, '194b0d05967ba18c5ace5fd07e48cd743452714b2adcb212d2612330bf880fb7'],
     [dbEventSinkLinkContacts, '0815eb9769042c9b5d8be504720e727f05cdde857fd255d692afdb391b3e3e2d'],
-    [dbEventSinkOnEvent, 'd7ad94229a73dedcdd31e0f696a93a83016c7a8ddf5883f9d0245300df110960'],
+    [dbEventSinkOnEvent, '9b8e86aba6e827d6edbe25d0d96d8327037d1fde42061cf4d14ccd6affe08fc1'],
     [restoreBackup, 'afe947d418d3b5d0c940d03ceb4670bfd793fc28f3ca0e87a15b675c7be5cc49'],
     [
       restorePreparedBackupWithinTransaction,
@@ -9213,7 +9213,7 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      'c9df432a9bff9400cc56c6e2be3788cf589c672f90608530f639f60698869d17' ||
+      '9243557340a9cb5c356f8e5895f202fb3f0b5fc155445b81841e261b5ef4c562' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
       .digest('hex') !== '55909d52f17e7e73d7ec600c9f18b9ab4dea322963e84ecf1e4700971ef42ff0' ||
@@ -10967,7 +10967,7 @@ function incomingIngressCertifiedNodes({
     normalizedSnippet(drainOptions.properties[3], controlFile) !==
       'onDependencyDeferred: (deliveryContext) => noteRealtimeDependencyDeferred(db, deliveryContext)' ||
     normalizedSnippet(drainOptions.properties[4], controlFile) !==
-      "onPermanentFailure: (_eventName, deliveryContext) => requestRealtimeRecovery(db, { kind: 'sync-account' }, deliveryContext)" ||
+      'onPermanentFailure: (eventName, deliveryContext) => requestRealtimeRecovery(db, permanentFailureRecovery(eventName), deliveryContext)' ||
     statementText(getRealtimeRuntime, 9) !== 'realtimeRuntimeInstance = runtime;' ||
     statementText(getRealtimeRuntime, 8) !==
       'const runtime: RealtimeRuntime = { db, generation: context.generation, dispatcher, unsubscribeInvalidation: () => undefined, };' ||

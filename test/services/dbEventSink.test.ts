@@ -16,6 +16,7 @@ import {
   RealtimeMessageChatUnavailableError,
   RealtimeReadStatusUnavailableError,
 } from '@/services/realtime/dbEventSink';
+import { IncomingEventPermanentPayloadError } from '@/services/realtime/incomingEventErrors';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { createTestDb } from '../support/testDb';
 import { insertOutgoingAttachment, listChats, listMessages } from '../support/repositoryWrappers';
@@ -256,7 +257,7 @@ describe('DbEventSink (live path)', () => {
           'fcm',
           context,
         ),
-      ).rejects.toThrow('attempt-aware send error omitted exact correlation');
+      ).rejects.toBeInstanceOf(IncomingEventPermanentPayloadError);
     }
 
     expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();

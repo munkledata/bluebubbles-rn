@@ -19,6 +19,7 @@ import {
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { IncomingEventDrain } from '@/services/realtime/incomingEventDrain';
+import { IncomingEventPermanentPayloadError } from '@/services/realtime/incomingEventErrors';
 import { effectivelyLocked } from '@/services/notifications/lockGate';
 import { DbEventSink, RealtimeMessageChatUnavailableError } from '@/services/realtime/dbEventSink';
 import { NotifyingEventSink } from '@/services/realtime/notifyingEventSink';
@@ -755,6 +756,35 @@ describe('incoming event drain', () => {
       payload: null,
       attempts: 2,
     });
+  });
+
+  it('poisons a payload that can never apply on its first failure (review M112)', async () => {
+    const { db, raw } = await createTestDb();
+    await enqueue(db, message('drain-payload-defect'));
+    const permanentFailure = jest.fn();
+    const handler = {
+      handleNormalized: jest.fn(async () => {
+        throw new IncomingEventPermanentPayloadError();
+      }),
+    };
+    const drain = new IncomingEventDrain(db, handler, digest, {
+      now: () => START,
+      makeLeaseToken: () => 'payload-defect-lease',
+      scheduleContinuation: jest.fn(),
+      onPermanentFailure: permanentFailure,
+    });
+
+    await drain.kick(lease());
+
+    expect(handler.handleNormalized).toHaveBeenCalledTimes(1);
+    expect(permanentFailure).toHaveBeenCalledWith('new-message', expect.any(Object));
+    expect(
+      raw
+        .prepare(
+          `SELECT state, payload, last_error_code AS lastErrorCode FROM incoming_event_queue`,
+        )
+        .get(),
+    ).toEqual({ state: 'poisoned', payload: null, lastErrorCode: 'payload-defect' });
   });
 
   it('reports recovery when the fifth delivery failure poisons the envelope', async () => {

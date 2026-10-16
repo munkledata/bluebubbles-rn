@@ -161,7 +161,14 @@ const mockDrainDueRetirements = jest.fn<Promise<void>, [unknown, { scope: unknow
 );
 let mockDispatcherOptions: { allowDevPersistWithoutDrain?: boolean } | undefined;
 let mockDrainOptions:
-  { onDependencyDeferred?: (context?: MockDeliveryContext) => void } | undefined;
+  | {
+      onDependencyDeferred?: (context?: MockDeliveryContext) => void;
+      onPermanentFailure?: (
+        eventName: string,
+        context?: MockDeliveryContext,
+      ) => void | Promise<void>;
+    }
+  | undefined;
 let mockSession = {
   status: 'connected',
   origin: 'https://server.example',
@@ -929,6 +936,51 @@ describe('startRealtime optional setup containment', () => {
 
     await resumeRealtime();
     expect(mockMaybeResumeSync).toHaveBeenCalledTimes(1);
+  });
+
+  describe('recovery after a poisoned event (review M112)', () => {
+    async function poison(eventName: string): Promise<void> {
+      jest.resetModules();
+      const { startRealtime } = await import('@/services/realtimeControl');
+      await startRealtime();
+      await flushMicrotasks(12);
+      if (!mockDrainOptions?.onPermanentFailure) {
+        throw new Error('drain did not register its permanent-failure callback');
+      }
+      await mockDrainOptions.onPermanentFailure(eventName, {
+        generation: 0,
+        isCurrent: () => true,
+      });
+      await flushMicrotasks(12);
+    }
+
+    it.each([
+      ['message-deleted', 'sync-deletions'],
+      ['message-state-changed', 'sync-deletions'],
+      ['new-message', 'sync-account'],
+      ['participant-added', 'sync-account'],
+      ['a-future-event', 'sync-account'],
+    ] as const)('re-syncs after a poisoned %s with %s', async (eventName, kind) => {
+      await poison(eventName);
+      expect(mockRecoverRealtimePrerequisite).toHaveBeenCalledTimes(1);
+      expect(mockRecoverRealtimePrerequisite).toHaveBeenCalledWith(
+        expect.anything(),
+        { kind },
+        0,
+        expect.any(Object),
+      );
+    });
+
+    it.each([
+      'typing-indicator',
+      'chat-read-status-changed',
+      'incoming-facetime',
+      'message-send-error',
+      'rcs-alert',
+    ])('re-syncs nothing after a poisoned %s', async (eventName) => {
+      await poison(eventName);
+      expect(mockRecoverRealtimePrerequisite).not.toHaveBeenCalled();
+    });
   });
 
   it('repairs a restored message with a deletion sync alone (review M111)', async () => {

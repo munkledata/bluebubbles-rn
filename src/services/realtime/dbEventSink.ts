@@ -34,7 +34,10 @@ import {
 } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { supportsMessageStateSync } from '../sync/providerRepair';
-import { IncomingEventDependencyPendingError } from './incomingEventErrors';
+import {
+  IncomingEventDependencyPendingError,
+  IncomingEventPermanentPayloadError,
+} from './incomingEventErrors';
 
 /** Private rollback signal for a delivery whose account generation changed mid-transaction. */
 const STALE_REALTIME_DELIVERY = Symbol('stale-realtime-delivery');
@@ -768,9 +771,9 @@ export class DbEventSink implements EventSink {
           throw new IncomingEventDependencyPendingError();
         }
         if (sendErrorResult.disposition === 'attempt-identity-missing' && context?.durableEvent) {
-          // A modern row must never fall through to the legacy temp-guid heuristic. Let the
-          // durable queue's bounded poison policy contain this malformed server event.
-          throw new Error('attempt-aware send error omitted exact correlation');
+          // A modern row must never fall through to the legacy temp-guid heuristic. The event can
+          // never apply, so the durable queue poisons it at once (review M112).
+          throw new IncomingEventPermanentPayloadError();
         }
         break;
       }

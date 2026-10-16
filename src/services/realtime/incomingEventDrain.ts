@@ -23,7 +23,10 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { IncomingEventDependencyPendingError } from './incomingEventErrors';
+import {
+  IncomingEventDependencyPendingError,
+  IncomingEventPermanentPayloadError,
+} from './incomingEventErrors';
 
 export interface NormalizedIncomingEventHandler {
   handleNormalized(
@@ -289,6 +292,21 @@ export class IncomingEventDrain {
       // observes a stale delivery instead of racing the next claim.
       delivery.revoke();
       if (!guard()) return 'stale';
+      if (error instanceof IncomingEventPermanentPayloadError) {
+        // A payload that can never apply is poisoned now, not after four more attempts over
+        // minutes while it blocks its ordering key (review M112).
+        const poisoned = await poisonIncomingEvent(
+          this.db,
+          { ...identity, errorCode: 'payload-defect' },
+          guard,
+          this.now,
+        );
+        if (poisoned) await this.reportPermanentFailure(claim.eventName, guard, context);
+        logger.warn('[incomingEvents] claimed delivery had a permanent payload defect', {
+          event: claim.eventName,
+        });
+        return 'settled';
+      }
       const dependencyPending = error instanceof IncomingEventDependencyPendingError;
       const failure = dependencyPending
         ? await deferIncomingEventForDependency(this.db, identity, guard, this.now)

@@ -251,6 +251,34 @@ function retireRealtimeRecoveryJob(job: RealtimeRecoveryJob): void {
 }
 
 /**
+ * What to re-sync after a durable event is poisoned (review M112). Only its name is trustworthy
+ * then, so no chat can be targeted: deletions and message state take the deletion catch-up, and
+ * events whose codec recovery is already 'none' (typing, read status, FaceTime, alias, server,
+ * RCS-health, test and send-error notices) take nothing. Message, group and unknown events keep
+ * the account sync.
+ */
+function permanentFailureRecovery(eventName: string): IncomingEventConflictRecovery {
+  switch (eventName) {
+    case 'message-deleted':
+    case 'message-state-changed':
+      return { kind: 'sync-deletions' };
+    case 'typing-indicator':
+    case 'chat-read-status-changed':
+    case 'ft-call-status-changed':
+    case 'incoming-facetime':
+    case 'imessage-aliases-removed':
+    case 'new-server':
+    case 'rcs-alert':
+    case 'rcs-bridge-down':
+    case 'test-notification':
+    case 'message-send-error':
+      return { kind: 'none' };
+    default:
+      return { kind: 'sync-account' };
+  }
+}
+
+/**
  * Start task-local prerequisite recovery immediately. An active FCM delivery adopts the job into
  * its own native lifetime; foreground/socket delivery can rely on IncomingEventDrain's wake timer.
  */
@@ -879,8 +907,8 @@ function getRealtimeRuntime(
     canDrain: canDrainPrivateQueue,
     canScheduleWake: () => realtimeForegroundActive && canDrainPrivateQueue(),
     onDependencyDeferred: (deliveryContext) => noteRealtimeDependencyDeferred(db, deliveryContext),
-    onPermanentFailure: (_eventName, deliveryContext) =>
-      requestRealtimeRecovery(db, { kind: 'sync-account' }, deliveryContext),
+    onPermanentFailure: (eventName, deliveryContext) =>
+      requestRealtimeRecovery(db, permanentFailureRecovery(eventName), deliveryContext),
   });
   const dispatcher = new DurableRealtimeDispatcher(db, expoDigestBackend, drain, {
     makeTransportOccurrenceId: (source) =>
