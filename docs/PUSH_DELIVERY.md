@@ -568,15 +568,16 @@ Two theories were falsified along the way and are recorded so they aren't retrie
 Keystore failure aborting `dispatchRealtimeEvent` at `ensureDatabase()` (dead — unlocking changed
 nothing), and the Pixel running an older build (dead — it is newer).
 
-**What was added:** a development-only receipt breadcrumb,
-`[fcm] push received {event, source}`, in `deliverRespectingLock` — the single entry point both the
-headless background handler and foreground `onMessage` share, with `source` recording which. Until
-then a dropped push and a silently-handled one were indistinguishable in the development App Logs:
-both simply absent (an `updated-message` receipt posts no notification by design). Event NAME only —
-never the body, which carries message text. `LOG-01B` now suppresses and does not persist this
-free-form line in release builds; candidate release investigation must use native traces, temporary
-instrumentation, or a future finite diagnostic event rather than expecting this breadcrumb in App
-Logs.
+**What was added:** a receipt breadcrumb in `deliverRespectingLock`, the single entry point both the
+headless background handler and foreground `onMessage` share. Until then a dropped push and a
+silently-handled one were indistinguishable: both simply absent (an `updated-message` receipt posts
+no notification by design). It is now the finite diagnostic event `fcm.push_received`
+(`src/services/notifications/fcmMessaging.ts`, defined in `src/core/secure/errorDiagnostic.ts`) with
+two fields: the event name, mapped to a known server event or `unknown`, and `source` (`background`
+or `foreground`). Never the body, which carries message text. Unlike free-form lines, which
+`LOG-01B` drops in release builds, this finite event is kept in release: it appears in Settings → App
+Logs and the persistent log (on the console only in development), so a candidate investigation can
+compare it with the server's sends.
 
 Also of note: measurement artifacts cost real time here. `RNFirebaseMsgReceiver` was briefly believed
 not to be emitted (it is — the capture window was wrong), and `dumpsys notification` counts are
