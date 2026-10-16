@@ -112,6 +112,7 @@ function deferred<T>(): Deferred<T> {
 
 beforeEach(() => {
   mockLease.isCurrent.mockReturnValue(true);
+  mockVault.get.mockReset();
   mockRunTrackedRealtimeWork.mockImplementation(
     async (_lease: unknown, task: (lease: typeof mockLease) => Promise<unknown>) => {
       await task(mockLease);
@@ -597,5 +598,90 @@ describe('replaced-credential wiring (M130)', () => {
     });
     await flushMicrotasks();
     expect(mockRevokeReplacedCredentialRuntime).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('resume without a stored upgrade (review M133)', () => {
+  const JOURNAL_KEY = 'serverCredentialUpgrade';
+
+  function journalRead(answer: () => Promise<string | null>): void {
+    mockVault.get.mockImplementation((key: string) =>
+      key === JOURNAL_KEY ? answer() : Promise.resolve(null),
+    );
+  }
+
+  it('answers idle for an absent journal without waiting for push registration', async () => {
+    mockRunSerializedFcmRegistration.mockImplementation(() => new Promise(() => undefined));
+    journalRead(async () => null);
+
+    let settled: unknown = 'pending';
+    void resumeScopedCredentialUpgrade({ restartRealtime: false }).then((outcome) => {
+      settled = outcome;
+    });
+    await flushMicrotasks();
+
+    expect(settled).toEqual({ kind: 'idle' });
+    expect(mockRunSerializedFcmRegistration).not.toHaveBeenCalled();
+    expect(mockResumeCredentialUpgradeRuntime).not.toHaveBeenCalled();
+    // An idle resume still retries a waiting replaced-credential revocation.
+    expect(mockRevokeReplacedCredentialRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it('still waits its turn behind push registration when a journal is stored', async () => {
+    const registration = deferred<void>();
+    mockRunSerializedFcmRegistration.mockImplementation(async (task: () => Promise<void>) => {
+      await registration.promise;
+      await task();
+    });
+    journalRead(async () => '{"phase":"candidate"}');
+
+    const resumed = resumeScopedCredentialUpgrade({ restartRealtime: false });
+    await flushMicrotasks();
+    expect(mockRunSerializedFcmRegistration).toHaveBeenCalledTimes(1);
+    expect(mockResumeCredentialUpgradeRuntime).not.toHaveBeenCalled();
+
+    registration.resolve();
+    await expect(resumed).resolves.toEqual({ kind: 'idle' });
+    expect(mockResumeCredentialUpgradeRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds the single-flight slot while the journal read is pending', async () => {
+    const read = deferred<string | null>();
+    journalRead(() => read.promise);
+
+    const resumed = resumeScopedCredentialUpgrade({ restartRealtime: false });
+    expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).toBe(resumed);
+    await expect(beginScopedCredentialUpgrade('device-candidate')).resolves.toEqual({
+      kind: 'busy',
+    });
+    await expect(discardScopedCredentialUpgradeCandidate()).resolves.toEqual({ kind: 'busy' });
+
+    read.resolve(null);
+    await expect(resumed).resolves.toEqual({ kind: 'idle' });
+    expect(mockBeginCredentialUpgradeRuntime).not.toHaveBeenCalled();
+    expect(mockDiscardCredentialUpgradeCandidateRuntime).not.toHaveBeenCalled();
+  });
+
+  it('takes the serialized path when the journal cannot be read', async () => {
+    journalRead(async () => {
+      throw new Error('keystore unavailable');
+    });
+
+    await expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).resolves.toEqual({
+      kind: 'idle',
+    });
+    expect(mockRunSerializedFcmRegistration).toHaveBeenCalledTimes(1);
+    expect(mockResumeCredentialUpgradeRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes the serialized path when the session changes during the read', async () => {
+    journalRead(async () => {
+      mockLease.isCurrent.mockReturnValue(false);
+      return null;
+    });
+
+    await resumeScopedCredentialUpgrade({ restartRealtime: false });
+    // A stale "absent" answer is not trusted: the serialized path decides instead.
+    expect(mockRunSerializedFcmRegistration).toHaveBeenCalledTimes(1);
   });
 });

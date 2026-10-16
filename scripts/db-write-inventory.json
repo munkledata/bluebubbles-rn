@@ -16915,12 +16915,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/serverAvatars.test.ts"
     },
     {
-      "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:bf13093c9436",
+      "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:b58db9fda762",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 465,
+      "line": 474,
       "symbol": "runCredentialUpgrade",
       "operation": "mutator-call",
-      "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:2bf8034a53>",
+      "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:46e7efa964>",
       "detectedContext": "coordinated-delegation",
       "owner": "runCredentialUpgrade",
       "transactionContext": "coordinated-delegation",
@@ -16928,10 +16928,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/secure/credentialUpgrade.test.ts; test/services/credentialUpgradeRuntime.test.ts; test/services/credentialUpgradeSingleFlight.test.ts; test/services/realtimePrerequisiteRecovery.test.ts"
     },
     {
-      "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:2bf8034a53>:mutator-call:9d767b824bbf",
+      "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:46e7efa964>:mutator-call:fd57ed00f5e2",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 494,
-      "symbol": "runCredentialUpgrade.<callback:2bf8034a53>",
+      "line": 507,
+      "symbol": "runCredentialUpgrade.<callback:46e7efa964>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade",
       "detectedContext": "coordinated-delegation",
@@ -16943,7 +16943,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade:mutator-call:9eca083a6ce1",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 522,
+      "line": 535,
       "symbol": "beginScopedCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16956,7 +16956,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#beginScopedCredentialReplacement:mutator-call:ec167bc062b1",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 529,
+      "line": 542,
       "symbol": "beginScopedCredentialReplacement",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16969,7 +16969,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#resumeScopedCredentialUpgrade:mutator-call:1fdf0f274b9d",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 536,
+      "line": 549,
       "symbol": "resumeScopedCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16982,7 +16982,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate:mutator-call:ab2e71099acf",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 541,
+      "line": 554,
       "symbol": "discardScopedCredentialUpgradeCandidate",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",

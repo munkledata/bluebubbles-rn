@@ -3263,11 +3263,11 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:2bf8034a53>:mutator-call:9d767b824bbf',
+        'src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:46e7efa964>:mutator-call:fd57ed00f5e2',
         'coordinated-delegation',
       ],
       [
-        'src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:bf13093c9436',
+        'src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:b58db9fda762',
         'coordinated-delegation',
       ],
       [
