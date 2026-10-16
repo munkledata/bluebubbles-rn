@@ -316,4 +316,81 @@ describe('full repair reconciliation', () => {
       raw.prepare('SELECT id FROM attachments WHERE guid = ?').get('exact-owner-attachment'),
     ).toBeDefined();
   });
+
+  it('keeps queued sends, scheduled messages and own messages from the last hour (M078)', async () => {
+    const { db, raw } = await createTestDb();
+    const insertChat = raw.prepare('INSERT INTO chats (guid) VALUES (?)');
+    // Own messages the Mac has not confirmed yet carry no original_row_id.
+    const insertOwnMessage = raw.prepare(
+      `INSERT INTO messages
+         (guid, original_row_id, chat_id, is_from_me, date_created, send_state)
+       VALUES (?, NULL, ?, 1, ?, 'sent')`,
+    );
+    const now = Date.now();
+    const tenMinutesAgo = now - 10 * 60_000;
+    insertChat.run('queued-chat');
+    insertChat.run('scheduled-chat');
+    const recentChatId = Number(insertChat.run('recent-own-chat').lastInsertRowid);
+    const oldChatId = Number(insertChat.run('old-own-chat').lastInsertRowid);
+    insertChat.run('empty-chat');
+    raw
+      .prepare(
+        `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload)
+         VALUES ('temp-queued', 'queued-chat', 'text', '{}')`,
+      )
+      .run();
+    raw
+      .prepare(
+        `INSERT INTO scheduled_messages (chat_guid, payload, scheduled_for)
+         VALUES ('scheduled-chat', '{}', ?)`,
+      )
+      .run(now + 60_000);
+    // Inside the one-hour grace: one plain message, one with a photo.
+    const recentId = Number(
+      insertOwnMessage.run('recent-own', recentChatId, tenMinutesAgo).lastInsertRowid,
+    );
+    const recentPhotoId = Number(
+      insertOwnMessage.run('recent-own-photo', recentChatId, tenMinutesAgo).lastInsertRowid,
+    );
+    raw
+      .prepare('INSERT INTO attachments (guid, message_id) VALUES (?, ?)')
+      .run('recent-own-attachment', recentPhotoId);
+    // Outside the grace, so the same kind of row is pruned.
+    insertOwnMessage.run('old-own', oldChatId, now - 2 * 60 * 60_000);
+
+    const exposure = await captureFullRepairPruneExposure(db);
+    // Capture already leaves recent own messages out...
+    expect(exposure.messages.map((row) => row.guid)).toEqual(['old-own']);
+    // ...and removal checks the grace again, so a stale candidate for one is refused too.
+    const staleCandidate = {
+      id: recentId,
+      guid: 'recent-own',
+      originalRowId: null,
+      chatId: recentChatId,
+      dateCreated: tenMinutesAgo,
+    };
+    const result = await reconcileFullRepairPruneExposure(
+      db,
+      { ...exposure, messages: [...exposure.messages, staleCandidate] },
+      { chatGuids: new Set(), messageGuids: new Set(), attachmentGuidsByMessage: new Map() },
+    );
+
+    expect(result).toMatchObject({
+      messagesRemoved: 1,
+      attachmentsRemoved: 0,
+      chatsRemoved: 2,
+      chatsPreservedForLocalWork: 3,
+    });
+    const guids = (table: string): unknown[] =>
+      raw.prepare(`SELECT guid FROM ${table} ORDER BY guid`).all();
+    expect(guids('chats')).toEqual([
+      { guid: 'queued-chat' },
+      { guid: 'recent-own-chat' },
+      { guid: 'scheduled-chat' },
+    ]);
+    expect(guids('messages')).toEqual([{ guid: 'recent-own' }, { guid: 'recent-own-photo' }]);
+    expect(guids('attachments')).toEqual([{ guid: 'recent-own-attachment' }]);
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM outgoing_queue').get()).toEqual({ n: 1 });
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM scheduled_messages').get()).toEqual({ n: 1 });
+  });
 });
