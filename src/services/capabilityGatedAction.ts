@@ -2,6 +2,7 @@ import type { ServerInfo } from '@core/models';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import { runAccountOperation } from './realtime/accountOperation';
 import type { RealtimeDeliveryLease } from './realtime/deliveryCoordinator';
+// The "Rcs" names are historical: this is the general server-capability lease (review M201).
 import {
   captureSessionRcsCapabilityLease,
   type RcsCapabilityLease,

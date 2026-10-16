@@ -1,3 +1,10 @@
+/**
+ * The send-capability lease and resolver for every server-gated action, not only RCS. The "Rcs"
+ * names predate their wider use: Apple-account actions (group rename and participants, remote
+ * delete, FaceTime) capture the same lease to prove which server, transport revision and capability
+ * set a request was admitted under. Renaming them would re-pin several send-path certificates for no
+ * behavior change, so the names stay (review M201).
+ */
 import { serverInfo as fetchServerInfo } from '@core/api/endpoints/server';
 import type { HttpClient, HttpTransportSnapshot } from '@core/api/http';
 import {
