@@ -76,9 +76,10 @@ cancellation, and is not counted as a detached-tail defect.
 
 ## TanStack query inventory
 
-There are 16 production TanStack query records: 15 remote account reads (Account 1, Server Management
-3, Server Health 10, Backup 1) and one local encrypted-DB chat search. There are no production `fetchQuery`,
-`prefetchQuery`, `ensureQueryData`, or mutation-cache call sites. The 15 remote functions consume
+There are 14 production TanStack query records: 13 remote account reads (Account 1, Server Management
+3, Server Health 8, Backup 1) and one local encrypted-DB chat search. Server Health dropped from 10
+when its Private API status and requirements reads were retired (2026-09-16). There are no production `fetchQuery`,
+`prefetchQuery`, `ensureQueryData`, or mutation-cache call sites. The 13 remote functions consume
 TanStack's `AbortSignal`; active fetch and retry-backoff aborts become non-retryable `cancelled`
 errors and cannot issue another old-session request. The local search retains the existing
 clear-and-late-publication proof because an `AbortSignal` does not cancel SQLite work.

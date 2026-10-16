@@ -82,26 +82,28 @@ still has to acquire the current durable/session authority shown above.
 
 ## Deliberately retained device-global state
 
-| Surface                                        | Why it survives Disconnect                                                                                                                                                                            |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Feature settings and error-reporting consent   | User/device choices stored in the encrypted preference table; guarded hydration prevents an old run from publishing late                                                                              |
-| Sync settings                                  | User-selected initial-history cap, not server data                                                                                                                                                    |
-| Theme/custom-theme store                       | User-created device appearance; no server response is stored here. Its asynchronous reload helper has no production account-transition caller; any future account-derived use must add an epoch check |
-| App Lock store                                 | Device policy and current lock gate                                                                                                                                                                   |
-| Share-intent store                             | Device-originated handoff must survive the unauthenticated gate until a recipient is chosen; public ACTION_SEND intake remains disabled                                                               |
-| Notification channel promises/app avatar       | Android application configuration, not message/account content                                                                                                                                        |
-| Global error-handler/logger installation flags | One-time process wiring; account log payloads are reset/cleared separately                                                                                                                            |
-| Reduced-motion listener set                    | Android accessibility preference observers only                                                                                                                                                       |
+| Surface                                        | Why it survives Disconnect                                                                                                                                                                                                               |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Feature settings and error-reporting consent   | User/device choices stored in the encrypted preference table; guarded hydration prevents an old run from publishing late                                                                                                                 |
+| Sync settings                                  | User-selected initial-history cap, not server data                                                                                                                                                                                       |
+| Theme/custom-theme store                       | User-created device appearance; no server response is stored here. Its asynchronous reload helper has no production account-transition caller; any future account-derived use must add an epoch check                                    |
+| App Lock store                                 | Device policy and current lock gate                                                                                                                                                                                                      |
+| Share-intent store                             | Device-originated handoff must survive the unauthenticated gate until a recipient is chosen; ACTION_SEND, ACTION_SEND_MULTIPLE and Direct Share arrive through the owned `gator-share-intake` module and its account and App Lock guards |
+| Notification channel promises/app avatar       | Android application configuration, not message/account content                                                                                                                                                                           |
+| Global error-handler/logger installation flags | One-time process wiring; account log payloads are reset/cleared separately                                                                                                                                                               |
+| Reduced-motion listener set                    | Android accessibility preference observers only                                                                                                                                                                                          |
 
 ## Query inventory
 
-- Server Management, Server Health, and Backup queries include the account-delivery
+- Account, Server Management, Server Health, and Backup queries include the account-delivery
   generation in their keys, reject stale results before publishing or mutating the cache, and pass
   TanStack's abort signal through their endpoint wrappers into `HttpClient`.
-- The former iMessage Account query and alias mutation are retired under `FP-006`; a direct account
-  route is static and owns no remote query state.
-- The 11 remote query records cancel an active request or retry delay without starting another old
-  request. The one local chat-search record remains deliberately non-abortable SQLite work.
+- The iMessage Account screen is live: one query reads the account status, and choosing an alias
+  sends a direct request (not a TanStack mutation) that the screen aborts on unmount or account
+  change.
+- The 13 remote query records (Account 1, Server Management 3, Server Health 8, Backup 1) cancel an
+  active request or retry delay without starting another old request. The one local chat-search
+  record remains deliberately non-abortable SQLite work.
 - Chat search reads the local encrypted DB and uses a term-only key. Disconnect destroys its Query
   entry. The focused same-key A→B regression proves a non-abortable A query settling after B cannot
   replace B's value.
