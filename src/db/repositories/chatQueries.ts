@@ -510,13 +510,20 @@ function customFolderMembershipSql(folderId: number | undefined) {
   )`;
 }
 
-function normalizeCustomFolderSearch(input: string | undefined): string {
-  if (input == null) return '';
-  if (typeof input !== 'string') throw new TypeError('Folder search must be text.');
+/**
+ * The search term as the UI normalizes it (NFC, trimmed, capped), or '' below two code points. The
+ * database boundary re-checks it rather than trusting callers.
+ */
+function normalizeSearchTerm(input: string, label: 'Folder' | 'Inbox'): string {
+  if (typeof input !== 'string') throw new TypeError(`${label} search must be text.`);
   const normalized = Array.from(input.normalize('NFC').trim())
     .slice(0, MAX_CUSTOM_FOLDER_SEARCH_CODE_POINTS)
     .join('');
   return Array.from(normalized).length >= 2 ? normalized : '';
+}
+
+function normalizeCustomFolderSearch(input: string | undefined): string {
+  return input == null ? '' : normalizeSearchTerm(input, 'Folder');
 }
 
 function inboxChatGuidRestrictionSql(chatGuids: readonly string[] | undefined) {
@@ -690,14 +697,6 @@ function compareInboxSearchCandidates(
   return left.id > right.id ? -1 : 1;
 }
 
-function normalizeInboxSearch(input: string): string {
-  if (typeof input !== 'string') throw new TypeError('Inbox search must be text.');
-  const normalized = Array.from(input.normalize('NFC').trim())
-    .slice(0, MAX_CUSTOM_FOLDER_SEARCH_CODE_POINTS)
-    .join('');
-  return Array.from(normalized).length >= 2 ? normalized : '';
-}
-
 function boundedMessageMatchSet(guids: readonly string[] | undefined): Set<string> {
   const bounded = new Set<string>();
   for (const guid of guids ?? []) {
@@ -724,7 +723,7 @@ export async function searchChatsForInboxPage(
   db: AppDatabase,
   opts: InboxSearchOptions,
 ): Promise<InboxPage> {
-  const query = normalizeInboxSearch(opts.query);
+  const query = normalizeSearchTerm(opts.query, 'Inbox');
   if (!query) return { rows: [], hasMore: false };
 
   const requested = opts.limit ?? MAX_INBOX_SEARCH_RESULTS;

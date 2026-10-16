@@ -26,6 +26,7 @@ import { ChatActionsSheet, type ChatActionTarget, toChatActionTarget } from './C
 import { ConversationTile } from './ConversationTile';
 import { InboxSeparator } from './FilteredChatListScreen';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { GLOBAL_SEARCH_MAX_CODE_POINTS, normalizeGlobalSearchQuery } from '@features/search/query';
 
 interface FolderConversationListScreenProps {
   folderId: number | null;
@@ -37,14 +38,12 @@ interface FolderConversationListAttemptProps {
   enabled: boolean;
 }
 
-const MAX_FOLDER_SEARCH_CODE_POINTS = 128;
-
+/**
+ * Bound the typed text by code points without normalizing it, so the field shows exactly what was
+ * typed. The lookup itself uses the shared normalization.
+ */
 function boundFolderSearchInput(value: string): string {
-  return Array.from(value).slice(0, MAX_FOLDER_SEARCH_CODE_POINTS).join('');
-}
-
-function normalizeFolderSearchInput(value: string): string {
-  return Array.from(value.normalize('NFC').trim()).slice(0, MAX_FOLDER_SEARCH_CODE_POINTS).join('');
+  return Array.from(value).slice(0, GLOBAL_SEARCH_MAX_CODE_POINTS).join('');
 }
 
 /** Account-owned wrapper; changing folders remounts the search draft under its new owner. */
@@ -86,7 +85,7 @@ function FolderConversationListAttempt({
   const kbVisible = useKeyboardVisible();
   const openChatNav = useChatNavigator();
   const [searchText, setSearchText] = useState('');
-  const normalizedSearch = normalizeFolderSearchInput(searchText);
+  const normalizedSearch = normalizeGlobalSearchQuery(searchText);
   const searchMode = normalizedSearch.length > 0;
   const searchEligible = Array.from(normalizedSearch).length >= 2;
   const [settledSearch, setSettledSearch] = useState(() =>
@@ -95,7 +94,7 @@ function FolderConversationListAttempt({
   const onSearchTextChange = useCallback((value: string): void => {
     const bounded = boundFolderSearchInput(value);
     setSearchText(bounded);
-    if (Array.from(normalizeFolderSearchInput(bounded)).length < 2) setSettledSearch('');
+    if (Array.from(normalizeGlobalSearchQuery(bounded)).length < 2) setSettledSearch('');
   }, []);
 
   useEffect(() => {
@@ -159,7 +158,7 @@ function FolderConversationListAttempt({
             value={searchText}
             onChangeText={onSearchTextChange}
             // Android counts UTF-16 units here; reserve two for each JavaScript code point.
-            maxLength={MAX_FOLDER_SEARCH_CODE_POINTS * 2}
+            maxLength={GLOBAL_SEARCH_MAX_CODE_POINTS * 2}
             placeholder="Search this folder"
             placeholderTextColor={theme.color.tertiaryLabel}
             autoCapitalize="none"

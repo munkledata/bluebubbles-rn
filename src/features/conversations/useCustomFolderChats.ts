@@ -3,6 +3,7 @@ import type { CustomFolderInboxPage, CustomFolderRow, InboxRow } from '@db/repos
 import { useReactiveQuery, type ReactiveState } from '@db/useReactiveQuery';
 import { loadCustomFolderInboxPage } from '@/services/customFolderCommands';
 import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
+import { isGlobalSearchQueryValid, normalizeGlobalSearchQuery } from '@features/search/query';
 import { createRowIdentityCache } from './rowIdentity';
 
 const PAGE_SIZE = 50;
@@ -50,9 +51,9 @@ export interface CustomFolderChatsState extends ReactiveState<CustomFolderInboxP
   retry: () => void;
 }
 
+/** The shared search normalization, or '' below the two-code-point minimum (review M243). */
 function normalizeFolderSearchQuery(input: string): string {
-  const normalized = Array.from(input.normalize('NFC').trim()).slice(0, 128).join('');
-  return Array.from(normalized).length >= 2 ? normalized : '';
+  return isGlobalSearchQueryValid(input) ? normalizeGlobalSearchQuery(input) : '';
 }
 
 function toError(cause: unknown): Error {
