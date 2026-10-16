@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars -- claimDueScheduled retains the reviewed transaction-owner callback shape. */
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { scheduledMessages } from '../schema';
 import {
@@ -8,10 +7,7 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
-import {
-  MessageTargetUnavailableError,
-  type MessageTargetServerAuthorization,
-} from './messageTargets';
+import { MessageTargetUnavailableError } from './messageTargets';
 import {
   insertOutgoingTextWithinTransaction,
   type InsertOutgoingTextArgs,
@@ -127,7 +123,6 @@ function mapScheduled(r: {
 export function insertScheduledWithinTransaction(
   context: DbTransactionContext,
   args: InsertScheduledArgs,
-  _serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<number> {
   return runInTransactionContext(context, async (db) => {
     if (args.selectedMessageGuid !== undefined || args.selectedMessagePartIndex !== undefined) {
@@ -458,11 +453,10 @@ export async function claimDueScheduled(
   id: number,
   now: number,
   commitGuard?: DbCommitGuard,
-  _serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<ScheduledRow | null> {
   return withDbTransaction(
     db,
-    async (context) => {
+    async (_context) => {
       const rows = await db.all<Parameters<typeof mapScheduled>[0]>(sql`
         UPDATE scheduled_messages
            SET status = 'sending'
@@ -504,7 +498,6 @@ export async function claimDueScheduled(
     commitGuard,
   );
 }
-/* eslint-enable @typescript-eslint/no-unused-vars */
 
 /**
  * Finish a claimed local row. Returns false when the row is no longer `sending` or became
@@ -575,7 +568,6 @@ export async function handoverScheduledTextToOutgoing(
   db: AppDatabase,
   args: ScheduledTextHandoverArgs,
   commitGuard?: DbCommitGuard,
-  _serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<OutgoingInsertResult> {
   const result = await withDbTransaction(
     db,
