@@ -56,9 +56,9 @@ private class DownloadFailure(val reason: String) : Exception()
 internal fun isCompleteDownloadResponse(statusCode: Int): Boolean = statusCode == 200
 
 /**
- * Fill a file that [create] has just made exclusively, removing it again if [fill] fails. When
- * [create] fails, whatever is at that path was not made by this call, so nothing is removed
- * (review M164).
+ * Fill a file that [create] has just made exclusively, removing it again if [fill] fails in any
+ * way, an Error included. When [create] fails, whatever is at that path was not made by this call,
+ * so nothing is removed (review M164).
  */
 internal fun <T> fillExclusivelyCreatedFile(
   create: () -> T,
@@ -68,7 +68,7 @@ internal fun <T> fillExclusivelyCreatedFile(
   val created = create()
   try {
     fill(created)
-  } catch (error: Exception) {
+  } catch (error: Throwable) {
     runCatching(remove)
     throw error
   }

@@ -108,4 +108,15 @@ class BoundedDownloadPolicyTest {
     fillExclusivelyCreatedFile(create = { 7 }, fill = {}, remove = { removed += 1 })
     assertEquals(0, removed)
   }
+
+  @Test
+  fun `a fill that dies with an Error still removes the file this call created`() {
+    var removed = 0
+    val fatal = NotImplementedError("fatal")
+    val thrown = assertThrows(NotImplementedError::class.java) {
+      fillExclusivelyCreatedFile(create = { 7 }, fill = { throw fatal }, remove = { removed += 1 })
+    }
+    assertSame(fatal, thrown)
+    assertEquals(1, removed)
+  }
 }
