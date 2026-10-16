@@ -424,12 +424,12 @@ function ChatScreenInner({
       // Composer flushes once while unmounting. If Disconnect caused that unmount, its old closure
       // must not recreate the just-wiped A draft in B's fresh database.
       if (!accountLease.isCurrent()) return;
-      // Keep the local `draft` state in lockstep with kv. Entering multi-select UNMOUNTS the
-      // Composer (bottomStack swaps to the selection bar); on exit it REMOUNTS and restores from
-      // `initialText={draft}`. Without this setDraft, `draft` stays frozen at the chat-open value
-      // and the remounted Composer comes up stale/empty — then its own unmount flush writes '' back
-      // over the real kv draft. The Composer's unmount flush calls this before it unmounts, so
-      // `draft` is fresh by the time it remounts.
+      // Keep the local `draft` state in lockstep with kv. The Composer reads `initialText={draft}`
+      // only on mount, and it can remount inside this screen (a share intake's readiness flips).
+      // Without this setDraft, `draft` stays frozen at the chat-open value, so a remounted Composer
+      // comes up stale and its own unmount flush writes that back over the real kv draft. Its
+      // unmount flush calls this first, so `draft` is fresh by the time it remounts. Multi-select
+      // only hides the Composer; it stays mounted.
       setDraft(text);
       void saveChatDraft(guid, text, accountLease).catch(() => {
         // Best-effort while this account is live — losing a draft persist is not worth surfacing.

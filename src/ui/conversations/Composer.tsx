@@ -32,7 +32,7 @@ import {
   isSupportedImessageAttachmentType,
 } from '@core/models/serverInfo';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
-import { ScheduleSheet } from './RecurrenceSheet';
+import { ScheduleSheet } from './ScheduleSheet';
 import { EffectPicker } from './effects';
 import {
   findMentionQuery,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScheduleSheet, parseScheduleDateTime } from '@ui/conversations/RecurrenceSheet';
+import { ScheduleSheet, parseScheduleDateTime } from '@ui/conversations/ScheduleSheet';
 import { renderWithTheme, screen, fireEvent } from '../support/renderWithTheme';
 
 jest.mock('react-native-safe-area-context', () => ({

@@ -15,7 +15,7 @@ import {
   ScheduledCancellationChangedError,
 } from '@/services/send';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
-import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
+import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/ScheduleSheet';
 import { formatChatDate, formatSeparatorDate, isRcsChatFromAnotherKnownPairing } from '@utils';
 import { useSessionStore } from '@state/sessionStore';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';

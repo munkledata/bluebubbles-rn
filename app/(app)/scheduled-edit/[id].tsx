@@ -9,7 +9,7 @@ import { getScheduledById, type ScheduledOccurrence } from '@db/repositories';
 import { editScheduled, ScheduledEditChangedError } from '@/services/send';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
-import { ScheduleSheet, SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
+import { ScheduleSheet, SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/ScheduleSheet';
 import { formatChatDate, formatTime } from '@utils';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';

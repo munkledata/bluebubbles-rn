@@ -50,10 +50,6 @@ interface ComposerAuthoringSessionOptions {
   onCancelEdit?: () => void;
   onDraftChange?: (text: string) => void;
   onTyping?: (isTyping: boolean) => void;
-  onRemovalStateChange?: (state: {
-    hasUnsavedEdit: boolean;
-    hasUnsavedDraftMetadata: boolean;
-  }) => void;
   /** Exact durable-admission result for an external handoff such as Android sharing. */
   onAdmissionApplied?: (result: ComposerAdmissionResult) => void;
 }
@@ -75,7 +71,6 @@ export function useComposerAuthoringSession({
   onCancelEdit,
   onDraftChange,
   onTyping,
-  onRemovalStateChange,
   onAdmissionApplied,
 }: ComposerAuthoringSessionOptions) {
   const [text, setText] = useState('');
@@ -183,13 +178,6 @@ export function useComposerAuthoringSession({
     };
   }, [editingText]);
 
-  // Body text already flushes to the per-chat DB draft below. Report only the authored pieces
-  // that cannot be reconstructed after this component or route is removed.
-  const hasUnsavedEdit = isEditing && text !== editingText;
-  const hasUnsavedDraftMetadata = pending.length > 0;
-  useEffect(() => {
-    onRemovalStateChange?.({ hasUnsavedEdit, hasUnsavedDraftMetadata });
-  }, [hasUnsavedDraftMetadata, hasUnsavedEdit, onRemovalStateChange]);
   const queueDraft = (value: string): void => {
     if (!onDraftChange || isEditing) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
