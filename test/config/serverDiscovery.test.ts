@@ -5,6 +5,7 @@ import {
   sanitizeServerAddress,
   strictServerOrigin,
 } from '@core/config';
+import { URL as DeviceURL } from 'whatwg-url-minimum';
 
 describe('sanitizeServerAddress', () => {
   it('adds https:// when no scheme is provided', () => {
@@ -102,8 +103,8 @@ describe('strictServerOrigin', () => {
 });
 
 // Review M114: on the phone, Expo's URL parser keeps a non-ASCII host as typed instead of
-// punycoding it (Node's parser converts it, which is why only raw strings can test this). A
-// look-alike host such as Cyrillic 'а' in 'gаtor' must be refused before any parsing.
+// punycoding it (Node's parser converts it). A look-alike host such as Cyrillic 'а' in 'gаtor' must
+// be refused before parsing, and the parsed result is checked under the phone's parser below.
 describe('look-alike Unicode server addresses', () => {
   const lookAlike = 'g\u0430tor.example'; // Cyrillic small a (U+0430)
 
@@ -117,6 +118,24 @@ describe('look-alike Unicode server addresses', () => {
   it('rejects them in untrusted server-supplied origins', () => {
     expect(strictServerOrigin(`https://${lookAlike}`)).toBeNull();
     expect(strictServerOrigin('https://g ator.example')).toBeNull();
+  });
+
+  it('rejects a percent-encoded look-alike under the phone URL parser', () => {
+    // The phone's parser (whatwg-url-minimum, installed by Expo) percent-decodes the host without
+    // punycoding it, so `g%D0%B0tor` comes back as Cyrillic 'gаtor' unless the result is checked.
+    const runtime = globalThis as unknown as { URL: unknown };
+    const original = runtime.URL;
+    runtime.URL = DeviceURL;
+    try {
+      expect(strictServerOrigin('https://g%D0%B0tor.example')).toBeNull();
+      expect(sanitizeServerAddress('g%D0%B0tor.example')).toBeNull();
+      expect(sanitizeServerAddress('https://g%D0%B0tor.example/')).toBeNull();
+      // Plain ASCII addresses still work under the same parser.
+      expect(strictServerOrigin('https://gator.example')).toBe('https://gator.example');
+      expect(sanitizeServerAddress('gator.example:1234')).toBe('https://gator.example:1234');
+    } finally {
+      runtime.URL = original;
+    }
   });
 
   it('still accepts the ASCII (punycode) form of an international domain', () => {

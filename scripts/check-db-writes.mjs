@@ -9766,7 +9766,7 @@ function incomingIngressCertifiedNodes({
     statementText(strictServerOrigin, 3) !==
       String.raw`if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;` ||
     statementText(strictServerOrigin, 4) !==
-      "try { const url = new URL(input); if (url.protocol !== 'https:' && url.protocol !== 'http:') return null; if (url.username || url.password || !url.hostname) return null; return url.origin; } catch { return null; }" ||
+      String.raw`try { const url = new URL(input); if (url.protocol !== 'https:' && url.protocol !== 'http:') return null; if (url.username || url.password || !url.hostname) return null; if (/[^\u0021-\u007e]/.test(url.origin)) return null; return url.origin; } catch { return null; }` ||
     isDevServer.body.statements.length !== 3 ||
     statementText(isDevServer, 0) !==
       "if (typeof __DEV__ === 'undefined' || !__DEV__) return false;" ||

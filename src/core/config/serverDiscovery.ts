@@ -50,8 +50,10 @@ export function sanitizeServerAddress(input: string | null | undefined): string 
     ) {
       return null;
     }
-    // Drop any path/query/hash — we only want the origin.
-    return `${url.protocol}//${url.host}`;
+    // Drop any path/query/hash — we only want the origin. The phone's URL parser percent-decodes
+    // the host without punycoding it, so the result must be visible ASCII too (review M114).
+    const origin = `${url.protocol}//${url.host}`;
+    return /[^\u0021-\u007e]/.test(origin) ? null : origin;
   } catch {
     return null;
   }
@@ -84,10 +86,13 @@ export function strictServerOrigin(input: string | null | undefined): string | n
   // Accept exactly an http(s) authority and an optional single trailing slash. Checking the raw
   // form first also rejects empty `?` / `#` delimiters that URL.search/hash normalize away.
   if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;
+  // The phone's URL parser percent-decodes the host without punycoding it (`g%D0%B0tor` becomes a
+  // Cyrillic look-alike), so the parsed origin must be visible ASCII too (review M114).
   try {
     const url = new URL(input);
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
     if (url.username || url.password || !url.hostname) return null;
+    if (/[^\u0021-\u007e]/.test(url.origin)) return null;
     return url.origin;
   } catch {
     return null;
