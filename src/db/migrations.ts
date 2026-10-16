@@ -1168,6 +1168,11 @@ export const MIGRATIONS: Migration[] = [
     ],
   },
   {
+    // Message-state sync (docs/MESSAGE_STATE_PROTOCOL.md): the server's latest deleted/restored
+    // verdict per Apple message, tagged with the provider and ledger epochs it came from and that
+    // ledger's sequence, so a replayed or older event never overrides a newer one. Shipped, so the
+    // SQL stays frozen: the CHECK is unnamed and the TEXT columns carry no length limit. Writers
+    // bound them instead (MessageStateEvent caps guids at 8 KiB; epochs are UUIDs).
     name: '0053_versioned_server_message_state',
     statements: [
       `CREATE TABLE message_server_states (

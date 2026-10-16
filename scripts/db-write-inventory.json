@@ -5152,7 +5152,7 @@
     {
       "id": "src/db/migrations.ts#migration:0053_versioned_server_message_state:sql-schema:dd4eecba523c",
       "path": "src/db/migrations.ts",
-      "line": 1173,
+      "line": 1178,
       "symbol": "migration:0053_versioned_server_message_state",
       "operation": "sql-schema",
       "target": "message_server_states",
@@ -5165,7 +5165,7 @@
     {
       "id": "src/db/migrations.ts#migration:0054_handle_contact_ambiguous:sql-schema:005838dec39d",
       "path": "src/db/migrations.ts",
-      "line": 1190,
+      "line": 1195,
       "symbol": "migration:0054_handle_contact_ambiguous",
       "operation": "sql-schema",
       "target": "handles",
@@ -5178,7 +5178,7 @@
     {
       "id": "src/db/migrations.ts#migration:0055_messages_active_send_attempt_index:sql-schema:7671894ce79c",
       "path": "src/db/migrations.ts",
-      "line": 1200,
+      "line": 1205,
       "symbol": "migration:0055_messages_active_send_attempt_index",
       "operation": "sql-schema",
       "target": "messages_active_send_attempt_idx",
