@@ -77,7 +77,12 @@ export async function createScheduled(
 
 /** DELETE /scheduled-message/{id}. */
 export function deleteScheduled(http: HttpClient, id: string): Promise<unknown> {
-  return http.delete(`/scheduled-message/${id}`, DeleteResponse, {
+  // The id comes from the server, so keep it one path segment (review M140). URL normalization
+  // would still resolve an encoded dot segment, so those are refused before any request.
+  if (id === '' || id === '.' || id === '..') {
+    return Promise.reject(new Error('Scheduled message id is not a valid path segment.'));
+  }
+  return http.delete(`/scheduled-message/${encodeURIComponent(id)}`, DeleteResponse, {
     captureErrorDetail: true,
     retry: false,
   });

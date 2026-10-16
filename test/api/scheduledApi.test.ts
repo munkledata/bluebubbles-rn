@@ -74,4 +74,24 @@ describe('scheduledApi', () => {
       retry: false,
     });
   });
+
+  it('keeps a server id with path, query or fragment characters inside one segment (review M140)', async () => {
+    const del = jest.fn((..._a: unknown[]) => Promise.resolve({ removed: true }));
+    const http = { delete: del } as unknown as HttpClient;
+    await deleteScheduled(http, 'a/b?c#d');
+    expect(del).toHaveBeenCalledWith('/scheduled-message/a%2Fb%3Fc%23d', expect.anything(), {
+      captureErrorDetail: true,
+      retry: false,
+    });
+  });
+
+  it.each(['', '.', '..'])(
+    'refuses the dot-segment or empty id %j before any request (review M140)',
+    async (id) => {
+      const del = jest.fn((..._a: unknown[]) => Promise.resolve({ removed: true }));
+      const http = { delete: del } as unknown as HttpClient;
+      await expect(deleteScheduled(http, id)).rejects.toThrow('not a valid path segment');
+      expect(del).not.toHaveBeenCalled();
+    },
+  );
 });
