@@ -2,8 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
-// Exercise installed CommonJS consumers, including the Router query parser. A version-only
-// override to the upstream ESM package would break this contract before any screen can mount.
+// Exercise installed CommonJS consumers, including the vendored React Navigation core parser, which
+// still calls query-string. Expo Router's own link parser does not use this decoder (review M018):
+// see test/components/routes/routerLinkQueryParser.test.tsx. A version-only override to the
+// upstream ESM package would break this contract before any screen can mount.
 const installed = createRequire(join(process.cwd(), 'package.json'));
 const decodePath = installed.resolve('decode-uri-component');
 const decode = installed(decodePath) as (input: unknown) => string;
@@ -48,7 +50,7 @@ describe('compatible URI decoder security patch', () => {
     );
   });
 
-  it('parses the actual Expo Router query path', () => {
+  it('parses through the vendored React Navigation core parser, which still calls query-string', () => {
     const state = getStateFromPath('/chat/test?body=hello+world&literal=%2B&bad=%C3%41', {
       screens: { Chat: 'chat/:guid' },
     });
