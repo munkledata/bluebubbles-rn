@@ -373,7 +373,7 @@ export interface FcmPushDecryptionKeyCandidate {
   readonly role: 'current' | 'previous';
 }
 
-/** Ordered keys for one V3 delivery; the previous key disappears at its exclusive local deadline. */
+/** Ordered keys for one V3 delivery; the previous key disappears at its exclusive deadline. */
 export function fcmPushDecryptionKeyCandidates(
   state: FcmPushUsableKeyState,
   now: number,
@@ -381,9 +381,11 @@ export function fcmPushDecryptionKeyCandidates(
   const current = Object.freeze({ key: state.key, role: 'current' as const });
   if (state.version !== ROTATABLE_V3_STATE_VERSION || state.status === 'pending') return [current];
   if (state.status === 'rotating') {
-    // A retry may refresh requestedAt so a first late commit can establish a new server-bounded
-    // overlap. Before an acknowledgement, never let that retry resurrect the old receive key.
-    return now < state.rotationStartedAt + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS
+    // Until the server acknowledges, it may never have received the new key and still encrypts
+    // with the previous one, so keep accepting it, for at most one rotation interval (review M097).
+    // A retry refreshes only requestedAt, so it can never move this deadline past the first
+    // attempt's. Each payload also carries its own signed expiry, so old captures stay rejected.
+    return now < state.rotationStartedAt + FCM_PUSH_KEY_ROTATION_INTERVAL_MS
       ? [current, Object.freeze({ key: state.previousKey, role: 'previous' as const })]
       : [current];
   }

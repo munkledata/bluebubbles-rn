@@ -144,7 +144,7 @@ describe('FCM device-encryption contract', () => {
     ).toThrow('invalid FCM device id');
   });
 
-  it('tries the current key first and drops the previous key at its exclusive local deadline', () => {
+  it('keeps the previous key until a rotation is acknowledged, for at most one interval (M097)', () => {
     const rotating = rotatingFcmPushKeyState(
       NEXT_KEY,
       KEY,
@@ -159,19 +159,27 @@ describe('FCM device-encryption contract', () => {
       keyVersion: 1,
       expiresAt: REQUESTED_AT + 1_000,
     });
+    const both = [
+      { key: NEXT_KEY, role: 'current' },
+      { key: KEY, role: 'previous' },
+    ];
+    const currentOnly = [{ key: NEXT_KEY, role: 'current' }];
 
+    // Unacknowledged, the server may never have received NEXT_KEY and still encrypts with KEY, so
+    // a day without an answer must not drop it.
+    expect(
+      fcmPushDecryptionKeyCandidates(rotating, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS),
+    ).toEqual(both);
     expect(
       fcmPushDecryptionKeyCandidates(
         rotating,
-        REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS - 1,
+        REQUESTED_AT + FCM_PUSH_KEY_ROTATION_INTERVAL_MS - 1,
       ),
-    ).toEqual([
-      { key: NEXT_KEY, role: 'current' },
-      { key: KEY, role: 'previous' },
-    ]);
+    ).toEqual(both);
     expect(
-      fcmPushDecryptionKeyCandidates(rotating, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS),
-    ).toEqual([{ key: NEXT_KEY, role: 'current' }]);
+      fcmPushDecryptionKeyCandidates(rotating, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_INTERVAL_MS),
+    ).toEqual(currentOnly);
+    // A retry refreshes only requestedAt, so it cannot move the bound past the first attempt's.
     const agedRetry = rotatingFcmPushKeyState(
       NEXT_KEY,
       KEY,
@@ -179,16 +187,15 @@ describe('FCM device-encryption contract', () => {
       V3_BINDING,
       ORIGIN,
       ROTATION_ID,
-      REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS,
+      REQUESTED_AT + FCM_PUSH_KEY_ROTATION_INTERVAL_MS,
       REQUESTED_AT,
     );
     expect(
-      fcmPushDecryptionKeyCandidates(agedRetry, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS),
-    ).toEqual([{ key: NEXT_KEY, role: 'current' }]);
+      fcmPushDecryptionKeyCandidates(agedRetry, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_INTERVAL_MS),
+    ).toEqual(currentOnly);
+    // Once acknowledged, the server-bounded overlap applies instead.
     expect(fcmPushDecryptionKeyCandidates(active, REQUESTED_AT + 999)).toHaveLength(2);
-    expect(fcmPushDecryptionKeyCandidates(active, REQUESTED_AT + 1_000)).toEqual([
-      { key: NEXT_KEY, role: 'current' },
-    ]);
+    expect(fcmPushDecryptionKeyCandidates(active, REQUESTED_AT + 1_000)).toEqual(currentOnly);
   });
 
   it('rotates legacy V3 immediately and versioned keys at the fixed 30-day boundary', () => {

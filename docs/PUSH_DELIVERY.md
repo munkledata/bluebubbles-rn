@@ -243,7 +243,10 @@ Scoped sessions require identity-bound V3. A versioned active key rotates after 
 bounded timer covering a continuously connected process. The candidate key, stable rotation UUID,
 previous version, and request times are stored before POST, so a lost response retries exactly.
 During a server-acknowledged overlap the candidate/current key is tried first and the immediately
-previous key only until the earlier of the server deadline and the local crash-safe deadline. An
+previous key only until the earlier of the server deadline and the local crash-safe deadline.
+Before any acknowledgement the server may never have received the candidate, so the previous key
+stays accepted for at most one 30-day rotation interval from the first attempt (review M097); a
+retry cannot extend that bound, and each V3 payload's signed expiry still rejects old captures. An
 aged idempotent acknowledgement promotes the current key without reviving an expired predecessor.
 After realtime work drains, Disconnect replaces any present key record with a retained keyless
 `revoked` tombstone; a failed or timed-out retirement keeps the next connection blocked, and a
