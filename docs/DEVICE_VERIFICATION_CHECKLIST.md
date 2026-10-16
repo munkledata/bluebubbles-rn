@@ -464,6 +464,10 @@ legacy-shortcut cleanup path ran. A clean-install result must not be relabeled a
       but within the manual ceiling and one with absent size metadata; neither starts automatically,
       while a user tap may start the bounded manual path. Malformed or non-positive metadata fails
       closed rather than starting either path. A sticker is checked separately below.
+- [ ] **`EXACT PLAY CANDIDATE`:** Since review items M160/M164 the native download writes only its
+      own temporary `bounded-download-parts/request-…part` file, and a failed shared-file copy
+      removes only a file it created. Confirm a received image still downloads and opens, a synced
+      chat background or contact photo still appears, and sharing a photo into Gator still attaches it.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With **Only on Wi-Fi** enabled, use the approved
       bounded image on Wi-Fi and away from Wi-Fi. Automatic work starts only on confirmed Wi-Fi;
       an unknown network fails closed. Restore the approved network and setting afterward.

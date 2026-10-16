@@ -3,6 +3,8 @@ package expo.modules.gatorboundeddownload
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -55,5 +57,55 @@ class BoundedDownloadPolicyTest {
         File("/data/user/0/app/files/bounded-download-parts/request-1-1.part"),
       ),
     )
+  }
+
+  @Test
+  fun `a failed exclusive create never removes the file already there`() {
+    // Review M164: if the exclusive create fails, the file at that path is not this call's.
+    var filled = 0
+    var removed = 0
+    val exists = IllegalStateException("EEXIST")
+    val thrown = assertThrows(IllegalStateException::class.java) {
+      fillExclusivelyCreatedFile(
+        create = { throw exists },
+        fill = { _: Int -> filled += 1 },
+        remove = { removed += 1 },
+      )
+    }
+    assertSame(exists, thrown)
+    assertEquals(0, filled)
+    assertEquals(0, removed)
+  }
+
+  @Test
+  fun `a failed fill removes only the file this call created`() {
+    var removed = 0
+    val copyFailed = IllegalStateException("copy failed")
+    val thrown = assertThrows(IllegalStateException::class.java) {
+      fillExclusivelyCreatedFile(
+        create = { 7 },
+        fill = { descriptor ->
+          assertEquals(7, descriptor)
+          throw copyFailed
+        },
+        remove = { removed += 1 },
+      )
+    }
+    assertSame(copyFailed, thrown)
+    assertEquals(1, removed)
+
+    // A failed removal must not hide why the fill failed.
+    val stillCopyFailed = assertThrows(IllegalStateException::class.java) {
+      fillExclusivelyCreatedFile(
+        create = { 7 },
+        fill = { throw copyFailed },
+        remove = { throw IllegalStateException("EBUSY") },
+      )
+    }
+    assertSame(copyFailed, stillCopyFailed)
+
+    removed = 0
+    fillExclusivelyCreatedFile(create = { 7 }, fill = {}, remove = { removed += 1 })
+    assertEquals(0, removed)
   }
 }

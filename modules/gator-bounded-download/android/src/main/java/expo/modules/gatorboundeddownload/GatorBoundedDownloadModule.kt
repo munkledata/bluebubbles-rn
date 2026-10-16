@@ -55,6 +55,25 @@ private class DownloadFailure(val reason: String) : Exception()
 
 internal fun isCompleteDownloadResponse(statusCode: Int): Boolean = statusCode == 200
 
+/**
+ * Fill a file that [create] has just made exclusively, removing it again if [fill] fails. When
+ * [create] fails, whatever is at that path was not made by this call, so nothing is removed
+ * (review M164).
+ */
+internal fun <T> fillExclusivelyCreatedFile(
+  create: () -> T,
+  fill: (T) -> Unit,
+  remove: () -> Unit,
+) {
+  val created = create()
+  try {
+    fill(created)
+  } catch (error: Exception) {
+    runCatching(remove)
+    throw error
+  }
+}
+
 internal fun matchesDeclaredDownloadLength(declaredBytes: Long, actualBytes: Long): Boolean =
   declaredBytes == -1L || declaredBytes == actualBytes
 
@@ -408,9 +427,9 @@ class GatorBoundedDownloadModule : Module() {
           ) { "Adopted attachment failed final validation" }
           adoptedPasteOutcome(destinationUri, expectedBytes)
         } catch (error: Exception) {
-          if (created || ownedFileLstat(destination) != null) {
-            runCatching { Os.remove(destination.path) }
-          }
+          // Remove only a file this call made: the copy already removes its own partial file, and
+          // a file that was there first (or appeared in between) is not ours (review M164).
+          if (created) runCatching { Os.remove(destination.path) }
           runCatching { pruneEmptyAttachmentCacheParents(attachmentRoot, destination) }
           throw error
         }
@@ -799,50 +818,59 @@ class GatorBoundedDownloadModule : Module() {
       runCatching { Os.close(sourceDescriptor) }
       throw IllegalArgumentException("Shared attachment changed before adoption")
     }
-    val destinationDescriptor = try {
-      Os.open(
-        destination.path,
-        OsConstants.O_WRONLY or
-          OsConstants.O_CREAT or
-          OsConstants.O_EXCL or
-          OsConstants.O_CLOEXEC or
-          OsConstants.O_NOFOLLOW,
-        0b110_000_000,
-      )
-    } catch (error: Exception) {
-      runCatching { Os.close(sourceDescriptor) }
-      throw error
-    }
-
-    try {
-      FileInputStream(sourceDescriptor).use { input ->
-        FileOutputStream(destinationDescriptor).use { output ->
-          copyExactSharedAttachment(input, output, expectedBytes)
-          output.fd.sync()
+    fillExclusivelyCreatedFile(
+      create = {
+        try {
+          Os.open(
+            destination.path,
+            OsConstants.O_WRONLY or
+              OsConstants.O_CREAT or
+              OsConstants.O_EXCL or
+              OsConstants.O_CLOEXEC or
+              OsConstants.O_NOFOLLOW,
+            0b110_000_000,
+          )
+        } catch (error: Exception) {
+          runCatching { Os.close(sourceDescriptor) }
+          throw error
         }
-      }
-    } finally {
-      // Android's FileInputStream/FileOutputStream(FileDescriptor) do not own the descriptor, so
-      // closing the streams leaves both open, keeping a later-deleted file's space allocated. Close
-      // them on every path. Os.close invalidates the FileDescriptor object before closing, so a
-      // second close is a harmless EBADF and can never close a reused descriptor number.
-      runCatching { Os.close(sourceDescriptor) }
-      runCatching { Os.close(destinationDescriptor) }
-    }
+      },
+      fill = { destinationDescriptor ->
+        try {
+          FileInputStream(sourceDescriptor).use { input ->
+            FileOutputStream(destinationDescriptor).use { output ->
+              copyExactSharedAttachment(input, output, expectedBytes)
+              output.fd.sync()
+            }
+          }
+        } finally {
+          // Android's FileInputStream/FileOutputStream(FileDescriptor) do not own the descriptor,
+          // so closing the streams leaves both open, keeping a later-deleted file's space
+          // allocated. Close them on every path. Os.close invalidates the FileDescriptor object
+          // before closing, so a second close is a harmless EBADF and can never close a reused
+          // descriptor number.
+          runCatching { Os.close(sourceDescriptor) }
+          runCatching { Os.close(destinationDescriptor) }
+        }
 
-    val sourceAfter = ownedFileLstat(source)
-      ?: throw IllegalArgumentException("Shared attachment disappeared during adoption")
-    val destinationAfter = ownedFileLstat(destination)
-      ?: throw IllegalStateException("Adopted attachment is missing")
-    require(
-      OsConstants.S_ISREG(sourceAfter.st_mode) &&
-        sourceAfter.st_size == expectedBytes &&
-        sourceAfter.st_dev == expectedDevice &&
-        sourceAfter.st_ino == expectedInode,
-    ) { "Shared attachment changed during adoption" }
-    require(
-      OsConstants.S_ISREG(destinationAfter.st_mode) && destinationAfter.st_size == expectedBytes,
-    ) { "Adopted attachment failed final validation" }
+        // Still inside the fill: a failed restat removes the file this call just created.
+        val sourceAfter = ownedFileLstat(source)
+          ?: throw IllegalArgumentException("Shared attachment disappeared during adoption")
+        val destinationAfter = ownedFileLstat(destination)
+          ?: throw IllegalStateException("Adopted attachment is missing")
+        require(
+          OsConstants.S_ISREG(sourceAfter.st_mode) &&
+            sourceAfter.st_size == expectedBytes &&
+            sourceAfter.st_dev == expectedDevice &&
+            sourceAfter.st_ino == expectedInode,
+        ) { "Shared attachment changed during adoption" }
+        require(
+          OsConstants.S_ISREG(destinationAfter.st_mode) &&
+            destinationAfter.st_size == expectedBytes,
+        ) { "Adopted attachment failed final validation" }
+      },
+      remove = { Os.remove(destination.path) },
+    )
   }
 
   /** lstat keeps a last-moment symlink swap from being followed; ENOENT is an idempotent miss. */
