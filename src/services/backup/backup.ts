@@ -122,6 +122,10 @@ export interface RestoreResult {
   handleColorsSkipped: number;
 }
 
+function assertRestoreOwned(ownershipGuard?: DbCommitGuard): void {
+  if (ownershipGuard && !ownershipGuard()) throw new DbCommitGuardRejectedError();
+}
+
 /**
  * Apply a validated backup. Kv + themes are upserted; chat customizations and folder members are
  * applied only to uniquely matched local chats. V3+ folders merge non-destructively by name, and
@@ -131,10 +135,6 @@ export interface RestoreResult {
  * by another install), and re-gating it here is what stops one from planting a composer draft or
  * pushing this device's deletion watermark past messages it has not caught up on yet.
  */
-function assertRestoreOwned(ownershipGuard?: DbCommitGuard): void {
-  if (ownershipGuard && !ownershipGuard()) throw new DbCommitGuardRejectedError();
-}
-
 export async function restoreBackup(
   db: AppDatabase,
   backup: Backup,

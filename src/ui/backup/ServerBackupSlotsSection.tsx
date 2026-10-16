@@ -21,6 +21,7 @@ import {
   getNewBackupPassphraseIssue,
   MIN_NEW_BACKUP_PASSPHRASE_LENGTH,
 } from '@/services/backup/backupSchema';
+import { passphraseIssueMessage } from './passphraseIssueMessage';
 import {
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
@@ -56,11 +57,7 @@ function formatUpdatedAt(value: number): string {
 }
 
 function saveFailureCopy(error: unknown): string {
-  if (error instanceof BackupPassphraseRejectedError) {
-    return error.issue === 'too-short'
-      ? `Use at least ${MIN_NEW_BACKUP_PASSPHRASE_LENGTH} characters.`
-      : 'Choose a less common passphrase.';
-  }
+  if (error instanceof BackupPassphraseRejectedError) return passphraseIssueMessage(error.issue);
   if (error instanceof ServerBackupSlotError) {
     if (error.kind === 'ciphertext-too-large') {
       return 'This backup is too large for the server’s 1 MB slot endpoint. Use local export instead.';

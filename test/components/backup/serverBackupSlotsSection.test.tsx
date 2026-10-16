@@ -510,7 +510,7 @@ describe('ServerBackupSlotsSection save flow', () => {
     [
       'short passphrase rejection',
       () => new BackupPassphraseRejectedError('too-short'),
-      'Use at least 15 characters.',
+      'Choose a passphrase of at least 15 characters.',
     ],
     [
       'common passphrase rejection',

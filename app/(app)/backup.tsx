@@ -11,11 +11,11 @@ import {
   type BackupEditableField,
 } from '@/services/backup/backupService';
 import { readPickedBackupDocument } from '@/services/backup/pickedBackupDocument';
+import { passphraseIssueMessage } from '@ui/backup/passphraseIssueMessage';
 import {
   BACKUP_LIMITS,
   getNewBackupPassphraseIssue,
   MIN_NEW_BACKUP_PASSPHRASE_LENGTH,
-  type NewBackupPassphraseIssue,
 } from '@/services/backup/backupSchema';
 import {
   captureRealtimeDeliveryLease,
@@ -84,12 +84,6 @@ export async function pickBackupFileForLease(
 const EXPORT_LIMIT_MESSAGES: Record<BackupEditableField, string> = {
   'folder-memberships': `Your folders hold more chats in total than a backup can include (${BACKUP_LIMITS.customFolderMemberships.toLocaleString('en-US')} at most). Remove some chats from folders, then export again.`,
 };
-
-function passphraseIssueMessage(issue: NewBackupPassphraseIssue): string {
-  return issue === 'too-short'
-    ? `Choose a passphrase of at least ${MIN_NEW_BACKUP_PASSPHRASE_LENGTH} characters.`
-    : 'Choose a less common passphrase.';
-}
 
 /** Settings/theme/chat/folder backup: encrypted export (share file) + restore (paste or picker). */
 export default function BackupScreen(): React.JSX.Element {
