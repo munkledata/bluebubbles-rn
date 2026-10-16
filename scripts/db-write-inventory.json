@@ -21415,7 +21415,7 @@
     {
       "id": "src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>:mutator-call:7dc7fa3db20e",
       "path": "src/services/search/serverMessageSearchOperation.ts",
-      "line": 107,
+      "line": 114,
       "symbol": "adoptServerMessageSearchHits.<callback:ca86dfd094>",
       "operation": "mutator-call",
       "target": "src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>",
@@ -21428,7 +21428,7 @@
     {
       "id": "src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>:mutator-call:98315c753c9e",
       "path": "src/services/search/serverMessageSearchOperation.ts",
-      "line": 107,
+      "line": 114,
       "symbol": "adoptServerMessageSearchHits.<callback:ca86dfd094>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -21441,7 +21441,7 @@
     {
       "id": "src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:eff11cf61723",
       "path": "src/services/search/serverMessageSearchOperation.ts",
-      "line": 110,
+      "line": 117,
       "symbol": "adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>",
       "operation": "mutator-call",
       "target": "src/db/repositories/handles.ts#upsertHandlesWithinTransaction",
@@ -21454,7 +21454,7 @@
     {
       "id": "src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:c5a2deb38ff2",
       "path": "src/services/search/serverMessageSearchOperation.ts",
-      "line": 111,
+      "line": 118,
       "symbol": "adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#upsertChatsWithinTransaction",
@@ -21467,7 +21467,7 @@
     {
       "id": "src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:2778da0a94b7",
       "path": "src/services/search/serverMessageSearchOperation.ts",
-      "line": 116,
+      "line": 123,
       "symbol": "adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#upsertMessagesWithinTransaction",

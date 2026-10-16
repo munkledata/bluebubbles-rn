@@ -42,12 +42,19 @@ function toAdoptableServerHit(message: Message): Message | null {
       (attachment) =>
         attachment.guid.toLowerCase().startsWith('rcs-media-') || attachment.providerEpoch != null,
     );
+  // Search strips the summary below, so a retracted hit would arrive as an "unknown" retraction and
+  // blank the text of a row the app already holds. The Mac excludes these; refuse them here too.
+  const retracted =
+    message.dateRetracted != null ||
+    (message.messageSummaryInfo?.retractedParts?.length ?? 0) > 0 ||
+    message.messageSummaryInfoInvalid === true;
   if (
     !message.guid ||
     !chat?.guid ||
     message.chatGuid !== chat.guid ||
     (message.chats ?? []).some((candidate) => candidate.guid !== chat.guid) ||
-    exposesRcsNamespace
+    exposesRcsNamespace ||
+    retracted
   ) {
     return null;
   }

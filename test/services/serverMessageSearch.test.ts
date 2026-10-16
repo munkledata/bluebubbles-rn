@@ -99,6 +99,35 @@ describe('server message search adoption', () => {
     expect(await getChatIdByGuid(db, 'RCS;-;unexpected')).toBeNull();
   });
 
+  it.each([
+    ['a retraction date', { dateRetracted: 3_000 }],
+    ['retracted parts', { messageSummaryInfo: { retractedParts: [0] } }],
+    ['an invalid summary', { messageSummaryInfoInvalid: true }],
+  ])(
+    'refuses a hit with %s so it cannot blank an existing row (review M217)',
+    async (_label, retraction) => {
+      const { db, raw } = await createTestDb();
+      await adoptServerMessageSearchHits(
+        db,
+        [remoteHit],
+        lease(() => true),
+      );
+
+      await expect(
+        adoptServerMessageSearchHits(
+          db,
+          [Message.parse({ ...remoteHit, ...retraction })],
+          lease(() => true),
+        ),
+      ).resolves.toEqual([]);
+      expect(
+        raw
+          .prepare('SELECT text, retraction_state AS retractionState FROM messages WHERE guid = ?')
+          .get('remote-message'),
+      ).toEqual({ text: 'find this remote message', retractionState: null });
+    },
+  );
+
   it('rejects case-varied RCS identities before any search-result DB write', async () => {
     const { db } = await createTestDb();
     const malformedRcs = Message.parse({
@@ -124,9 +153,9 @@ describe('server message search adoption', () => {
       attachments: Array.from({ length: 10_000 }, (_, index) => ({
         guid: `unexpected-attachment-${index}`,
       })),
+      // No retractedParts: a retracted hit is refused outright rather than stripped (M217 above).
       messageSummaryInfo: {
         editedParts: { '0': Array.from({ length: 10_000 }, () => ({ malformed: true })) },
-        retractedParts: Array.from({ length: 10_000 }, (_, index) => index),
       },
       payloadData: {
         urlData: Array.from({ length: 10_000 }, () => ({ malformed: true })),
