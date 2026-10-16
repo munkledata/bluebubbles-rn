@@ -101,6 +101,30 @@ describe('strictServerOrigin', () => {
   });
 });
 
+// Review M114: on the phone, Expo's URL parser keeps a non-ASCII host as typed instead of
+// punycoding it (Node's parser converts it, which is why only raw strings can test this). A
+// look-alike host such as Cyrillic 'а' in 'gаtor' must be refused before any parsing.
+describe('look-alike Unicode server addresses', () => {
+  const lookAlike = 'g\u0430tor.example'; // Cyrillic small a (U+0430)
+
+  it('rejects them in typed or scanned setup input', () => {
+    expect(sanitizeServerAddress(lookAlike)).toBeNull();
+    expect(sanitizeServerAddress(`https://${lookAlike}`)).toBeNull();
+    // A non-breaking space inside the name (trailing ones are trimmed like any paste).
+    expect(sanitizeServerAddress('https://gator\u00a0example.com')).toBeNull();
+  });
+
+  it('rejects them in untrusted server-supplied origins', () => {
+    expect(strictServerOrigin(`https://${lookAlike}`)).toBeNull();
+    expect(strictServerOrigin('https://g ator.example')).toBeNull();
+  });
+
+  it('still accepts the ASCII (punycode) form of an international domain', () => {
+    expect(strictServerOrigin('https://xn--gtor-5qe.example')).toBe('https://xn--gtor-5qe.example');
+    expect(sanitizeServerAddress('xn--gtor-5qe.example')).toBe('https://xn--gtor-5qe.example');
+  });
+});
+
 describe('classifyServerRotation', () => {
   it('recognizes canonical spellings of the trusted origin as a no-op', () => {
     expect(classifyServerRotation('https://example.com', 'HTTPS://EXAMPLE.COM:443/')).toEqual({

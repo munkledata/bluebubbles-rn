@@ -21,7 +21,8 @@ export function sanitizeServerAddress(input: string | null | undefined): string 
   if (addr.length === 0) return null;
   if (
     addr.length > MAX_SERVER_ORIGIN_INPUT_LENGTH ||
-    /[\\\s\u0000-\u001f\u007f]/.test(addr) ||
+    // Visible ASCII only, no backslash: see strictServerOrigin (review M114).
+    /[^\u0021-\u007e]|\\/.test(addr) ||
     addr.includes('@')
   ) {
     return null;
@@ -74,8 +75,12 @@ export const MAX_SERVER_ORIGIN_INPUT_LENGTH = 2_048;
 export function strictServerOrigin(input: string | null | undefined): string | null {
   if (!input || input !== input.trim()) return null;
   if (input.length > MAX_SERVER_ORIGIN_INPUT_LENGTH) return null;
-  // Reject the raw user-info delimiter even when both parsed fields are empty (`https://@host`).
-  if (/[\\\u0000-\u001f\u007f]/.test(input) || input.includes('@')) return null;
+  // Only visible ASCII, no backslash (the URL parser reads it as a slash), and no raw user-info
+  // delimiter even when both parsed fields are empty (`https://@host`). Non-ASCII is refused
+  // outright (review M114): on the phone, Expo's URL parser keeps a host such as Cyrillic 'gаtor'
+  // as typed instead of punycoding it, so a look-alike server would pass for the real one. An
+  // international domain still works in its ASCII xn-- form.
+  if (/[^\u0021-\u007e]|\\/.test(input) || input.includes('@')) return null;
   // Accept exactly an http(s) authority and an optional single trailing slash. Checking the raw
   // form first also rejects empty `?` / `#` delimiters that URL.search/hash normalize away.
   if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;

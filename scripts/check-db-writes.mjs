@@ -9762,7 +9762,7 @@ function incomingIngressCertifiedNodes({
     statementText(strictServerOrigin, 1) !==
       'if (input.length > MAX_SERVER_ORIGIN_INPUT_LENGTH) return null;' ||
     statementText(strictServerOrigin, 2) !==
-      String.raw`if (/[\\\u0000-\u001f\u007f]/.test(input) || input.includes('@')) return null;` ||
+      String.raw`if (/[^\u0021-\u007e]|\\/.test(input) || input.includes('@')) return null;` ||
     statementText(strictServerOrigin, 3) !==
       String.raw`if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;` ||
     statementText(strictServerOrigin, 4) !==
