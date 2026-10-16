@@ -1,10 +1,7 @@
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import {
-  isAggregateRetractionTombstone,
-  isExactMessagePartTopology,
-} from '@core/messages/retraction';
-import { parseMessagePartTopology } from '@core/models';
+import { isAggregateRetractionTombstone } from '@core/messages/retraction';
+import { canTargetReplyPartZero } from '@features/conversations/messageActionEligibility';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import {
@@ -156,14 +153,7 @@ export const MessageRow = React.memo(function MessageRow({
   // they stay aligned. Own messages + 1:1 chats need no avatar (it's obvious who's talking).
   const showAvatar = isGroup && msg.isFromMe !== 1;
   const isEdited = !isAggregateRetractionTombstone(msg) && !!msg.dateEdited;
-  const topology = parseMessagePartTopology(msg.messagePartTopology);
-  const canSwipeReply =
-    !!onSwipeReply &&
-    !msg.guid.startsWith('temp-') &&
-    !isAggregateRetractionTombstone(msg) &&
-    (msg.senderService == null || msg.senderService === 'iMessage') &&
-    isExactMessagePartTopology(topology) &&
-    topology.currentParts.some((part) => part.index === 0);
+  const canSwipeReply = !!onSwipeReply && canTargetReplyPartZero(msg);
 
   const headerNode = header ? (
     <Text style={[styles.sender, overlay, pill ? [styles.senderPill, pill] : null]}>

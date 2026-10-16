@@ -48,6 +48,7 @@ import {
 import { devSendFakeReaction } from './devSeed';
 import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
+import { canTargetReplyPartZero } from './messageActionEligibility';
 import type { EnrichedMessage } from './useMessages';
 
 function actionContentOf(msg: EnrichedMessage) {
@@ -141,17 +142,6 @@ function canUnsendExactPlainTextPartZero(msg: EnrichedMessage, now: number): boo
     topology.currentParts.length === 1 &&
     topology.currentParts[0]?.index === 0 &&
     topology.currentParts[0]?.kind === 'text'
-  );
-}
-
-function canTargetReplyPartZero(msg: EnrichedMessage): boolean {
-  const topology = parseMessagePartTopology(msg.messagePartTopology);
-  return (
-    !msg.guid.startsWith('temp-') &&
-    !isAggregateRetractionTombstone(msg) &&
-    (msg.senderService == null || msg.senderService === 'iMessage') &&
-    isExactMessagePartTopology(topology) &&
-    topology.currentParts.some((part) => part.index === 0)
   );
 }
 
