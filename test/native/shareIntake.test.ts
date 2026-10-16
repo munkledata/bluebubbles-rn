@@ -117,20 +117,31 @@ describe('native share manifest validation', () => {
     });
   });
 
+  // Exact messages, so a case cannot pass by failing for an unrelated reason (review M009).
+  const BATCH = 'invalid share batch';
+  const FILE = 'invalid shared file';
+  const ESCAPED = 'shared file escaped its native batch';
+  const TEXT = 'shared text is too large';
+
   it.each([
-    ['a non-object', null],
-    ['an invalid batch id', manifest({ batchId: '../batch' })],
-    ['a non-integer timestamp', manifest({ createdAtMs: 1.5 })],
-    ['missing explicit nullable text', manifest({ text: undefined })],
-    ['an invalid target token', manifest({ targetToken: 'conversation-guid' })],
-    ['an empty batch', manifest({ text: null, files: [] })],
-    ['oversized UTF-8 text', manifest({ text: 'é'.repeat(32_769), files: [] })],
+    ['a non-object', null, BATCH],
+    ['an invalid batch id', manifest({ batchId: '../batch' }), BATCH],
+    ['a non-integer timestamp', manifest({ createdAtMs: 1.5 }), BATCH],
+    ['missing explicit nullable text', manifest({ text: undefined }), BATCH],
+    ['an invalid target token', manifest({ targetToken: 'conversation-guid' }), BATCH],
+    ['an empty batch', manifest({ text: null, files: [] }), BATCH],
+    ['oversized UTF-8 text', manifest({ text: 'é'.repeat(32_769), files: [] }), TEXT],
     [
       'too many files',
       manifest({ files: Array.from({ length: 11 }, (_, i) => sharedFile(i, `p${i}.jpg`, 1)) }),
+      BATCH,
     ],
-    ['a zero-byte file', manifest({ files: [sharedFile(0, 'empty.jpg', 0)] })],
-    ['an oversized file', manifest({ files: [sharedFile(0, 'huge.jpg', 128 * 1024 * 1024 + 1)] })],
+    ['a zero-byte file', manifest({ files: [sharedFile(0, 'empty.jpg', 0)] }), FILE],
+    [
+      'an oversized file',
+      manifest({ files: [sharedFile(0, 'huge.jpg', 128 * 1024 * 1024 + 1)] }),
+      FILE,
+    ],
     [
       'aggregate bytes over the batch limit',
       manifest({
@@ -142,14 +153,17 @@ describe('native share manifest validation', () => {
           sharedFile(4, 'e.jpg', 1),
         ],
       }),
+      BATCH,
     ],
     [
       'a file outside the exact batch directory',
       manifest({ files: [sharedFile(0, 'photo.jpg', 42, OTHER_BATCH_ID)] }),
+      ESCAPED,
     ],
     [
       'a mismatched native file index',
       manifest({ files: [{ ...sharedFile(1, 'photo.jpg', 42) }] }),
+      ESCAPED,
     ],
     [
       'an unsafe filename',
@@ -161,15 +175,17 @@ describe('native share manifest validation', () => {
           },
         ],
       }),
+      FILE,
     ],
     [
       'an invalid MIME type',
       manifest({
         files: [{ ...sharedFile(0, 'photo.jpg', 42), mimeType: 'IMAGE/JPEG' }],
       }),
+      FILE,
     ],
-  ])('rejects %s', (_label, value) => {
-    expect(() => parseNativeShareBatch(value)).toThrow();
+  ])('rejects %s with its own error', (_label, value, message) => {
+    expect(() => parseNativeShareBatch(value)).toThrow(new Error(message));
   });
 });
 
