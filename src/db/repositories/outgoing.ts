@@ -21,9 +21,11 @@ import {
 } from './messageState';
 import { requireChatIdByGuidWithinTransaction } from './chats';
 import {
+  findAttemptOwnerSnapshotWithinTransaction,
   MAX_SEND_ATTEMPT_OWNER_GENERATION,
   MessageGuidAliasConflictError,
   recordMessageGuidAliasWithinTransaction,
+  type AttemptOwnerSnapshot,
   type SendAttemptOwnerToken,
 } from './outgoingAttemptOwnership';
 import type { RetryableOutgoing } from './outgoingRetry';
@@ -85,18 +87,6 @@ export type ExactOutgoingAttemptSuccessDisposition =
   | 'owner-conflict'
   | 'unmatched';
 
-interface AttemptOwnerSnapshot {
-  readonly guid: string;
-  readonly chatId: number;
-  readonly chatGuid: string;
-  readonly activeSendAttemptGuid: string | null;
-  readonly attemptOwnerPending: number;
-  readonly attemptOwnerGeneration: number;
-  readonly sendState: string | null;
-  readonly error: number | null;
-  readonly errorMessage: string | null;
-}
-
 /**
  * Contain a confirmed exact success whose canonical identity conflicts with retained ownership.
  * The source bubble is independently proven before this helper is called. Never install the
@@ -145,64 +135,6 @@ function settleConfirmedLegacyIdentityConflictWithinTransaction(
       })
       .where(eq(messages.guid, tempGuid));
     await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
-  });
-}
-
-/** Resolve the durable temp identity first, then its alias, with a canonical fallback for repair. */
-async function findAttemptOwnerSnapshotWithinTransaction(
-  context: DbTransactionContext,
-  tempGuid: string,
-  fallbackGuid?: string,
-): Promise<AttemptOwnerSnapshot | null> {
-  return runInTransactionContext(context, async (db) => {
-    const direct = await db.all<AttemptOwnerSnapshot>(sql`
-      SELECT m.guid, m.chat_id AS chatId, c.guid AS chatGuid,
-             m.active_send_attempt_guid AS activeSendAttemptGuid,
-             m.attempt_owner_pending AS attemptOwnerPending,
-             m.attempt_owner_generation AS attemptOwnerGeneration,
-             m.send_state AS sendState, m.error, m.error_message AS errorMessage
-        FROM messages m
-        JOIN chats c ON c.id = m.chat_id
-       WHERE m.guid = ${tempGuid}
-       LIMIT 1
-    `);
-    if (direct[0]) return direct[0];
-    const aliased = await db.all<AttemptOwnerSnapshot>(sql`
-      SELECT m.guid, m.chat_id AS chatId, c.guid AS chatGuid,
-             m.active_send_attempt_guid AS activeSendAttemptGuid,
-             m.attempt_owner_pending AS attemptOwnerPending,
-             m.attempt_owner_generation AS attemptOwnerGeneration,
-             m.send_state AS sendState, m.error, m.error_message AS errorMessage
-        FROM message_guid_aliases a
-        JOIN messages m ON m.guid = a.canonical_guid
-        JOIN chats c ON c.id = m.chat_id
-       WHERE a.alias_guid = ${tempGuid}
-         AND a.chat_guid = c.guid
-       LIMIT 1
-    `);
-    if (aliased[0]) return aliased[0];
-    const aliasReservations = await db.all<{ aliasGuid: string }>(sql`
-      SELECT alias_guid AS aliasGuid
-        FROM message_guid_aliases
-       WHERE alias_guid = ${tempGuid}
-       LIMIT 1
-    `);
-    // A retained alias that did not satisfy the scoped join above is a quarantine/conflict, not
-    // permission to trust a payload-selected canonical fallback.
-    if (aliasReservations[0]) return null;
-    if (!fallbackGuid || fallbackGuid === tempGuid) return null;
-    const fallback = await db.all<AttemptOwnerSnapshot>(sql`
-      SELECT m.guid, m.chat_id AS chatId, c.guid AS chatGuid,
-             m.active_send_attempt_guid AS activeSendAttemptGuid,
-             m.attempt_owner_pending AS attemptOwnerPending,
-             m.attempt_owner_generation AS attemptOwnerGeneration,
-             m.send_state AS sendState, m.error, m.error_message AS errorMessage
-        FROM messages m
-        JOIN chats c ON c.id = m.chat_id
-       WHERE m.guid = ${fallbackGuid}
-       LIMIT 1
-    `);
-    return fallback[0] ?? null;
   });
 }
 

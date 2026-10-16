@@ -11,6 +11,7 @@ import {
 } from '../transaction';
 import type { AppDatabase } from '../types';
 import {
+  findAttemptOwnerSnapshotWithinTransaction,
   MAX_SEND_ATTEMPT_OWNER_GENERATION,
   recordMessageGuidAliasWithinTransaction,
   type SendAttemptOwnerToken,
@@ -485,57 +486,6 @@ export async function applyServerSendErrorWithinTransaction(
       attemptOwnerPending: number;
       attemptOwnerGeneration: number;
     };
-    const findOwner = async (
-      tempGuid: string,
-      fallbackGuid: string,
-    ): Promise<AttemptOwnerRow | null> => {
-      const direct = await db.all<AttemptOwnerRow>(sql`
-        SELECT m.guid, c.guid AS chatGuid,
-               m.active_send_attempt_guid AS activeSendAttemptGuid,
-               m.attempt_owner_pending AS attemptOwnerPending,
-               m.attempt_owner_generation AS attemptOwnerGeneration
-          FROM messages m
-          JOIN chats c ON c.id = m.chat_id
-         WHERE m.guid = ${tempGuid}
-         LIMIT 1
-      `);
-      if (direct[0]) return direct[0];
-      const aliased = await db.all<AttemptOwnerRow>(sql`
-        SELECT m.guid, c.guid AS chatGuid,
-               m.active_send_attempt_guid AS activeSendAttemptGuid,
-               m.attempt_owner_pending AS attemptOwnerPending,
-               m.attempt_owner_generation AS attemptOwnerGeneration
-          FROM message_guid_aliases a
-          JOIN messages m ON m.guid = a.canonical_guid
-          JOIN chats c ON c.id = m.chat_id
-         WHERE a.alias_guid = ${tempGuid}
-           AND a.chat_guid = c.guid
-         LIMIT 1
-      `);
-      if (aliased[0]) return aliased[0];
-      const aliasReservations = await db.all<{ aliasGuid: string }>(sql`
-        SELECT alias_guid AS aliasGuid
-          FROM message_guid_aliases
-         WHERE alias_guid = ${tempGuid}
-         LIMIT 1
-      `);
-      if (aliasReservations[0]) return null;
-      if (fallbackGuid !== tempGuid) {
-        const fallback = await db.all<AttemptOwnerRow>(sql`
-          SELECT m.guid, c.guid AS chatGuid,
-                 m.active_send_attempt_guid AS activeSendAttemptGuid,
-                 m.attempt_owner_pending AS attemptOwnerPending,
-                 m.attempt_owner_generation AS attemptOwnerGeneration
-            FROM messages m
-            JOIN chats c ON c.id = m.chat_id
-           WHERE m.guid = ${fallbackGuid}
-           LIMIT 1
-        `);
-        if (fallback[0]) return fallback[0];
-      }
-      return null;
-    };
-
     let queueGuid = guid;
     let targetGuid = guid;
     if (attemptIdentity) {
@@ -548,7 +498,11 @@ export async function applyServerSendErrorWithinTransaction(
       ) {
         return { matched: true, disposition: 'attempt-identity-missing', onCommitted: null };
       }
-      let owner = await findOwner(attemptIdentity.tempGuid, guid);
+      let owner: AttemptOwnerRow | null = await findAttemptOwnerSnapshotWithinTransaction(
+        context,
+        attemptIdentity.tempGuid,
+        guid,
+      );
       let recoveredAfterAliasPrune = false;
       if (!owner) {
         const blockedAliases = await db.all<{ aliasGuid: string }>(sql`
@@ -614,7 +568,7 @@ export async function applyServerSendErrorWithinTransaction(
         return { matched: true, disposition: 'stale-attempt', onCommitted: null };
       }
     } else {
-      const owner = await findOwner(guid, guid);
+      const owner = await findAttemptOwnerSnapshotWithinTransaction(context, guid, guid);
       if (owner?.attemptOwnerGeneration && owner.attemptOwnerGeneration > 0) {
         return { matched: true, disposition: 'attempt-identity-missing', onCommitted: null };
       }
