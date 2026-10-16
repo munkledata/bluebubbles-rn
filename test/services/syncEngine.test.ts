@@ -347,7 +347,7 @@ describe('syncAllChats — account-bound page writes', () => {
       fetchMessagesAfter: async () => [],
       fetchDeletedAfter: async () => [],
     };
-    const syncing = syncAllChats(db, api, 200, () => revoked);
+    const syncing = syncAllChats(db, api, { shouldAbort: () => revoked });
     await new Promise<void>((resolve) => {
       setImmediate(resolve);
     });

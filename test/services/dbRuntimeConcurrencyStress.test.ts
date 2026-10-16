@@ -187,17 +187,7 @@ describe('DB-02C mixed runtime concurrency', () => {
 
       // syncAllChats submits its first five-chat owner before the other production paths.
       syncRun = retain(
-        syncAllChats(
-          db,
-          api,
-          10,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          RCS_PROVIDER_INFO,
-        ),
+        syncAllChats(db, api, { chatPageSize: 10, rcsProviderInfo: RCS_PROVIDER_INFO }),
       );
       await deadline(pageFetched.promise, 'sync page fetch');
       await nextTurn();

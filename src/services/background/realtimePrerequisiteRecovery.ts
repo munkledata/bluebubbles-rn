@@ -139,17 +139,11 @@ export async function recoverRealtimePrerequisite(
         return;
       }
       if (recovery.kind === 'sync-account') {
-        await syncAllChats(
-          db,
-          api,
-          200,
-          stopped,
-          controller.signal,
-          undefined,
-          undefined,
-          undefined,
-          info,
-        );
+        await syncAllChats(db, api, {
+          shouldAbort: stopped,
+          signal: controller.signal,
+          rcsProviderInfo: info,
+        });
         if (stopped()) {
           outcome = 'stale';
           return;

@@ -1721,7 +1721,7 @@ function dbProcessRelaunchCertificateCandidate({
   if (
     createHash('sha256')
       .update(normalizedSnippet(runtimeWaveFile, runtimeWaveFile))
-      .digest('hex') !== '6968d63599f07c2477d08efef5f45a8731b8fc886e4d9de53b621dc5711cb603'
+      .digest('hex') !== '086d176a5c9d7063b188d7b6082e98330a247d5d07cd088f49c61f73e8db804d'
   ) {
     return undefined;
   }
@@ -1977,7 +1977,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runDbRuntimeConcurrencyWave',
-      'a82b6925813f5910e09dbdceb50e53e93948f1a2a6c1e206d869b1119d39d2f8',
+      'd45fd337f7d54d2d651887d1587ef160ff6f05ce01e3d0503d8ae73efe85b396',
     ],
   ]);
   for (const [name, expected] of expectedRuntimeWaveFingerprints) {
@@ -2604,7 +2604,7 @@ function dbProcessRelaunchCertificateCandidate({
   // reviewed entry bodies plus the exact contact-link bypass and send-attempt ownership closure, so
   // internal DB/native work cannot become detached while an outer inventory id stays unchanged.
   const runtimeProductionCalleeFingerprints = new Map([
-    [syncAllChats, '189937044d82dfb92301d506020b56ab350514c7cc2fb7d8d4e3d909511b0461'],
+    [syncAllChats, 'c020fac074e1490f98ec8d53ae0ccde29ba6c827abbdb302ead4a5990fc5beda'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
     [sendImageMessage, 'c17a1d44482187d7e6995858f44d603897c2555d3a5856ffabe8a5dcbe542f7f'],
     [sendVoice, '8396e13554087324711d5fc8ca3854a1821ad6a16818c72c1c01a2ee46889eb3'],
@@ -9231,7 +9231,7 @@ function incomingIngressCertifiedNodes({
       .digest('hex') !== '64ef0ee4c27ead97edc14f2ca49d638de4c08666c7867036c77e1f15f1287468' ||
     createHash('sha256')
       .update(normalizedSnippet(prerequisiteRecoveryFile, prerequisiteRecoveryFile))
-      .digest('hex') !== '735245eb0da4a17e53441b2a122743e5a679e640b73a23af5ade5bbe748e1514' ||
+      .digest('hex') !== '78970ac88201e6664e7c35b25ba6e613da5f9af1f6cb91aa796658053fe76471' ||
     createHash('sha256').update(normalizedSnippet(fileLogFile, fileLogFile)).digest('hex') !==
       '58120b0f2dd9cd52685c83894333ee06db8e32b69569fb76ddcafd8cc13fbdbe' ||
     createHash('sha256')

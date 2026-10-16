@@ -702,13 +702,10 @@ export async function syncProviderMessages(
   const listingOptional = !refreshAll && hasSyncPosition(await getSyncMarker(db));
   let chats: Awaited<ReturnType<typeof syncAllChats>> = [];
   try {
-    chats = await syncAllChats(
-      db,
-      api,
-      200,
+    chats = await syncAllChats(db, api, {
       shouldAbort,
       signal,
-      (messages, chatGuidByMessage) => {
+      onServerMessages: (messages, chatGuidByMessage) => {
         listed = advanceMarker(
           listed,
           messages
@@ -723,14 +720,13 @@ export async function syncProviderMessages(
             })),
         );
       },
-      (serverChats) => {
+      onServerChats: (serverChats) => {
         for (const chat of serverChats)
           if (looksLikeRcsChatGuid(chat.guid))
             rcsNewestListed.set(chat.guid, chat.lastMessage?.guid ?? null);
       },
-      undefined,
-      serverInfo,
-    );
+      rcsProviderInfo: serverInfo,
+    });
   } catch (error) {
     if (!listingOptional || error instanceof DbCommitGuardRejectedError) throw error;
     logger.debug('[sync] chat-list refresh failed; the iMessage catch-up continues', error);

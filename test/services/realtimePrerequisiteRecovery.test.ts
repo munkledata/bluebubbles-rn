@@ -130,20 +130,14 @@ describe('task-local realtime prerequisite recovery', () => {
     ).resolves.toBe('recovered');
 
     expect(mockServerInfo).toHaveBeenCalledWith(http, expect.any(AbortSignal));
-    expect(mockSyncAllChats).toHaveBeenCalledWith(
-      db,
-      expect.anything(),
-      200,
-      expect.any(Function),
-      expect.any(AbortSignal),
-      undefined,
-      undefined,
-      undefined,
-      expect.objectContaining({
+    expect(mockSyncAllChats).toHaveBeenCalledWith(db, expect.anything(), {
+      shouldAbort: expect.any(Function),
+      signal: expect.any(AbortSignal),
+      rcsProviderInfo: expect.objectContaining({
         server_version: '1.9.0',
         supports_message_deleted: true,
       }),
-    );
+    });
     expect(mockIncrementalSync).toHaveBeenCalledWith(
       db,
       expect.anything(),

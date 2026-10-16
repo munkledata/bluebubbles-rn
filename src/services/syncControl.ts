@@ -852,17 +852,11 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       // Refresh the FULL chat list first so conversations the interrupted first sync never reached
       // (disproportionately older SMS threads) appear in the inbox; their history backfills on open.
       // Best-effort — a failure here must not block the incremental message sync below.
-      await syncAllChats(
-        db,
-        api,
-        200,
+      await syncAllChats(db, api, {
         shouldAbort,
-        options.signal,
-        undefined,
-        undefined,
-        undefined,
-        serverInfo,
-      ).catch((e) => logger.debug('[sync] chat-list refresh failed', e));
+        signal: options.signal,
+        rcsProviderInfo: serverInfo,
+      }).catch((e) => logger.debug('[sync] chat-list refresh failed', e));
       if (shouldAbort()) {
         outcome = stoppedOutcome();
         return;

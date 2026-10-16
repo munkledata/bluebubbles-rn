@@ -232,17 +232,10 @@ export async function runDbRuntimeConcurrencyWave(
   try {
     const chats = Array.from({ length: 10 }, (_, index) => syncChat(index));
     // Seed only the upload owner. The ten-row call below remains the measured two-slice sync.
-    await syncAllChats(
-      db,
-      syncApi([chats[0]!]),
-      1,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      RCS_PROVIDER_INFO,
-    );
+    await syncAllChats(db, syncApi([chats[0]!]), {
+      chatPageSize: 1,
+      rcsProviderInfo: RCS_PROVIDER_INFO,
+    });
 
     sendRun = observe(
       sendImageMessage(
@@ -279,17 +272,10 @@ export async function runDbRuntimeConcurrencyWave(
         sql`SELECT COUNT(*) AS count FROM outgoing_queue WHERE temp_guid = ${identity.tempGuid}`,
       )) === 1;
 
-    const syncRun = syncAllChats(
-      db,
-      syncApi(chats),
-      10,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      RCS_PROVIDER_INFO,
-    );
+    const syncRun = syncAllChats(db, syncApi(chats), {
+      chatPageSize: 10,
+      rcsProviderInfo: RCS_PROVIDER_INFO,
+    });
     retained.push(syncRun);
     // The resolved in-memory fetch resumes before this continuation, so slice one owns the queue
     // before the four calls below claim their slots synchronously.

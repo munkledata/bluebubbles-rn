@@ -195,6 +195,27 @@ export interface FullSyncOptions {
   rcsProviderInfo?: RcsProviderServerInfo | null;
 }
 
+/** Options for {@link syncAllChats}; every field is optional (review M196). */
+export interface SyncAllChatsOptions {
+  /** Chats per `chat/query` page; capped at (and defaulting to) 200. */
+  chatPageSize?: number;
+  /** Stops paging; without a transactionGuard it also guards every page's commit. */
+  shouldAbort?: () => boolean;
+  /** Cancels the active HttpClient request/retry wait. */
+  signal?: AbortSignal;
+  /** Each page's server last-messages, with the chat each belongs to. */
+  onServerMessages?: (
+    messages: readonly Message[],
+    chatGuidByMessage: ReadonlyMap<string, string>,
+  ) => void;
+  /** Each page's admitted server chats. */
+  onServerChats?: (chats: readonly Chat[]) => void;
+  /** Commit guard for every page; defaults to `shouldAbort`'s inverse. */
+  transactionGuard?: DbCommitGuard;
+  /** Current Google pairing identity; absent deliberately rejects newly received RCS rows. */
+  rcsProviderInfo?: RcsProviderServerInfo | null;
+}
+
 /**
  * Fetch + store EVERY chat (the list + participants only, no messages), paging `chat/query`.
  * Returns the stored chats so a caller can page their messages. Cheap (a couple of requests for
@@ -204,17 +225,17 @@ export interface FullSyncOptions {
 export async function syncAllChats(
   db: AppDatabase,
   api: SyncApi,
-  chatPageSize = 200,
-  shouldAbort?: () => boolean,
-  signal?: AbortSignal,
-  onServerMessages?: (
-    messages: readonly Message[],
-    chatGuidByMessage: ReadonlyMap<string, string>,
-  ) => void,
-  onServerChats?: (chats: readonly Chat[]) => void,
-  transactionGuard?: DbCommitGuard,
-  rcsProviderInfo?: RcsProviderServerInfo | null,
+  options: SyncAllChatsOptions = {},
 ): Promise<StoredChat[]> {
+  const {
+    chatPageSize = 200,
+    shouldAbort,
+    signal,
+    onServerMessages,
+    onServerChats,
+    transactionGuard,
+    rcsProviderInfo,
+  } = options;
   const boundedPageSize =
     Number.isFinite(chatPageSize) && chatPageSize > 0 ? Math.min(Math.floor(chatPageSize), 200) : 0;
   if (boundedPageSize === 0 || shouldAbort?.()) return [];
@@ -430,17 +451,15 @@ export async function fullSync(
 
   // Phase 1: store ALL chats first (fast — just the list + participants). This guarantees every
   // conversation shows in the inbox even if the message pass below is interrupted by a timeout.
-  const stored = await syncAllChats(
-    db,
-    api,
-    opts.chatPageSize ?? 200,
-    opts.shouldAbort,
-    opts.signal,
-    recordServerLastMessages,
-    recordServerChats,
-    commitGuard,
-    opts.rcsProviderInfo,
-  );
+  const stored = await syncAllChats(db, api, {
+    chatPageSize: opts.chatPageSize ?? 200,
+    shouldAbort: opts.shouldAbort,
+    signal: opts.signal,
+    onServerMessages: recordServerLastMessages,
+    onServerChats: recordServerChats,
+    transactionGuard: commitGuard,
+    rcsProviderInfo: opts.rcsProviderInfo,
+  });
   const chats = stored.length;
   if (shouldContinue()) opts.onProgress?.({ chats, messages });
   if (!shouldContinue() || messagePageSize === 0 || maxPerChat === 0) {
