@@ -453,15 +453,9 @@ describe('the Expo background task adapter', () => {
     const capabilitySourceFactory = (
       mockRunDueScheduled.mock.calls[0] as unknown[] | undefined
     )?.[6] as (() => unknown) | undefined;
-    expect(capabilitySourceFactory?.()).toEqual({
-      kind: 'fixed',
-      serverInfo: {
-        ...serverInfo,
-        private_api: false,
-        supports_imessage_text_with_attachment: false,
-        supports_icloud_account: false,
-      },
-    });
+    // The fixed source carries the server info as given; the wire schema alone retires the
+    // Private API flags, and nothing reads them (review M139).
+    expect(capabilitySourceFactory?.()).toEqual({ kind: 'fixed', serverInfo });
     expect(mockRunOutgoingQueue).toHaveBeenCalledWith(
       db,
       client,
