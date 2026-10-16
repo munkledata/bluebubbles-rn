@@ -107,8 +107,8 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const rcsLastAlert = useRcsHealthStore((s) => s.lastAlertType);
 
   // Each read is its own query — a failure just leaves that card at "—" (data stays undefined),
-  // never blocks the rest. The `?? null` coercions matter: most of these endpoints can resolve
-  // `undefined` (nullish zod schemas), which TanStack Query treats as an error.
+  // never blocks the rest. The typed routes never resolve `undefined`; the `?? null` turns a read
+  // that returns nothing into an empty card rather than a TanStack Query error.
   const queryClient = useQueryClient();
   const healthQueries = useQueries({
     queries: [
@@ -240,10 +240,8 @@ export default function ServerHealthScreen(): React.JSX.Element {
     })();
   };
 
-  const tlsMode = tls
-    ? String(tls.mode ?? tls.tls_mode ?? (tls.enabled ? 'enabled' : 'off'))
-    : null;
-  const tlsDomain = tls ? (tls.domain ?? tls.tls_domain ?? tls.commonName) : null;
+  const tlsMode = tls ? tls.mode : null;
+  const tlsDomain = tls ? tls.domain : null;
 
   return (
     <Screen>

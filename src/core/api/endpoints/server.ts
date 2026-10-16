@@ -131,16 +131,6 @@ export async function serverStatTotals(
 // explicit unsupported-version result without retrying any retired compatibility transport.
 
 /** Server environment: version, platform, node, and Find My / macOS capability flags. */
-const ServerEnv = z
-  .object({
-    version: z.string().nullish(),
-    platform: z.string().nullish(),
-    node: z.string().nullish(),
-    findmyNeedsKeys: z.boolean().nullish(),
-    isMinMonterey: z.boolean().nullish(),
-  })
-  .loose()
-  .nullish();
 const TypedServerEnv = z
   .object({
     version: z.string().min(1).max(128),
@@ -150,18 +140,13 @@ const TypedServerEnv = z
     isMinMonterey: z.boolean(),
   })
   .strict();
-export type ServerEnv = z.infer<typeof ServerEnv>;
+export type ServerEnv = z.infer<typeof TypedServerEnv>;
 export const serverEnv = (http: HttpClient, signal?: AbortSignal): Promise<ServerEnv> =>
   typedRoute('/server/environment', () =>
     http.get('/server/environment', TypedServerEnv, { signal }),
   );
 
 /** Find My decryption-key import status (per key: present + valid). */
-const KeyState = z.object({ present: z.boolean().nullish(), valid: z.boolean().nullish() }).loose();
-const FindMyKeysStatus = z
-  .object({ LocalStorage: KeyState.nullish(), FMIP: KeyState.nullish(), FMF: KeyState.nullish() })
-  .loose()
-  .nullish();
 const TypedKeyState = z
   .object({ present: z.boolean(), valid: z.boolean() })
   .strict()
@@ -177,7 +162,7 @@ const TypedKeyState = z
 const TypedFindMyKeysStatus = z
   .object({ LocalStorage: TypedKeyState, FMIP: TypedKeyState, FMF: TypedKeyState })
   .strict();
-export type FindMyKeysStatus = z.infer<typeof FindMyKeysStatus>;
+export type FindMyKeysStatus = z.infer<typeof TypedFindMyKeysStatus>;
 export const findMyKeysStatus = (
   http: HttpClient,
   signal?: AbortSignal,
@@ -187,15 +172,6 @@ export const findMyKeysStatus = (
   );
 
 /** FCM (push) configuration status. */
-const FcmStatus = z
-  .object({
-    configured: z.boolean().nullish(),
-    projectId: z.string().nullish(),
-    clientEmail: z.string().nullish(),
-    oauthClientConfigured: z.boolean().nullish(),
-  })
-  .loose()
-  .nullish();
 const TypedFcmStatus = z
   .object({
     configured: z.boolean(),
@@ -220,7 +196,7 @@ const TypedFcmStatus = z
       });
     }
   });
-export type FcmStatus = z.infer<typeof FcmStatus>;
+export type FcmStatus = z.infer<typeof TypedFcmStatus>;
 export const fcmStatus = (http: HttpClient, signal?: AbortSignal): Promise<FcmStatus> =>
   typedRoute('/notifications/fcm/status', () =>
     http.get('/notifications/fcm/status', TypedFcmStatus, { signal }),
@@ -323,7 +299,6 @@ export const publicIp = (http: HttpClient, signal?: AbortSignal): Promise<string
   ).then((r) => r.ip);
 
 /** Active TLS/certificate information. */
-const TlsStatus = z.record(z.string(), z.unknown()).nullish();
 const TlsMode = z.enum(['self-signed', 'letsencrypt', 'custom']);
 const TlsCertificateExpiry = z
   .string()
@@ -432,7 +407,12 @@ const TypedTlsStatus = z
       });
     }
   });
-export type TlsStatus = z.infer<typeof TlsStatus>;
+/** The typed TLS route plus the presentation aliases the health screen shows. */
+export type TlsStatus = z.infer<typeof TypedTlsStatus> & {
+  enabled: boolean;
+  mode: z.infer<typeof TlsMode> | 'not-serving' | 'off';
+  domain: string | null;
+};
 export const tlsStatus = (http: HttpClient, signal?: AbortSignal): Promise<TlsStatus> =>
   typedRoute('/tls/status', () =>
     http.get('/tls/status', TypedTlsStatus, { signal }).then((status) => ({
@@ -450,16 +430,6 @@ export const tlsStatus = (http: HttpClient, signal?: AbortSignal): Promise<TlsSt
   );
 
 /** In-memory server alert log. */
-const ServerAlert = z
-  .object({
-    id: z.string(),
-    type: z.string().nullish(),
-    value: z.string().nullish(),
-    created: z.number().nullish(),
-    isRead: z.boolean().nullish(),
-  })
-  .loose();
-export type ServerAlert = z.infer<typeof ServerAlert>;
 const TypedServerAlert = z
   .object({
     id: z.string().min(1).max(256),
@@ -469,6 +439,7 @@ const TypedServerAlert = z
     isRead: z.boolean(),
   })
   .strict();
+export type ServerAlert = z.infer<typeof TypedServerAlert>;
 const TypedServerAlerts = z.object({ alerts: z.array(TypedServerAlert) }).strict();
 const ClearServerAlertsResult = z
   .object({ removed: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })
