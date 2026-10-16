@@ -94,7 +94,7 @@ export const ERROR_REPORTING_CONSENT_KEY = 'diagnostics.errorReportingConsent.v1
 export const LEGACY_ERROR_REPORTING_KEY = 'diagnostics.errorReporting';
 type ErrorReportingConsentValue = 'granted' | 'denied';
 
-/** Durable account-local marker: missing means the optional permission choices are still due. */
+/** Durable device-wide marker (Disconnect keeps it): missing means the permission step is due. */
 export const PERMISSION_ONBOARDING_COMPLETED_KEY = 'onboarding.permissionsCompleted.v1';
 
 export interface PermissionOnboardingWriteContext extends HydrationOptions {
@@ -182,7 +182,7 @@ function parseAutoDownloadDestination(raw: string | null): AutoDownloadDestinati
   return raw === 'app' || raw === 'gallery' || raw === 'album' ? raw : AUTO_DOWNLOAD_DEST_DEFAULT;
 }
 
-/** Versioned account-local inbox view preference; included in settings-only backups. */
+/** Versioned device-wide inbox view preference (Disconnect keeps it); in settings-only backups. */
 export const INBOX_FILTERS_KEY = 'chatList.inboxFilters.v1';
 
 function clampDownloads(n: number): number {
@@ -246,7 +246,7 @@ interface FeatureSettingsState {
   setMaxConcurrentDownloads: (n: number) => Promise<void>;
   setAutoDownloadDestination: (
     dest: AutoDownloadDestination,
-    context?: AutoDownloadPolicyWriteContext,
+    context: AutoDownloadPolicyWriteContext,
   ) => Promise<void>;
   setInboxFilters: (filters: InboxFilters) => Promise<void>;
 }
@@ -405,12 +405,10 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
   setErrorReportingConsent: async (value, context) => {
     if (!canCommitHydration(context)) return;
     const generation = ++errorReportingChoiceGeneration;
-    const previous = {
-      errorReportingEnabled: get().errorReportingEnabled,
-      hydrated: get().hydrated,
-    };
-    // Revocation is immediate so subscribers can abort transport before storage finishes.
-    if (!value) set({ errorReportingEnabled: false, hydrated: true });
+    const previous = get().errorReportingEnabled;
+    // Revocation is immediate so subscribers can abort transport before storage finishes. Neither
+    // path sets `hydrated`: only hydrate() may say the other settings were loaded (review M259).
+    if (!value) set({ errorReportingEnabled: false });
     try {
       const committed = await enqueueErrorReportingConsentWrite(
         value ? 'granted' : 'denied',
@@ -418,11 +416,11 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
         context,
       );
       if (committed && canCommitErrorReportingConsentWrite(generation, context)) {
-        set({ errorReportingEnabled: value, hydrated: true });
+        set({ errorReportingEnabled: value });
       }
     } catch (error) {
       if (!canCommitErrorReportingConsentWrite(generation, context)) return;
-      set(previous);
+      set({ errorReportingEnabled: previous });
       throw error;
     }
   },
@@ -440,31 +438,21 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     }
   },
   setAutoDownloadDestination: async (dest, context) => {
-    const previous = get().autoDownloadDestination;
-    if (dest === previous && context === undefined) return;
     // Account-owned UI commands are persist-first because an external choice can wait behind a
     // permission prompt. Its generation guard must be able to reject an older choice without that
     // choice ever publishing over a newer App/Gallery/Album selection.
-    if (context === undefined) set({ autoDownloadDestination: dest });
     try {
       await withDbTransaction(
-        context?.db ?? getDatabase(),
+        context.db,
         async (transactionContext) => {
           await kvSetWithinTransaction(transactionContext, AUTO_DOWNLOAD_DEST_KEY, dest);
           await cancelPendingAttachmentMediaExportsWithinTransaction(transactionContext);
         },
-        context ? () => canCommitHydration(context) : undefined,
+        () => canCommitHydration(context),
       );
-      if (context !== undefined && canCommitHydration(context)) {
-        set({ autoDownloadDestination: dest });
-      }
+      if (canCommitHydration(context)) set({ autoDownloadDestination: dest });
     } catch (error) {
-      if (context === undefined || canCommitHydration(context)) {
-        if (context === undefined && get().autoDownloadDestination === dest) {
-          set({ autoDownloadDestination: previous });
-        }
-        throw error;
-      }
+      if (canCommitHydration(context)) throw error;
     }
   },
   setInboxFilters: async (filters) => {

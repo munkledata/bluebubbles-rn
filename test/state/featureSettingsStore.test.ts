@@ -393,6 +393,31 @@ describe('featureSettingsStore — versioned error-reporting consent', () => {
     });
   });
 
+  it('saves a consent choice without marking unloaded settings as loaded (review M259)', async () => {
+    const db = await openTestDb();
+    // The user turned read receipts off earlier; this process has not loaded its settings yet.
+    await kvSet(db, 'privateApi.sendReadReceipts', '0');
+
+    await useFeatureSettingsStore.getState().setErrorReportingConsent(true, consentContext(db));
+    expect(useFeatureSettingsStore.getState()).toMatchObject({
+      errorReportingEnabled: true,
+      hydrated: false,
+    });
+    await useFeatureSettingsStore.getState().setErrorReportingConsent(false, consentContext(db));
+    expect(useFeatureSettingsStore.getState()).toMatchObject({
+      errorReportingEnabled: false,
+      hydrated: false,
+    });
+
+    // Services trust these values only once hydrated, so the default "receipts on" never counted.
+    await useFeatureSettingsStore.getState().hydrate();
+    expect(useFeatureSettingsStore.getState()).toMatchObject({
+      sendReadReceipts: false,
+      errorReportingEnabled: false,
+      hydrated: true,
+    });
+  });
+
   it('captures the caller database before the serialized tail can observe a new global database', async () => {
     const accountA = await openTestContext();
     const accountB = await createTestDb();
@@ -530,7 +555,7 @@ describe('featureSettingsStore — versioned error-reporting consent', () => {
     expect(await kvGet(db, ERROR_REPORTING_CONSENT_KEY)).toBe('granted');
     expect(useFeatureSettingsStore.getState()).toMatchObject({
       errorReportingEnabled: true,
-      hydrated: true,
+      hydrated: false,
     });
   });
 
@@ -727,7 +752,9 @@ describe('featureSettingsStore — autoDownloadDestination', () => {
 
   it('round-trips a persisted destination', async () => {
     const db = await openTestDb();
-    await useFeatureSettingsStore.getState().setAutoDownloadDestination('gallery');
+    await useFeatureSettingsStore
+      .getState()
+      .setAutoDownloadDestination('gallery', { db, shouldCommit: () => true });
     expect(await kvGet(db, AUTO_DOWNLOAD_DEST_KEY)).toBe('gallery');
     useFeatureSettingsStore.setState({ autoDownloadDestination: 'album', hydrated: false });
     await useFeatureSettingsStore.getState().hydrate();

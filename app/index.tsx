@@ -26,9 +26,9 @@ export default function Index(): React.JSX.Element {
     );
   }
 
-  // A completed permission step is account-local and persisted in the encrypted DB. If Android
-  // kills the process after credentials commit but before that write, boot returns to the choices
-  // instead of silently skipping them. A transient connection error still keeps the saved session.
+  // A completed permission step is device-wide (Disconnect keeps it) and saved in the encrypted DB.
+  // If Android kills the process after credentials commit but before that write, boot returns to
+  // the choices instead of skipping them. A transient connection error still keeps the session.
   if (!hasSession) return <Redirect href="/welcome" />;
   return <Redirect href={permissionOnboardingCompleted ? '/home' : '/permissions'} />;
 }
