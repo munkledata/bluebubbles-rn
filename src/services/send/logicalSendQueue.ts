@@ -236,7 +236,14 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
   };
 }
 
-/** One process-wide queue; account-generation invalidation retires its queued closures. */
+/**
+ * One process-wide queue; account-generation invalidation retires its queued closures.
+ *
+ * Known trade-off (review M089): ordering is global, not per chat, so a send that is slow inside
+ * its turn (an attachment upload, say) can delay a send to another chat by up to
+ * LOGICAL_SEND_ORDER_WINDOW_MS. Per-chat turns wait until a device test shows the Mac's
+ * AppleScript and RCS paths accept sends to different chats at the same time.
+ */
 export const logicalSendQueue = createLogicalSendQueue({
   onOrderWindowElapsed: () => {
     logger.warn('[send] logical ordering window elapsed; allowing the next send');
