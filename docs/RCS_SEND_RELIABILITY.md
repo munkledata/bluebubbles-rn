@@ -27,8 +27,9 @@ an incomplete payload.**
 Every optimistic send (text / contact / reaction / **attachment**) writes an `outgoing_queue` row
 next to its `temp-…` message row. `runOutgoingQueue`
 (`src/services/send/outgoingQueueService.ts`) re-sends eligible rows with exponential backoff
-(30s → 1h cap, `OUTGOING_MAX_ATTEMPTS = 5`), under an atomic per-row claim (`claimOutgoing`) so
-concurrent drains never double-send.
+(30s → 1h cap, `OUTGOING_MAX_ATTEMPTS = 5`), under an atomic per-row claim
+(`claimOutgoingForSendWithinTransaction` in `src/db/repositories/outgoingRetry.ts`) so concurrent
+drains never double-send.
 
 - **Capability is known before the optimistic RCS insert.** The server advertises
   `supports_rcs_send_attempt_ownership`. If server info is not cached yet, the app resolves it
@@ -50,8 +51,8 @@ concurrent drains never double-send.
   the file at the attachment row's `localPath` **under the original tempGuid**. A gone file or
   an unknown row kind retires immediately (`retireOutgoing`: attempts→cap, bubble stays errored)
   instead of zombie-looping.
-- **Drain triggers:** home mount, the 15-min background task, the chat screen's 20s ticker, and
-  AppState `active` (`recoverOutgoing`). Frequent drains are cheap: one indexed SELECT when the
+- **Drain triggers:** home mount, the 15-min background task, the chat screen's 20s ticker,
+  AppState `active`, and App Lock unlock (`recoverOutgoing`). Frequent drains are cheap: one indexed SELECT when the
   queue is idle; `next_retry_at` gates actual re-sends.
 - **The ack-swallow fix (was a live duplicate-text bug):** the app-facing RCS ack returns the
   client's logical tempGuid in `guid`. A capable ack also returns `attemptGuid` and
