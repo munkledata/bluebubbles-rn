@@ -635,8 +635,6 @@ describe('notificationRouting — native privacy boundary', () => {
     await createReminder(mockDb, {
       chatGuid: 'iMessage;-;+15551234567',
       messageGuid: 'p:0/private-message-guid',
-      messagePreview: 'secret',
-      senderName: 'Alice',
       scheduledFor: 5000,
       notificationId: 'reminder-p:0/private-message-guid-5000',
     });
@@ -661,8 +659,6 @@ describe('notificationRouting — native privacy boundary', () => {
     await createReminder(mockDb, {
       chatGuid: 'iMessage;-;+15551234567',
       messageGuid: 'p:0/private-message-guid',
-      messagePreview: 'secret',
-      senderName: 'Alice',
       scheduledFor: 6500,
       notificationId: oldId,
     });
@@ -806,8 +802,6 @@ describe('notificationRouting — native privacy boundary', () => {
     await createReminder(mockDb, {
       chatGuid: 'iMessage;-;+15551234567',
       messageGuid: 'p:0/private-message-guid',
-      messagePreview: 'secret',
-      senderName: 'Alice',
       scheduledFor: 7000,
       notificationId: oldId,
     });
@@ -868,24 +862,18 @@ describe('notificationRouting — native privacy boundary', () => {
     await createReminder(mockDb, {
       chatGuid: 'iMessage;-;+15551234567',
       messageGuid: 'p:0/private-message-guid',
-      messagePreview: 'past private preview',
-      senderName: 'Alice',
       scheduledFor: 900,
       notificationId: 'reminder-p:0/private-message-guid-900',
     });
     await createReminder(mockDb, {
       chatGuid: 'iMessage;-;+15551234567',
       messageGuid: 'p:0/private-message-guid',
-      messagePreview: 'future private preview',
-      senderName: 'Alice',
       scheduledFor: 1500,
       notificationId: 'reminder-p:0/private-message-guid-1500',
     });
     await createReminder(mockDb, {
       chatGuid: 'iMessage;-;+15551234567',
       messageGuid: 'missing-private-message-guid',
-      messagePreview: 'future missing-message preview',
-      senderName: 'Alice',
       scheduledFor: 1600,
       notificationId: 'legacy-private-id-1600',
     });

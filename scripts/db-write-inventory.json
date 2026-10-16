@@ -11821,7 +11821,7 @@
     {
       "id": "src/db/repositories/reminders.ts#createReminderWithinTransaction:drizzle-insert:3f7e289128b3",
       "path": "src/db/repositories/reminders.ts",
-      "line": 25,
+      "line": 30,
       "symbol": "createReminderWithinTransaction",
       "operation": "drizzle-insert",
       "target": "reminders",
@@ -11834,7 +11834,7 @@
     {
       "id": "src/db/repositories/reminders.ts#deleteReminderWithinTransaction:drizzle-delete:4d16415ac0cf",
       "path": "src/db/repositories/reminders.ts",
-      "line": 84,
+      "line": 89,
       "symbol": "deleteReminderWithinTransaction",
       "operation": "drizzle-delete",
       "target": "reminders",
@@ -11847,7 +11847,7 @@
     {
       "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b",
       "path": "src/db/repositories/reminders.ts",
-      "line": 101,
+      "line": 106,
       "symbol": "deleteReminderByNotificationIdWithinTransaction",
       "operation": "drizzle-delete",
       "target": "reminders",
@@ -11860,7 +11860,7 @@
     {
       "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId:mutator-call:4f91da6c434d",
       "path": "src/db/repositories/reminders.ts",
-      "line": 110,
+      "line": 115,
       "symbol": "deleteReminderByNotificationId",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -11873,7 +11873,7 @@
     {
       "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId:mutator-call:8e2cee1baa6a",
       "path": "src/db/repositories/reminders.ts",
-      "line": 110,
+      "line": 115,
       "symbol": "deleteReminderByNotificationId",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationId.<callback:56f135a15c>",
@@ -11886,7 +11886,7 @@
     {
       "id": "src/db/repositories/reminders.ts#deleteReminderByNotificationId.<callback:56f135a15c>:mutator-call:9f84209fc3ea",
       "path": "src/db/repositories/reminders.ts",
-      "line": 112,
+      "line": 117,
       "symbol": "deleteReminderByNotificationId.<callback:56f135a15c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction",
@@ -11899,7 +11899,7 @@
     {
       "id": "src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction:drizzle-update:69b01aa5bda9",
       "path": "src/db/repositories/reminders.ts",
-      "line": 135,
+      "line": 140,
       "symbol": "updateReminderTimeWithinTransaction",
       "operation": "drizzle-update",
       "target": "reminders",
@@ -20165,10 +20165,23 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:2105bc10b4b8",
+      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:2dd3b79ed6d7",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 292,
-      "symbol": "scheduleReminder.<callback:ac1a922b9c>",
+      "line": 289,
+      "symbol": "scheduleReminder.<callback:bf4fe406d2>",
+      "operation": "mutator-call",
+      "target": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:63ddd06ef2>",
+      "detectedContext": "withDbTransaction",
+      "owner": "scheduleReminder existing-row finalization",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:6351e1f44e1c",
+      "path": "src/services/notifications/remindersService.ts",
+      "line": 289,
+      "symbol": "scheduleReminder.<callback:bf4fe406d2>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -20178,23 +20191,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:bbe5ce8ab77e",
+      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:63ddd06ef2>:mutator-call:abe03326536b",
       "path": "src/services/notifications/remindersService.ts",
       "line": 292,
-      "symbol": "scheduleReminder.<callback:ac1a922b9c>",
-      "operation": "mutator-call",
-      "target": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>.<callback:63ddd06ef2>",
-      "detectedContext": "withDbTransaction",
-      "owner": "scheduleReminder existing-row finalization",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>.<callback:63ddd06ef2>:mutator-call:41281d25ebe8",
-      "path": "src/services/notifications/remindersService.ts",
-      "line": 295,
-      "symbol": "scheduleReminder.<callback:ac1a922b9c>.<callback:63ddd06ef2>",
+      "symbol": "scheduleReminder.<callback:bf4fe406d2>.<callback:63ddd06ef2>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -20204,10 +20204,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:aeff8b41893f",
+      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:2b84b1873777",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 309,
-      "symbol": "scheduleReminder.<callback:ac1a922b9c>",
+      "line": 306,
+      "symbol": "scheduleReminder.<callback:bf4fe406d2>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -20217,12 +20217,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:f72eb0e606ce",
+      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:fe436ced4e32",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 309,
-      "symbol": "scheduleReminder.<callback:ac1a922b9c>",
+      "line": 306,
+      "symbol": "scheduleReminder.<callback:bf4fe406d2>",
       "operation": "mutator-call",
-      "target": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>.<callback:8aa1abdd3a>",
+      "target": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:04f4d3fd8d>",
       "detectedContext": "withDbTransaction",
       "owner": "scheduleReminder new-row finalization",
       "transactionContext": "withDbTransaction",
@@ -20230,10 +20230,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>.<callback:8aa1abdd3a>:mutator-call:e826c5cb7540",
+      "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:04f4d3fd8d>:mutator-call:7a70fb282b9a",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 312,
-      "symbol": "scheduleReminder.<callback:ac1a922b9c>.<callback:8aa1abdd3a>",
+      "line": 309,
+      "symbol": "scheduleReminder.<callback:bf4fe406d2>.<callback:04f4d3fd8d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#createReminderWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -20245,7 +20245,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>:mutator-call:bcbf7e23e475",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 371,
+      "line": 366,
       "symbol": "cancelReminder.<callback:874375fa5e>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20258,7 +20258,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>:mutator-call:d0cd941932cd",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 371,
+      "line": 366,
       "symbol": "cancelReminder.<callback:874375fa5e>",
       "operation": "mutator-call",
       "target": "src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>.<callback:e767effe3c>",
@@ -20271,7 +20271,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>.<callback:e767effe3c>:mutator-call:4f3fa0734c19",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 374,
+      "line": 369,
       "symbol": "cancelReminder.<callback:874375fa5e>.<callback:e767effe3c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminderWithinTransaction",
@@ -20284,7 +20284,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:6fa89ed6b038",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 445,
+      "line": 440,
       "symbol": "rescheduleReminder.<callback:5632cc03da>",
       "operation": "mutator-call",
       "target": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>.<callback:e57c656026>",
@@ -20297,7 +20297,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:cbb0784d6576",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 445,
+      "line": 440,
       "symbol": "rescheduleReminder.<callback:5632cc03da>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20310,7 +20310,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>.<callback:e57c656026>:mutator-call:79b8466b9ed4",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 448,
+      "line": 443,
       "symbol": "rescheduleReminder.<callback:5632cc03da>.<callback:e57c656026>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction",

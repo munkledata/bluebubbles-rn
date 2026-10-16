@@ -175,9 +175,6 @@ async function retireUncertainTrigger(
 export interface ScheduleReminderArgs {
   chatGuid: string;
   messageGuid: string;
-  chatTitle: string;
-  messagePreview: string | null;
-  senderName: string | null;
   scheduledFor: number;
   now?: number;
 }
@@ -312,8 +309,6 @@ export async function scheduleReminder(
               createReminderWithinTransaction(context, {
                 messageGuid: args.messageGuid,
                 chatGuid: args.chatGuid,
-                messagePreview: args.messagePreview,
-                senderName: args.senderName,
                 scheduledFor: args.scheduledFor,
                 notificationId,
                 createdAt: args.now ?? null,

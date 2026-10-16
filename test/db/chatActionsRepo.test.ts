@@ -927,16 +927,12 @@ describe('chat actions repo', () => {
     await createReminder(db, {
       messageGuid: 'm1',
       chatGuid: 'c1',
-      messagePreview: 'secret',
-      senderName: 'A',
       scheduledFor: 9000,
       notificationId: 'reminder-m1-9000',
     });
     await createReminder(db, {
       messageGuid: 'm2',
       chatGuid: 'c2',
-      messagePreview: 'keep',
-      senderName: 'B',
       scheduledFor: 9000,
       notificationId: 'reminder-m2-9000',
     });

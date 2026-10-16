@@ -142,7 +142,6 @@ async function mount(
       ...useMessageActions({
         guid,
         messages: liveMessages,
-        chatTitle: 'Alice',
         imessageEditsAvailable: edit?.enabled,
         imessageUnsendsAvailable: unsendEnabled,
         imessageRemoteDeleteAvailable: remoteDeleteEnabled,
@@ -597,10 +596,7 @@ describe('useMessageActions — narrow iMessage actions and RCS reactions', () =
     });
     await waitFor(() =>
       expect(mockScheduleMessageReminder).toHaveBeenCalledWith(
-        expect.objectContaining({
-          messageGuid: 'message-balloon',
-          messagePreview: 'Handwritten message',
-        }),
+        expect.objectContaining({ messageGuid: 'message-balloon' }),
         expect.objectContaining({ isCurrent: expect.any(Function) }),
       ),
     );

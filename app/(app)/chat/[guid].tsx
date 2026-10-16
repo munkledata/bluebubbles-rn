@@ -68,7 +68,7 @@ import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { useTypingStore } from '@state/typingStore';
-import { isGroupRow, resolveChatService, resolveTitle } from '@utils';
+import { isGroupRow, resolveChatService } from '@utils';
 
 // Lazy: expo-audio (native) is only pulled in when the user actually records a voice memo,
 // so the chat opens fine on a build that hasn't linked the module yet.
@@ -338,7 +338,6 @@ function ChatScreenInner({
   } = useMessageActions({
     guid,
     messages,
-    chatTitle: header.data ? resolveTitle(header.data) : 'Gator',
     accountLease,
     imessageReactionsAvailable,
     imessageRepliesAvailable,

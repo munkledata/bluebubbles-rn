@@ -38,13 +38,7 @@ import {
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useTransportHealthStore } from '@state/transportHealthStore';
 import { isDevServer } from '@utils/isDev';
-import {
-  buildMessageSnippet,
-  isLocalFileUri,
-  isRcsChatGuid,
-  isUserFileAttachment,
-  type BubbleRect,
-} from '@utils';
+import { isLocalFileUri, isRcsChatGuid, isUserFileAttachment, type BubbleRect } from '@utils';
 import { devSendFakeReaction } from './devSeed';
 import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
@@ -187,8 +181,6 @@ export interface MessageActionsArgs {
   guid: string;
   /** The reactive message window — read through a ref by the stable callbacks. */
   messages: EnrichedMessage[];
-  /** The chat's display title, for the reminder notification. */
-  chatTitle: string;
   /** Account generation captured when the owning chat screen mounted. */
   accountLease?: RealtimeDeliveryLease;
   /** Proven existing one-to-one chat plus live narrow helper reaction capability. */
@@ -220,7 +212,6 @@ export interface MessageActionsArgs {
 export function useMessageActions({
   guid,
   messages,
-  chatTitle,
   accountLease,
   imessageReactionsAvailable = false,
   imessageRepliesAvailable = false,
@@ -919,23 +910,10 @@ export function useMessageActions({
         if (when == null || !screenLease.isCurrent()) return;
         const msg = currentSelectedMessage();
         if (!msg) return;
-        const content = actionContentOf(msg);
         await scheduleMessageReminder(
           {
             chatGuid: guid,
             messageGuid: msg.guid,
-            chatTitle,
-            messagePreview:
-              buildMessageSnippet({
-                text: content.bodyText || msg.text,
-                subject: msg.subject,
-                hasAttachments: msg.hasAttachments,
-                hasVisibleAttachments: content.visibleAttachmentCount > 0 ? 1 : 0,
-                attachmentDescription: msg.attachmentDescription,
-                balloonBundleId: msg.balloonBundleId,
-                isRetracted: isAggregateRetractionTombstone(msg),
-              }) || null,
-            senderName: msg.senderName,
             scheduledFor: when,
             now: Date.now(),
           },

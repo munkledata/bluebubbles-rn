@@ -2061,17 +2061,17 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
   assert.deepEqual(
     createReminderTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>.<callback:8aa1abdd3a>:mutator-call:e826c5cb7540',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:aeff8b41893f',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:f72eb0e606ce',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:04f4d3fd8d>:mutator-call:7a70fb282b9a',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:2b84b1873777',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:fe436ced4e32',
     ].sort(),
   );
   assert.deepEqual(
     scheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>.<callback:63ddd06ef2>:mutator-call:41281d25ebe8',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:2105bc10b4b8',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:bbe5ce8ab77e',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:63ddd06ef2>:mutator-call:abe03326536b',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:6351e1f44e1c',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:2dd3b79ed6d7',
     ].sort(),
   );
   assert.deepEqual(

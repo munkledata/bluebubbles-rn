@@ -92,8 +92,6 @@ async function seed(db: AppDatabase): Promise<void> {
   await createReminder(db, {
     messageGuid: 'm1',
     chatGuid: 'c1',
-    messagePreview: 'confidential picnic plans',
-    senderName: 'Alice',
     scheduledFor: 9_000_000,
     notificationId: 'notif-1',
   });

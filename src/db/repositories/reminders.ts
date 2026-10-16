@@ -12,7 +12,12 @@ import { messageHasVisibleContentSql } from './chatVisibility';
 
 // ---- Reminders -------------------------------------------------------------
 
-export type CreateReminderArgs = Omit<Reminder, 'id' | 'createdAt'> & {
+// No preview or sender: the row never stores a plaintext copy (see the insert below), and the
+// reminders list reads both live from the message (review M070).
+export type CreateReminderArgs = Pick<
+  Reminder,
+  'messageGuid' | 'chatGuid' | 'scheduledFor' | 'notificationId'
+> & {
   createdAt?: number | null;
 };
 

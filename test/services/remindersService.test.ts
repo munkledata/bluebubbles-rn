@@ -112,9 +112,6 @@ async function seedMessage(db: AppDatabase, guid: string, dateCreated: number): 
 const base = {
   chatGuid: 'c1',
   messageGuid: 'm1',
-  chatTitle: 'Alice',
-  messagePreview: 'see you at 5',
-  senderName: 'Alice',
 };
 
 const RCS_EPOCH_A = `gpe1_${'A'.repeat(43)}`;
@@ -667,8 +664,6 @@ describe('cancelReminder', () => {
       const id = await createReminder(db, {
         chatGuid: rcsChatGuid(RCS_EPOCH_A),
         messageGuid: rcsMessageGuid(RCS_EPOCH_A),
-        messagePreview: null,
-        senderName: null,
         scheduledFor: 5_000,
         notificationId: reminderId(5_000),
         createdAt: 1,
@@ -706,8 +701,6 @@ describe('cancelReminder', () => {
       const id = await createReminder(db, {
         chatGuid: rcsChatGuid(RCS_EPOCH_A),
         messageGuid: rcsMessageGuid(RCS_EPOCH_A),
-        messagePreview: null,
-        senderName: null,
         scheduledFor: 5_000,
         notificationId: reminderId(5_000),
         createdAt: 1,
@@ -839,8 +832,6 @@ describe('rescheduleReminder', () => {
       const id = await createReminder(db, {
         chatGuid: rcsChatGuid(RCS_EPOCH_A),
         messageGuid: rcsMessageGuid(RCS_EPOCH_A),
-        messagePreview: null,
-        senderName: null,
         scheduledFor: 5_000,
         notificationId: reminderId(5_000),
         createdAt: 1,

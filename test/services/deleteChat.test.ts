@@ -129,8 +129,6 @@ async function seedReminder(db: AppDatabase, chatGuid: string, id: string): Prom
   await createReminder(db, {
     messageGuid: `msg-${id}`,
     chatGuid,
-    messagePreview: 'private text',
-    senderName: 'Alice',
     scheduledFor: 9_000,
     notificationId: id,
   });
