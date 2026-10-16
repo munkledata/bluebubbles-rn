@@ -112,14 +112,18 @@ manually reopened.
 **Fix.** A real bundle entry, `index.js`, referenced by `package.json` `main`:
 
 ```js
+import './src/services/errors/registerReactNativeExceptionPrivacy'; // MUST be the first side effect
+import './src/services/logging/registerPersistentLogs'; // persistent ERROR sink
 import './src/services/notifications/backgroundEvents'; // notify-kit headless taps
-import './src/services/background/backgroundSync'; // TaskManager.defineTask('gator-bg-sync')
-import './src/services/notifications/fcmMessaging'; // setBackgroundMessageHandler
+import './src/services/background/registerBackgroundSyncHeadlessTask'; // 'gator-bg-sync' task
+import './src/services/notifications/registerFcmBackgroundHandler'; // setBackgroundMessageHandler
+import './src/services/download/registerBoundedNativeDownloadCleanup'; // abandoned partials
 import 'expo-router/entry'; // MUST be last
 ```
 
-`app/_layout.tsx` keeps its imports (the module cache makes them a no-op) so the app still works if
-the entry is ever changed. This also fixed a related error the same flaw produced at boot:
+`index.js` is the only registration owner. A route module such as `app/_layout.tsx` cannot be a
+fallback: Android never evaluates routes during a killed-app wake. This also fixed a related error
+the same flaw produced at boot:
 `Cannot start headless task, CatalystInstance not available` from expo-task-manager.
 
 > This needs a **native rebuild** to take effect — the release bundle is embedded at build time.
