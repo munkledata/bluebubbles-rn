@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm';
+import { AUTO_IMAGE_MAX_BYTES } from '@utils/attachment';
 import { utf8Encode } from '@utils/bytes';
 import type { AppDatabase } from '../types';
 import {
@@ -28,7 +29,6 @@ export const ATTACHMENT_MEDIA_EXPORT_MAX_DRAIN = 8;
 
 const ATTACHMENT_GUID_MAX_BYTES = 512;
 const LEASE_TOKEN_MAX_BYTES = 128;
-const AUTO_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 
 export type AttachmentMediaExportDestination = 'gallery' | 'album';
 export type AttachmentMediaExportState = 'pending' | 'completed' | 'terminal';
