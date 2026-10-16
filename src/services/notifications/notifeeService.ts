@@ -92,6 +92,15 @@ export function commitAppLockNotificationPrivacy(): void {
   appLockPrivacyBarrier = false;
 }
 
+/**
+ * Startup read App Lock as off: lift the barrier but keep in-flight notifications. Nothing prepared
+ * before that read can reveal more than the off policy allows, so a new epoch would only drop them
+ * (review M106).
+ */
+export function releaseAppLockNotificationPrivacyBarrier(): void {
+  appLockPrivacyBarrier = false;
+}
+
 function capturePresentationContext(context?: EventDeliveryContext): EventDeliveryContext {
   const account = context ?? captureRealtimeDeliveryLease();
   const epoch = notificationPrivacyEpoch;

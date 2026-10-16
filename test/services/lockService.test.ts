@@ -5,6 +5,7 @@ const reconcileMessageNotificationGroup = jest.fn<Promise<void>, []>(() => Promi
 const clearLockedNotification = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const beginAppLockNotificationPrivacy = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const commitAppLockNotificationPrivacy = jest.fn();
+const releaseAppLockNotificationPrivacyBarrier = jest.fn();
 const recoverOutgoing = jest.fn<Promise<{ eligible: number; sent: number }>, []>(async () => ({
   eligible: 0,
   sent: 0,
@@ -22,6 +23,7 @@ jest.mock('@/services/notifications/notifeeService', () => ({
   clearLockedNotification,
   beginAppLockNotificationPrivacy,
   commitAppLockNotificationPrivacy,
+  releaseAppLockNotificationPrivacyBarrier,
 }));
 jest.mock('@/services/send', () => ({ recoverOutgoing }));
 jest.mock('@utils/isDev', () => ({ isDevServer }));
@@ -59,6 +61,7 @@ beforeEach(() => {
   clearLockedNotification.mockReset().mockResolvedValue(undefined);
   beginAppLockNotificationPrivacy.mockReset().mockResolvedValue(undefined);
   commitAppLockNotificationPrivacy.mockReset();
+  releaseAppLockNotificationPrivacyBarrier.mockReset();
   recoverOutgoing.mockReset().mockResolvedValue({ eligible: 0, sent: 0 });
   isDevServer.mockReset().mockReturnValue(false);
   vaultSet.mockReset().mockResolvedValue(undefined);
@@ -232,6 +235,33 @@ describe('setAppLockEnabled', () => {
     expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
     // The barrier stays up until a later sweep is verified.
     expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'false'])(
+    'hydrating App Lock off (%s) keeps notifications already being prepared (M106)',
+    async (stored) => {
+      // Startup reading "off" changes no policy: nothing prepared during startup can reveal more
+      // than "off" allows, so only the barrier is lifted; a new privacy epoch would drop it.
+      useLockStore.setState({ enabled: false, locked: false, hydrated: false });
+      vaultGet.mockResolvedValueOnce(stored);
+
+      await expect(hydrateLock()).resolves.toEqual({ notificationCleanupFailed: false });
+
+      expect(useLockStore.getState()).toMatchObject({ enabled: false, hydrated: true });
+      expect(beginAppLockNotificationPrivacy).not.toHaveBeenCalled();
+      expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
+      expect(releaseAppLockNotificationPrivacyBarrier).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('hydrating App Lock on still starts a new privacy epoch after the verified sweep', async () => {
+    useLockStore.setState({ enabled: false, locked: false, hydrated: false });
+    vaultGet.mockResolvedValueOnce('true');
+
+    await hydrateLock();
+
+    expect(commitAppLockNotificationPrivacy).toHaveBeenCalledTimes(1);
+    expect(releaseAppLockNotificationPrivacyBarrier).not.toHaveBeenCalled();
   });
 
   it('hydrates the native Recents owner before publishing the persisted App Lock choice', async () => {

@@ -38,6 +38,7 @@ import {
   PRESS_REMINDER,
   beginAppLockNotificationPrivacy,
   commitAppLockNotificationPrivacy,
+  releaseAppLockNotificationPrivacyBarrier,
   cancelAllNotifications,
   cancelForChat,
   cancelReminderNotification,
@@ -509,6 +510,22 @@ describe('App Lock notification privacy transition', () => {
       }
     },
   );
+
+  it('keeps a notification prepared before App Lock-off startup finishes (M106)', async () => {
+    let finish!: () => void;
+    mockGetChannel.mockImplementationOnce(
+      () =>
+        new Promise<null>((resolve) => {
+          finish = () => resolve(null);
+        }),
+    );
+    const post = postNotification(messageIntent());
+    for (let i = 0; i < 40 && !finish; i += 1) await Promise.resolve();
+    releaseAppLockNotificationPrivacyBarrier();
+    finish();
+    await post;
+    expect(lastNotif().body).toBe('secret plans');
+  });
 
   it('rejects an old presentation epoch even after OFF -> ON -> OFF', async () => {
     let finish!: () => void;

@@ -12,6 +12,7 @@ import {
   clearLockedNotification,
   commitAppLockNotificationPrivacy,
   reconcileMessageNotificationGroup,
+  releaseAppLockNotificationPrivacyBarrier,
 } from './notifications/notifeeService';
 import { clearCurrentShareShortcuts } from './shortcuts/shareShortcuts';
 import {
@@ -95,8 +96,10 @@ export async function hydrateLock(
     // protection until rebuilt and device-verified.
     syncNativeAppLockPolicy(enabled);
     useLockStore.getState().hydrate(enabled);
-    // Lift the barrier only after a verified sweep.
-    if (!notificationCleanupFailed) commitAppLockNotificationPrivacy();
+    // Lift the barrier only after a verified sweep. Reading App Lock as off changes no policy, so
+    // notifications prepared during startup are kept rather than voided (review M106).
+    if (!enabled) releaseAppLockNotificationPrivacyBarrier();
+    else if (!notificationCleanupFailed) commitAppLockNotificationPrivacy();
     return { notificationCleanupFailed };
   } finally {
     lockPolicyOperationPending = false;
