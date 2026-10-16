@@ -338,7 +338,17 @@ describe('SocketService reconnect escalation', () => {
       return { service, observer };
     }
 
-    it.each(['AUTH_REQUIRED', 'unknown', undefined, { code: 'AUTH_UNAVAILABLE' }])(
+    it('reports a rejected credential distinctly and stops retrying it (review M118)', () => {
+      const { observer } = open();
+      fireReconnectFailed();
+      reject('AUTH_REQUIRED');
+      expect(observer).toHaveBeenLastCalledWith({ phase: 'auth-rejected' });
+      jest.advanceTimersByTime(120_000);
+      expect(mockIo).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenLastCalledWith({ phase: 'auth-rejected' });
+    });
+
+    it.each(['unknown', undefined, { code: 'AUTH_UNAVAILABLE' }])(
       'stops automatic retries for a terminal or unrecognized code: %p',
       (code) => {
         const { observer } = open();

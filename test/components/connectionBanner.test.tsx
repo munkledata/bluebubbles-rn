@@ -28,6 +28,10 @@ function seedStatus(status: TransportHealthStatus): void {
     store.setNetworkState(generation, 'offline');
     return;
   }
+  if (status === 'auth-rejected') {
+    store.setSocketState(generation, 'auth-rejected');
+    return;
+  }
   store.setSocketState(generation, 'error');
 }
 
@@ -144,6 +148,22 @@ describe('ConnectionBanner', () => {
     expect(alert.props.accessibilityLiveRegion).toBe('polite');
     expect(screen.getByText(label)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Retry live updates' })).toBeTruthy();
+  });
+
+  it('says the password was rejected and offers Server Management instead of Retry', async () => {
+    // Review M118: retrying would only re-send the same rejected credential.
+    seedStatus('auth-rejected');
+    const onRetry = jest.fn();
+    const onManageServer = jest.fn();
+    await renderWithTheme(<ConnectionBanner onRetry={onRetry} onManageServer={onManageServer} />);
+
+    expect(screen.getByRole('alert').props.accessibilityLabel).toBe(
+      'Live updates: Password rejected',
+    );
+    expect(screen.queryByRole('button', { name: 'Retry live updates' })).toBeNull();
+    fireEvent.press(screen.getByRole('button', { name: 'Open Server Management' }));
+    expect(onManageServer).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   it('delegates Retry without mutating transport state itself', async () => {

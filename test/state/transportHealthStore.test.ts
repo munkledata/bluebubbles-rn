@@ -76,6 +76,29 @@ describe('transport health state machine', () => {
     expect(recovered.status).toBe('connected');
   });
 
+  it('reports a rejected password as its own status, below a confirmed offline link', () => {
+    const connecting = reduceTransportHealth(INITIAL, { type: 'begin' });
+    const rejected = reduceTransportHealth(connecting, {
+      type: 'socket',
+      generation: connecting.generation,
+      socket: 'auth-rejected',
+    });
+    expect(rejected.status).toBe('auth-rejected');
+    // A reachable server does not hide it: the server answered, and it said no.
+    const reachable = reduceTransportHealth(rejected, {
+      type: 'server',
+      generation: rejected.generation,
+      server: 'reachable',
+    });
+    expect(reachable.status).toBe('auth-rejected');
+    const offline = reduceTransportHealth(reachable, {
+      type: 'network',
+      generation: reachable.generation,
+      network: 'offline',
+    });
+    expect(offline.status).toBe('offline');
+  });
+
   it('uses typed server failures for error and explicit transport loss for offline', () => {
     const connecting = reduceTransportHealth(INITIAL, { type: 'begin' });
     const serverError = reduceTransportHealth(connecting, {

@@ -140,7 +140,7 @@ application operations. Its Socket.IO `connect_error.data.code` contract is fini
 
 | Code                | Current client behavior                                                                                                                                                               |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AUTH_REQUIRED`     | Error state; no automatic retry in this socket lifecycle. Explicit manual Retry creates a new lifecycle.                                                                              |
+| `AUTH_REQUIRED`     | 'Password rejected' state; no automatic retry in this socket lifecycle. The banner offers Server Management instead of Retry (review M118).                                           |
 | `AUTH_UNAVAILABLE`  | Retry the same trusted origin and credential snapshot after a capped, jittered 1–60 second exponential delay.                                                                         |
 | `AUTH_RATE_LIMITED` | Wait a conservative 60 seconds before automatic retry. The current server sends `retryAfterMs: 60000`; this client pins that agreed floor and does not parse arbitrary future delays. |
 

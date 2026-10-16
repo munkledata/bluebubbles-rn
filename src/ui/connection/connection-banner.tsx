@@ -14,20 +14,28 @@ type TransientTransportHealthStatus = Extract<TransportHealthStatus, 'connecting
 interface TransportHealthPresentation {
   readonly label: string;
   readonly showBanner: boolean;
-  readonly retryable: boolean;
+  /** Retry reconnects with the saved credential; manage-server opens Server Management. */
+  readonly action: 'retry' | 'manage-server' | null;
   readonly tone: 'tint' | 'destructive';
 }
 
 const PRESENTATION: Record<TransportHealthStatus, TransportHealthPresentation> = {
-  idle: { label: 'Paused', showBanner: false, retryable: false, tone: 'tint' },
-  connecting: { label: 'Connecting…', showBanner: true, retryable: false, tone: 'tint' },
-  connected: { label: 'Connected', showBanner: false, retryable: false, tone: 'tint' },
-  reconnecting: { label: 'Reconnecting…', showBanner: true, retryable: false, tone: 'tint' },
-  offline: { label: 'Offline', showBanner: true, retryable: true, tone: 'destructive' },
+  idle: { label: 'Paused', showBanner: false, action: null, tone: 'tint' },
+  connecting: { label: 'Connecting…', showBanner: true, action: null, tone: 'tint' },
+  connected: { label: 'Connected', showBanner: false, action: null, tone: 'tint' },
+  reconnecting: { label: 'Reconnecting…', showBanner: true, action: null, tone: 'tint' },
+  offline: { label: 'Offline', showBanner: true, action: 'retry', tone: 'destructive' },
   error: {
     label: 'Connection problem',
     showBanner: true,
-    retryable: true,
+    action: 'retry',
+    tone: 'destructive',
+  },
+  // Retrying would re-send the same refused credential (review M118).
+  'auth-rejected': {
+    label: 'Password rejected',
+    showBanner: true,
+    action: 'manage-server',
     tone: 'destructive',
   },
 };
@@ -46,6 +54,8 @@ function isTransientStatus(
 interface ConnectionBannerProps {
   /** Service-owned Retry action; this component never mutates auth or transport state directly. */
   readonly onRetry: () => unknown;
+  /** Opens Server Management, where a rejected credential can be replaced or the account left. */
+  readonly onManageServer?: () => unknown;
   /** Reserve the measured banner height above routed content, including scaled text. */
   readonly onHeightChange?: (height: number) => void;
 }
@@ -57,6 +67,7 @@ interface ConnectionBannerSurfaceProps extends ConnectionBannerProps {
 function ConnectionBannerSurface({
   status,
   onRetry,
+  onManageServer,
   onHeightChange,
 }: ConnectionBannerSurfaceProps): React.JSX.Element {
   const theme = useTheme();
@@ -87,7 +98,7 @@ function ConnectionBannerSurface({
         >
           <Text style={[styles.label, { color: tone }]}>{presentation.label}</Text>
         </View>
-        {presentation.retryable ? (
+        {presentation.action === 'retry' ? (
           <Button
             title="Retry"
             variant="plain"
@@ -95,6 +106,18 @@ function ConnectionBannerSurface({
             accessibilityHint="Reconnects to the saved server without changing your account"
             onPress={() => {
               onRetry();
+            }}
+            style={styles.retry}
+          />
+        ) : null}
+        {presentation.action === 'manage-server' && onManageServer ? (
+          <Button
+            title="Fix"
+            variant="plain"
+            accessibilityLabel="Open Server Management"
+            accessibilityHint="Pair this phone with the server again, or disconnect"
+            onPress={() => {
+              onManageServer();
             }}
             style={styles.retry}
           />
@@ -131,6 +154,7 @@ function DelayedConnectionBanner({
 /** Compact protected-route overlay that appears only while live updates are degraded. */
 export function ConnectionBanner({
   onRetry,
+  onManageServer,
   onHeightChange,
 }: ConnectionBannerProps): React.JSX.Element | null {
   const status = useTransportHealthStore((state) => state.status);
@@ -149,7 +173,12 @@ export function ConnectionBanner({
     );
   }
   return (
-    <ConnectionBannerSurface status={status} onRetry={onRetry} onHeightChange={onHeightChange} />
+    <ConnectionBannerSurface
+      status={status}
+      onRetry={onRetry}
+      onManageServer={onManageServer}
+      onHeightChange={onHeightChange}
+    />
   );
 }
 

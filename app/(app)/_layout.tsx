@@ -268,6 +268,7 @@ function ConnectedAppLayout(): React.JSX.Element {
       <ShareIntentNavigator />
       <ConnectionBanner
         onRetry={retryRealtimeConnection}
+        onManageServer={() => router.push('/server-management')}
         onHeightChange={setConnectionBannerHeight}
       />
       <ServerRotationApprovalHost />

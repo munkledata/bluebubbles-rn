@@ -28,7 +28,13 @@ export type RawRealtimeEventHandler = (
 
 export type SocketOccurrenceNamespaceFactory = () => string;
 
-export type SocketLifecyclePhase = 'connecting' | 'connected' | 'reconnecting' | 'error';
+export type SocketLifecyclePhase =
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'error'
+  /** The server refused the saved credential (AUTH_REQUIRED); retrying would re-send it. */
+  | 'auth-rejected';
 
 export interface SocketLifecycleEvent {
   readonly phase: SocketLifecyclePhase;
@@ -400,7 +406,11 @@ export class SocketService {
         if (code !== 'AUTH_UNAVAILABLE' && code !== 'AUTH_RATE_LIMITED') {
           this.terminalAuthGeneration = lifecycleGeneration;
           this.cancelEscalation();
-          this.publishObservedLifecycle({ phase: 'error' });
+          // The server's wire code for a refused credential gets its own state, so the app can
+          // say so instead of offering a Retry that re-sends it (review M118).
+          this.publishObservedLifecycle({
+            phase: code === 'AUTH_REQUIRED' ? 'auth-rejected' : 'error',
+          });
           return;
         }
         if (this.terminalAuthGeneration === lifecycleGeneration) return;

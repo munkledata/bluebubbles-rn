@@ -2,9 +2,10 @@ import { create } from 'zustand';
 
 /** Live socket/server health. This is deliberately separate from saved-session authentication. */
 export type TransportHealthStatus =
-  'idle' | 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'error';
+  'idle' | 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'error' | 'auth-rejected';
 
-export type TransportSocketState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+export type TransportSocketState =
+  'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error' | 'auth-rejected';
 export type TransportServerState = 'unknown' | 'reachable' | 'unreachable' | 'error';
 export type TransportNetworkState = 'unknown' | 'online' | 'offline';
 
@@ -67,6 +68,10 @@ function deriveTransportHealthStatus(
   // A live socket is the strongest direct server proof. HTTP probes arbitrate only while the
   // socket is down; a transient ping failure must not hide a working live-update channel.
   if (state.socket === 'connected') return 'connected';
+
+  // The server answered and refused the saved credential (review M118). Reachability probes
+  // cannot change that, and the fix is in Server Management rather than a retry.
+  if (state.socket === 'auth-rejected') return 'auth-rejected';
 
   // A fast-failing server probe means the app cannot currently reach its server. A typed
   // HTTP/schema/auth failure is different: the server answered, but the transport cannot be used
