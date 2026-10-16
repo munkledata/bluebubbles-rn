@@ -283,6 +283,26 @@ it('releases a prepared request when the download bridge call throws synchronous
   expect(native.releasePrepared).toHaveBeenCalledWith(requestId);
 });
 
+it('releases a prepared request when the download bridge rejects before native starts it (review M161)', async () => {
+  // An argument-conversion or queue rejection settles the promise without running native's own
+  // cleanup, so only releasePrepared can free this slot; cancel would just set a flag.
+  native.download.mockImplementationOnce(() =>
+    Promise.reject(new Error('argument conversion failed')),
+  );
+
+  await expect(
+    downloadNativeBoundedFile({
+      url: 'https://server.test/file',
+      destinationUri: 'file:///private/file.part',
+      maxBytes: 100,
+      timeoutMs: 1_000,
+    }),
+  ).rejects.toThrow('argument conversion failed');
+
+  const requestId = native.prepare.mock.calls[0]![0] as string;
+  expect(native.releasePrepared).toHaveBeenCalledWith(requestId);
+});
+
 it('still tears down native request state when listener removal throws', async () => {
   native.addListener.mockImplementationOnce(() => ({
     remove: () => {
@@ -300,7 +320,7 @@ it('still tears down native request state when listener removal throws', async (
   ).resolves.toEqual({ bytes: 25 });
 
   const requestId = native.prepare.mock.calls[0]![0] as string;
-  expect(native.cancel).toHaveBeenCalledWith(requestId);
+  expect(native.releasePrepared).toHaveBeenCalledWith(requestId);
 });
 
 it('rejects a malformed native success instead of trusting it', async () => {

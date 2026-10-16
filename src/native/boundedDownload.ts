@@ -277,7 +277,6 @@ export async function downloadNativeBoundedFile(
   const requestId = nextRequestId();
   native.prepare(requestId);
   let subscription: NativeSubscription | null = null;
-  let downloadInvoked = false;
   const abort = (): void => native.cancel(requestId);
   try {
     subscription = native.addListener('onProgress', (event) => {
@@ -294,7 +293,6 @@ export async function downloadNativeBoundedFile(
       options.timeoutMs,
       options.maxImagePixels ?? 0,
     );
-    downloadInvoked = true;
     const result = await download;
     if (!result.ok) {
       throw new NativeBoundedDownloadError(result.reason ?? 'unavailable');
@@ -311,16 +309,14 @@ export async function downloadNativeBoundedFile(
       // Event-emitter teardown is independent from request-state teardown below.
     }
     try {
-      if (downloadInvoked) {
-        native.cancel(requestId);
-      } else {
-        // Listener setup or the bridge call itself failed before native `download()` could own its
-        // cleanup. Release only that prepared (not-yet-running) slot.
-        native.releasePrepared(requestId);
-      }
+      // Nothing native is running any more: the download settled, or it never started. Release
+      // frees only a prepared slot native never took over, so it is a no-op after native's own
+      // `finally`, and it covers a bridge rejection that never reached native (review M161).
+      // `cancel` stays for an abort while the download is running.
+      native.releasePrepared(requestId);
     } catch {
-      // An invoked operation also owns a native `finally`. If a prepared-slot release itself is
-      // unreachable, there is no second bridge path to recover it; never mask the original result.
+      // If a prepared-slot release itself is unreachable, there is no second bridge path to
+      // recover it; never mask the original result.
     }
   }
 }
