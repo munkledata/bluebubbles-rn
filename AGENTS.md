@@ -217,5 +217,6 @@ evidence. Do not claim host tests prove native behavior.
 - React Native Testing Library under React 19 is async: await render and user interactions.
 - Mounted-store mutations that rerender must be wrapped in awaited `act`.
 - Do not assert the global timer count is zero; Expo animation mocks retain timers.
-- Keep UI coverage at or above the configured aggregate and critical-file floors with
-  `npm run coverage:ui`.
+- Keep coverage at or above the configured floors with `npm run coverage:ui`: the UI aggregate
+  and critical-file floors, plus ratchet floors for `app/` and `src/features/`. Raise a ratchet
+  floor when coverage improves; never lower one to let a change pass.
