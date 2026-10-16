@@ -67,10 +67,11 @@ export function useChatReadLifecycle({
     count: number;
   } | null>(null);
 
-  // Is the app actually in FRONT? This screen stays MOUNTED while the app is backgrounded and
-  // underneath the app-lock overlay (the gate is an absolute-fill overlay at the ROOT layout, not a
-  // route swap), and FCM keeps writing incoming messages in both states — which flushes the
-  // reactive query and re-renders this screen. The live read marker below must not run then.
+  // Is the app actually in FRONT? This screen stays MOUNTED while the app is backgrounded, and FCM
+  // keeps writing incoming messages then, which flushes the reactive query and re-renders it. The
+  // live read marker below must not run in that state. App Lock is different: its gate unmounts
+  // this screen and unlocking remounts it, re-running the read marker and sync. Until a lock's
+  // unmount commits, the locked check below still keeps the screen from claiming visibility.
   // Unknown native state fails closed: an extra alert is safer than suppressing a background wake.
   const activeChatClaim = useRef<ActiveChatClaim | null>(null);
   const [screenFocused, setScreenFocused] = useState(false);
