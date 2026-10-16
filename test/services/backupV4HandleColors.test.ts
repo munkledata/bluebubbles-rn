@@ -4,6 +4,7 @@ import {
   setHandleColorWithinTransaction,
   upsertChats,
   upsertHandles,
+  MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL,
   type BackupExportLimits,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
@@ -38,6 +39,8 @@ function exportLimits(overrides: Partial<BackupExportLimits> = {}): BackupExport
     chatIdentifierCharacters: BACKUP_LIMITS.chatIdentifierCharacters,
     chatParticipantAddressCharacters: BACKUP_LIMITS.chatParticipantAddressCharacters,
     chatParticipants: BACKUP_LIMITS.chatParticipants,
+    customFolderChatIdentities: BACKUP_LIMITS.customFolderChatIdentities,
+    customFolderMemberships: BACKUP_LIMITS.customFolderMemberships,
     chatNameCharacters: BACKUP_LIMITS.chatNameCharacters,
     chatColorCharacters: BACKUP_LIMITS.chatColorCharacters,
     muteTypeCharacters: BACKUP_LIMITS.muteTypeCharacters,
@@ -283,4 +286,10 @@ describe('backup v4 device-owned handle colors', () => {
     ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
     expect(storedColors(destination)).toEqual([]);
   });
+});
+
+// The export reads its folder caps from the passed limits now, so pin the one relationship the
+// removed repository constant used to encode (review M074).
+it('caps backup folder memberships at the same total that saving folders enforces', () => {
+  expect(BACKUP_LIMITS.customFolderMemberships).toBe(MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL);
 });

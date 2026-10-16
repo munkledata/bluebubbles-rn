@@ -80,6 +80,9 @@ const BACKUP_EXPORT_LIMITS = {
   chatIdentifierCharacters: BACKUP_LIMITS.chatIdentifierCharacters,
   chatParticipantAddressCharacters: BACKUP_LIMITS.chatParticipantAddressCharacters,
   chatParticipants: BACKUP_LIMITS.chatParticipants,
+  customFolderChatIdentities: BACKUP_LIMITS.customFolderChatIdentities,
+  // Saving folders enforces the same total, so only a set saved before that limit can exceed it.
+  customFolderMemberships: BACKUP_LIMITS.customFolderMemberships,
   chatNameCharacters: BACKUP_LIMITS.chatNameCharacters,
   chatColorCharacters: BACKUP_LIMITS.chatColorCharacters,
   muteTypeCharacters: BACKUP_LIMITS.muteTypeCharacters,

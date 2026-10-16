@@ -11,7 +11,6 @@ import type { AppDatabase } from '../types';
 import {
   MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS,
   MAX_CUSTOM_FOLDER_MEMBERS,
-  MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL,
   MAX_CUSTOM_FOLDER_NAME_CODE_POINTS,
   MAX_CUSTOM_FOLDERS,
   normalizeCustomFolderName,
@@ -91,35 +90,20 @@ export class BackupExportLimitError extends Error {
   }
 }
 
-const MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES = 10_000;
-// Saving folders enforces the same total, so only a set saved before that limit can exceed it.
-const MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS = MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL;
-const MAX_BACKUP_CHAT_PARTICIPANTS = 512;
-// Apply coarse SQL allocation caps before JSON aggregation. The JavaScript check below then
-// mirrors BackupV3Schema's exact UTF-16 string-length semantics without truncating evidence.
-const MAX_BACKUP_CHAT_SERVICE_CHARACTERS = 128;
-const MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS = 4_096;
-const MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS = 4_096;
-const DEFAULT_BACKUP_MAX_RAW_BYTES = 4 * 1024 * 1024;
 const ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER = 96;
 const ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER_ASSOCIATION = 12;
 const ESTIMATED_JSON_BYTES_PER_CUSTOM_FOLDER_IDENTITY = 128;
 
+/** The folder part of BackupExportLimits; every bound comes from the caller (review M074). */
 interface CustomFolderExportLimits {
   maxRawBytes: number;
   chatServiceCharacters: number;
   chatIdentifierCharacters: number;
   chatParticipantAddressCharacters: number;
   chatParticipants: number;
+  customFolderChatIdentities: number;
+  customFolderMemberships: number;
 }
-
-const DEFAULT_CUSTOM_FOLDER_EXPORT_LIMITS: CustomFolderExportLimits = {
-  maxRawBytes: DEFAULT_BACKUP_MAX_RAW_BYTES,
-  chatServiceCharacters: MAX_BACKUP_CHAT_SERVICE_CHARACTERS,
-  chatIdentifierCharacters: MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS,
-  chatParticipantAddressCharacters: MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS,
-  chatParticipants: MAX_BACKUP_CHAT_PARTICIPANTS,
-};
 
 interface CustomFolderHeaderProbeRow {
   folderId: number;
@@ -354,6 +338,8 @@ export interface BackupExportLimits {
   chatIdentifierCharacters: number;
   chatParticipantAddressCharacters: number;
   chatParticipants: number;
+  customFolderChatIdentities: number;
+  customFolderMemberships: number;
   chatNameCharacters: number;
   chatColorCharacters: number;
   muteTypeCharacters: number;
@@ -1176,7 +1162,7 @@ function readHandleColorBackupRowsWithinTransaction(
 
 function readCustomFolderBackupRowsWithinTransaction(
   context: DbTransactionContext,
-  limits: CustomFolderExportLimits = DEFAULT_CUSTOM_FOLDER_EXPORT_LIMITS,
+  limits: CustomFolderExportLimits,
   initialEstimatedBytes = 0,
 ): Promise<CustomFolderBackupExportRows> {
   return runInTransactionContext(context, async (db) => {
@@ -1186,6 +1172,8 @@ function readCustomFolderBackupRowsWithinTransaction(
       limits.chatIdentifierCharacters,
       limits.chatParticipantAddressCharacters,
       limits.chatParticipants,
+      limits.customFolderChatIdentities,
+      limits.customFolderMemberships,
     ];
     if (
       numericLimits.some((value) => !Number.isSafeInteger(value) || value <= 0) ||
@@ -1288,7 +1276,7 @@ function readCustomFolderBackupRowsWithinTransaction(
           SELECT rowid
             FROM custom_folder_members INDEXED BY custom_folder_members_chat_guid_idx
            ORDER BY chat_guid ASC, folder_id ASC
-           LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+           LIMIT ${limits.customFolderMemberships + 1}
         )
         SELECT COUNT(*) AS rowCount FROM member_ids
       `),
@@ -1298,7 +1286,7 @@ function readCustomFolderBackupRowsWithinTransaction(
       memberCountProbe.rowCount,
       'custom folder membership count',
     );
-    if (memberCount > MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS) {
+    if (memberCount > limits.customFolderMemberships) {
       throw new BackupExportLimitError(
         'folder-memberships',
         'Custom folder memberships exceed their aggregate backup safety bound.',
@@ -1310,7 +1298,7 @@ function readCustomFolderBackupRowsWithinTransaction(
         SELECT rowid
           FROM custom_folder_members INDEXED BY custom_folder_members_chat_guid_idx
          ORDER BY chat_guid ASC, folder_id ASC
-         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+         LIMIT ${limits.customFolderMemberships + 1}
       )
       SELECT member.folder_id AS folderId,
              chat.id AS chatId,
@@ -1380,7 +1368,7 @@ function readCustomFolderBackupRowsWithinTransaction(
                CAST(entry.key AS INTEGER) AS occurrence
           FROM json_each(${candidateChatIdsJson}) AS entry
          ORDER BY CAST(entry.key AS INTEGER)
-         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+         LIMIT ${limits.customFolderMemberships + 1}
       )
       SELECT chat.id AS chatId,
              CASE WHEN typeof(chat.guid) <> 'text'
@@ -1574,7 +1562,7 @@ function readCustomFolderBackupRowsWithinTransaction(
                CAST(entry.key AS INTEGER) AS occurrence
           FROM json_each(${exportableChatIdsJson}) AS entry
          ORDER BY CAST(entry.key AS INTEGER)
-         LIMIT ${MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS + 1}
+         LIMIT ${limits.customFolderMemberships + 1}
       )
       SELECT chat.id AS chatId,
              (
@@ -1645,7 +1633,7 @@ function readCustomFolderBackupRowsWithinTransaction(
     // omission semantics without letting all 25,000 associations allocate participant arrays.
     const identities: CustomFolderPortableIdentityRow[] = [];
     const returnedIdentityIds = new Set<number>();
-    const identityBatchSize = MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES + 1;
+    const identityBatchSize = limits.customFolderChatIdentities + 1;
     for (let offset = 0; offset < exportableChatIds.length; offset += identityBatchSize) {
       const batchChatIds = exportableChatIds.slice(offset, offset + identityBatchSize);
       const batchChatIdsJson = JSON.stringify(batchChatIds);
@@ -1702,8 +1690,10 @@ function readCustomFolderBackupRowsWithinTransaction(
           throw new Error('Custom folder identity export is inconsistent.');
         }
         returnedIdentityIds.add(row.chatId);
-        const participants = parseBackupParticipants(row.participantsJson);
-        if (!hasBackupSchemaBoundedIdentityStrings(row.chatIdentifier, participants)) continue;
+        const participants = parseBackupParticipants(row.participantsJson, limits);
+        if (!hasBackupSchemaBoundedIdentityStrings(row.chatIdentifier, participants, limits)) {
+          continue;
+        }
         const identity = buildPortableChatIdentity(
           row.guid,
           row.chatIdentifier,
@@ -1711,7 +1701,7 @@ function readCustomFolderBackupRowsWithinTransaction(
           participants,
         );
         if (!hasPortableRestoreEvidence(identity)) continue;
-        if (identities.length >= MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES) {
+        if (identities.length >= limits.customFolderChatIdentities) {
           throw new Error('Custom folder chat identities exceed their backup safety bound.');
         }
         identities.push({ chatId: row.chatId, identity });
@@ -1724,14 +1714,17 @@ function readCustomFolderBackupRowsWithinTransaction(
   });
 }
 
-function parseBackupParticipants(value: string | null): PortableChatParticipant[] {
+function parseBackupParticipants(
+  value: string | null,
+  limits: Pick<CustomFolderExportLimits, 'chatParticipants'>,
+): PortableChatParticipant[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value ?? '[]');
   } catch {
     throw new Error('Custom folder chat participants are invalid.');
   }
-  if (!Array.isArray(parsed) || parsed.length > MAX_BACKUP_CHAT_PARTICIPANTS) {
+  if (!Array.isArray(parsed) || parsed.length > limits.chatParticipants) {
     throw new Error('Custom folder chat participants exceed their safety bound.');
   }
   return parsed.map((participant) => {
@@ -1750,22 +1743,32 @@ function parseBackupParticipants(value: string | null): PortableChatParticipant[
   });
 }
 
-/** Match the final Zod string semantics after SQL has already capped allocation by bytes. */
+/**
+ * SQL caps allocation by bytes before JSON aggregation; this then mirrors BackupV3Schema's exact
+ * UTF-16 string-length semantics without truncating evidence.
+ */
 function hasBackupSchemaBoundedIdentityStrings(
   chatIdentifier: string | null,
   participants: readonly PortableChatParticipant[],
+  limits: Pick<
+    CustomFolderExportLimits,
+    'chatIdentifierCharacters' | 'chatServiceCharacters' | 'chatParticipantAddressCharacters'
+  >,
 ): boolean {
   return (
-    (chatIdentifier === null || chatIdentifier.length <= MAX_BACKUP_CHAT_IDENTIFIER_CHARACTERS) &&
+    (chatIdentifier === null || chatIdentifier.length <= limits.chatIdentifierCharacters) &&
     participants.every(
       (participant) =>
-        participant.service.length <= MAX_BACKUP_CHAT_SERVICE_CHARACTERS &&
-        participant.address.length <= MAX_BACKUP_CHAT_PARTICIPANT_ADDRESS_CHARACTERS,
+        participant.service.length <= limits.chatServiceCharacters &&
+        participant.address.length <= limits.chatParticipantAddressCharacters,
     )
   );
 }
 
-function buildCustomFolderBackupData(rows: CustomFolderBackupExportRows): CustomFolderBackupData {
+function buildCustomFolderBackupData(
+  rows: CustomFolderBackupExportRows,
+  limits: Pick<CustomFolderExportLimits, 'customFolderChatIdentities' | 'customFolderMemberships'>,
+): CustomFolderBackupData {
   const folderIds = new Set<number>();
   const memberCounts = new Map<number, number>();
   const membersByFolder = new Map<
@@ -1797,7 +1800,7 @@ function buildCustomFolderBackupData(rows: CustomFolderBackupExportRows): Custom
   if (folderIds.size > MAX_CUSTOM_FOLDERS) {
     throw new Error('Custom folder count exceeds its backup safety bound.');
   }
-  if (rows.members.length > MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS) {
+  if (rows.members.length > limits.customFolderMemberships) {
     throw new Error('Custom folder memberships exceed their aggregate backup safety bound.');
   }
   if ([...memberCounts.values()].some((count) => count > MAX_CUSTOM_FOLDER_MEMBERS)) {
@@ -1837,7 +1840,7 @@ function buildCustomFolderBackupData(rows: CustomFolderBackupExportRows): Custom
       if (!identity) continue;
       let identityIndex = identityIndexes.get(member.chatId);
       if (identityIndex === undefined) {
-        if (customFolderChatIdentities.length >= MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES) {
+        if (customFolderChatIdentities.length >= limits.customFolderChatIdentities) {
           throw new Error('Custom folder chat identities exceed their backup safety bound.');
         }
         identityIndex = customFolderChatIdentities.length;
@@ -1915,7 +1918,7 @@ export async function getBackupV4ExportData(
   );
   return {
     ...buildBackupBaseExportData(rows.base, limits),
-    ...buildCustomFolderBackupData(rows.customFolders),
+    ...buildCustomFolderBackupData(rows.customFolders, limits),
     handleColors: rows.handleColors.handleColors,
   };
 }
