@@ -322,3 +322,57 @@ it('adopts a device credential after Disconnect left a revoked push-key marker',
     kind: 'adopted',
   });
 });
+
+it('replays a saved adoption whose device name predates an Android update (M128)', async () => {
+  // The journal keeps the exact request, including the name built from the Android version when it
+  // was saved (Platform.Version is 36 here). A retry must send that saved request, not refuse it.
+  const candidate = `bbd_device_v1_${'W'.repeat(43)}`;
+  const identity = {
+    serverInstallationId: '11111111-1111-4111-8111-111111111111',
+    principalId: '22222222-2222-4222-8222-222222222222',
+    deviceId: '33333333-3333-4333-8333-333333333333',
+  } as const;
+  const journaled = {
+    name: 'Gator (Android 35)',
+    provider: 'fcm' as const,
+    token: 'fcm-token',
+    pushEncryption: {
+      type: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      key: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+    },
+  };
+  jest.mocked(readFcmDeviceEncryptionState).mockResolvedValue({
+    kind: 'valid',
+    state: revokedFcmDeviceEncryptionState(FCM_PUSH_ENCRYPTION_TYPE_V3),
+  });
+  mockRegisterDevice.mockResolvedValueOnce({
+    id: identity.deviceId,
+    pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+    pushEncryptionIdentity: identity,
+    pushEncryptionKeyVersion: 1,
+  });
+  mockResumeCredentialUpgradeRuntime.mockImplementationOnce(
+    async (dependencies: {
+      persistPendingV3(origin: string, registration: typeof journaled): Promise<void>;
+      registerV3(
+        origin: string,
+        credential: string,
+        registration: typeof journaled,
+      ): Promise<unknown>;
+    }) => {
+      await dependencies.persistPendingV3(mockSession.origin, journaled);
+      await dependencies.registerV3(mockSession.origin, candidate, journaled);
+      return { kind: 'adopted' as const };
+    },
+  );
+
+  await expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).resolves.toEqual({
+    kind: 'adopted',
+  });
+  expect(mockRegisterDevice).toHaveBeenCalledWith(
+    expect.anything(),
+    'Gator (Android 35)',
+    'fcm-token',
+    journaled.pushEncryption,
+  );
+});

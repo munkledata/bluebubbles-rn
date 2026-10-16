@@ -120,10 +120,12 @@ function registrationHasExactV3(
   registration: CredentialUpgradeFcmRegistration,
   origin: string,
 ): boolean {
+  // The name is a display label. A saved adoption replays the exact name it was saved with, which
+  // embeds the Android version of that time, so it must not be compared with today's (review M128).
   return (
     registration.provider === 'fcm' &&
     registration.pushEncryption.type === FCM_PUSH_ENCRYPTION_TYPE_V3 &&
-    registration.name === DEVICE_NAME &&
+    registration.name.length > 0 &&
     registration.token.length > 0 &&
     origin.length > 0
   );
