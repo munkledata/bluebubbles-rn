@@ -1,39 +1,10 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, StyleSheet, View } from 'react-native';
+import React, { useLayoutEffect, useMemo, useRef } from 'react';
+import { Animated, StyleSheet, View } from 'react-native';
+import { useReduceMotionPreference } from '../hooks/useReduceMotionPreference';
 import { useTheme } from '../theme';
 
 const PULSE_MIN_OPACITY = 0.3;
 const STATIC_OPACITY = 1;
-
-function useReduceMotionPreference(): boolean | null {
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    let receivedPreferenceEvent = false;
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-      receivedPreferenceEvent = true;
-      if (mounted) setReduceMotion(enabled);
-    });
-
-    void AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted && !receivedPreferenceEvent) setReduceMotion(enabled);
-      },
-      () => {
-        // If the native query is unavailable, retain the existing animated behavior.
-        if (mounted && !receivedPreferenceEvent) setReduceMotion(false);
-      },
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-
-  return reduceMotion;
-}
 
 /** iOS "…" typing bubble: three dots pulsing in a received-style bubble. */
 export function TypingBubble(): React.JSX.Element {

@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import {
-  AccessibilityInfo,
   Modal,
   Pressable,
   ScrollView,
@@ -13,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
+import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
 import { isScopedDeviceCredential } from '@core/secure';
@@ -65,36 +65,6 @@ async function readForTransport<T>(
 }
 
 type ModalAnimationType = 'none' | 'slide';
-
-function useReduceMotionPreferenceRef(): React.RefObject<boolean | null> {
-  const reduceMotion = useRef<boolean | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    let receivedPreferenceEvent = false;
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-      receivedPreferenceEvent = true;
-      if (mounted) reduceMotion.current = enabled;
-    });
-
-    void AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted && !receivedPreferenceEvent) reduceMotion.current = enabled;
-      },
-      () => {
-        // If the native query is unavailable, retain the existing slide behavior for future opens.
-        if (mounted && !receivedPreferenceEvent) reduceMotion.current = false;
-      },
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-
-  return reduceMotion;
-}
 
 function modalAnimationFor(reduceMotion: boolean | null): ModalAnimationType {
   return reduceMotion === false ? 'slide' : 'none';

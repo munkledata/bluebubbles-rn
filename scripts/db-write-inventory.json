@@ -381,7 +381,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:1e716ab98ac5",
       "path": "app/(app)/server-management.tsx",
-      "line": 349,
+      "line": 319,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialReplacement",
@@ -394,7 +394,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:f08dd1db40ef",
       "path": "app/(app)/server-management.tsx",
-      "line": 350,
+      "line": 320,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade",
@@ -407,7 +407,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.confirmDiscardCredential.onConfirm:mutator-call:ffe1420d9aaf",
       "path": "app/(app)/server-management.tsx",
-      "line": 536,
+      "line": 506,
       "symbol": "ServerManagementScreen.confirmDiscardCredential.onConfirm",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential",
@@ -420,7 +420,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796",
       "path": "app/(app)/server-management.tsx",
-      "line": 544,
+      "line": 514,
       "symbol": "ServerManagementScreen.onDiscardCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate",
@@ -433,7 +433,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.<callback:7bf4151522>:mutator-call:6b73b09a1510",
       "path": "app/(app)/server-management.tsx",
-      "line": 910,
+      "line": 880,
       "symbol": "ServerManagementScreen.<callback:7bf4151522>",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential",

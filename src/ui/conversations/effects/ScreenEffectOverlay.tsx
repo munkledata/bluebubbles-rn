@@ -1,13 +1,7 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  Animated,
-  Easing,
-  StyleSheet,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { Animated, Easing, StyleSheet, useWindowDimensions, View } from 'react-native';
 import type { ScreenEffect } from '@core/effects';
+import { useReduceMotionPreference } from '../../hooks/useReduceMotionPreference';
 
 interface ScreenEffectOverlayProps {
   effect: ScreenEffect;
@@ -96,7 +90,7 @@ export function ScreenEffectOverlay({
   const t = useRef(new Animated.Value(0)).current;
   const onDoneRef = useRef(onDone);
   const completionRef = useRef<EffectCompletionState>({ completed: false });
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
+  const reduceMotion = useReduceMotionPreference();
 
   onDoneRef.current = onDone;
 
@@ -110,30 +104,6 @@ export function ScreenEffectOverlay({
     // Each prop transition is a new effect run, even when an earlier effect name repeats.
     completionRef.current = { completed: false };
   }, [effect]);
-
-  useEffect(() => {
-    let mounted = true;
-    let receivedPreferenceEvent = false;
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-      receivedPreferenceEvent = true;
-      if (mounted) setReduceMotion(enabled);
-    });
-
-    void AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted && !receivedPreferenceEvent) setReduceMotion(enabled);
-      },
-      () => {
-        // If the native query is unavailable, retain the existing animated behavior.
-        if (mounted && !receivedPreferenceEvent) setReduceMotion(false);
-      },
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
 
   const particles = useMemo(
     () => (reduceMotion === false ? buildParticles(effect, width, height) : []),

@@ -1,13 +1,7 @@
 import { Image } from 'expo-image';
 import React, { useEffect, useRef } from 'react';
-import {
-  AccessibilityInfo,
-  Animated,
-  type GestureResponderEvent,
-  PanResponder,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Animated, type GestureResponderEvent, PanResponder, StyleSheet, View } from 'react-native';
+import { useReduceMotionPreferenceRef } from '../hooks/useReduceMotionPreference';
 
 const MAX_SCALE = 4;
 
@@ -69,7 +63,6 @@ export function ZoomableImage({
   const liveTranslate = useRef({ x: 0, y: 0 });
   const initialDist = useRef(0);
   const zoomedRef = useRef(false);
-  const reduceMotion = useRef<boolean | null>(null);
   const activeReset = useRef<Animated.CompositeAnimation | null>(null);
 
   const setZoomed = (z: boolean): void => {
@@ -90,6 +83,11 @@ export function ZoomableImage({
     translateX.setValue(0);
     translateY.setValue(0);
   };
+
+  // Turning Reduce Motion on mid-reset stops the spring and snaps to fit.
+  const reduceMotion = useReduceMotionPreferenceRef((enabled) => {
+    if (enabled && stopActiveReset()) snapAnimatedValuesToFit();
+  });
 
   const resetZoom = (animated: boolean): void => {
     stopActiveReset();
@@ -114,32 +112,12 @@ export function ZoomableImage({
     setZoomed(false);
   };
 
-  useEffect(() => {
-    let mounted = true;
-    let receivedPreferenceEvent = false;
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-      if (!mounted) return;
-      receivedPreferenceEvent = true;
-      reduceMotion.current = enabled;
-      if (enabled && stopActiveReset()) snapAnimatedValuesToFit();
-    });
-
-    void AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted && !receivedPreferenceEvent) reduceMotion.current = enabled;
-      },
-      () => {
-        // If the native query is unavailable, retain the existing spring for future resets.
-        if (mounted && !receivedPreferenceEvent) reduceMotion.current = false;
-      },
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
+  useEffect(
+    () => () => {
       stopActiveReset();
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    },
+    [],
+  );
 
   // Reset when this page scrolls out of view so returning to it starts at fit.
   useEffect(() => {

@@ -1,41 +1,12 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, Text } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text } from 'react-native';
 import type { BubbleEffect } from '@core/effects';
+import { useReduceMotionPreference } from '../../hooks/useReduceMotionPreference';
 import { useTheme } from '../../theme';
 
 interface BubbleEffectViewProps {
   effect: BubbleEffect;
   children: React.ReactNode;
-}
-
-function useReduceMotionPreference(): boolean | null {
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    let receivedPreferenceEvent = false;
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-      receivedPreferenceEvent = true;
-      if (mounted) setReduceMotion(enabled);
-    });
-
-    void AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted && !receivedPreferenceEvent) setReduceMotion(enabled);
-      },
-      () => {
-        // If the native query is unavailable, retain the existing animated behavior.
-        if (mounted && !receivedPreferenceEvent) setReduceMotion(false);
-      },
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-
-  return reduceMotion;
 }
 
 /**

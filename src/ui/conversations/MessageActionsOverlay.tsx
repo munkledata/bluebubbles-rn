@@ -1,6 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   Animated,
   Modal,
   Pressable,
@@ -20,6 +19,7 @@ import {
 } from '@core/reactions/reactionType';
 import type { MessageSummaryInfo } from '@core/models';
 import { placeReactionMenu, type BubbleRect } from '@utils';
+import { useReduceMotionPreference } from '../hooks/useReduceMotionPreference';
 import { useTheme } from '../theme';
 
 export interface SelectedMessage {
@@ -118,36 +118,6 @@ const SIDE_INSET = 12;
 const BAR_HEIGHT = 56; // the tapback pill's height (44px targets + padding)
 const HOLE_PAD = 6; // breathing room around the "lifted" bubble in the scrim punch-out
 const SCRIM = 'rgba(0,0,0,0.45)';
-
-function useReduceMotionPreference(): boolean | null {
-  const [reduceMotion, setReduceMotion] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    let receivedPreferenceEvent = false;
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (enabled) => {
-      receivedPreferenceEvent = true;
-      if (mounted) setReduceMotion(enabled);
-    });
-
-    void AccessibilityInfo.isReduceMotionEnabled().then(
-      (enabled) => {
-        if (mounted && !receivedPreferenceEvent) setReduceMotion(enabled);
-      },
-      () => {
-        // If the native query is unavailable, retain the existing animated behavior.
-        if (mounted && !receivedPreferenceEvent) setReduceMotion(false);
-      },
-    );
-
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
-
-  return reduceMotion;
-}
 
 /** One row in the local action menu, built once and rendered in either layout. */
 interface ActionDef {
