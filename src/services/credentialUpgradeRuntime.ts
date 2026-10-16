@@ -1,5 +1,6 @@
 import type { ServerInfo } from '@core/models';
 import { ApiError } from '@core/api/errors';
+import { strictServerOrigin } from '@core/config';
 import { FCM_PUSH_ENCRYPTION_TYPE_V3 } from '@core/realtime';
 import {
   acknowledgeCredentialUpgradePushAdoption,
@@ -217,8 +218,9 @@ const REPLACED_CREDENTIAL_KEY = 'replacedServerCredential';
 
 /**
  * Revoke one exact scoped bearer. A revoked, never-issued or mistyped bearer cannot call
- * revoke-self, so a 401 counts as "already gone" only when the info endpoint, asked with the same
- * bearer, independently answers 401 too. Any other answer keeps custody for another attempt.
+ * revoke-self, and one without the push:self scope is refused it, so a 401 or 403 counts as
+ * "already gone" only when the info endpoint, asked with the same bearer, independently answers
+ * 401. Any other answer keeps custody for another attempt.
  */
 async function revokeExactBearer(
   deps: CredentialUpgradeRuntimeDependencies,
@@ -230,7 +232,9 @@ async function revokeExactBearer(
     await revoke();
     return 'revoked';
   } catch (error) {
-    if (!(error instanceof ApiError && error.status === 401)) return 'retry';
+    if (!(error instanceof ApiError && (error.status === 401 || error.status === 403))) {
+      return 'retry';
+    }
     try {
       await deps.checkBearerAccepted(origin, credential);
       return 'retry';
@@ -247,6 +251,10 @@ async function revokeExactBearer(
  * the record, revokes its bearer over the network and then forgets it; a replacement writes a newer
  * record. Interleaved, the slower revocation could delete a record whose bearer it never revoked.
  * A task must never start another record operation, or it would wait for itself.
+ *
+ * Safe outside the lock: Disconnect reads and deletes the record only after tracked account work
+ * has drained, the new-account commit clears it only behind Disconnect's tombstone, and the
+ * post-promotion check for a missing live session only reads it.
  */
 let replacedCredentialRecordTail: Promise<unknown> = Promise.resolve();
 
@@ -306,10 +314,12 @@ async function revokeReplacedCredentialRecord(
 ): Promise<'none' | 'revoked' | 'pending' | 'cancelled'> {
   let stored: string | null;
   let mainCredential: string | null;
+  let mainAddress: string | null;
   try {
-    [stored, mainCredential] = await Promise.all([
+    [stored, mainCredential, mainAddress] = await Promise.all([
       deps.vault.get(REPLACED_CREDENTIAL_KEY),
       deps.vault.get('serverPassword'),
+      deps.vault.get('serverAddress'),
     ]);
   } catch {
     return deps.isCurrent() ? 'pending' : 'cancelled';
@@ -318,9 +328,15 @@ async function revokeReplacedCredentialRecord(
   const inspected = inspectReplacedCredentialRecord(stored);
   if (inspected.kind === 'absent') return 'none';
   if (inspected.kind === 'invalid' || inspected.record.credential === mainCredential) {
-    return (await forgetReplacedCredential(deps, stored)) ? 'none' : 'pending';
+    // Nothing here may be revoked: an unreadable record names no bearer, and the live credential
+    // never is. Remove it when the keystore allows; either way it must not block anything.
+    await forgetReplacedCredential(deps, stored);
+    return 'none';
   }
   const { origin, credential } = inspected.record;
+  // Address changes wait for this record, so it can only name the current server. Any other origin
+  // is stale, and the bearer is never sent to a host that may no longer be this server.
+  if (origin !== strictServerOrigin(mainAddress)) return 'pending';
   const revoked = await revokeExactBearer(
     deps,
     () => deps.revokePreviousCredential(origin, credential),

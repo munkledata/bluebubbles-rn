@@ -8,6 +8,7 @@ import {
   inspectCredentialUpgradeJournal,
   logger,
   readAccountRevocationState,
+  retireReplacedCredentialRecord,
   SERVER_SESSION_STATE,
   type AccountRevocationMarker,
   type SecureVault,
@@ -226,13 +227,10 @@ export async function persistServerConnection(
       // Disconnect revoked or waived every bearer it held before writing this tombstone, so a
       // replaced-credential record that outlived it is the old account's and must not reach the new
       // session (review M130). Clear it before the tombstone, which keeps a failure retryable.
-      if ((await deps.vault.get('replacedServerCredential')) !== null) {
-        await deps.vault.delete('replacedServerCredential');
-        if (!attemptIsCurrent(deps)) return cancelledResult();
-        if ((await deps.vault.get('replacedServerCredential')) !== null) {
-          throw new Error('replaced-credential record deletion was not confirmed');
-        }
+      if (!(await retireReplacedCredentialRecord(deps.vault))) {
+        throw new Error('replaced-credential record could not be removed');
       }
+      if (!attemptIsCurrent(deps)) return cancelledResult();
       // A keyless tombstone may be retired only as part of this completely new explicit session.
       await deps.vault.delete('serverCredentialUpgrade');
       if (!attemptIsCurrent(deps)) return cancelledResult();

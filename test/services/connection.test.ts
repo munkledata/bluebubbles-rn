@@ -100,7 +100,7 @@ describe('connectToServer', () => {
       expect(await vault.get('serverCredentialUpgrade')).toBeNull();
     });
 
-    it('fails the connect closed, tombstone kept, when it cannot be cleared', async () => {
+    it('overwrites one the keystore will not delete, so the new account starts clean', async () => {
       const backing = new InMemoryVault();
       await backing.set('serverCredentialUpgrade', tombstone);
       await backing.set('replacedServerCredential', record);
@@ -116,6 +116,32 @@ describe('connectToServer', () => {
         connectToServer('https://srv', SCOPED_CREDENTIAL, {
           fetchServerInfo: async () => upToDate,
           vault: keepsRecord,
+          revocationMarker,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+      expect(await backing.get('replacedServerCredential')).toBe('');
+      expect(await backing.get('serverCredentialUpgrade')).toBeNull();
+    });
+
+    it('fails the connect closed, tombstone kept, when it can be neither removed nor overwritten', async () => {
+      const backing = new InMemoryVault();
+      await backing.set('serverCredentialUpgrade', tombstone);
+      await backing.set('replacedServerCredential', record);
+      const stuckRecord: SecureVault = {
+        get: (key) => backing.get(key),
+        set: async (key, value) => {
+          if (key === 'replacedServerCredential') throw new Error('Keystore write unavailable');
+          await backing.set(key, value);
+        },
+        delete: async (key) => {
+          if (key !== 'replacedServerCredential') await backing.delete(key);
+        },
+      };
+
+      await expect(
+        connectToServer('https://srv', SCOPED_CREDENTIAL, {
+          fetchServerInfo: async () => upToDate,
+          vault: stuckRecord,
           revocationMarker,
         }),
       ).resolves.toMatchObject({ ok: false, kind: 'unknown' });

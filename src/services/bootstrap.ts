@@ -10,6 +10,7 @@ import {
   isScopedDeviceCredential,
   logger,
   memoryLogSink,
+  retireReplacedCredentialRecord,
   revokedCredentialUpgradeJournal,
   serializeCredentialUpgradeJournal,
   SERVER_SESSION_STATE,
@@ -1100,10 +1101,8 @@ async function writeCredentialUpgradeRevokedTombstone(): Promise<void> {
  * account's session (review M130).
  */
 async function forgetReplacedServerCredential(): Promise<void> {
-  if ((await vault.get('replacedServerCredential')) === null) return;
-  await vault.delete('replacedServerCredential');
-  if ((await vault.get('replacedServerCredential')) !== null) {
-    throw new Error('replaced-credential record deletion was not confirmed');
+  if (!(await retireReplacedCredentialRecord(vault))) {
+    throw new Error('replaced-credential record could not be removed');
   }
 }
 
@@ -1218,10 +1217,17 @@ async function finishScopedCredentialRetirement(
     }
   }
   await writeCredentialUpgradeRevokedTombstone();
-  await forgetReplacedServerCredential();
-  if (!credentialTupleWasPreserved) return;
-  const removalFailure = await retireDurableCredentials(independentlyRevoked);
+  // A record that cannot be removed must not also keep the revoked live pair in the vault: retire
+  // the pair first, then report whichever failed (review M130).
+  const recordFailure = await forgetReplacedServerCredential().then(
+    () => null,
+    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+  );
+  const removalFailure = credentialTupleWasPreserved
+    ? await retireDurableCredentials(independentlyRevoked)
+    : null;
   if (removalFailure) throw removalFailure;
+  if (recordFailure) throw recordFailure;
 }
 
 interface DatabaseAccountCleanupResult {

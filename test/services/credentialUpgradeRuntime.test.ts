@@ -24,7 +24,7 @@ import {
   revokeReplacedCredentialRuntime,
   type CredentialUpgradeRuntimeDependencies,
 } from '@/services/credentialUpgradeRuntime';
-import { flushMicrotasks, waitForMicrotaskCondition } from '../support/async';
+import { flushMicrotasks, waitForCondition, waitForMicrotaskCondition } from '../support/async';
 
 const ORIGIN = 'https://gator.example';
 const PREVIOUS = 'legacy shared password';
@@ -625,18 +625,125 @@ describe('replaced scoped credential (M130)', () => {
 
     const first = revokeReplacedCredentialRuntime(deps);
     const second = revokeReplacedCredentialRuntime(deps);
-    await waitForMicrotaskCondition(
-      () => revokePreviousCredential.mock.calls.length === 1,
-      'first revocation',
-      50,
-    );
-    await flushMicrotasks(20);
-    expect(revokePreviousCredential).toHaveBeenCalledTimes(1);
-
-    release();
+    try {
+      await waitForMicrotaskCondition(
+        () => revokePreviousCredential.mock.calls.length === 1,
+        'first revocation',
+        50,
+      );
+      await flushMicrotasks(20);
+      expect(revokePreviousCredential).toHaveBeenCalledTimes(1);
+    } finally {
+      release();
+    }
     await expect(first).resolves.toBe('revoked');
     await expect(second).resolves.toBe('none');
     expect(revokePreviousCredential).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds a replacement’s record write until an in-flight revocation finishes (review M130)', async () => {
+    const vault = await activeVault(PREVIOUS_SCOPED);
+    // A replacement stops at adoption, so its resume later goes straight to promotion.
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, {
+          registerV3: async () => {
+            throw new Error('response lost');
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'retry', stage: 'adoption' });
+    const older = serializeReplacedCredentialRecord(
+      createReplacedCredentialRecord(ORIGIN, OLDER_SCOPED),
+    );
+    await vault.set('replacedServerCredential', older);
+    vault.events.length = 0;
+
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const revocation = revokeReplacedCredentialRuntime(
+      dependencies(vault, {
+        revokePreviousCredential: async () => {
+          await held;
+        },
+      }),
+    );
+    const resume = resumeCredentialUpgradeRuntime(dependencies(vault));
+    try {
+      await waitForCondition(() => vault.events.includes('main-credential'), 'promotion');
+      await flushMicrotasks(50);
+      // The promotion wrote the new main credential but waits to record the old one.
+      expect(await vault.get('replacedServerCredential')).toBe(older);
+      expect(vault.events).not.toContain('journal:delete');
+    } finally {
+      // Always release: a held revocation would wedge the module-wide lock for later tests.
+      release();
+    }
+    await expect(revocation).resolves.toBe('revoked');
+    await expect(resume).resolves.toEqual({ kind: 'adopted' });
+    expect(
+      inspectReplacedCredentialRecord(await vault.get('replacedServerCredential')),
+    ).toMatchObject({ kind: 'valid', record: { credential: PREVIOUS_SCOPED } });
+  });
+
+  it('treats an unreadable record it cannot remove as nothing to revoke (review M130)', async () => {
+    const vault = await activeVault(CANDIDATE);
+    await vault.set('replacedServerCredential', '');
+    jest.spyOn(vault, 'delete').mockRejectedValue(new Error('Keystore delete unavailable'));
+    const revokePreviousCredential = jest.fn(async () => undefined);
+
+    await expect(
+      revokeReplacedCredentialRuntime(dependencies(vault, { revokePreviousCredential })),
+    ).resolves.toBe('none');
+    expect(revokePreviousCredential).not.toHaveBeenCalled();
+  });
+
+  it('confirms a 403 from revoke-self with the same independent bearer check (review M130)', async () => {
+    const forbidden = () => ApiError.fromStatus(403, 'missing push:self');
+    const dead = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
+    await expect(
+      revokeReplacedCredentialRuntime(
+        dependencies(dead, {
+          revokePreviousCredential: async () => {
+            throw forbidden();
+          },
+          checkBearerAccepted: async () => {
+            throw ApiError.fromStatus(401, 'unauthorized');
+          },
+        }),
+      ),
+    ).resolves.toBe('revoked');
+
+    const alive = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
+    await expect(
+      revokeReplacedCredentialRuntime(
+        dependencies(alive, {
+          revokePreviousCredential: async () => {
+            throw forbidden();
+          },
+        }),
+      ),
+    ).resolves.toBe('pending');
+    expect(await alive.get('replacedServerCredential')).not.toBeNull();
+  });
+
+  it('never sends a record to an address other than the current server (review M130)', async () => {
+    const vault = await activeVault(CANDIDATE);
+    await vault.set(
+      'replacedServerCredential',
+      serializeReplacedCredentialRecord(
+        createReplacedCredentialRecord('https://retired.example', PREVIOUS_SCOPED),
+      ),
+    );
+    const revokePreviousCredential = jest.fn(async () => undefined);
+
+    await expect(
+      revokeReplacedCredentialRuntime(dependencies(vault, { revokePreviousCredential })),
+    ).resolves.toBe('pending');
+    expect(revokePreviousCredential).not.toHaveBeenCalled();
   });
 
   it('never forgets a newer record that appeared while its revocation was in flight', async () => {

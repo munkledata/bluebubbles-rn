@@ -2339,17 +2339,33 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
     });
 
-    it('fails Disconnect when a present record cannot be confirmed deleted (review M130)', async () => {
-      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    it('overwrites a record the keystore will not delete, then completes Disconnect (review M130)', async () => {
       vaultDelete.mockImplementation(async (key: string) => {
         // The keystore reports success but keeps this one value.
         if (key !== 'replacedServerCredential') vaultValues.delete(key);
       });
 
+      await expect(forget()).resolves.toBeUndefined();
+      // An empty record names no bearer, so nothing is ever sent for it again.
+      expect(vaultValues.get('replacedServerCredential')).toBe('');
+    });
+
+    it('fails Disconnect, after retiring the live pair, when the record can be neither removed nor overwritten (review M130)', async () => {
+      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      vaultDelete.mockImplementation(async (key: string) => {
+        if (key !== 'replacedServerCredential') vaultValues.delete(key);
+      });
+      vaultSet.mockImplementation(async (key: string, value: string) => {
+        if (key === 'replacedServerCredential') throw new Error('Keystore write unavailable');
+        vaultValues.set(key, value);
+      });
+
       await expect(forget()).rejects.toThrow(
         'Scoped credential retirement for the previous connection could not be confirmed.',
       );
-      expect(vaultValues.has('replacedServerCredential')).toBe(true);
+      expect(vaultValues.get('replacedServerCredential')).not.toBe('');
+      expect(vaultValues.has('serverPassword')).toBe(false);
+      expect(vaultValues.has('serverAddress')).toBe(false);
     });
   });
 
