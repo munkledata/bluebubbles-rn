@@ -25,17 +25,13 @@ const okSchema = z.object({ ok: z.boolean() });
 beforeEach(() => mockKy.mockReset());
 
 describe('verbs + request snapshots', () => {
-  it('put and delete route through the request path with the right method', async () => {
-    // Fresh Response per call — a Response body can only be read once.
+  it('delete routes through the request path with the right method', async () => {
     mockKy.mockImplementation(async () => jsonResponse({ ok: true }));
     const client = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
 
-    await client.put('/thing', okSchema, { json: { a: 1 } });
-    expect(mockKy.mock.calls[0][1].method).toBe('PUT');
-    expect(mockKy.mock.calls[0][1].redirect).toBe('error');
-
     await client.delete('/thing', okSchema);
-    expect(mockKy.mock.calls[1][1].method).toBe('DELETE');
+    expect(mockKy.mock.calls[0][1].method).toBe('DELETE');
+    expect(mockKy.mock.calls[0][1].redirect).toBe('error');
   });
 
   it('restates redirect:error on the final fetch call after React Native Request loses it', async () => {
@@ -414,12 +410,10 @@ describe('retry wiring', () => {
     expect(mockKy).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT retry a PUT or DELETE either', async () => {
+  it('does NOT retry a DELETE either', async () => {
     mockKy.mockRejectedValue(new Error('socket hang up'));
-    await expect(client().put('/thing', okSchema, { json: {} })).rejects.toBeDefined();
-    expect(mockKy).toHaveBeenCalledTimes(1);
     await expect(client().delete('/thing', okSchema)).rejects.toBeDefined();
-    expect(mockKy).toHaveBeenCalledTimes(2);
+    expect(mockKy).toHaveBeenCalledTimes(1);
   });
 
   it('`retry: false` forces a single shot on a GET (the fail-fast ping)', async () => {

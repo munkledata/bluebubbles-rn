@@ -7,7 +7,7 @@ jest.mock('@/services/clients', () => {
   return {
     vault: new InMemoryVault(),
     accountRevocationMarker: marker,
-    http: { buildHeaders: () => ({}), pinTransport: jest.fn() },
+    http: { pinTransport: jest.fn() },
     candidateClient: jest.fn(),
     fixedCredentialClient: jest.fn(
       (_origin: string, _password: string, isCurrent: () => boolean) => ({

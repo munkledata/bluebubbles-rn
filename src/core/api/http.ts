@@ -465,14 +465,6 @@ export class HttpClient {
     return this.request('POST', path, schema, opts);
   }
 
-  put<S extends z.ZodType>(
-    path: string,
-    schema: S,
-    opts: RequestOptions = {},
-  ): Promise<z.infer<S>> {
-    return this.request('PUT', path, schema, opts);
-  }
-
   delete<S extends z.ZodType>(
     path: string,
     schema: S,
@@ -490,10 +482,6 @@ export class HttpClient {
     const origin = rawOrigin.replace(/\/+$/, '');
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     return `${origin}${API_BASE_PATH}${cleanPath}`;
-  }
-
-  buildHeaders(): Record<string, string> {
-    return this.buildHeadersFor(this.cfg.getPassword());
   }
 
   private buildHeadersFor(password: string | undefined): Record<string, string> {

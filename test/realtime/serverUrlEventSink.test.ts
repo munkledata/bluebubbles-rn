@@ -17,7 +17,7 @@ jest.mock('@core/secure', () => ({
 }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn(), ensureDatabase: jest.fn() }));
 jest.mock('@/services/clients', () => ({
-  http: { buildHeaders: () => ({}) },
+  http: {},
   vault: { set: jest.fn(async () => {}), get: jest.fn(async () => null) },
   candidateClient: jest.fn(),
   accountRevocationMarker: { clear: jest.fn() },
