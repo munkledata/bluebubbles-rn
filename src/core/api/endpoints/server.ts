@@ -245,54 +245,11 @@ export type RcsReauthResult = z.infer<typeof RcsReauthResult>;
 export const rcsReauthNow = (http: HttpClient): Promise<RcsReauthResult> =>
   http.post('/rcs/reauth-now', RcsReauthResult, { json: {} });
 
-/** The server's detected public IP (or null). */
-const BLOCKED_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
-  [0x00000000, 8],
-  [0x0a000000, 8],
-  [0x64400000, 10],
-  [0x7f000000, 8],
-  [0xa9fe0000, 16],
-  [0xac100000, 12],
-  [0xc0000000, 24],
-  [0xc0000200, 24],
-  [0xc01fc400, 24],
-  [0xc034c100, 24],
-  [0xc0586300, 24],
-  [0xc0a80000, 16],
-  [0xc0af3000, 24],
-  [0xc6120000, 15],
-  [0xc6336400, 24],
-  [0xcb007100, 24],
-  [0xe0000000, 3],
-];
-
-function isCanonicalGloballyPublicIpv4(value: string): boolean {
-  const parts = value.split('.');
-  if (parts.length !== 4) return false;
-
-  let numeric = 0;
-  for (const part of parts) {
-    if (!/^(?:0|[1-9][0-9]{0,2})$/.test(part)) return false;
-    const octet = Number(part);
-    if (octet > 255) return false;
-    numeric = numeric * 256 + octet;
-  }
-
-  const address = numeric >>> 0;
-  return !BLOCKED_IPV4_RANGES.some(([network, prefix]) => {
-    const mask = (0xffffffff << (32 - prefix)) >>> 0;
-    return (address & mask) >>> 0 === (network & mask) >>> 0;
-  });
-}
-
-const TypedPublicIp = z
-  .object({
-    ip: z
-      .string()
-      .refine(isCanonicalGloballyPublicIpv4, 'public IPv4 address is invalid')
-      .nullable(),
-  })
-  .strict();
+/**
+ * The server's detected public IP (or null). It is only displayed, and the Mac already decides what
+ * counts as public, so any canonical IPv4 it reports is shown as is (review M144).
+ */
+const TypedPublicIp = z.object({ ip: z.ipv4().nullable() }).strict();
 export const publicIp = (http: HttpClient, signal?: AbortSignal): Promise<string | null> =>
   typedRoute('/admin/network/public-ip', () =>
     http.get('/admin/network/public-ip', TypedPublicIp, { signal }),

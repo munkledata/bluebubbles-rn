@@ -281,6 +281,15 @@ const typedHealthRouteCases: TypedHealthRouteCase[] = [
     call: (http, signal) => serverApi.publicIp(http, signal),
   },
   {
+    // Shown, never trusted: the Mac decides what is public (review M144).
+    name: 'public IP passes through any canonical IPv4 the server reports',
+    method: 'GET',
+    path: '/admin/network/public-ip',
+    typedPayload: { ip: '192.168.1.20' },
+    expectedTyped: '192.168.1.20',
+    call: (http, signal) => serverApi.publicIp(http, signal),
+  },
+  {
     name: 'alert list',
     method: 'GET',
     path: '/alerts',
@@ -382,11 +391,6 @@ describe('typed health response validation', () => {
         FMF: { present: false, valid: true },
       },
       call: (http: HttpClient) => serverApi.findMyKeysStatus(http),
-    },
-    {
-      name: 'public IP rejects a private address',
-      payload: { ip: '192.168.1.20' },
-      call: (http: HttpClient) => serverApi.publicIp(http),
     },
     {
       name: 'public IP rejects non-canonical IPv4 spelling',
