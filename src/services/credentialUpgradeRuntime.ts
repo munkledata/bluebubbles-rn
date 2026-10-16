@@ -6,9 +6,12 @@ import {
   beginCredentialUpgradePushAdoption,
   createCredentialUpgradeCandidate,
   createCredentialReplacementCandidate,
+  createReplacedCredentialRecord,
+  inspectReplacedCredentialRecord,
   isScopedDeviceCredential,
   resolveCredentialUpgrade,
   serializeCredentialUpgradeJournal,
+  serializeReplacedCredentialRecord,
   SERVER_SESSION_STATE,
   type CredentialUpgradeFcmRegistration,
   type CredentialUpgradeFcmV3AdoptionAck,
@@ -54,6 +57,16 @@ export interface CredentialUpgradeRuntimeDependencies {
   ): Promise<boolean>;
   /** Revoke the exact pre-adoption bearer before its only local custody is removed. */
   revokeCandidate(origin: string, candidateCredential: string): Promise<void>;
+  /**
+   * With the replaced bearer, remove only its own push row so the new bearer can claim this
+   * phone's push target. 'refused' means the server definitely will not; a transient failure throws.
+   */
+  releasePreviousPushTarget(
+    origin: string,
+    previousCredential: string,
+  ): Promise<'released' | 'refused'>;
+  /** Revoke the replaced bearer itself, once the new one holds the push target and the session. */
+  revokePreviousCredential(origin: string, previousCredential: string): Promise<void>;
   /** Synchronous live handoff after the durable main credential has committed. */
   publishCredential(previousCredential: string, candidateCredential: string): boolean;
 }
@@ -61,6 +74,8 @@ export interface CredentialUpgradeRuntimeDependencies {
 export type CredentialUpgradeRuntimeOutcome =
   | { readonly kind: 'adopted' }
   | { readonly kind: 'adopted-cleanup-pending' }
+  /** The replacement is live; revoking the old bearer is retried on later reconnects. */
+  | { readonly kind: 'adopted-revocation-pending' }
   | { readonly kind: 'idle' }
   | { readonly kind: 'cancelled' }
   | { readonly kind: 'revoked' }
@@ -74,7 +89,12 @@ export type CredentialUpgradeRuntimeOutcome =
   | { readonly kind: 'blocked'; readonly reason: 'push-target-owned' }
   | {
       readonly kind: 'retry';
-      readonly stage: 'candidate-validation' | 'candidate-revocation' | 'adoption' | 'storage';
+      readonly stage:
+        | 'candidate-validation'
+        | 'candidate-revocation'
+        | 'previous-revocation'
+        | 'adoption'
+        | 'storage';
     }
   | {
       readonly kind: 'unsupported';
@@ -181,6 +201,107 @@ async function rereadExactJournal(
   return snapshot.resolution;
 }
 
+const REPLACED_CREDENTIAL_KEY = 'replacedServerCredential';
+
+/**
+ * Revoke one exact scoped bearer. A revoked, never-issued or mistyped bearer cannot call
+ * revoke-self, so a 401 counts as "already gone" only when the info endpoint, asked with the same
+ * bearer, independently answers 401 too. Any other answer keeps custody for another attempt.
+ */
+async function revokeExactBearer(
+  deps: CredentialUpgradeRuntimeDependencies,
+  revoke: () => Promise<void>,
+  origin: string,
+  credential: string,
+): Promise<'revoked' | 'retry'> {
+  try {
+    await revoke();
+    return 'revoked';
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 401)) return 'retry';
+    try {
+      await deps.fetchCandidateServerInfo(origin, credential);
+      return 'retry';
+    } catch (validationError) {
+      return validationError instanceof ApiError && validationError.status === 401
+        ? 'revoked'
+        : 'retry';
+    }
+  }
+}
+
+/** Move custody of a replaced bearer to its own record; true once the write is confirmed. */
+async function recordReplacedCredential(
+  deps: CredentialUpgradeRuntimeDependencies,
+  origin: string,
+  credential: string,
+): Promise<boolean> {
+  try {
+    const serialized = serializeReplacedCredentialRecord(
+      createReplacedCredentialRecord(origin, credential),
+    );
+    await deps.vault.set(REPLACED_CREDENTIAL_KEY, serialized);
+    return (await deps.vault.get(REPLACED_CREDENTIAL_KEY)) === serialized;
+  } catch {
+    return false;
+  }
+}
+
+async function forgetReplacedCredential(
+  deps: CredentialUpgradeRuntimeDependencies,
+): Promise<boolean> {
+  try {
+    await deps.vault.delete(REPLACED_CREDENTIAL_KEY);
+    return (await deps.vault.get(REPLACED_CREDENTIAL_KEY)) === null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Revoke the bearer a scoped replacement left behind (review M130), and forget it only once the
+ * server confirms. Never touches the live credential: a record naming it, or one that cannot be
+ * read, is dropped without any server call.
+ */
+export async function revokeReplacedCredentialRuntime(
+  deps: CredentialUpgradeRuntimeDependencies,
+): Promise<'none' | 'revoked' | 'pending' | 'cancelled'> {
+  let stored: string | null;
+  let mainCredential: string | null;
+  try {
+    [stored, mainCredential] = await Promise.all([
+      deps.vault.get(REPLACED_CREDENTIAL_KEY),
+      deps.vault.get('serverPassword'),
+    ]);
+  } catch {
+    return deps.isCurrent() ? 'pending' : 'cancelled';
+  }
+  if (!deps.isCurrent()) return 'cancelled';
+  const inspected = inspectReplacedCredentialRecord(stored);
+  if (inspected.kind === 'absent') return 'none';
+  if (inspected.kind === 'invalid' || inspected.record.credential === mainCredential) {
+    return (await forgetReplacedCredential(deps)) ? 'none' : 'pending';
+  }
+  const { origin, credential } = inspected.record;
+  const revoked = await revokeExactBearer(
+    deps,
+    () => deps.revokePreviousCredential(origin, credential),
+    origin,
+    credential,
+  );
+  if (!deps.isCurrent()) return 'cancelled';
+  if (revoked !== 'revoked') return 'pending';
+  return (await forgetReplacedCredential(deps)) ? 'revoked' : 'pending';
+}
+
+function isPushTargetOwned(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    error.serverErrorType === 'device_target_owned'
+  );
+}
+
 function exactV3AdoptedJournal(
   resolution: Extract<CredentialUpgradeResolution, { kind: 'finish-promotion' }>,
 ): boolean {
@@ -229,17 +350,27 @@ async function finishPromotion(
       : { kind: 'cancelled' };
   }
 
-  let cleanupPending = false;
-  try {
-    await deps.vault.delete('serverCredentialUpgrade');
-    cleanupPending = (await deps.vault.get('serverCredentialUpgrade')) !== null;
-  } catch {
-    cleanupPending = true;
+  // A scoped replacement keeps custody of the old bearer in its own record before the journal
+  // goes away, so it can be revoked now or on a later reconnect (review M130). Until that record
+  // is confirmed, the journal keeps custody instead and a later resume moves it.
+  const replacement = journal.version === 2;
+  const custodyMoved =
+    !replacement ||
+    (await recordReplacedCredential(deps, journal.origin, journal.previousCredential));
+  let cleanupPending = !custodyMoved;
+  if (custodyMoved) {
+    try {
+      await deps.vault.delete('serverCredentialUpgrade');
+      cleanupPending = (await deps.vault.get('serverCredentialUpgrade')) !== null;
+    } catch {
+      cleanupPending = true;
+    }
   }
   if (!deps.isCurrent()) return { kind: 'cancelled' };
   if (!deps.publishCredential(journal.previousCredential, journal.candidateCredential)) {
     return { kind: 'cancelled' };
   }
+  // The caller revokes the recorded old bearer next, with the new live session's currency.
   return cleanupPending ? { kind: 'adopted-cleanup-pending' } : { kind: 'adopted' };
 }
 
@@ -326,17 +457,34 @@ async function advanceCredentialUpgrade(
       );
     } catch (error) {
       if (!deps.isCurrent()) return { kind: 'cancelled' };
-      if (
-        journal.version === 2 &&
-        error instanceof ApiError &&
-        error.status === 409 &&
-        error.serverErrorType === 'device_target_owned'
-      ) {
-        // The exact V2 intent remains durable. Do not revoke the old bearer or accept a different
-        // candidate; an owner must resolve the conflicting push row before this request can retry.
-        return { kind: 'blocked', reason: 'push-target-owned' };
+      if (journal.version !== 2 || !isPushTargetOwned(error)) {
+        return { kind: 'retry', stage: 'adoption' };
       }
-      return { kind: 'retry', stage: 'adoption' };
+      // The replaced bearer's own push row still holds this phone's push target. Free only that
+      // row with the old bearer, which keeps working, then register once more (review M130). The
+      // exact V2 intent stays durable either way, and no other candidate is ever accepted.
+      let released: 'released' | 'refused' | 'unavailable';
+      try {
+        released = await deps.releasePreviousPushTarget(journal.origin, journal.previousCredential);
+      } catch {
+        released = 'unavailable';
+      }
+      if (!deps.isCurrent()) return { kind: 'cancelled' };
+      if (released === 'refused') return { kind: 'blocked', reason: 'push-target-owned' };
+      if (released === 'unavailable') return { kind: 'retry', stage: 'adoption' };
+      try {
+        ack = await deps.registerV3(
+          journal.origin,
+          journal.candidateCredential,
+          journal.registration,
+        );
+      } catch (retryError) {
+        if (!deps.isCurrent()) return { kind: 'cancelled' };
+        // Still owned after its row was freed: an owner must look at the Mac dashboard.
+        return isPushTargetOwned(retryError)
+          ? { kind: 'blocked', reason: 'push-target-owned' }
+          : { kind: 'retry', stage: 'adoption' };
+      }
     }
     if (!deps.isCurrent()) return { kind: 'cancelled' };
 
@@ -411,6 +559,13 @@ async function beginCredentialTransitionRuntime(
   if (snapshot.storedSession.credential === candidateCredential) {
     return { kind: 'quarantined', reason: 'invalid-candidate' };
   }
+  if (mode === 'scoped-replacement') {
+    // One replaced bearer is kept at a time: finish revoking the previous one first. Reaching the
+    // server is needed for the new replacement anyway, so this rarely waits (review M130).
+    const earlier = await revokeReplacedCredentialRuntime(deps);
+    if (earlier === 'cancelled') return { kind: 'cancelled' };
+    if (earlier === 'pending') return { kind: 'retry', stage: 'previous-revocation' };
+  }
   if (!deps.beginExclusiveTransition()) return { kind: 'busy' };
   if (!deps.isCurrent()) return { kind: 'cancelled' };
 
@@ -483,35 +638,17 @@ export async function discardCredentialUpgradeCandidateRuntime(
   if (!(await rereadExactJournal(deps, snapshot.resolution.journal))) {
     return { kind: 'cancelled' };
   }
-  try {
-    await deps.revokeCandidate(
-      snapshot.resolution.journal.origin,
-      snapshot.resolution.journal.candidateCredential,
-    );
-  } catch (error) {
-    if (!(error instanceof ApiError && error.status === 401)) {
-      return deps.isCurrent()
-        ? { kind: 'retry', stage: 'candidate-revocation' }
-        : { kind: 'cancelled' };
-    }
-    // A revoked or mistyped bearer cannot call revoke-self. Only an independent 401 from the
-    // candidate-authenticated info endpoint proves it has no remaining authority; any reachable
-    // valid bearer or uncertain result keeps its only local custody for another revocation attempt.
-    try {
-      await deps.fetchCandidateServerInfo(
-        snapshot.resolution.journal.origin,
-        snapshot.resolution.journal.candidateCredential,
-      );
-      return deps.isCurrent()
-        ? { kind: 'retry', stage: 'candidate-revocation' }
-        : { kind: 'cancelled' };
-    } catch (validationError) {
-      if (!(validationError instanceof ApiError && validationError.status === 401)) {
-        return deps.isCurrent()
-          ? { kind: 'retry', stage: 'candidate-revocation' }
-          : { kind: 'cancelled' };
-      }
-    }
+  const { origin, candidateCredential } = snapshot.resolution.journal;
+  const revoked = await revokeExactBearer(
+    deps,
+    () => deps.revokeCandidate(origin, candidateCredential),
+    origin,
+    candidateCredential,
+  );
+  if (revoked !== 'revoked') {
+    return deps.isCurrent()
+      ? { kind: 'retry', stage: 'candidate-revocation' }
+      : { kind: 'cancelled' };
   }
   if (!deps.isCurrent()) return { kind: 'cancelled' };
   if (!(await rereadExactJournal(deps, snapshot.resolution.journal))) {

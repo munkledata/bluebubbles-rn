@@ -3,8 +3,11 @@ import {
   beginCredentialUpgradePushAdoption,
   createCredentialUpgradeCandidate,
   createCredentialReplacementCandidate,
+  createReplacedCredentialRecord,
   InMemoryVault,
   inspectCredentialUpgradeJournal,
+  inspectReplacedCredentialRecord,
+  serializeReplacedCredentialRecord,
   serializeCredentialUpgradeJournal,
   SERVER_SESSION_STATE,
   type CredentialUpgradeFcmRegistration,
@@ -18,6 +21,7 @@ import {
   beginCredentialReplacementRuntime,
   discardCredentialUpgradeCandidateRuntime,
   resumeCredentialUpgradeRuntime,
+  revokeReplacedCredentialRuntime,
   type CredentialUpgradeRuntimeDependencies,
 } from '@/services/credentialUpgradeRuntime';
 
@@ -53,12 +57,15 @@ class RecordingVault extends InMemoryVault {
       );
     } else if (key === 'serverPassword') {
       this.events.push('main-credential');
+    } else if (key === 'replacedServerCredential') {
+      this.events.push('replaced:record');
     }
     await super.set(key, value);
   }
 
   override async delete(key: SecretKey): Promise<void> {
     if (key === 'serverCredentialUpgrade') this.events.push('journal:delete');
+    if (key === 'replacedServerCredential') this.events.push('replaced:delete');
     await super.delete(key);
   }
 }
@@ -113,6 +120,13 @@ function dependencies(
     },
     revokeCandidate: async () => {
       vault.events.push('server:revoke-candidate');
+    },
+    releasePreviousPushTarget: async () => {
+      vault.events.push('server:release-previous-push');
+      return 'released';
+    },
+    revokePreviousCredential: async () => {
+      vault.events.push('server:revoke-previous');
     },
     publishCredential: () => {
       vault.events.push('live:publish');
@@ -325,17 +339,25 @@ describe('scoped credential upgrade runtime', () => {
     expect(await validVault.get('serverCredentialUpgrade')).not.toBeNull();
   });
 
-  it('replaces a scoped credential in place after exact V3 adoption without revoking the old bearer', async () => {
+  it('replaces a scoped credential and keeps custody of the old bearer for revocation (M130)', async () => {
     const vault = await activeVault(PREVIOUS_SCOPED);
+    const revokePreviousCredential = jest.fn(async () => undefined);
 
     await expect(
-      beginCredentialReplacementRuntime(CANDIDATE, dependencies(vault)),
-    ).resolves.toEqual({
-      kind: 'adopted',
-    });
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, { revokePreviousCredential }),
+      ),
+    ).resolves.toEqual({ kind: 'adopted' });
 
     expect(await vault.get('serverPassword')).toBe(CANDIDATE);
     expect(await vault.get('serverCredentialUpgrade')).toBeNull();
+    // The caller revokes the old bearer next, once the new credential is live.
+    expect(revokePreviousCredential).not.toHaveBeenCalled();
+    expect(inspectReplacedCredentialRecord(await vault.get('replacedServerCredential'))).toEqual({
+      kind: 'valid',
+      record: { version: 1, origin: ORIGIN, credential: PREVIOUS_SCOPED },
+    });
     expect(vault.events).toEqual([
       'exclusive',
       'journal:candidate',
@@ -348,18 +370,23 @@ describe('scoped credential upgrade runtime', () => {
       'journal:adopted',
       'fcm:verify',
       'main-credential',
+      // Custody of the old bearer moves to its own record before the journal goes away.
+      'replaced:record',
       'journal:delete',
       'live:publish',
     ]);
     expect(vault.events).not.toContain('server:revoke-candidate');
   });
-
-  it('keeps a V2 scoped replacement recoverable when push adoption conflicts', async () => {
+  it('keeps a V2 scoped replacement recoverable when the old push row cannot be freed', async () => {
     const vault = await activeVault(PREVIOUS_SCOPED);
     await expect(
       beginCredentialReplacementRuntime(
         CANDIDATE,
         dependencies(vault, {
+          releasePreviousPushTarget: async () => {
+            vault.events.push('server:release-refused');
+            return 'refused';
+          },
           registerV3: async () => {
             vault.events.push('server:adoption-conflict');
             throw ApiError.fromStatus(
@@ -387,6 +414,7 @@ describe('scoped credential upgrade runtime', () => {
       },
     });
     expect(vault.events).not.toContain('server:revoke-candidate');
+    expect(vault.events).not.toContain('server:revoke-previous');
 
     vault.events.length = 0;
     await expect(resumeCredentialUpgradeRuntime(dependencies(vault))).resolves.toEqual({
@@ -417,5 +445,204 @@ describe('scoped credential upgrade runtime', () => {
       beginCredentialReplacementRuntime(PREVIOUS_SCOPED, dependencies(scopedVault)),
     ).resolves.toEqual({ kind: 'quarantined', reason: 'invalid-candidate' });
     expect(scopedVault.events).toEqual([]);
+  });
+});
+
+describe('replaced scoped credential (M130)', () => {
+  const OLDER_SCOPED = `bbd_device_v1_${'C'.repeat(43)}`;
+  const conflict = (): ApiError =>
+    ApiError.fromStatus(409, 'device target already owned', undefined, 'device_target_owned');
+  const unauthorized = (): ApiError => ApiError.fromStatus(401, 'invalid credential');
+
+  async function withRecord(main: string, recorded: string): Promise<RecordingVault> {
+    const vault = await activeVault(main);
+    await vault.set(
+      'replacedServerCredential',
+      serializeReplacedCredentialRecord(createReplacedCredentialRecord(ORIGIN, recorded)),
+    );
+    vault.events.length = 0;
+    return vault;
+  }
+
+  it('frees the old push row with the old credential, then registers once more', async () => {
+    const vault = await activeVault(PREVIOUS_SCOPED);
+    const releasePreviousPushTarget = jest.fn(async () => {
+      vault.events.push('server:release-previous-push');
+      return 'released' as const;
+    });
+    let attempts = 0;
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, {
+          releasePreviousPushTarget,
+          registerV3: async () => {
+            attempts += 1;
+            vault.events.push(attempts === 1 ? 'server:adoption-conflict' : 'server:adopt');
+            if (attempts === 1) throw conflict();
+            return ACK;
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'adopted' });
+
+    expect(releasePreviousPushTarget).toHaveBeenCalledWith(ORIGIN, PREVIOUS_SCOPED);
+    expect(vault.events.slice(5, 9)).toEqual([
+      'fcm:pending',
+      'server:adoption-conflict',
+      'server:release-previous-push',
+      'server:adopt',
+    ]);
+    expect(await vault.get('serverPassword')).toBe(CANDIDATE);
+  });
+
+  it('retries the adoption later when freeing the old push row fails for now', async () => {
+    const vault = await activeVault(PREVIOUS_SCOPED);
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, {
+          releasePreviousPushTarget: async () => {
+            throw new Error('network down');
+          },
+          registerV3: async () => {
+            throw conflict();
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'retry', stage: 'adoption' });
+    expect(await vault.get('serverPassword')).toBe(PREVIOUS_SCOPED);
+    expect(
+      inspectCredentialUpgradeJournal(await vault.get('serverCredentialUpgrade')),
+    ).toMatchObject({ kind: 'valid', journal: { phase: 'adopting' } });
+  });
+
+  it('reports a push target still owned after the old row was freed as blocked', async () => {
+    const vault = await activeVault(PREVIOUS_SCOPED);
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, {
+          registerV3: async () => {
+            throw conflict();
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'blocked', reason: 'push-target-owned' });
+    expect(await vault.get('serverPassword')).toBe(PREVIOUS_SCOPED);
+  });
+
+  it('keeps custody of the old bearer while its revocation fails, and finishes it later', async () => {
+    const vault = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
+    await expect(
+      revokeReplacedCredentialRuntime(
+        dependencies(vault, {
+          revokePreviousCredential: async () => {
+            throw new Error('Mac unreachable');
+          },
+        }),
+      ),
+    ).resolves.toBe('pending');
+    expect(inspectReplacedCredentialRecord(await vault.get('replacedServerCredential'))).toEqual({
+      kind: 'valid',
+      record: { version: 1, origin: ORIGIN, credential: PREVIOUS_SCOPED },
+    });
+
+    vault.events.length = 0;
+    await expect(revokeReplacedCredentialRuntime(dependencies(vault))).resolves.toBe('revoked');
+    expect(vault.events).toEqual(['server:revoke-previous', 'replaced:delete']);
+    expect(await vault.get('replacedServerCredential')).toBeNull();
+  });
+  it('counts a 401 as already revoked only when the info endpoint agrees', async () => {
+    const rejected = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
+    await expect(
+      revokeReplacedCredentialRuntime(
+        dependencies(rejected, {
+          revokePreviousCredential: async () => {
+            throw unauthorized();
+          },
+          fetchCandidateServerInfo: async () => {
+            throw unauthorized();
+          },
+        }),
+      ),
+    ).resolves.toBe('revoked');
+    expect(await rejected.get('replacedServerCredential')).toBeNull();
+
+    const stillValid = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
+    const fetchCandidateServerInfo = jest.fn(async () => ({
+      server_version: '2.0.0',
+      supports_scoped_device_credentials: true,
+      supports_fcm_push_encryption_v3: true,
+    }));
+    await expect(
+      revokeReplacedCredentialRuntime(
+        dependencies(stillValid, {
+          revokePreviousCredential: async () => {
+            throw unauthorized();
+          },
+          fetchCandidateServerInfo,
+        }),
+      ),
+    ).resolves.toBe('pending');
+    expect(fetchCandidateServerInfo).toHaveBeenCalledWith(ORIGIN, PREVIOUS_SCOPED);
+    expect(await stillValid.get('replacedServerCredential')).not.toBeNull();
+  });
+
+  it('finishes an earlier pending revocation before starting another replacement', async () => {
+    const vault = await withRecord(PREVIOUS_SCOPED, OLDER_SCOPED);
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, {
+          revokePreviousCredential: async () => {
+            throw new Error('Mac unreachable');
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'retry', stage: 'previous-revocation' });
+    expect(await vault.get('serverCredentialUpgrade')).toBeNull();
+    expect(await vault.get('serverPassword')).toBe(PREVIOUS_SCOPED);
+
+    const revokePreviousCredential = jest.fn(async () => undefined);
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, { revokePreviousCredential }),
+      ),
+    ).resolves.toEqual({ kind: 'adopted' });
+    expect(revokePreviousCredential.mock.calls).toEqual([[ORIGIN, OLDER_SCOPED]]);
+    expect(await vault.get('serverPassword')).toBe(CANDIDATE);
+    // Custody now holds the bearer this replacement retired, for the caller to revoke next.
+    expect(
+      inspectReplacedCredentialRecord(await vault.get('replacedServerCredential')),
+    ).toMatchObject({ kind: 'valid', record: { credential: PREVIOUS_SCOPED } });
+  });
+
+  it('never revokes the live credential and drops a record that names it', async () => {
+    const vault = await withRecord(CANDIDATE, CANDIDATE);
+    const revokePreviousCredential = jest.fn(async () => undefined);
+    await expect(
+      revokeReplacedCredentialRuntime(dependencies(vault, { revokePreviousCredential })),
+    ).resolves.toBe('none');
+    expect(revokePreviousCredential).not.toHaveBeenCalled();
+    expect(await vault.get('replacedServerCredential')).toBeNull();
+  });
+
+  it('drops an unreadable record without revoking anything', async () => {
+    const vault = await activeVault(CANDIDATE);
+    await vault.set('replacedServerCredential', '{"version":1}');
+    const revokePreviousCredential = jest.fn(async () => undefined);
+    await expect(
+      revokeReplacedCredentialRuntime(dependencies(vault, { revokePreviousCredential })),
+    ).resolves.toBe('none');
+    expect(revokePreviousCredential).not.toHaveBeenCalled();
+    expect(await vault.get('replacedServerCredential')).toBeNull();
+  });
+
+  it('does nothing when no credential is waiting', async () => {
+    const vault = await activeVault(CANDIDATE);
+    await expect(revokeReplacedCredentialRuntime(dependencies(vault))).resolves.toBe('none');
+    expect(vault.events).toEqual([]);
   });
 });

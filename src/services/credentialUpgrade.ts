@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { Platform } from 'react-native';
 import { deviceCredentialsApi, fcmApi, serverApi } from '@core/api';
+import { ApiError } from '@core/api/errors';
 import {
   activeFcmDeviceEncryptionV3State,
   encodeFcmDeviceEncryptionKey,
@@ -22,12 +23,14 @@ import {
   beginCredentialUpgradeRuntime,
   discardCredentialUpgradeCandidateRuntime,
   resumeCredentialUpgradeRuntime,
+  revokeReplacedCredentialRuntime,
   type CredentialUpgradeRuntimeDependencies,
   type CredentialUpgradeRuntimeOutcome,
 } from './credentialUpgradeRuntime';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
+  type RealtimeDeliveryLease,
 } from './realtime/deliveryCoordinator';
 import {
   pauseRealtimeForCredentialUpgrade,
@@ -41,7 +44,8 @@ import {
 import { runSerializedFcmRegistration } from './notifications/fcmRegistrationCoordinator';
 
 const DEVICE_NAME = `Gator (Android ${Platform.Version})`;
-const CANDIDATE_REVOCATION_DEADLINE_MS = 5_000;
+/** Each request made with a bearer that is not the live session's gives up after this long. */
+const SCOPED_BEARER_REQUEST_DEADLINE_MS = 5_000;
 
 interface LiveUpgradeSession {
   readonly epoch: number;
@@ -270,18 +274,52 @@ function createRuntimeDependencies(
         stored.state.principalId === ack.pushEncryptionIdentity.principalId
       );
     },
-    revokeCandidate: async (origin, candidateCredential) => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), CANDIDATE_REVOCATION_DEADLINE_MS);
-      try {
-        await deviceCredentialsApi.revokeSelf(
+    revokeCandidate: (origin, candidateCredential) =>
+      withBearerDeadline((signal) =>
+        deviceCredentialsApi.revokeSelf(
           fixedCredentialClient(origin, candidateCredential, isCurrent),
-          controller.signal,
+          signal,
+        ),
+      ).then(() => undefined),
+    releasePreviousPushTarget: async (origin, previousCredential) => {
+      const stored = await readFcmDeviceEncryptionState(vault);
+      if (!isCurrent()) throw new Error('credential upgrade was cancelled');
+      // The replaced bearer's own push row is the active V3 binding it registered. The server lets
+      // it remove only that row; anything else needs the owner (review M130).
+      const state = stored.kind === 'valid' ? stored.state : null;
+      if (
+        !state ||
+        state.encryptionType !== FCM_PUSH_ENCRYPTION_TYPE_V3 ||
+        !('deviceId' in state) ||
+        state.origin !== origin
+      ) {
+        return 'refused';
+      }
+      try {
+        await withBearerDeadline((signal) =>
+          fcmApi.removeDevice(
+            fixedCredentialClient(origin, previousCredential, isCurrent),
+            state.deviceId,
+            signal,
+          ),
         );
-      } finally {
-        clearTimeout(timeout);
+        return 'released';
+      } catch (error) {
+        // Already gone counts as freed: the next registration attempt decides the rest.
+        if (error instanceof ApiError && error.status === 404) return 'released';
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+          return 'refused';
+        }
+        throw error;
       }
     },
+    revokePreviousCredential: (origin, previousCredential) =>
+      withBearerDeadline((signal) =>
+        deviceCredentialsApi.revokeSelf(
+          fixedCredentialClient(origin, previousCredential, isCurrent),
+          signal,
+        ),
+      ).then(() => undefined),
     publishCredential: (previousCredential, candidateCredential) => {
       const current = useSessionStore.getState();
       if (
@@ -301,6 +339,75 @@ function createRuntimeDependencies(
       );
     },
   };
+}
+
+async function withBearerDeadline<T>(request: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SCOPED_BEARER_REQUEST_DEADLINE_MS);
+  try {
+    return await request(controller.signal);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Once a replacement's new credential is live, revoke the one it replaced (review M130). This runs
+ * against the new live session, so an interruption leaves the revocation pending, never the live
+ * session on a revoked bearer. A legacy upgrade records nothing, so it passes straight through.
+ */
+async function revokeReplacedAfterPromotion(
+  outcome: CredentialUpgradeRuntimeOutcome,
+  lease: RealtimeDeliveryLease,
+): Promise<CredentialUpgradeRuntimeOutcome> {
+  const promoted = captureLiveUpgradeSession();
+  if (!promoted) {
+    // No live session to act for right now: a recorded old bearer is retried on the next reconnect.
+    const recorded = await vault.get('replacedServerCredential').then(
+      (value) => value !== null,
+      () => true,
+    );
+    return recorded ? { kind: 'adopted-revocation-pending' } : outcome;
+  }
+  const isCurrent = (): boolean => lease.isCurrent() && sameLiveUpgradeSession(promoted);
+  const revocation = await revokeReplacedCredentialRuntime(
+    createRuntimeDependencies(promoted, isCurrent, () => undefined),
+  );
+  return revocation === 'pending' || revocation === 'cancelled'
+    ? { kind: 'adopted-revocation-pending' }
+    : outcome;
+}
+
+let replacedRevocationInFlight: Promise<void> | null = null;
+
+/**
+ * Retry revoking a replaced bearer after an ordinary reconnect, without holding up realtime
+ * startup (review M130). Tracked like other account work, so Disconnect waits for it.
+ */
+function revokeReplacedCredentialInBackground(): void {
+  if (replacedRevocationInFlight) return;
+  const session = captureLiveUpgradeSession();
+  if (!session) return;
+  const lease = captureRealtimeDeliveryLease();
+  if (!lease.isCurrent()) return;
+  const isCurrent = (): boolean => lease.isCurrent() && sameLiveUpgradeSession(session);
+  const deps = createRuntimeDependencies(session, isCurrent, () => undefined);
+  const attempt = (async (): Promise<void> => {
+    try {
+      await runTrackedRealtimeWork(lease, async () => {
+        await revokeReplacedCredentialRuntime(deps);
+      });
+    } catch (error) {
+      logger.warn('[credential-upgrade] replaced credential revocation attempt failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+  })();
+  replacedRevocationInFlight = attempt;
+  const clear = (): void => {
+    if (replacedRevocationInFlight === attempt) replacedRevocationInFlight = null;
+  };
+  void attempt.then(clear, clear);
 }
 
 function runCredentialUpgrade(
@@ -339,6 +446,9 @@ function runCredentialUpgrade(
                 : mode === 'resume'
                   ? await resumeCredentialUpgradeRuntime(deps)
                   : await discardCredentialUpgradeCandidateRuntime(deps);
+          if (outcome.kind === 'adopted' || outcome.kind === 'adopted-cleanup-pending') {
+            outcome = await revokeReplacedAfterPromotion(outcome, lease);
+          }
         }),
       );
       if (tracked === 'paused') outcome = { kind: 'cancelled' };
@@ -368,6 +478,12 @@ function runCredentialUpgrade(
     if (credentialUpgradeInFlight === operation) credentialUpgradeInFlight = null;
   };
   void operation.then(clear, clear);
+  if (mode === 'resume') {
+    // Only after an idle resume: a resumed promotion has just tried the revocation itself.
+    void operation.then((outcome) => {
+      if (outcome.kind === 'idle') revokeReplacedCredentialInBackground();
+    });
+  }
   return operation;
 }
 

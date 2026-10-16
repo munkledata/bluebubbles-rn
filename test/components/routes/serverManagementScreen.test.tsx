@@ -509,7 +509,7 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(mockQrCode).not.toHaveBeenCalled();
   });
 
-  it('replaces a scoped credential without a QR or automatic old-credential revocation', async () => {
+  it('replaces a scoped credential without a QR and says the old one was revoked (M130)', async () => {
     useSessionStore.setState({
       origin: PRIVATE_ORIGIN,
       password: PRIVATE_SCOPED_CREDENTIAL,
@@ -532,8 +532,41 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(screen.queryByTestId('device-credential-modal')).toBeNull();
     expect(useDialogStore.getState().current).toMatchObject({
       title: 'Credential replaced',
-      message: expect.stringContaining('old credential was not revoked automatically'),
+      message: expect.stringContaining('the old credential has been revoked'),
     });
+  });
+
+  async function replaceWith(outcome: object): Promise<string> {
+    useSessionStore.setState({
+      origin: PRIVATE_ORIGIN,
+      password: PRIVATE_SCOPED_CREDENTIAL,
+      serverInfo: null,
+    });
+    mockInfo.mockResolvedValue({ ...PRIVATE_INFO, supports_scoped_device_credentials: true });
+    mockBeginScopedCredentialReplacement.mockResolvedValue(outcome);
+    await renderScreen();
+    await fireEvent.press(screen.getByRole('button', { name: 'Replace Device Credential' }));
+    const newCredential = `bbd_device_v1_${'n'.repeat(43)}`;
+    await fireEvent.changeText(screen.getByLabelText('Paired-client credential'), newCredential);
+    await fireEvent.press(screen.getByRole('button', { name: 'Use New Credential' }));
+    return newCredential;
+  }
+
+  it('says when the old credential will be revoked once the Mac is reachable (M130)', async () => {
+    await replaceWith({ kind: 'adopted-revocation-pending' });
+    await waitFor(() =>
+      expect(useDialogStore.getState().current).toMatchObject({
+        title: 'Credential replaced',
+        message: expect.stringContaining('revoke the old credential automatically'),
+      }),
+    );
+  });
+
+  it('keeps the entry while an earlier replacement still revokes its old credential (M130)', async () => {
+    const newCredential = await replaceWith({ kind: 'retry', stage: 'previous-revocation' });
+    expect(await screen.findByText(/previous replacement is still revoking/)).toBeTruthy();
+    expect(screen.getByLabelText('Paired-client credential').props.value).toBe(newCredential);
+    expect(screen.getByLabelText('Paired-client credential').props.editable).toBe(true);
   });
 
   it('keeps an unconfirmed replacement entry available to retry', async () => {
@@ -619,7 +652,7 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
       `bbd_device_v1_${'n'.repeat(43)}`,
     );
     await fireEvent.press(screen.getByRole('button', { name: 'Use New Credential' }));
-    expect(await screen.findByText(/push target assigned to another credential/)).toBeTruthy();
+    expect(await screen.findByText(/could not move this phone’s notifications/)).toBeTruthy();
     expect(await screen.findByText(/remove only the old notification registration/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Revoke and Remove Credential' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Revoke and Remove Replacement' })).toBeNull();

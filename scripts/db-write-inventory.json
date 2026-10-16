@@ -407,7 +407,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.confirmDiscardCredential.onConfirm:mutator-call:ffe1420d9aaf",
       "path": "app/(app)/server-management.tsx",
-      "line": 510,
+      "line": 523,
       "symbol": "ServerManagementScreen.confirmDiscardCredential.onConfirm",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential",
@@ -420,7 +420,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796",
       "path": "app/(app)/server-management.tsx",
-      "line": 518,
+      "line": 531,
       "symbol": "ServerManagementScreen.onDiscardCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate",
@@ -433,7 +433,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.<callback:7bf4151522>:mutator-call:6b73b09a1510",
       "path": "app/(app)/server-management.tsx",
-      "line": 884,
+      "line": 897,
       "symbol": "ServerManagementScreen.<callback:7bf4151522>",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential",
@@ -15656,7 +15656,7 @@
     {
       "id": "src/services/bootstrap.ts#inspectForegroundBootSession:mutator-call:106ee7ea858e",
       "path": "src/services/bootstrap.ts",
-      "line": 405,
+      "line": 406,
       "symbol": "inspectForegroundBootSession",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -15669,7 +15669,7 @@
     {
       "id": "src/services/bootstrap.ts#openForegroundBootDatabase:mutator-call:aa0271b15f39",
       "path": "src/services/bootstrap.ts",
-      "line": 433,
+      "line": 434,
       "symbol": "openForegroundBootDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -15682,7 +15682,7 @@
     {
       "id": "src/services/bootstrap.ts#activateForegroundBootSession:mutator-call:8f03db7d6c0e",
       "path": "src/services/bootstrap.ts",
-      "line": 601,
+      "line": 602,
       "symbol": "activateForegroundBootSession",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#resumeChatPurges",
@@ -15695,7 +15695,7 @@
     {
       "id": "src/services/bootstrap.ts#activateForegroundBootSession:mutator-call:f0181c470642",
       "path": "src/services/bootstrap.ts",
-      "line": 630,
+      "line": 631,
       "symbol": "activateForegroundBootSession",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -15708,7 +15708,7 @@
     {
       "id": "src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:21c31fa08724",
       "path": "src/services/bootstrap.ts",
-      "line": 713,
+      "line": 714,
       "symbol": "prepareCandidateConnection",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -15721,7 +15721,7 @@
     {
       "id": "src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:a35e092f20bd",
       "path": "src/services/bootstrap.ts",
-      "line": 718,
+      "line": 719,
       "symbol": "prepareCandidateConnection",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#prepareCandidateConnection",
@@ -15734,7 +15734,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:0215e207799e",
       "path": "src/services/bootstrap.ts",
-      "line": 816,
+      "line": 817,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#prepareCandidateConnection",
@@ -15747,7 +15747,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:f72fb8307767",
       "path": "src/services/bootstrap.ts",
-      "line": 914,
+      "line": 915,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -15760,7 +15760,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:e75fcdcefedc",
       "path": "src/services/bootstrap.ts",
-      "line": 996,
+      "line": 997,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -15773,7 +15773,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:bd0a1be3afa9",
       "path": "src/services/bootstrap.ts",
-      "line": 1207,
+      "line": 1225,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -15786,7 +15786,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:9c87d79ec275",
       "path": "src/services/bootstrap.ts",
-      "line": 1248,
+      "line": 1266,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#wipeLocalCache",
@@ -15799,7 +15799,7 @@
     {
       "id": "src/services/bootstrap.ts#runForget:mutator-call:8d5a9e357850",
       "path": "src/services/bootstrap.ts",
-      "line": 1663,
+      "line": 1681,
       "symbol": "runForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#cleanupAccountDatabase",
@@ -15812,7 +15812,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829",
       "path": "src/services/bootstrap.ts",
-      "line": 1790,
+      "line": 1808,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#clearLocalCache",
@@ -15825,7 +15825,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e",
       "path": "src/services/bootstrap.ts",
-      "line": 1794,
+      "line": 1812,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#localCacheDirty",
@@ -15838,7 +15838,7 @@
     {
       "id": "src/services/bootstrap.ts#startForget:mutator-call:56e44cd9d18f",
       "path": "src/services/bootstrap.ts",
-      "line": 1889,
+      "line": 1907,
       "symbol": "startForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runForget",
@@ -15851,7 +15851,7 @@
     {
       "id": "src/services/bootstrap.ts#forget:mutator-call:fde5b98b6a5c",
       "path": "src/services/bootstrap.ts",
-      "line": 1899,
+      "line": 1917,
       "symbol": "forget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -15864,7 +15864,7 @@
     {
       "id": "src/services/bootstrap.ts#forgetOnThisPhoneOnly:mutator-call:aa633e0b631a",
       "path": "src/services/bootstrap.ts",
-      "line": 1912,
+      "line": 1930,
       "symbol": "forgetOnThisPhoneOnly",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -15877,7 +15877,7 @@
     {
       "id": "src/services/bootstrap.ts#runOrAwaitForget:mutator-call:a0e09cd34906",
       "path": "src/services/bootstrap.ts",
-      "line": 1935,
+      "line": 1953,
       "symbol": "runOrAwaitForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -16915,12 +16915,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/serverAvatars.test.ts"
     },
     {
-      "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:b60b6329bbde",
+      "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:bf13093c9436",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 330,
+      "line": 437,
       "symbol": "runCredentialUpgrade",
       "operation": "mutator-call",
-      "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:0137fa13cb>",
+      "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:2bf8034a53>",
       "detectedContext": "coordinated-delegation",
       "owner": "runCredentialUpgrade",
       "transactionContext": "coordinated-delegation",
@@ -16928,10 +16928,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/secure/credentialUpgrade.test.ts; test/services/credentialUpgradeRuntime.test.ts; test/services/credentialUpgradeSingleFlight.test.ts; test/services/realtimePrerequisiteRecovery.test.ts"
     },
     {
-      "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:0137fa13cb>:mutator-call:54b86789cdbd",
+      "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:2bf8034a53>:mutator-call:9d767b824bbf",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 356,
-      "symbol": "runCredentialUpgrade.<callback:0137fa13cb>",
+      "line": 466,
+      "symbol": "runCredentialUpgrade.<callback:2bf8034a53>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade",
       "detectedContext": "coordinated-delegation",
@@ -16943,7 +16943,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade:mutator-call:9eca083a6ce1",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 378,
+      "line": 494,
       "symbol": "beginScopedCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16956,7 +16956,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#beginScopedCredentialReplacement:mutator-call:ec167bc062b1",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 385,
+      "line": 501,
       "symbol": "beginScopedCredentialReplacement",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16969,7 +16969,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#resumeScopedCredentialUpgrade:mutator-call:1fdf0f274b9d",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 392,
+      "line": 508,
       "symbol": "resumeScopedCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16982,7 +16982,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate:mutator-call:ab2e71099acf",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 397,
+      "line": 513,
       "symbol": "discardScopedCredentialUpgradeCandidate",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",

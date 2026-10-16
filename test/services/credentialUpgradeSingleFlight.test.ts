@@ -2,12 +2,14 @@ const mockBeginCredentialUpgradeRuntime = jest.fn();
 const mockBeginCredentialReplacementRuntime = jest.fn();
 const mockResumeCredentialUpgradeRuntime = jest.fn();
 const mockDiscardCredentialUpgradeCandidateRuntime = jest.fn();
+const mockRevokeReplacedCredentialRuntime = jest.fn();
 const mockRunTrackedRealtimeWork = jest.fn();
 const mockRunSerializedFcmRegistration = jest.fn();
 const mockPauseRealtimeForCredentialUpgrade = jest.fn();
 const mockResumeRealtimeAfterCredentialUpgrade = jest.fn(async () => undefined);
 const mockRevokeSelf = jest.fn();
 const mockRegisterDevice = jest.fn();
+const mockRemoveDevice = jest.fn();
 const mockFixedCredentialClient = jest.fn(() => ({ kind: 'fixed-candidate-client' }));
 const mockLease = {
   generation: 47,
@@ -30,7 +32,7 @@ const mockVault = {
 jest.mock('react-native', () => ({ Platform: { Version: 36 } }));
 jest.mock('@core/api', () => ({
   deviceCredentialsApi: { revokeSelf: mockRevokeSelf },
-  fcmApi: { registerDevice: mockRegisterDevice },
+  fcmApi: { registerDevice: mockRegisterDevice, removeDevice: mockRemoveDevice },
   serverApi: { serverInfo: jest.fn() },
 }));
 jest.mock('@state/sessionStore', () => ({
@@ -45,6 +47,7 @@ jest.mock('@/services/credentialUpgradeRuntime', () => ({
   beginCredentialReplacementRuntime: mockBeginCredentialReplacementRuntime,
   resumeCredentialUpgradeRuntime: mockResumeCredentialUpgradeRuntime,
   discardCredentialUpgradeCandidateRuntime: mockDiscardCredentialUpgradeCandidateRuntime,
+  revokeReplacedCredentialRuntime: mockRevokeReplacedCredentialRuntime,
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => mockLease,
@@ -72,7 +75,11 @@ jest.mock('@/services/notifications/fcmRegistrationCoordinator', () => ({
 // eslint-disable-next-line import/first
 import { ApiError } from '@core/api/errors';
 // eslint-disable-next-line import/first
-import { FCM_PUSH_ENCRYPTION_TYPE_V3, revokedFcmDeviceEncryptionState } from '@core/realtime';
+import {
+  activeFcmDeviceEncryptionV3State,
+  FCM_PUSH_ENCRYPTION_TYPE_V3,
+  revokedFcmDeviceEncryptionState,
+} from '@core/realtime';
 // eslint-disable-next-line import/first
 import {
   readFcmDeviceEncryptionState,
@@ -118,6 +125,8 @@ beforeEach(() => {
   mockBeginCredentialReplacementRuntime.mockResolvedValue({ kind: 'adopted' });
   mockResumeCredentialUpgradeRuntime.mockResolvedValue({ kind: 'idle' });
   mockDiscardCredentialUpgradeCandidateRuntime.mockResolvedValue({ kind: 'discarded' });
+  mockRevokeReplacedCredentialRuntime.mockReset().mockResolvedValue('none');
+  mockRemoveDevice.mockReset().mockResolvedValue(undefined);
   mockResumeRealtimeAfterCredentialUpgrade.mockResolvedValue(undefined);
   mockRevokeSelf.mockReset();
   mockRegisterDevice.mockReset();
@@ -208,7 +217,7 @@ it('joins an in-flight resume while begin and discard remain busy', async () => 
   await settle();
 });
 
-it('routes a scoped replacement through the same serialized transition without revoking the old token', async () => {
+it('routes a scoped replacement through the serialized transition; only the runtime revokes', async () => {
   const candidate = `bbd_device_v1_${'R'.repeat(43)}`;
   mockBeginCredentialReplacementRuntime.mockImplementationOnce(
     async (_candidate: string, dependencies: { beginExclusiveTransition(): boolean }) => {
@@ -375,4 +384,146 @@ it('replays a saved adoption whose device name predates an Android update (M128)
     'fcm-token',
     journaled.pushEncryption,
   );
+});
+
+describe('replaced-credential wiring (M130)', () => {
+  const OLD = `bbd_device_v1_${'O'.repeat(43)}`;
+  const KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+  const identity = {
+    serverInstallationId: '11111111-1111-4111-8111-111111111111',
+    principalId: '22222222-2222-4222-8222-222222222222',
+    deviceId: '33333333-3333-4333-8333-333333333333',
+  } as const;
+
+  type ReplacementDeps = {
+    releasePreviousPushTarget(origin: string, previous: string): Promise<'released' | 'refused'>;
+    revokePreviousCredential(origin: string, previous: string): Promise<void>;
+  };
+
+  /** Run one replacement whose runtime only hands its real dependencies to `use`. */
+  async function withReplacementDeps(use: (deps: ReplacementDeps) => Promise<void>): Promise<void> {
+    mockBeginCredentialReplacementRuntime.mockImplementationOnce(
+      async (_candidate: string, deps: ReplacementDeps) => {
+        await use(deps);
+        return { kind: 'adopted' as const };
+      },
+    );
+    await expect(
+      beginScopedCredentialReplacement(`bbd_device_v1_${'N'.repeat(43)}`),
+    ).resolves.toEqual({ kind: 'adopted' });
+  }
+
+  function storeActiveV3(origin = mockSession.origin): void {
+    jest.mocked(readFcmDeviceEncryptionState).mockResolvedValue({
+      kind: 'valid',
+      state: activeFcmDeviceEncryptionV3State(KEY, identity, origin),
+    });
+  }
+
+  it('frees only the replaced bearer’s own push row, through that bearer', async () => {
+    storeActiveV3();
+    await withReplacementDeps(async (deps) => {
+      await expect(deps.releasePreviousPushTarget(mockSession.origin, OLD)).resolves.toBe(
+        'released',
+      );
+    });
+    expect(mockFixedCredentialClient).toHaveBeenCalledWith(
+      mockSession.origin,
+      OLD,
+      expect.any(Function),
+    );
+    expect(mockRemoveDevice).toHaveBeenCalledWith(
+      { kind: 'fixed-candidate-client' },
+      identity.deviceId,
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('maps the server’s answers: gone is freed, forbidden is refused, a network error retries', async () => {
+    storeActiveV3();
+    await withReplacementDeps(async (deps) => {
+      mockRemoveDevice.mockRejectedValueOnce(ApiError.fromStatus(404, 'not found'));
+      await expect(deps.releasePreviousPushTarget(mockSession.origin, OLD)).resolves.toBe(
+        'released',
+      );
+      mockRemoveDevice.mockRejectedValueOnce(ApiError.fromStatus(403, 'self only'));
+      await expect(deps.releasePreviousPushTarget(mockSession.origin, OLD)).resolves.toBe(
+        'refused',
+      );
+      mockRemoveDevice.mockRejectedValueOnce(new Error('network down'));
+      await expect(deps.releasePreviousPushTarget(mockSession.origin, OLD)).rejects.toThrow(
+        'network down',
+      );
+    });
+  });
+
+  it('refuses without any server call when no active V3 row is stored for this server', async () => {
+    jest.mocked(readFcmDeviceEncryptionState).mockResolvedValue({
+      kind: 'valid',
+      state: revokedFcmDeviceEncryptionState(FCM_PUSH_ENCRYPTION_TYPE_V3),
+    });
+    await withReplacementDeps(async (deps) => {
+      await expect(deps.releasePreviousPushTarget(mockSession.origin, OLD)).resolves.toBe(
+        'refused',
+      );
+    });
+    storeActiveV3('https://other.example.test');
+    await withReplacementDeps(async (deps) => {
+      await expect(deps.releasePreviousPushTarget(mockSession.origin, OLD)).resolves.toBe(
+        'refused',
+      );
+    });
+    expect(mockRemoveDevice).not.toHaveBeenCalled();
+  });
+
+  it('revokes the replaced bearer through that bearer', async () => {
+    mockRevokeSelf.mockResolvedValueOnce({
+      revoked: true,
+      deviceId: identity.deviceId,
+      deviceRemoved: true,
+    });
+    await withReplacementDeps(async (deps) => {
+      await deps.revokePreviousCredential(mockSession.origin, OLD);
+    });
+    expect(mockFixedCredentialClient).toHaveBeenCalledWith(
+      mockSession.origin,
+      OLD,
+      expect.any(Function),
+    );
+    expect(mockRevokeSelf).toHaveBeenCalledWith(
+      { kind: 'fixed-candidate-client' },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('revokes the replaced bearer once the new credential is live, as pending when that fails', async () => {
+    mockRevokeReplacedCredentialRuntime.mockResolvedValueOnce('pending');
+    await expect(
+      beginScopedCredentialReplacement(`bbd_device_v1_${'N'.repeat(43)}`),
+    ).resolves.toEqual({ kind: 'adopted-revocation-pending' });
+    expect(mockRevokeReplacedCredentialRuntime.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockBeginCredentialReplacementRuntime.mock.invocationCallOrder[0]!,
+    );
+
+    mockRevokeReplacedCredentialRuntime.mockResolvedValueOnce('revoked');
+    await expect(
+      beginScopedCredentialReplacement(`bbd_device_v1_${'M'.repeat(43)}`),
+    ).resolves.toEqual({ kind: 'adopted' });
+  });
+
+  it('retries a pending revocation in the background only after an idle resume', async () => {
+    await expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).resolves.toEqual({
+      kind: 'idle',
+    });
+    await settle();
+    expect(mockRevokeReplacedCredentialRuntime).toHaveBeenCalledTimes(1);
+
+    // A resume that finishes a promotion revokes inline once and schedules nothing more.
+    mockResumeCredentialUpgradeRuntime.mockResolvedValueOnce({ kind: 'adopted' });
+    await expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).resolves.toEqual({
+      kind: 'adopted',
+    });
+    await settle();
+    expect(mockRevokeReplacedCredentialRuntime).toHaveBeenCalledTimes(2);
+  });
 });

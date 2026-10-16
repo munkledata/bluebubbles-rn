@@ -971,6 +971,13 @@ those rows is a current remediation or candidate requirement.
       active: this is a server sender-alias setting, not account switching and never a substitute
       for the A→Disconnect→B journey or `ALIAS-SEND-01`.
 
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Since review item M130, replacing this phone's
+      paired-client credential (Server Management → Replace Device Credential) frees the old
+      credential's notification registration and then revokes the old credential, with no Mac
+      dashboard step. Confirm the dialog says the old credential was revoked, the Mac dashboard no
+      longer lists it as active, and a new message still notifies. With the Mac unreachable at the
+      end, the dialog says revocation is pending and the old credential disappears after a reconnect.
+
 ### 7. Claims and cleanup boundaries
 
 | Claim or boundary                                             | Required evidence / current disposition                                                                                                                                                     |

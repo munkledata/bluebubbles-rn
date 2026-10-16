@@ -294,10 +294,12 @@ import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
 import {
   createCredentialUpgradeCandidate,
+  createReplacedCredentialRecord,
   ERROR_DIAGNOSTIC_SITES,
   logger,
   memoryLogSink,
   serializeCredentialUpgradeJournal,
+  serializeReplacedCredentialRecord,
   SERVER_SESSION_STATE,
 } from '@core/secure';
 import {
@@ -712,7 +714,14 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
       origin: null,
       password: null,
     });
-    expect(vaultGet).toHaveBeenCalledTimes(4);
+    // Only the custody the wipe must revoke or retire, including a replaced bearer (M130).
+    expect(vaultGet.mock.calls.map(([key]) => key)).toEqual([
+      'serverAddress',
+      'serverPassword',
+      'serverCredentialUpgrade',
+      'replacedServerCredential',
+      'serverCredentialUpgrade',
+    ]);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(startSync).not.toHaveBeenCalled();
     expect(startRealtime).not.toHaveBeenCalled();
@@ -2241,6 +2250,44 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(clearLocalCache).toHaveBeenCalledTimes(2);
   });
 
+  describe('a replaced credential still waiting for revocation (M130)', () => {
+    const live = `bbd_device_v1_${'N'.repeat(43)}`;
+    const replaced = `bbd_device_v1_${'P'.repeat(43)}`;
+
+    beforeEach(() => {
+      vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+      vaultValues.set('serverAddress', 'https://old.example');
+      vaultValues.set('serverPassword', live);
+      vaultValues.set(
+        'replacedServerCredential',
+        serializeReplacedCredentialRecord(
+          createReplacedCredentialRecord('https://old.example', replaced),
+        ),
+      );
+      useSessionStore.setState({
+        status: 'connected',
+        origin: 'https://old.example',
+        password: live,
+      });
+    });
+
+    it('is revoked by Disconnect like the live credential, then forgotten', async () => {
+      await expect(forget()).resolves.toBeUndefined();
+
+      expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', live);
+      expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', replaced);
+      expect(revokeSelf).toHaveBeenCalledTimes(2);
+      expect(vaultValues.has('replacedServerCredential')).toBe(false);
+    });
+
+    it('is forgotten without a server call when Disconnect runs on this phone only', async () => {
+      await expect(forgetOnThisPhoneOnly()).resolves.toBeUndefined();
+
+      expect(revokeSelf).not.toHaveBeenCalled();
+      expect(vaultValues.has('replacedServerCredential')).toBe(false);
+    });
+  });
+
   it('finishes Disconnect for a bearer the server proves dead with two independent 401s', async () => {
     const scopedCredential = `bbd_device_v1_${'D'.repeat(43)}`;
     vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
@@ -3183,7 +3230,11 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       'serverSessionState',
       SERVER_SESSION_STATE.forgotten,
     );
-    expect(vaultDelete).toHaveBeenCalledTimes(2);
+    expect(vaultDelete.mock.calls.map(([key]) => key)).toEqual([
+      'replacedServerCredential',
+      'serverAddress',
+      'serverPassword',
+    ]);
     expect(vaultValues.get('serverAddress')).toBe('https://old.example');
     expect(vaultValues.get('serverPassword')).toBe('hunter2');
     await expect(

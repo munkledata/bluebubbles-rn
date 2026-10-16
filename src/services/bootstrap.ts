@@ -6,6 +6,7 @@ import {
   CREDENTIAL_REMOVAL_FAILURE_MESSAGE,
   hasActiveServerSession,
   inspectCredentialUpgradeJournal,
+  inspectReplacedCredentialRecord,
   isScopedDeviceCredential,
   logger,
   memoryLogSink,
@@ -1035,10 +1036,11 @@ function liveScopedCredentialRevocationTarget(): ScopedCredentialRevocationTarge
 async function captureScopedCredentialRevocationTargets(
   liveTarget: ScopedCredentialRevocationTarget | null,
 ): Promise<ScopedCredentialRevocationSnapshot> {
-  const [storedOrigin, storedCredential, storedUpgrade] = await Promise.all([
+  const [storedOrigin, storedCredential, storedUpgrade, storedReplaced] = await Promise.all([
     vault.get('serverAddress'),
     vault.get('serverPassword'),
     vault.get('serverCredentialUpgrade'),
+    vault.get('replacedServerCredential'),
   ]);
   const targets: ScopedCredentialRevocationTarget[] = liveTarget ? [liveTarget] : [];
   const remember = (target: ScopedCredentialRevocationTarget): void => {
@@ -1060,6 +1062,11 @@ async function captureScopedCredentialRevocationTargets(
       credential: upgrade.journal.candidateCredential,
     });
   }
+  // A replacement's old bearer still awaiting revocation is revoked with the rest (review M130).
+  // An unreadable record names nothing that could be sent; it is simply removed afterwards.
+  const replaced = inspectReplacedCredentialRecord(storedReplaced);
+  if (replaced.kind === 'valid') remember(replaced.record);
+  if (replaced.kind === 'invalid') logger.warn('[forget] replaced-credential record is unreadable');
   const origin = strictServerOrigin(storedOrigin);
   // Deliberately accept an exact scoped tuple under `forgotten`: that is the retry custody left by
   // a prior network failure. Other non-active states are safe too because the independent/session
@@ -1076,6 +1083,16 @@ async function writeCredentialUpgradeRevokedTombstone(): Promise<void> {
   await vault.set('serverCredentialUpgrade', serialized);
   if ((await vault.get('serverCredentialUpgrade')) !== serialized) {
     throw new Error('credential-upgrade revocation tombstone was not confirmed');
+  }
+}
+
+/** Drop a replaced bearer's record once it is revoked or Disconnect waived the server step. */
+async function forgetReplacedServerCredential(): Promise<void> {
+  try {
+    await vault.delete('replacedServerCredential');
+  } catch (error) {
+    // Its bearer is already revoked or deliberately forgotten; a later attempt finds it dead.
+    logger.warn('[forget] replaced-credential record delete failed', error);
   }
 }
 
@@ -1190,6 +1207,7 @@ async function finishScopedCredentialRetirement(
     }
   }
   await writeCredentialUpgradeRevokedTombstone();
+  await forgetReplacedServerCredential();
   if (!credentialTupleWasPreserved) return;
   const removalFailure = await retireDurableCredentials(independentlyRevoked);
   if (removalFailure) throw removalFailure;

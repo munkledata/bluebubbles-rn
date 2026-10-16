@@ -1,4 +1,4 @@
-import { registerDevice } from '@core/api/endpoints/fcm';
+import { registerDevice, removeDevice } from '@core/api/endpoints/fcm';
 import type { HttpClient } from '@core/api/http';
 import { FCM_DEVICE_ENCRYPTION_TYPE, FCM_PUSH_ENCRYPTION_TYPE_V3 } from '@core/realtime';
 
@@ -153,5 +153,15 @@ describe('fcmApi.registerDevice', () => {
       }),
     ).rejects.toThrow('invalid FCM device encryption key');
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe('fcmApi.removeDevice', () => {
+  it('DELETEs exactly one device row by its encoded id (M130)', async () => {
+    const del = jest.fn((..._a: unknown[]) => Promise.resolve({ removed: 'dev 1/x' }));
+    const http = { delete: del } as unknown as HttpClient;
+    const signal = new AbortController().signal;
+    await expect(removeDevice(http, 'dev 1/x', signal)).resolves.toBeUndefined();
+    expect(del).toHaveBeenCalledWith('/devices/dev%201%2Fx', expect.anything(), { signal });
   });
 });

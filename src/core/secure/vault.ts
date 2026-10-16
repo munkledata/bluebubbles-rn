@@ -24,6 +24,8 @@ export type SecretKey =
   | 'fcmPushEncryptionV2'
   // One bounded journal for crash-safe shared-password -> scoped-credential adoption.
   | 'serverCredentialUpgrade'
+  // The scoped bearer a credential replacement left behind, kept until its revocation is confirmed.
+  | 'replacedServerCredential'
   // App-lock enabled flag. Lives OUTSIDE the encrypted DB so boot can decide whether
   // to show the UI gate before the database is initialized — hence the vault, not kv.
   | 'appLockEnabled';

@@ -18,6 +18,8 @@ const PushEncryptionIdentityV3 = z
   .strict();
 const PositiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 
+const RemoveDeviceAck = z.object({ removed: z.string().max(256).nullish() }).loose();
+
 // Gator's register-device op returns `{ id }` (the new device row's id) post-unwrap.
 const RegisterAck = z
   .object({
@@ -114,4 +116,16 @@ export async function registerDevice(
       ? {}
       : { pushEncryptionPreviousKeyExpiresAt: res.pushEncryptionPreviousKeyExpiresAt }),
   };
+}
+
+/**
+ * Remove one push device row. The server lets a scoped bearer remove only its own row, so a
+ * replaced credential can free this phone's push target without being revoked (review M130).
+ */
+export async function removeDevice(
+  http: HttpClient,
+  id: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await http.delete(`/devices/${encodeURIComponent(id)}`, RemoveDeviceAck, { signal });
 }
