@@ -334,14 +334,18 @@ describe('saveAttachmentsToPhotos', () => {
 
 describe('saveImageToLibrary', () => {
   it('skips a non-local path without touching the library', async () => {
-    await expect(saveImageToLibrary('https://dev.local/a.jpg')).resolves.toBe('skipped');
-    await expect(saveImageToLibrary(null)).resolves.toBe('skipped');
+    await expect(
+      saveImageToLibrary('https://dev.local/a.jpg', { permissionMode: 'request' }),
+    ).resolves.toBe('skipped');
+    await expect(saveImageToLibrary(null, { permissionMode: 'request' })).resolves.toBe('skipped');
     expect(requestPerm).not.toHaveBeenCalled();
   });
 
   it('reports denied without permission', async () => {
     requestPerm.mockResolvedValue({ status: 'denied' });
-    await expect(saveImageToLibrary('file:///docs/a.jpg')).resolves.toBe('denied');
+    await expect(
+      saveImageToLibrary('file:///docs/a.jpg', { permissionMode: 'request' }),
+    ).resolves.toBe('denied');
     expect(saveToLibrary).not.toHaveBeenCalled();
     expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
   });
@@ -349,7 +353,7 @@ describe('saveImageToLibrary', () => {
   it('asks for WRITE-ONLY permission on the auto-download path too', async () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
     saveToLibrary.mockResolvedValue(undefined);
-    await saveImageToLibrary('file:///docs/a.jpg');
+    await saveImageToLibrary('file:///docs/a.jpg', { permissionMode: 'request' });
     expect(requestPerm).toHaveBeenCalledWith(true);
   });
 
@@ -368,7 +372,9 @@ describe('saveImageToLibrary', () => {
   it('gallery save (no album) uses saveToLibraryAsync', async () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
     saveToLibrary.mockResolvedValue(undefined);
-    await expect(saveImageToLibrary('file:///docs/a.jpg')).resolves.toBe('saved');
+    await expect(
+      saveImageToLibrary('file:///docs/a.jpg', { permissionMode: 'request' }),
+    ).resolves.toBe('saved');
     expect(saveToLibrary).toHaveBeenCalledWith('file:///docs/a.jpg');
     expect(createAsset).not.toHaveBeenCalled();
     expect(mockReleaseProtection).toHaveBeenCalledTimes(1);
@@ -376,7 +382,9 @@ describe('saveImageToLibrary', () => {
 
   it('never calls the library when its operation pin is refused', async () => {
     mockProtectPath.mockReturnValueOnce(null);
-    await expect(saveImageToLibrary('file:///docs/a.jpg')).resolves.toBe('error');
+    await expect(
+      saveImageToLibrary('file:///docs/a.jpg', { permissionMode: 'request' }),
+    ).resolves.toBe('error');
     expect(statAttachment).not.toHaveBeenCalled();
     expect(requestPerm).not.toHaveBeenCalled();
     expect(saveToLibrary).not.toHaveBeenCalled();
@@ -394,7 +402,9 @@ describe('saveImageToLibrary', () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
     getAlbum.mockResolvedValue({ id: 'album-1', title: 'Gator' });
     createAsset.mockResolvedValue({ id: 'asset-2' });
-    await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
+    await expect(
+      saveImageToLibrary('file:///docs/a.jpg', { album: true, permissionMode: 'request' }),
+    ).resolves.toBe('saved');
     expect(createAsset).toHaveBeenCalledWith('file:///docs/a.jpg', {
       id: 'album-1',
       title: 'Gator',
@@ -413,7 +423,9 @@ describe('saveImageToLibrary', () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
     getAlbum.mockResolvedValue(null);
     createAlbum.mockResolvedValue({ id: 'album-1', title: 'Gator' });
-    await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
+    await expect(
+      saveImageToLibrary('file:///docs/a.jpg', { album: true, permissionMode: 'request' }),
+    ).resolves.toBe('saved');
     expect(createAlbum).toHaveBeenCalledWith('Gator', undefined, false, 'file:///docs/a.jpg');
     expect(createAsset).not.toHaveBeenCalled();
     expect(addToAlbum).not.toHaveBeenCalled();
@@ -428,7 +440,9 @@ describe('saveImageToLibrary', () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
     getAlbum.mockRejectedValue(new Error('Missing MEDIA_LIBRARY permissions.'));
     createAlbum.mockResolvedValue({ id: 'album-1', title: 'Gator' });
-    await expect(saveImageToLibrary('file:///docs/a.jpg', { album: true })).resolves.toBe('saved');
+    await expect(
+      saveImageToLibrary('file:///docs/a.jpg', { album: true, permissionMode: 'request' }),
+    ).resolves.toBe('saved');
     // Falls through to the write-gated, idempotent seed call — NOT to an unfiled gallery save.
     expect(createAlbum).toHaveBeenCalledWith('Gator', undefined, false, 'file:///docs/a.jpg');
     expect(saveToLibrary).not.toHaveBeenCalled();
@@ -438,6 +452,8 @@ describe('saveImageToLibrary', () => {
   it('maps a native failure to error (no throw)', async () => {
     requestPerm.mockResolvedValue({ status: 'granted' });
     saveToLibrary.mockRejectedValue(new Error('disk full'));
-    await expect(saveImageToLibrary('file:///docs/a.jpg')).resolves.toBe('error');
+    await expect(
+      saveImageToLibrary('file:///docs/a.jpg', { permissionMode: 'request' }),
+    ).resolves.toBe('error');
   });
 });

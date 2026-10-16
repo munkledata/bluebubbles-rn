@@ -204,11 +204,13 @@ export type SaveImageResult = 'saved' | 'skipped' | 'denied' | 'error';
  * Save ONE already-downloaded image file to the device library, for the auto-download flow.
  * `album: true` files it into the {@link GATOR_ALBUM} album (created on first use); otherwise it
  * lands in the regular gallery. A non-local path (undownloaded / remote dev URL) is 'skipped'.
- * Never throws — maps failures to a result the caller can count.
+ * Never throws — maps failures to a result the caller can count. Every caller chooses whether it
+ * may show the permission prompt ('request') or only use an existing grant ('check'): a background
+ * caller must never prompt (review M203).
  */
 export async function saveImageToLibrary(
   uri: string | null | undefined,
-  opts: { album?: boolean; permissionMode?: 'request' | 'check' } = {},
+  opts: { album?: boolean; permissionMode: 'request' | 'check' },
 ): Promise<SaveImageResult> {
   if (!isLocalFileUri(uri)) return 'skipped';
   // Foreground auto-save can race cache maintenance. Acquire synchronously so permission/native-
