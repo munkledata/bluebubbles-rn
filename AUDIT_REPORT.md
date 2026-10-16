@@ -21,6 +21,11 @@
 > the connect gate). **SEC-6 is now closed:** `allowBackup` is false and the Android artifact guard
 > enforces it in generated manifests. The app is now on Expo SDK 57 / RN 0.86.
 >
+> **CORRECTION (2026-10-16, review M215):** the SSRF note above is out of date. `isPrivateHost` was
+> removed (a4c7a73) after link previews moved to the authenticated Gator-server preview proxy
+> (`NET-01`). The app never fetches a link or image host directly, so that proxy, with its DNS
+> pinning and its redirect, size, type and timeout limits, is the SSRF guard.
+>
 > **STATUS UPDATE (2026-08-04):** The dormant, partial certificate-pinning implementation was
 > removed. Current HTTPS connections use ordinary Android/OS certificate validation; Gator neither
 > bypasses certificate errors nor performs application-level pinning. Historical pinning claims in
