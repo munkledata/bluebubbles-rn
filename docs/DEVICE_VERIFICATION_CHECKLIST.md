@@ -301,7 +301,8 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Run an enrolled random-key encrypted push in
       background and ordinary killed-process states: V3 for a scoped session, or V2 only before its
       exclusive **2027-02-01T00:00:00Z** cutoff. Disable App Lock before each detailed
-      killed-process branch. Confirm absent-state plaintext and password-derived `AEAD_GCM_V1` are
+      killed-process branch (turning it off asks for the phone's fingerprint or PIN since review
+      M241; over adb, answer the system prompt with the device PIN). Confirm absent-state plaintext and password-derived `AEAD_GCM_V1` are
       dropped and recovered only by foreground sync; they are no longer happy paths.
 - [ ] **`STATIC/HOST`:** Keep malformed ciphertext, wrong-key/decrypt-failure, and unsupported
       encryption branches as host/static evidence unless the staged-server owner separately approves

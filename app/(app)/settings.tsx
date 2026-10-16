@@ -6,7 +6,7 @@ import { SHARED_PASSWORD_PUSH_CUTOFF_MS } from '@core/config/constants';
 import { isScopedDeviceCredential, logger } from '@core/secure';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { isBiometricAvailable } from '@native/biometrics';
+import { authenticate, isBiometricAvailable } from '@native/biometrics';
 import {
   getSecureScreenState,
   setSecureScreenEnabled,
@@ -308,21 +308,25 @@ export default function SettingsScreen(): React.JSX.Element {
     );
   };
 
-  // Enabling requires enrolled biometrics, else the user could lock themselves out.
+  // Enabling requires enrolled biometrics, else the user could lock themselves out. Disabling asks
+  // the phone's owner to confirm with that same fingerprint, face or PIN (review M241); with none
+  // set up nothing could unlock Gator again anyway, so the switch then stays usable.
   const onToggleAppLock = async (next: boolean): Promise<void> => {
     if (!screenCurrent() || appLockChangePending.current) return;
     appLockChangePending.current = true;
     try {
-      if (next) {
-        const available = await isBiometricAvailable();
-        if (!screenCurrent()) return;
-        if (!available) {
-          showDialog(
-            'Biometrics required',
-            'Set up a fingerprint, face unlock, or device PIN before enabling App Lock.',
-          );
-          return;
-        }
+      const available = await isBiometricAvailable();
+      if (!screenCurrent()) return;
+      if (next && !available) {
+        showDialog(
+          'Biometrics required',
+          'Set up a fingerprint, face unlock, or device PIN before enabling App Lock.',
+        );
+        return;
+      }
+      if (!next && available) {
+        const confirmed = await authenticate('Turn off App Lock');
+        if (!screenCurrent() || !confirmed) return;
       }
       if (!screenCurrent()) return;
       await setAppLockEnabled(next);
