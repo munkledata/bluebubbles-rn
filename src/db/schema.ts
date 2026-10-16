@@ -957,27 +957,3 @@ export const reminders = sqliteTable(
     messageGuidIdx: index('reminders_message_guid_idx').on(t.messageGuid),
   }),
 );
-
-export const schema = {
-  handles,
-  chats,
-  customFolders,
-  customFolderMembers,
-  chatHandles,
-  messages,
-  messageDeletionLedger,
-  messageServerStates,
-  messageGuidAliases,
-  attachments,
-  attachmentCacheEntries,
-  contacts,
-  scheduledMessages,
-  outgoingQueue,
-  incomingEventQueue,
-  errorReports,
-  syncMarkers,
-  themes,
-  kv,
-  urlPreviews,
-  reminders,
-};
