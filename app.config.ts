@@ -63,9 +63,11 @@ const config: ExpoConfig = {
     // Interactive preview/progress still depends on the installed RN/Router native stack and
     // remains an exact-device verification item (ANDROID-02).
     predictiveBackGestureEnabled: true,
-    // No adb/device-transfer backups (SEC-6): the SQLCipher key lives in the Android Keystore
-    // and never leaves the device, so a restored DB would be undecryptable anyway. This must be
-    // the top-level Expo android option; expo-build-properties has no allowBackup setting.
+    // No adb or cloud backups (SEC-6). On Android 12+ this does not stop a phone-to-phone
+    // transfer: expo-secure-store's data-extraction rules let one copy plain SharedPreferences,
+    // never its SecureStore file and no database. The SQLCipher key lives in the Android Keystore
+    // and never leaves the device, so a copied database would be undecryptable anyway. This must
+    // be the top-level Expo android option; expo-build-properties has no allowBackup setting.
     allowBackup: false,
     // RECORD_AUDIO + MODIFY_AUDIO_SETTINGS: the composer records voice messages; CAMERA is
     // declared by expo-camera for setup QR scanning and composer photo capture.
