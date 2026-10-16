@@ -13,7 +13,8 @@ import {
   mediaGenerationPathSegment,
 } from './pathSafety';
 
-function attachmentDestination(
+/** Where one attachment is saved; shared with the DEV fetcher (review M040). */
+export function attachmentDestination(
   guid: string,
   transferName: string,
   generation?: number,
@@ -27,6 +28,25 @@ function attachmentDestination(
   return { dir, file: new File(dir, encodedMediaPathSegment(transferName)) };
 }
 
+/** True when `localPath` names an existing file; a malformed path counts as missing. */
+export function attachmentFileExists(localPath: string | null): boolean {
+  if (!localPath) return false;
+  try {
+    return new File(localPath).exists;
+  } catch {
+    return false;
+  }
+}
+
+/** Delete one downloaded attachment, best-effort. */
+export function discardAttachmentFile(localPath: string): void {
+  try {
+    deleteOwnedFile(new File(localPath));
+  } catch {
+    // Teardown cleanup is best-effort; the account-wide media sweep is the fallback.
+  }
+}
+
 /**
  * Real attachment fetcher (expo-file-system new object API). Saves to
  * {documents}/attachments/{guid}/{generation}/{name} with header auth (URL stays clean). The
@@ -37,14 +57,7 @@ function attachmentDestination(
  */
 export function expoFetcher(http: HttpClient): AttachmentFetcher {
   return {
-    exists(localPath: string | null): boolean {
-      if (!localPath) return false;
-      try {
-        return new File(localPath).exists;
-      } catch {
-        return false;
-      }
-    },
+    exists: attachmentFileExists,
     destinationUri(guid: string, transferName: string, generation?: number): string {
       return attachmentDestination(guid, transferName, generation).file.uri;
     },
@@ -76,13 +89,6 @@ export function expoFetcher(http: HttpClient): AttachmentFetcher {
       });
       return { localPath: result.file.uri, bytes: result.bytes };
     },
-    discard(localPath: string): void {
-      try {
-        const file = new File(localPath);
-        deleteOwnedFile(file);
-      } catch {
-        // Teardown cleanup is best-effort; the account-wide media sweep is the fallback.
-      }
-    },
+    discard: discardAttachmentFile,
   };
 }

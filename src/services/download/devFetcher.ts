@@ -1,36 +1,15 @@
-import { Directory, File, Paths } from 'expo-file-system';
-import { hashNativeAttachmentCacheGuid } from '@native/boundedDownload';
 import {
   MANUAL_ATTACHMENT_MAX_BYTES,
   MANUAL_DOWNLOAD_TIMEOUT_MS,
   type AttachmentFetcher,
 } from './downloadService';
-import { deleteOwnedFile, downloadBoundedNativeFile } from './boundedNativeDownload';
-import {
-  attachmentIdentityPathSegment,
-  encodedMediaPathSegment,
-  mediaGenerationPathSegment,
-} from './pathSafety';
+import { downloadBoundedNativeFile } from './boundedNativeDownload';
+import { attachmentDestination, attachmentFileExists, discardAttachmentFile } from './expoFetcher';
 
 // The bounded downloader deliberately rejects redirects. Keep this synthetic DEV fixture on the
 // direct Picsum CDN object instead of the public seed endpoint, which responds with HTTP 302.
 const DEV_PROGRESS_IMAGE_URL =
   'https://fastly.picsum.photos/id/1078/1200/800.jpg?hmac=AaoeVGhypi-ZEGH8YpfSBDKaT3Lya5Hr4ETQOkVoqiI';
-
-function developmentDestination(
-  guid: string,
-  transferName: string,
-  generation?: number,
-): { dir: Directory; file: File } {
-  const safeGuid = attachmentIdentityPathSegment(guid, hashNativeAttachmentCacheGuid);
-  const dir = new Directory(
-    Paths.document,
-    'attachments',
-    safeGuid,
-    mediaGenerationPathSegment(generation),
-  );
-  return { dir, file: new File(dir, encodedMediaPathSegment(transferName)) };
-}
 
 /**
  * DEV-ONLY fetcher: downloads a real public image (picsum, HTTPS) with byte
@@ -38,16 +17,9 @@ function developmentDestination(
  * Gator server. Installed via setAttachmentFetcher() on the dev session.
  */
 export const devProgressFetcher: AttachmentFetcher = {
-  exists(localPath: string | null): boolean {
-    if (!localPath) return false;
-    try {
-      return new File(localPath).exists;
-    } catch {
-      return false;
-    }
-  },
+  exists: attachmentFileExists,
   destinationUri(guid: string, transferName: string, generation?: number): string {
-    return developmentDestination(guid, transferName, generation).file.uri;
+    return attachmentDestination(guid, transferName, generation).file.uri;
   },
   async download(
     guid: string,
@@ -57,7 +29,7 @@ export const devProgressFetcher: AttachmentFetcher = {
     generation?: number,
     limits?,
   ) {
-    const { dir, file: dest } = developmentDestination(guid, transferName, generation);
+    const { dir, file: dest } = attachmentDestination(guid, transferName, generation);
     dir.create({ intermediates: true, idempotent: true });
     const maxBytes = limits?.maxBytes ?? MANUAL_ATTACHMENT_MAX_BYTES;
     const result = await downloadBoundedNativeFile({
@@ -71,12 +43,5 @@ export const devProgressFetcher: AttachmentFetcher = {
     });
     return { localPath: result.file.uri, bytes: result.bytes };
   },
-  discard(localPath: string): void {
-    try {
-      const file = new File(localPath);
-      deleteOwnedFile(file);
-    } catch {
-      // Best-effort development cache cleanup.
-    }
-  },
+  discard: discardAttachmentFile,
 };
