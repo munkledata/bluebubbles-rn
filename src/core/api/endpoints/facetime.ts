@@ -2,7 +2,8 @@ import { z } from 'zod/v4';
 import { ApiError } from '../errors';
 import type { HttpClient } from '../http';
 
-const TEMP_GUID = /^temp-[a-z0-9]{8}$/;
+// 16 hex characters today (generateTempGuid); 8 for an attempt made before review M090.
+const TEMP_GUID = /^temp-[a-z0-9]{8,64}$/;
 const E164_FACETIME_CALL_ADDRESS = /^\+[1-9][0-9]{1,14}$/u;
 const LOWERCASE_ASCII_EMAIL_LOCAL_PART =
   /^[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/u;

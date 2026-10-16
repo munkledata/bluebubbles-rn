@@ -237,6 +237,11 @@ contains the post-v56 source, use only an approved synthetic staged-server failu
 - [ ] Confirm a success/echo or failed-bubble deletion removes the matching notice, a sticky RCS failure is not cleared
       by a late acknowledgement, and an expired App Lock produces only the existing generic `Gator` /
       `You have new messages` notice. Record any stale or duplicate notice as a failure.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Since review item M090, new sends use a longer,
+      cryptographically random temporary id (`temp-` plus 16 hex characters). Send one iMessage text
+      and one RCS text: each bubble moves from sending to sent without a duplicate. Then make one RCS
+      send fail (for example with the phone offline) and confirm its failed bubble and notice match
+      that exact message.
 
 Do not test removed Hide Preview/Redacted Mode behavior. Normal notifications are detailed, Android
 owns lock-screen presentation, and App Lock's limited generic-new-delivery behavior is tested below.

@@ -74,7 +74,7 @@ describe('startExactFaceTimeCall', () => {
       json: {
         address: ADDRESS,
         video: false,
-        tempGuid: expect.stringMatching(/^temp-[a-z0-9]{8}$/),
+        tempGuid: expect.stringMatching(/^temp-[0-9a-f]{16}$/),
       },
     });
   });

@@ -57,7 +57,7 @@ describe('createExactFaceTimeLink', () => {
     expect(transport.post).toHaveBeenCalledTimes(1);
     expect(transport.post.mock.calls[0]?.[2]).toMatchObject({
       retry: false,
-      json: { tempGuid: expect.stringMatching(/^temp-[a-z0-9]{8}$/) },
+      json: { tempGuid: expect.stringMatching(/^temp-[0-9a-f]{16}$/) },
     });
   });
 

@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import type { HttpClient } from '@core/api/http';
 import { ApiError } from '@core/api/errors';
 import {
@@ -46,10 +47,13 @@ export function chooseSendMethod(needsPrivateApi: boolean): 'apple-script' {
   return 'apple-script';
 }
 
-/** "temp-{8 lowercase alnum}" — a client-generated id for optimistic sends. */
+/**
+ * "temp-{16 lowercase hex}": a client-generated id for optimistic sends. The server uses it as an
+ * idempotency key, so it comes from a cryptographic UUID rather than Math.random (review M090): 60
+ * random bits (the UUID's version digit is fixed), while keeping the RCS wire token short.
+ */
 export function generateTempGuid(): string {
-  const s = Math.random().toString(36).slice(2, 10).padEnd(8, '0');
-  return `temp-${s}`;
+  return `temp-${Crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
 export interface SendTextArgs {

@@ -98,8 +98,10 @@ function countMessages(raw: Database.Database) {
 }
 
 describe('generateTempGuid', () => {
-  it('matches temp-{8 alnum}', () => {
-    for (let i = 0; i < 20; i++) expect(generateTempGuid()).toMatch(/^temp-[a-z0-9]{8}$/);
+  it('returns temp- plus 16 hex characters from a cryptographic UUID (review M090)', () => {
+    const draws = Array.from({ length: 1_000 }, () => generateTempGuid());
+    for (const id of draws) expect(id).toMatch(/^temp-[0-9a-f]{16}$/);
+    expect(new Set(draws).size).toBe(draws.length);
   });
 });
 
