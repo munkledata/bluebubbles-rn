@@ -87,6 +87,15 @@ describe('redaction', () => {
     }
   });
 
+  it('redacts e-mail local parts and identifier labels of any length (M131 follow-up)', () => {
+    // A 64-character cap let these through: the e-mail standard's limit says nothing about logs.
+    const longLocal = `${'x'.repeat(70)}@example.com`;
+    expect(redactUrls(`sent to ${longLocal} today`)).toBe('sent to [redacted] today');
+    expect(redactUrls(`first.last.${'y'.repeat(60)}@example.com`)).toBe('[redacted]');
+    const longLabel = `${'a'.repeat(70)}guid`;
+    expect(redactUrls(`${longLabel}: secretvalue`)).toBe(`${longLabel}: [redacted]`);
+  });
+
   it('preserves ordinary numbers, dates, endpoint paths and stack locations', () => {
     const line =
       'status=500 row=1234567890 at sync (/app/src/redact.test.ts:123:45) date=2026-08-04 timestamp=1700000009000';

@@ -64,10 +64,11 @@ const URL_AUTHORITY = /\b((?:https?|wss?):\/\/)(?:\[[^\]\s/?#]+\](?::\d{1,5})?|[
 // numbers are intentionally excluded so timestamps, row ids and stack line/column numbers survive.
 const CANONICAL_UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 
-// The local part is capped at 64 characters, the e-mail standard's own limit. Uncapped, a long run
-// of local-part characters with no '@' was rescanned from every word boundary, so redaction time
-// grew with the square of the line length (review M131).
-const EMAIL_ADDRESS = /\b[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[a-z0-9-]+(?:\.[a-z0-9-]+)+\b/gi;
+// Anchored on the character before a run of local-part characters, so each run is scanned once.
+// Starting at every word boundary inside a long run made redaction time grow with the square of
+// the line length, and a length cap instead let long local parts through (review M131).
+const EMAIL_ADDRESS =
+  /(^|[^a-z0-9.!#$%&'*+/=?^_`{|}~-])[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+\b/gi;
 
 // A leading `+` makes a 7–15 digit run unambiguously phone-like. The second expression handles
 // common North-American formatting while deliberately not matching bare 10/13 digit numbers (a
@@ -83,10 +84,9 @@ const UNQUOTED_PHONE_FIELD =
 // itself labels one as a GUID/UUID, including JSON fragments copied into native error messages.
 const QUOTED_IDENTIFIER_FIELD =
   /(["'])((?:[a-z0-9_-]*guid|[a-z0-9_-]*uuid))\1(\s*:\s*)(["'])(.*?)\4/gi;
-// The label prefix before guid/uuid is capped at 64 characters for the same reason as the e-mail
-// pattern (review M131). A longer label still matches from a word boundary nearer its end.
+// Anchored like the e-mail pattern, and for the same reason (review M131).
 const UNQUOTED_IDENTIFIER_FIELD =
-  /\b([a-z0-9_-]{0,64}(?:guid|uuid))\b(\s*[:=]\s*)(\[[^\]\r\n]*\]|[^\s,}&\]]+)/gi;
+  /(^|[^a-z0-9_-])([a-z0-9_-]*(?:guid|uuid))\b(\s*[:=]\s*)(\[[^\]\r\n]*\]|[^\s,}&\]]+)/gi;
 
 // Some native networking errors expose a host without a URL, for example
 // `Unable to resolve host "private.example"`. Limit this to explicit host/server phrases so a
@@ -153,14 +153,14 @@ export function redactUrls(input: string): string {
       // catches structured `{ authorization: ... }`, not a bare header string).
       .replace(/\bBearer\s+\S+/gi, `Bearer ${PLACEHOLDER}`)
       .replace(URL_AUTHORITY, `$1${PLACEHOLDER}`)
-      .replace(EMAIL_ADDRESS, PLACEHOLDER)
+      .replace(EMAIL_ADDRESS, `$1${PLACEHOLDER}`)
       .replace(CANONICAL_UUID, PLACEHOLDER)
       .replace(
         QUOTED_IDENTIFIER_FIELD,
         (_match, keyQuote, key, separator, valueQuote) =>
           `${keyQuote}${key}${keyQuote}${separator}${valueQuote}${PLACEHOLDER}${valueQuote}`,
       )
-      .replace(UNQUOTED_IDENTIFIER_FIELD, `$1$2${PLACEHOLDER}`)
+      .replace(UNQUOTED_IDENTIFIER_FIELD, `$1$2$3${PLACEHOLDER}`)
       .replace(INTERNATIONAL_PHONE, `$1${PLACEHOLDER}`)
       .replace(FORMATTED_PHONE, `$1${PLACEHOLDER}`)
       .replace(
