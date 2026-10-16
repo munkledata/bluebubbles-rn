@@ -8,6 +8,7 @@
 import type Database from 'better-sqlite3';
 import { Chat, Message } from '@core/models';
 import { EventRouter } from '@core/realtime';
+import { deliverRaw } from '../support/realtimeRouter';
 import {
   insertOutgoingReaction,
   listReactionsByMessageGuids,
@@ -69,7 +70,7 @@ describe('live echo reconcile — emoji tapback', () => {
       associatedMessageType: 'emoji',
       associatedMessageEmoji: '🔥',
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
 
     // Promoted in place: exactly one reaction row targeting 'mt', now under the real guid.
     expect(count(raw, "associated_message_guid = 'mt'")).toBe(1);
@@ -132,7 +133,7 @@ describe('live echo reconcile — emoji tapback', () => {
       associatedMessageType: 'emoji',
       associatedMessageEmoji: '🫡',
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
 
     const badges = (await listReactionsByMessageGuids(db, 'cEmo', ['mt'])).get('mt') ?? [];
     expect(badges).toHaveLength(1);
@@ -163,7 +164,7 @@ describe('live echo reconcile — emoji tapback', () => {
       associatedMessageGuid: 'p:2/mt',
       associatedMessageType: 'love',
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
 
     expect(
       raw
@@ -195,7 +196,8 @@ describe('live echo reconcile — emoji tapback', () => {
       });
       await markOutgoingSentNoGuid(db, `temp-unknown-part-${partIndex}`);
     }
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       JSON.stringify(
         Message.parse({
@@ -225,7 +227,8 @@ describe('live echo reconcile — emoji tapback', () => {
       });
       await markOutgoingSentNoGuid(db, `temp-emoji-${suffix}`);
     }
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       JSON.stringify(
         Message.parse({

@@ -20,6 +20,7 @@ const mockIo = jest.fn((..._args: unknown[]) => ({
 jest.mock('socket.io-client', () => ({ io: mockIo }));
 
 import { EventRouter, type EventSink } from '@core/realtime';
+import { deliverRaw } from '../support/realtimeRouter';
 import { logSinks, type LogLevel } from '@core/secure';
 import {
   pauseRealtimeDeliveries,
@@ -49,8 +50,8 @@ function handlersFor(event: string): Array<(data: unknown) => void> {
 
 function rawHandlerForSink(sink: EventSink): RawRealtimeEventHandler {
   const router = new EventRouter(sink);
-  return (eventName, rawData, source, context, occurrence) =>
-    router.handle(eventName, rawData, source, context, occurrence);
+  return (eventName, rawData, source, context) =>
+    deliverRaw(router, eventName, rawData, source, context);
 }
 
 describe('SocketService event dispatch failures', () => {

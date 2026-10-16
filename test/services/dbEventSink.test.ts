@@ -1,5 +1,6 @@
 import { Chat, Message } from '@core/models';
 import { EventRouter, type EventDeliveryContext } from '@core/realtime';
+import { deliverRaw } from '../support/realtimeRouter';
 import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
@@ -98,7 +99,7 @@ describe('DbEventSink (live path)', () => {
     });
 
     // Simulate an event arriving over the socket as a JSON string (FCM-style).
-    await router.handle('new-message', JSON.stringify(payload), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(payload), 'socket');
 
     const chats = (await listChats(db)) as Array<{ id: number; guid: string }>;
     const chat = chats.find((c) => c.guid === 'cLive');
@@ -155,7 +156,8 @@ describe('DbEventSink (live path)', () => {
     const { db } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));
     // Seed a message, then fire the server-pushed send failure referencing its guid.
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       JSON.stringify(
         Message.parse({
@@ -168,7 +170,8 @@ describe('DbEventSink (live path)', () => {
       ),
       'socket',
     );
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-send-error',
       JSON.stringify({
         guid: 'send-fail-1',
@@ -179,13 +182,15 @@ describe('DbEventSink (live path)', () => {
       'socket',
     );
     // A second fanout without prose must preserve the useful first detail.
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-send-error',
       JSON.stringify({ guid: 'send-fail-1', tempGuid: 'temp-no-local-row', error: 22 }),
       'fcm',
     );
     // Oversized decorative prose is omitted without erasing the already-projected detail.
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-send-error',
       JSON.stringify({
         guid: 'send-fail-1',
@@ -218,7 +223,8 @@ describe('DbEventSink (live path)', () => {
       durableEvent: { dbAppliedAt: null, markDbAppliedWithinTransaction },
     };
     const router = new EventRouter(new DbEventSink(db));
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       JSON.stringify(
         Message.parse({
@@ -247,7 +253,8 @@ describe('DbEventSink (live path)', () => {
       { clientAttemptGeneration: 1 },
     ]) {
       await expect(
-        router.handle(
+        deliverRaw(
+          router,
           'message-send-error',
           {
             tempGuid: 'temp-legacy-send-error',
@@ -268,7 +275,8 @@ describe('DbEventSink (live path)', () => {
     ).toEqual({ sendState: 'sent', error: 0 });
 
     await expect(
-      router.handle(
+      deliverRaw(
+        router,
         'message-send-error',
         { tempGuid: 'temp-legacy-send-error', error: 22 },
         'fcm',
@@ -318,7 +326,8 @@ describe('DbEventSink (live path)', () => {
     raw.prepare("UPDATE messages SET send_state='sent' WHERE guid='temp-sink-pic'").run();
     raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid='temp-sink-pic'").run();
 
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-send-error',
       JSON.stringify({
         guid: RCS_RETRY_MESSAGE_GUID,
@@ -331,7 +340,8 @@ describe('DbEventSink (live path)', () => {
     );
     // The real server fans the same failure over socket + FCM. Without a shared attempt id the DB
     // transition itself must be idempotent so the second copy cannot consume another retry rung.
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-send-error',
       JSON.stringify({
         guid: RCS_RETRY_MESSAGE_GUID,
@@ -430,7 +440,7 @@ describe('DbEventSink (live path)', () => {
     const { db } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));
     await expect(
-      router.handle('typing-indicator', { chatGuid: 'c', display: true }, 'socket'),
+      deliverRaw(router, 'typing-indicator', { chatGuid: 'c', display: true }, 'socket'),
     ).resolves.toBeDefined();
   });
 
@@ -454,7 +464,7 @@ describe('DbEventSink (live path)', () => {
       handle: { address: 'bob@x.com' },
       chatGuid: 'cBare', // top-level fallback (no `chats` array)
     };
-    const normalized = await router.handle('new-message', JSON.stringify(bare), 'fcm');
+    const normalized = await deliverRaw(router, 'new-message', JSON.stringify(bare), 'fcm');
     expect(normalized?.type).toBe('new-message');
 
     const chats = (await listChats(db)) as Array<{ id: number; guid: string }>;
@@ -478,7 +488,7 @@ describe('DbEventSink (live path)', () => {
     const { db } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));
     const orphan = { guid: 'orphan', text: 'hi', dateCreated: 1 };
-    await expect(router.handle('new-message', orphan, 'socket')).resolves.toBeDefined();
+    await expect(deliverRaw(router, 'new-message', orphan, 'socket')).resolves.toBeDefined();
     // No chat → no message row anywhere.
     const chats = (await listChats(db)) as Array<{ id: number }>;
     for (const c of chats) {
@@ -496,7 +506,8 @@ describe('DbEventSink (live path)', () => {
       const router = new EventRouter(new DbEventSink(db));
       const oldBody = [{ string: 'old realtime body', runs: [] }];
       const newBody = [{ string: 'new realtime body', runs: [] }];
-      await router.handle(
+      await deliverRaw(
+        router,
         'new-message',
         {
           guid: 'lean-update-1',
@@ -511,7 +522,8 @@ describe('DbEventSink (live path)', () => {
       );
 
       // No chats[] or chatGuid: production updated-message must recover the existing row's owner.
-      await router.handle(
+      await deliverRaw(
+        router,
         'updated-message',
         {
           guid: 'lean-update-1',
@@ -522,7 +534,8 @@ describe('DbEventSink (live path)', () => {
         },
         'socket',
       );
-      await router.handle(
+      await deliverRaw(
+        router,
         'updated-message',
         {
           guid: 'lean-update-1',
@@ -565,7 +578,8 @@ describe('DbEventSink (live path)', () => {
       throw new Error('CACHE_RETIREMENT_CANARY');
     });
     const router = new EventRouter(new DbEventSink(db, undefined, retirement));
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'retracted-live',
@@ -578,7 +592,8 @@ describe('DbEventSink (live path)', () => {
     );
 
     await expect(
-      router.handle(
+      deliverRaw(
+        router,
         'updated-message',
         { guid: 'retracted-live', text: 'private body', dateCreated: 100, dateRetracted: 200 },
         'socket',
@@ -1076,7 +1091,8 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
     onAttachmentCacheRetirement?: () => void | Promise<void>,
   ): Promise<EventRouter> {
     const router = new EventRouter(new DbEventSink(db, undefined, onAttachmentCacheRetirement));
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       JSON.stringify(
         Message.parse({
@@ -1105,7 +1121,8 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
     const chatId = (await getChatIdByGuid(db, 'cDel'))!;
     expect((await listMessagesWithSenders(db, chatId)).map((r) => r.guid)).toContain('del-live');
 
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-deleted',
       JSON.stringify({ guid: 'del-live', chatGuid: 'cDel', dateDeleted: 1700000009000 }),
       'socket',
@@ -1184,7 +1201,7 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
     const router = await seedInbound(db, 'del-bare', 'cBare');
     const before = Date.now();
     // No chatGuid, no dateDeleted — markMessageDeleted still resolves the chat from the message row.
-    await router.handle('message-deleted', { guid: 'del-bare' }, 'socket');
+    await deliverRaw(router, 'message-deleted', { guid: 'del-bare' }, 'socket');
     const row = raw
       .prepare('SELECT date_deleted d FROM messages WHERE guid = ?')
       .get('del-bare') as {
@@ -1198,7 +1215,8 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
     const { db, raw } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));
     await expect(
-      router.handle(
+      deliverRaw(
+        router,
         'message-deleted',
         { guid: 'never-synced', chatGuid: 'cNeverSynced', dateDeleted: 1 },
         'socket',
@@ -1222,7 +1240,12 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
     const router = new EventRouter(new DbEventSink(db));
 
     await expect(
-      router.handle('message-deleted', { guid: 'unknown-without-owner', dateDeleted: 2 }, 'socket'),
+      deliverRaw(
+        router,
+        'message-deleted',
+        { guid: 'unknown-without-owner', dateDeleted: 2 },
+        'socket',
+      ),
     ).resolves.toBeDefined();
 
     expect(
@@ -1233,7 +1256,8 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
         .get(),
     ).toEqual({ guid: 'unknown-without-owner', dateDeleted: 2, chatGuid: null });
 
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'unknown-without-owner',
@@ -1251,7 +1275,8 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
   it('rejects a deletion whose claimed chat conflicts with the stored message owner', async () => {
     const { db, raw } = await createTestDb();
     const router = await seedInbound(db, 'cross-chat-delete-target', 'cDeleteOwner');
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       Message.parse({
         guid: 'other-chat-message',
@@ -1262,7 +1287,8 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
       'socket',
     );
 
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-deleted',
       { guid: 'cross-chat-delete-target', chatGuid: 'cDeleteOther', dateDeleted: 500 },
       'socket',

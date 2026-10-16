@@ -1,5 +1,6 @@
 import { SERVER_EVENTS, type ServerEventName } from '@core/config';
 import { EventRouter, type EventSink, type NormalizedEvent } from '@core/realtime';
+import { deliverRaw } from '../support/realtimeRouter';
 
 function collector() {
   const events: { event: NormalizedEvent; source: string }[] = [];
@@ -51,7 +52,8 @@ describe('EventRouter', () => {
   it('normalizes new-message and forwards to the sink', async () => {
     const { events, sink } = collector();
     const router = new EventRouter(sink);
-    const out = await router.handle(
+    const out = await deliverRaw(
+      router,
       'new-message',
       { guid: 'm1', text: 'hi', dateCreated: 1700000000000 },
       'socket',
@@ -65,7 +67,7 @@ describe('EventRouter', () => {
     const { sink } = collector();
     const router = new EventRouter(sink);
     const json = JSON.stringify({ guid: 'm2', text: 'fcm' });
-    const out = await router.handle('new-message', json, 'fcm');
+    const out = await deliverRaw(router, 'new-message', json, 'fcm');
     expect(out?.type).toBe('new-message');
     if (out?.type === 'new-message') expect(out.message.guid).toBe('m2');
   });
@@ -73,7 +75,8 @@ describe('EventRouter', () => {
   it('coerces string timestamps in message payloads', async () => {
     const { sink } = collector();
     const router = new EventRouter(sink);
-    const out = await router.handle(
+    const out = await deliverRaw(
+      router,
       'new-message',
       { guid: 'm3', dateCreated: '1700000000000' },
       'socket',
@@ -85,25 +88,32 @@ describe('EventRouter', () => {
     const { sink } = collector();
     const router = new EventRouter(sink);
     expect(
-      (await router.handle('typing-indicator', { chatGuid: 'c1', display: true }, 'socket'))?.type,
+      (await deliverRaw(router, 'typing-indicator', { chatGuid: 'c1', display: true }, 'socket'))
+        ?.type,
     ).toBe('typing-indicator');
     expect(
-      (await router.handle('chat-read-status-changed', { chatGuid: 'c1', read: true }, 'socket'))
-        ?.type,
+      (
+        await deliverRaw(
+          router,
+          'chat-read-status-changed',
+          { chatGuid: 'c1', read: true },
+          'socket',
+        )
+      )?.type,
     ).toBe('chat-read-status-changed');
   });
 
   it('returns null for unknown events and does not call the sink', async () => {
     const { events, sink } = collector();
     const router = new EventRouter(sink);
-    expect(await router.handle('not-a-real-event', {}, 'socket')).toBeNull();
+    expect(await deliverRaw(router, 'not-a-real-event', {}, 'socket')).toBeNull();
     expect(events).toHaveLength(0);
   });
 
   it('returns null for invalid payloads (no guid)', async () => {
     const { sink } = collector();
     const router = new EventRouter(sink);
-    expect(await router.handle('new-message', { text: 'no guid' }, 'socket')).toBeNull();
+    expect(await deliverRaw(router, 'new-message', { text: 'no guid' }, 'socket')).toBeNull();
   });
 
   it.each([
@@ -113,7 +123,7 @@ describe('EventRouter', () => {
     const { events, sink } = collector();
     const router = new EventRouter(sink);
 
-    expect(await router.handle(eventName, payload, 'socket')).toBeNull();
+    expect(await deliverRaw(router, eventName, payload, 'socket')).toBeNull();
     expect(events).toHaveLength(0);
   });
 
@@ -126,7 +136,7 @@ describe('EventRouter', () => {
     const { events, sink } = collector();
     const router = new EventRouter(sink);
 
-    expect(await router.handle('chat-read-status-changed', payload, 'socket')).toBeNull();
+    expect(await deliverRaw(router, 'chat-read-status-changed', payload, 'socket')).toBeNull();
     expect(events).toHaveLength(0);
   });
 
@@ -135,7 +145,8 @@ describe('EventRouter', () => {
     const router = new EventRouter({
       onEvent: (event) => void events.push({ event, source: 's' }),
     });
-    const out = await router.handle(
+    const out = await deliverRaw(
+      router,
       'rcs-alert',
       { kind: 'alert', alertType: 'GAIA_LOGGED_OUT' },
       'socket',
@@ -148,7 +159,8 @@ describe('EventRouter', () => {
   it('normalizes a message-deleted event and forwards its guid + chatGuid + dateDeleted', async () => {
     const { events, sink } = collector();
     const router = new EventRouter(sink);
-    const out = await router.handle(
+    const out = await deliverRaw(
+      router,
       'message-deleted',
       { guid: 'del-1', chatGuid: 'iMessage;-;+1555', dateDeleted: 1700000000000 },
       'socket',
@@ -165,7 +177,7 @@ describe('EventRouter', () => {
   it('tolerates a message-deleted with only a guid (chatGuid/dateDeleted absent → null)', async () => {
     const { sink } = collector();
     const router = new EventRouter(sink);
-    const out = await router.handle('message-deleted', { guid: 'del-2' }, 'fcm');
+    const out = await deliverRaw(router, 'message-deleted', { guid: 'del-2' }, 'fcm');
     expect(out?.type).toBe('message-deleted');
     if (out?.type === 'message-deleted') {
       expect(out.payload.guid).toBe('del-2');
@@ -179,7 +191,7 @@ describe('EventRouter', () => {
   it('drops a guid-less message-deleted (nothing to tombstone)', async () => {
     const { events, sink } = collector();
     const router = new EventRouter(sink);
-    expect(await router.handle('message-deleted', { dateDeleted: 1 }, 'socket')).toBeNull();
+    expect(await deliverRaw(router, 'message-deleted', { dateDeleted: 1 }, 'socket')).toBeNull();
     expect(events).toHaveLength(0);
   });
 
@@ -194,7 +206,7 @@ describe('EventRouter', () => {
     it.each([...SERVER_EVENTS])('normalizes %s and forwards it to the sink', async (name) => {
       const { events, sink } = collector();
       const router = new EventRouter(sink);
-      const out = await router.handle(name, MINIMAL_PAYLOAD[name], 'socket');
+      const out = await deliverRaw(router, name, MINIMAL_PAYLOAD[name], 'socket');
       // A missing `case` in EventRouter.normalize falls through to `default: return null`, which
       // drops the event entirely — no DB write, no notification, no error anywhere.
       expect(out).not.toBeNull();

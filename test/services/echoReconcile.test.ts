@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { Chat, Message } from '@core/models';
 import { EventRouter } from '@core/realtime';
+import { deliverRaw } from '../support/realtimeRouter';
 import {
   getChatIdByGuid,
   insertOutgoingText,
@@ -62,7 +63,7 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
       dateCreated: 1000,
       chats: [{ guid: 'cEcho' }],
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
 
     const msgs = (await listMessages(db, chatId)) as Array<{ guid: string; sendState: string }>;
     expect(msgs).toHaveLength(1); // promoted in place — NOT orphaned into a duplicate
@@ -105,7 +106,7 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
       dateCreated: 1000,
       chats: [{ guid: 'cErrEcho' }],
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
 
     const msgs = (await listMessages(db, chatId)) as Array<{
       guid: string;
@@ -144,7 +145,7 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
       chats: [{ guid: 'cAtt' }],
       attachments: [{ guid: 'real-2-att', mimeType: 'image/jpeg' }],
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
     // The ack lands second; it must be an idempotent no-op (temp already promoted).
     await reconcileOutgoingSuccess(db, 'temp-bbb22222', {
       guid: 'real-2',
@@ -185,7 +186,7 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
       dateCreated: 3000,
       chats: [{ guid: 'cPapi' }],
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
 
     const msgs = (await listMessages(db, chatId)) as Array<{ guid: string }>;
     expect(msgs).toHaveLength(1);
@@ -212,7 +213,7 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
       dateCreated: 4001,
       chats: [{ guid: 'cNo' }],
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
 
     const guids = ((await listMessages(db, chatId)) as Array<{ guid: string }>)
       .map((m) => m.guid)
@@ -289,7 +290,7 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
       dateCreated: 100_000_000,
       chats: [{ guid: 'cWin' }],
     });
-    await router.handle('new-message', JSON.stringify(echo), 'socket');
+    await deliverRaw(router, 'new-message', JSON.stringify(echo), 'socket');
 
     const guids = ((await listMessages(db, chatId)) as Array<{ guid: string }>)
       .map((m) => m.guid)

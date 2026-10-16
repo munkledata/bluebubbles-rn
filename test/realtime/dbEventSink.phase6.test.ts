@@ -1,4 +1,5 @@
 import { EventRouter } from '@core/realtime';
+import { deliverRaw } from '../support/realtimeRouter';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { createTestDb } from '../support/testDb';
 
@@ -14,9 +15,9 @@ describe('DbEventSink — Phase 6 events', () => {
   it('chat-read-status-changed advances the local read marker', async () => {
     const { db, raw } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));
-    await router.handle('new-message', inbound('m1', 'cR', 'Bob'), 'socket');
+    await deliverRaw(router, 'new-message', inbound('m1', 'cR', 'Bob'), 'socket');
 
-    await router.handle('chat-read-status-changed', { chatGuid: 'cR', read: true }, 'socket');
+    await deliverRaw(router, 'chat-read-status-changed', { chatGuid: 'cR', read: true }, 'socket');
 
     const row = raw
       .prepare("SELECT last_read_message_guid lr FROM chats WHERE guid='cR'")
@@ -29,9 +30,10 @@ describe('DbEventSink — Phase 6 events', () => {
   it('group-name-change re-upserts the chat name', async () => {
     const { db, raw } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));
-    await router.handle('new-message', inbound('m2', 'cG', 'Old Name'), 'socket');
+    await deliverRaw(router, 'new-message', inbound('m2', 'cG', 'Old Name'), 'socket');
 
-    await router.handle(
+    await deliverRaw(
+      router,
       'group-name-change',
       { chats: [{ guid: 'cG', displayName: 'New Name' }] },
       'socket',
@@ -47,7 +49,7 @@ describe('DbEventSink — Phase 6 events', () => {
     const { db } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));
     await expect(
-      router.handle('participant-added', { chats: [] }, 'socket'),
+      deliverRaw(router, 'participant-added', { chats: [] }, 'socket'),
     ).resolves.toBeDefined();
   });
 });

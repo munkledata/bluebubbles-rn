@@ -4,6 +4,7 @@ import {
   type EventSink,
   type NotificationIntent,
 } from '@core/realtime';
+import { deliverRaw } from '../support/realtimeRouter';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { NotifyingEventSink } from '@/services/realtime/notifyingEventSink';
@@ -59,22 +60,21 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     const context: EventDeliveryContext = { generation: 3, isCurrent: () => true };
     let finished = false;
 
-    const handled = router
-      .handle(
-        'new-message',
-        {
-          guid: 'tracked-notification',
-          text: 'wait for native presentation',
-          dateCreated: 1,
-          handle: { address: 'a@b.com' },
-          chats: [{ guid: 'cTracked', participants: [{ address: 'a@b.com' }] }],
-        },
-        'fcm',
-        context,
-      )
-      .then(() => {
-        finished = true;
-      });
+    const handled = deliverRaw(
+      router,
+      'new-message',
+      {
+        guid: 'tracked-notification',
+        text: 'wait for native presentation',
+        dateCreated: 1,
+        handle: { address: 'a@b.com' },
+        chats: [{ guid: 'cTracked', participants: [{ address: 'a@b.com' }] }],
+      },
+      'fcm',
+      context,
+    ).then(() => {
+      finished = true;
+    });
     for (let i = 0; i < 20 && notify.mock.calls.length === 0; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
@@ -91,7 +91,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('emits a message intent for an inbound message (title/sender from data)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'n1',
@@ -116,7 +117,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('decodes the ordered participant projection for a group notification title', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'comma-name-notification',
@@ -145,7 +147,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('does not present or withdraw under a different provider chat for a colliding message GUID', async () => {
     const { db } = await createTestDb();
     const first = wire(db);
-    await first.router.handle(
+    await deliverRaw(
+      first.router,
       'new-message',
       {
         guid: 'cross-provider-notification-collision',
@@ -163,11 +166,12 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     );
     expect(first.intents).toHaveLength(1);
 
-    // Use a fresh router so legacy in-memory event deduplication cannot make this pass without the
-    // persisted-owner check that durable replay also relies on.
+    // A fresh router: only the persisted-owner check that durable replay relies on can stop this
+    // second notice.
     const collision = wire(db);
 
-    await collision.router.handle(
+    await deliverRaw(
+      collision.router,
       'new-message',
       {
         guid: 'cross-provider-notification-collision',
@@ -183,7 +187,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       },
       'socket',
     );
-    await collision.router.handle(
+    await deliverRaw(
+      collision.router,
       'updated-message',
       {
         guid: 'cross-provider-notification-collision',
@@ -201,7 +206,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('does not resurrect a notification after the message was read before presentation retry', async () => {
     const { db } = await createTestDb();
     const { router } = wire(db);
-    const event = await router.handle(
+    const event = await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'read-before-retry',
@@ -212,7 +218,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       },
       'socket',
     );
-    await router.handle(
+    await deliverRaw(
+      router,
       'chat-read-status-changed',
       { chatGuid: 'cReadRetry', read: true },
       'socket',
@@ -224,7 +231,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('does not resurrect a notification after the message was deleted before presentation retry', async () => {
     const { db } = await createTestDb();
     const { router } = wire(db);
-    const event = await router.handle(
+    const event = await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'deleted-before-retry',
@@ -235,7 +243,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       },
       'socket',
     );
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-deleted',
       { guid: 'deleted-before-retry', chatGuid: 'cDeleteRetry', dateDeleted: 300 },
       'socket',
@@ -250,7 +259,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   ])('withdraws an existing notification after deletion using the %s', async (_label, deletion) => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: deletion.guid,
@@ -264,7 +274,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     expect(intents.at(-1)?.kind).toBe('message');
     intents.length = 0;
 
-    await router.handle('message-deleted', { ...deletion, dateDeleted: 300 }, 'socket');
+    await deliverRaw(router, 'message-deleted', { ...deletion, dateDeleted: 300 }, 'socket');
 
     expect(intents).toEqual([
       {
@@ -278,7 +288,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('does not withdraw another chat notification for conflicting deletion metadata', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'delete-cancel-stale-chat',
@@ -291,7 +302,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     );
     intents.length = 0;
 
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-deleted',
       { guid: 'delete-cancel-stale-chat', chatGuid: 'cWrong', dateDeleted: 300 },
       'socket',
@@ -303,7 +315,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('uses the scoped deletion ledger after row purge and rejects a different chat claim', async () => {
     const { db, raw } = await createTestDb();
     const original = wire(db);
-    await original.router.handle(
+    await deliverRaw(
+      original.router,
       'new-message',
       {
         guid: 'purged-delete-owner',
@@ -319,7 +332,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       },
       'socket',
     );
-    await original.router.handle(
+    await deliverRaw(
+      original.router,
       'message-deleted',
       {
         guid: 'purged-delete-owner',
@@ -331,7 +345,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     raw.prepare("DELETE FROM messages WHERE guid = 'purged-delete-owner'").run();
 
     const collision = wire(db);
-    await collision.router.handle(
+    await deliverRaw(
+      collision.router,
       'message-deleted',
       {
         guid: 'purged-delete-owner',
@@ -356,7 +371,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     const { intents, router } = wire(db);
     // Attachment messages carry the object-replacement char as placeholder text — the
     // notification must not render it as a bare box.
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'att1',
@@ -378,7 +394,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('uses the Genmoji description as the body for an attachment-only Genmoji message', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'gm1',
@@ -407,7 +424,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('prefers a real caption over the Genmoji description (description is only the fallback)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'gm2',
@@ -433,7 +451,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('strips a U+FFFC placeholder but keeps a real caption', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'att2',
@@ -465,7 +484,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       },
     ]);
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'n2',
@@ -498,7 +518,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       },
     ]);
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'n3',
@@ -527,18 +548,19 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       chats: [{ guid: 'cMute', displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
     });
     // The first inbound message creates the chat and notifies as usual.
-    await router.handle('new-message', msg('m1', 'hi'), 'socket');
+    await deliverRaw(router, 'new-message', msg('m1', 'hi'), 'socket');
     expect(intents).toHaveLength(1);
     // Once muted, a further inbound message must NOT raise a new notification.
     await setChatMute(db, 'cMute', 'mute');
-    await router.handle('new-message', msg('m2', 'still there?'), 'socket');
+    await deliverRaw(router, 'new-message', msg('m2', 'still there?'), 'socket');
     expect(intents).toHaveLength(1);
   });
 
   it('does not raise a message notice for our own message and only withdraws a prior failure notice', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    const event = await router.handle(
+    const event = await deliverRaw(
+      router,
       'new-message',
       { guid: 'mine', text: 'sent', isFromMe: true, dateCreated: 1, chats: [{ guid: 'cMe' }] },
       'socket',
@@ -558,7 +580,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('derives a generic failed-send intent only after the server error is committed to the DB', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'outgoing-server-error',
@@ -571,7 +594,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     );
     intents.length = 0;
 
-    await router.handle(
+    await deliverRaw(
+      router,
       'message-send-error',
       {
         tempGuid: 'missing-first-candidate',
@@ -597,7 +621,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('emits a cancel intent on remote read', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 's1',
@@ -608,7 +633,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       'socket',
     );
     intents.length = 0;
-    await router.handle('chat-read-status-changed', { chatGuid: 'cC', read: true }, 'socket');
+    await deliverRaw(router, 'chat-read-status-changed', { chatGuid: 'cC', read: true }, 'socket');
     expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cC' }]);
   });
 
@@ -616,7 +641,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
     // Seed the chat with an inbound message (creates the chat + its notify intent).
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'u1',
@@ -631,7 +657,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     // The sender unsends it → real FCM carries a LEAN updated-message with no chats/chatGuid.
     // The sink + intent builder recover the owner from the existing message row and withdraw the
     // per-chat notification.
-    await router.handle(
+    await deliverRaw(
+      router,
       'updated-message',
       {
         guid: 'u1',
@@ -647,7 +674,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('does NOT touch notifications for an ordinary updated-message (edit / receipt, no dateRetracted)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'new-message',
       {
         guid: 'u2',
@@ -661,7 +689,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     intents.length = 0;
     // An edit / delivery update (no dateRetracted) must produce NO intent — neither a new
     // notification nor a cancel.
-    await router.handle(
+    await deliverRaw(
+      router,
       'updated-message',
       {
         guid: 'u2',
@@ -679,7 +708,8 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('emits an alias-removed intent when iMessage aliases are deregistered (F-6)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'imessage-aliases-removed',
       { aliases: ['me@icloud.com', '+15551234567'] },
       'socket',
@@ -692,14 +722,15 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('drops an aliases-removed event with no aliases', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle('imessage-aliases-removed', { aliases: [] }, 'socket');
+    await deliverRaw(router, 'imessage-aliases-removed', { aliases: [] }, 'socket');
     expect(intents).toHaveLength(0);
   });
 
   it('emits an rcs-bridge-down status intent from the server-supplied title/body', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'rcs-bridge-down',
       {
         title: 'RCS bridge down',
@@ -716,7 +747,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('falls back to default copy when the bridge-down push omits title/body', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle('rcs-bridge-down', { reason: 'PHONE_NOT_RESPONDING' }, 'fcm');
+    await deliverRaw(router, 'rcs-bridge-down', { reason: 'PHONE_NOT_RESPONDING' }, 'fcm');
     expect(intents).toHaveLength(1);
     expect(intents[0]?.kind).toBe('rcs-bridge-down');
   });
@@ -732,7 +763,8 @@ describe('buildMessageIntents — test-notification (server push self-test)', ()
   it('emits a status intent from the server-supplied title/body', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    await deliverRaw(
+      router,
       'test-notification',
       { title: 'Gator', body: 'Test notification from your Gator server 🐊' },
       'fcm',
@@ -749,7 +781,7 @@ describe('buildMessageIntents — test-notification (server push self-test)', ()
   it('falls back to default copy when the push omits title/body', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle('test-notification', {}, 'fcm');
+    await deliverRaw(router, 'test-notification', {}, 'fcm');
     expect(intents).toHaveLength(1);
     expect(intents[0]).toMatchObject({ kind: 'test-notification', title: 'Gator' });
   });
@@ -757,7 +789,7 @@ describe('buildMessageIntents — test-notification (server push self-test)', ()
   it('is delivered over the socket too, not just FCM', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle('test-notification', { title: 'T', body: 'B' }, 'socket');
+    await deliverRaw(router, 'test-notification', { title: 'T', body: 'B' }, 'socket');
     expect(intents).toEqual([{ kind: 'test-notification', title: 'T', body: 'B' }]);
   });
 });

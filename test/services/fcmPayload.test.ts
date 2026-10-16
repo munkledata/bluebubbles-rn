@@ -1,4 +1,5 @@
 import { EventRouter, type EventSink, type NormalizedEvent } from '@core/realtime';
+import { deliverRaw } from '../support/realtimeRouter';
 import { parseFcmData } from '@/services/notifications/fcmPayload';
 
 function collector() {
@@ -59,7 +60,7 @@ describe('parseFcmData', () => {
       encoding: 'json',
     };
     const { eventName, body } = parseFcmData(fcm);
-    const out = await router.handle(eventName, body, 'fcm');
+    const out = await deliverRaw(router, eventName, body, 'fcm');
     expect(out?.type).toBe('new-message');
     expect(events).toHaveLength(1);
     if (out?.type === 'new-message') {
@@ -82,7 +83,7 @@ describe('parseFcmData', () => {
     const router = new EventRouter(sink);
     const fcm = { type: 'new-message', data: JSON.stringify({ guid: 'srv-2' }) };
     // Pre-fix bug: the entire data map was dispatched; guid lives under `.data`, not top level.
-    const out = await router.handle('new-message', fcm, 'fcm');
+    const out = await deliverRaw(router, 'new-message', fcm, 'fcm');
     expect(out).toBeNull();
   });
 });

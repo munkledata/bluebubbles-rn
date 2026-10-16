@@ -237,9 +237,9 @@ value TEXT)`.
 
 - `GuidDeduper` (Set + insertion-order array, cap 5000, evicts oldest) remains a compatibility
   defense for message upserts.
-- `EventRouter` has its own process-local `seen` Set (cap 500) on the legacy direct new-message
-  path. Eligible modern socket/FCM events instead use canonical durable occurrence receipts;
-  `message-send-error` uses server `attemptGuid` as exact identity when present.
+- `EventRouter` keeps no `seen` Set: its legacy direct `handle` path was used only by tests and was
+  removed (review M110). Socket and FCM events are deduplicated by canonical durable occurrence
+  receipts; `message-send-error` uses server `attemptGuid` as exact identity when present.
 - `outgoing.ts` `cancelledTempGuids` (cap 256) tracks user-cancelled sends.
 - The in-memory sets reset on every (re)launch. Durable terminal receipts survive restart for seven
   days and at most 2,000 rows; cross-session message convergence also retains idempotent DB upserts.
