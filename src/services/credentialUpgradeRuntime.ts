@@ -91,7 +91,12 @@ export type CredentialUpgradeRuntimeOutcome =
       /** A begin only: whether the saved attempt that blocked it holds this exact credential. */
       readonly sameCandidate?: boolean;
     }
-  | { readonly kind: 'blocked'; readonly reason: 'push-target-owned' }
+  | {
+      readonly kind: 'blocked';
+      readonly reason: 'push-target-owned';
+      /** The replaced bearer's own push row is already gone, so no notifications arrive (M130). */
+      readonly notificationsPaused?: true;
+    }
   | {
       readonly kind: 'retry';
       readonly stage:
@@ -100,6 +105,8 @@ export type CredentialUpgradeRuntimeOutcome =
         | 'previous-revocation'
         | 'adoption'
         | 'storage';
+      /** As on 'blocked': set only once the old push row was freed and no new one exists yet. */
+      readonly notificationsPaused?: true;
     }
   | {
       readonly kind: 'unsupported';
@@ -513,10 +520,12 @@ async function advanceCredentialUpgrade(
         );
       } catch (retryError) {
         if (!deps.isCurrent()) return { kind: 'cancelled' };
-        // Still owned after its row was freed: an owner must look at the Mac dashboard.
+        // The old row is gone and the new one is not in place, so this phone gets no notifications
+        // until the adoption finishes; the caller must say so (review M130). Still owned after the
+        // old row was freed means another registration holds it: an owner must look at the Mac.
         return isPushTargetOwned(retryError)
-          ? { kind: 'blocked', reason: 'push-target-owned' }
-          : { kind: 'retry', stage: 'adoption' };
+          ? { kind: 'blocked', reason: 'push-target-owned', notificationsPaused: true }
+          : { kind: 'retry', stage: 'adoption', notificationsPaused: true };
       }
     }
     if (!deps.isCurrent()) return { kind: 'cancelled' };

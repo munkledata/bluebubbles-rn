@@ -361,7 +361,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
           replacing
             ? outcome.kind === 'adopted'
               ? 'This phone now uses the new credential, and the old credential has been revoked.'
-              : 'This phone now uses the new credential. Gator will revoke the old credential automatically the next time it reaches the Mac.'
+              : 'This phone now uses the new credential. Gator will revoke the old credential automatically the next time you open it with the Mac reachable.'
             : outcome.kind === 'adopted'
               ? 'This phone now uses its own paired-client credential.'
               : 'This phone is paired. Secure cleanup will finish automatically after the next reconnect.',
@@ -372,7 +372,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
         if (replacing && outcome.stage === 'previous-revocation') {
           // Nothing new was saved, so the entry stays for another try (review M130).
           setCredentialIssue(
-            'The previous replacement is still revoking its old credential. Gator retries when it reaches the Mac; try again then. Your entry is still here.',
+            'The previous replacement is still revoking its old credential. Gator retries the next time you open it; try again after that. Your entry is still here.',
           );
           return;
         }
@@ -386,9 +386,11 @@ export default function ServerManagementScreen(): React.JSX.Element {
           setCredentialIssue(
             status.kind === 'candidate' && outcome.stage === 'candidate-validation'
               ? 'The replacement is saved securely, but the server could not verify it. Gator will retry; if the value is wrong, revoke and remove it below before entering another. The old credential still works.'
-              : confirmedSaved
-                ? 'The replacement is saved securely. Gator will retry it when it reconnects; the old credential still works until then.'
-                : 'Gator could not confirm that the replacement was saved. Your entry is still here so you can retry.',
+              : confirmedSaved && outcome.notificationsPaused
+                ? 'The replacement is saved securely, but this phone’s notifications are paused until Gator finishes it. Gator retries the next time you open it; the old credential still works until then.'
+                : confirmedSaved
+                  ? 'The replacement is saved securely. Gator will retry it when it reconnects; the old credential still works until then.'
+                  : 'Gator could not confirm that the replacement was saved. Your entry is still here so you can retry.',
           );
           return;
         }
@@ -424,7 +426,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
         setCredentialDiscardable(false);
         if (confirmedSaved) setCredentialText('');
         setCredentialIssue(
-          'Gator could not move this phone’s notifications away from the old credential automatically. In the Mac dashboard, remove only the old notification registration for this phone, not the old paired-client credential. Then Gator can retry; your phone data remains here.',
+          outcome.notificationsPaused
+            ? 'Another notification registration on the Mac still holds this phone’s notifications, so they are paused. In the Mac dashboard, remove that other notification registration for this phone, not a paired-client credential. Then Gator can retry; your phone data remains here.'
+            : 'Gator could not move this phone’s notifications away from the old credential automatically. In the Mac dashboard, remove only the old notification registration for this phone, not the old paired-client credential. Then Gator can retry; your phone data remains here.',
         );
         return;
       }

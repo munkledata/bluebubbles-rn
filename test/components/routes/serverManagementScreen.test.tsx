@@ -557,9 +557,33 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     await waitFor(() =>
       expect(useDialogStore.getState().current).toMatchObject({
         title: 'Credential replaced',
-        message: expect.stringContaining('revoke the old credential automatically'),
+        message: expect.stringContaining(
+          'revoke the old credential automatically the next time you open it with the Mac reachable',
+        ),
       }),
     );
+  });
+
+  it('says notifications are paused when the old registration was freed but the new one is not in place (M130 review)', async () => {
+    mockInspectScopedCredentialUpgradeStatus
+      .mockResolvedValueOnce({ kind: 'none' })
+      .mockResolvedValue({ kind: 'in-progress' });
+    await replaceWith({ kind: 'retry', stage: 'adoption', notificationsPaused: true });
+    expect(
+      await screen.findByText(/notifications are paused until Gator finishes it/),
+    ).toBeTruthy();
+  });
+
+  it('points at the other registration, not the old one, when the target is still owned after freeing it (M130 review)', async () => {
+    mockInspectScopedCredentialUpgradeStatus
+      .mockResolvedValueOnce({ kind: 'none' })
+      .mockResolvedValue({ kind: 'in-progress' });
+    await replaceWith({ kind: 'blocked', reason: 'push-target-owned', notificationsPaused: true });
+    expect(
+      await screen.findByText(/Another notification registration on the Mac still holds/),
+    ).toBeTruthy();
+    expect(screen.getByText(/so they are paused/)).toBeTruthy();
+    expect(screen.queryByText(/remove only the old notification registration/)).toBeNull();
   });
 
   it('keeps the entry while an earlier replacement still revokes its old credential (M130)', async () => {

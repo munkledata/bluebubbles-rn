@@ -521,7 +521,7 @@ describe('replaced scoped credential (M130)', () => {
     ).toMatchObject({ kind: 'valid', journal: { phase: 'adopting' } });
   });
 
-  it('reports a push target still owned after the old row was freed as blocked', async () => {
+  it('reports a push target still owned after the old row was freed as blocked, notifications paused', async () => {
     const vault = await activeVault(PREVIOUS_SCOPED);
     await expect(
       beginCredentialReplacementRuntime(
@@ -532,7 +532,30 @@ describe('replaced scoped credential (M130)', () => {
           },
         }),
       ),
-    ).resolves.toEqual({ kind: 'blocked', reason: 'push-target-owned' });
+    ).resolves.toEqual({
+      kind: 'blocked',
+      reason: 'push-target-owned',
+      notificationsPaused: true,
+    });
+    expect(await vault.get('serverPassword')).toBe(PREVIOUS_SCOPED);
+  });
+
+  it('says notifications are paused when registering fails for now after the old row was freed', async () => {
+    const vault = await activeVault(PREVIOUS_SCOPED);
+    let attempts = 0;
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, {
+          registerV3: async () => {
+            attempts += 1;
+            if (attempts === 1) throw conflict();
+            throw new Error('network down');
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'retry', stage: 'adoption', notificationsPaused: true });
+    expect(attempts).toBe(2);
     expect(await vault.get('serverPassword')).toBe(PREVIOUS_SCOPED);
   });
 

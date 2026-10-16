@@ -976,7 +976,8 @@ those rows is a current remediation or candidate requirement.
       credential's notification registration and then revokes the old credential, with no Mac
       dashboard step. Confirm the dialog says the old credential was revoked, the Mac dashboard no
       longer lists it as active, and a new message still notifies. With the Mac unreachable at the
-      end, the dialog says revocation is pending and the old credential disappears after a reconnect.
+      end, the dialog says revocation is pending and the old credential disappears once Gator is
+      opened again with the Mac reachable.
       An approved server-address change made while that revocation is pending first revokes the old
       credential at the current address; if it cannot, the prompt asks to try again and the address
       stays unchanged.

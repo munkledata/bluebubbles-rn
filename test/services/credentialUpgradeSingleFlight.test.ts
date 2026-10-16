@@ -564,6 +564,25 @@ describe('replaced-credential wiring (M130)', () => {
     ).resolves.toEqual({ kind: 'adopted' });
   });
 
+  it('reports a cleanup-pending replacement as revoked once its old credential is (review M130)', async () => {
+    mockBeginCredentialReplacementRuntime.mockResolvedValueOnce({
+      kind: 'adopted-cleanup-pending',
+    });
+    mockRevokeReplacedCredentialRuntime.mockResolvedValueOnce('revoked');
+    await expect(
+      beginScopedCredentialReplacement(`bbd_device_v1_${'N'.repeat(43)}`),
+    ).resolves.toEqual({ kind: 'adopted' });
+
+    // With no record to revoke yet, the old credential is still only in the journal.
+    mockBeginCredentialReplacementRuntime.mockResolvedValueOnce({
+      kind: 'adopted-cleanup-pending',
+    });
+    mockRevokeReplacedCredentialRuntime.mockResolvedValueOnce('none');
+    await expect(
+      beginScopedCredentialReplacement(`bbd_device_v1_${'M'.repeat(43)}`),
+    ).resolves.toEqual({ kind: 'adopted-cleanup-pending' });
+  });
+
   it('retries a pending revocation in the background only after an idle resume', async () => {
     await expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).resolves.toEqual({
       kind: 'idle',

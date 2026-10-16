@@ -367,7 +367,8 @@ async function revokeReplacedAfterPromotion(
 ): Promise<CredentialUpgradeRuntimeOutcome> {
   const promoted = captureLiveUpgradeSession();
   if (!promoted) {
-    // No live session to act for right now: a recorded old bearer is retried on the next reconnect.
+    // No live session to act for right now: a recorded old bearer is retried the next time the app
+    // resumes with nothing else pending.
     const recorded = await vault.get('replacedServerCredential').then(
       (value) => value !== null,
       () => true,
@@ -378,9 +379,12 @@ async function revokeReplacedAfterPromotion(
   const revocation = await revokeReplacedCredentialRuntime(
     createRuntimeDependencies(promoted, isCurrent, () => undefined),
   );
-  return revocation === 'pending' || revocation === 'cancelled'
-    ? { kind: 'adopted-revocation-pending' }
-    : outcome;
+  if (revocation === 'pending' || revocation === 'cancelled') {
+    return { kind: 'adopted-revocation-pending' };
+  }
+  // The owner needs to know the old credential is revoked; a journal cleanup still pending is
+  // housekeeping that the next resume finishes on its own.
+  return revocation === 'revoked' ? { kind: 'adopted' } : outcome;
 }
 
 /**
