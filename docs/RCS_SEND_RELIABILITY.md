@@ -49,7 +49,7 @@ drains never double-send.
 - **Attachments re-upload now.** The queue takes an injected `OutgoingQueueIO`
   (`{ upload, fileExists }` — expo implementations in prod, fakes in Node tests) and re-streams
   the file at the attachment row's `localPath` **under the original tempGuid**. A gone file or
-  an unknown row kind retires immediately (`retireOutgoing`: attempts→cap, bubble stays errored)
+  an unknown row kind retires immediately (`retireOutgoingWithinTransaction`: attempts→cap, bubble stays errored)
   instead of zombie-looping.
 - **Drain triggers:** home mount, the 15-min background task, the chat screen's 20s ticker,
   AppState `active`, and App Lock unlock (`recoverOutgoing`). Frequent drains are cheap: one indexed SELECT when the
@@ -62,7 +62,8 @@ drains never double-send.
   against a failure event racing the SAME attempt's ack).
   A queue retry's row is always `'error'`, so a retry's SUCCESS was swallowed: bubble stayed
   errored, the queue row survived un-bumped, and the message re-sent on every later drain.
-  `resend()` now flips the row `'error' → 'sending'` first (`markOutgoingSending`), scoping the
+  `resendOutgoingRow` now claims the row through `claimOutgoingForSendWithinTransaction`, which
+  flips the message `'error' → 'sending'` in the claim's own transaction, scoping the
   sticky guard back to its original race.
 - **Failed-but-delivered self-heal:** both content reconcilers (`reconcileEchoByContent`, live;
   `reconcileOutgoingAttachmentByContent`, sync) now also match `'error'` rows — when a send
@@ -83,7 +84,7 @@ failure needs its own path back into the ladder:
   fields. The app installs the physical attempt id under the request's local generation token. This
   matters when the server replays an older retained physical attempt: the replayed `attemptGuid`
   becomes the owner of the current local retry without rolling its durable generation backward.
-- `applyServerSendError` (`src/db/repositories/outgoingRetry.ts`) routes every
+- `applyServerSendErrorWithinTransaction` (`src/db/repositories/outgoingRetry.ts`) routes every
   `message-send-error`: queue row still present → bump attempts + reschedule backoff; queue row gone
   AND the event carries **`retryable: true`** → rebuild only when the message still has an attachment
   with retained local file metadata (attempts=1, so it skips the grace window). Text and contact
@@ -201,7 +202,7 @@ retryable: true }` (pre-flight `rcsReady` on every RCS send path) — the app's 
 ## Tests that lock this
 
 - `test/services/outgoingQueueService.test.ts` — attachment resend (success/failure/file-gone/
-  unknown-kind), the ack-swallow regression, `applyServerSendError` (bump / bubble-only / safe
+  unknown-kind), the ack-swallow regression, `applyServerSendErrorWithinTransaction` (bump / bubble-only / safe
   queue-less attachment rebuild / contact fail-closed / cycle cap / reaction exclusion)
 - `test/db/outgoingBranches.test.ts` — queue-less text fail-closed and transactional re-enqueue
   behavior
