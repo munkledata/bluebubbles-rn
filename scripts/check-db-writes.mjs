@@ -101,7 +101,6 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/backup/backupService.ts',
   'src/services/boot/foregroundBoot.ts',
   'src/services/bootstrap.ts',
-  'src/services/chat/groupManagement.ts',
   'src/services/contacts/serverAvatars.ts',
   'src/services/credentialUpgrade.ts',
   'src/services/databaseControl.ts',

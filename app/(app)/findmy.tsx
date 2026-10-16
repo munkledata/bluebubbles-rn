@@ -22,7 +22,7 @@ import {
   type MapMarker,
 } from '@ui/findmy/FindMyMap';
 import { showExternalOpenFailure } from '@ui/toast/external-open-feedback';
-import { useFindMyPolling } from '@/features/findmy/use-find-my-polling';
+import { useFindMyPolling } from '@features/findmy/useFindMyPolling';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** Find My: devices/items/people with last location, battery, and explicit system-map actions. */

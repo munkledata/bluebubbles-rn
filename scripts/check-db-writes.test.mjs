@@ -7110,7 +7110,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'src/features/conversations/useChatShareIntake.ts',
     'src/services/backup/backup.ts',
     'src/services/backup/backupService.ts',
-    'src/services/chat/groupManagement.ts',
     'src/services/contacts/serverAvatars.ts',
   ]);
   const leafSymbols = new Set([

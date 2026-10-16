@@ -37,7 +37,7 @@ jest.mock('@ui/findmy/FindMyMap', () => {
   };
 });
 
-jest.mock('@/features/findmy/use-find-my-polling', () => ({ useFindMyPolling: jest.fn() }));
+jest.mock('@features/findmy/useFindMyPolling', () => ({ useFindMyPolling: jest.fn() }));
 jest.mock('@core/api', () => ({ findMyApi: {} }));
 jest.mock('@/services/clients', () => ({ http: {} }));
 jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));

@@ -11,10 +11,7 @@ jest.mock('expo-router', () => ({
 import React from 'react';
 import { act, render } from '@testing-library/react-native';
 import { AppState, type AppStateStatus } from 'react-native';
-import {
-  FIND_MY_REFRESH_INTERVAL_MS,
-  useFindMyPolling,
-} from '@/features/findmy/use-find-my-polling';
+import { FIND_MY_REFRESH_INTERVAL_MS, useFindMyPolling } from '@features/findmy/useFindMyPolling';
 
 function Harness({ refresh }: { refresh: () => Promise<void> }): null {
   useFindMyPolling(refresh);
