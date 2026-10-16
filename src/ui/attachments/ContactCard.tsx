@@ -1,29 +1,20 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
-import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { openAttachmentFile } from '@/services/openFile';
-import { parseVCard, type VCardData } from '@utils';
+import { parseVCard } from '@utils';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { showToast } from '../toast/toastStore';
-import { readBoundedTextAttachment } from './readBoundedTextAttachment';
-import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { useParsedTextAttachment } from './useParsedTextAttachment';
 
 interface ContactCardProps {
   att: AttachmentRow;
   isFromMe: boolean;
   /** The bubble's message-menu action, fired on a hold instead of the attachment's own tap. */
   onLongPress?: () => void;
-}
-
-interface ParsedContactState {
-  attachmentGuid: string;
-  localPath: string;
-  sourceLifetime: number;
-  value: VCardData | null;
 }
 
 interface ContactOpenOperation {
@@ -41,105 +32,14 @@ interface ContactOpenOperation {
 export function ContactCard({ att, isFromMe, onLongPress }: ContactCardProps): React.JSX.Element {
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
-  const accountLease = useScreenAccountLease();
-  const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
-  const [parsed, setParsed] = useState<ParsedContactState | null>(null);
-  const sourceLifetimeRef = useRef(0);
-  // The ref revokes old native callbacks synchronously. Committed state gives a recycled row a
-  // fresh callback after its replacement source becomes current.
-  const [renderSourceLifetime, setRenderSourceLifetime] = useState(0);
-  const activeAttachment = useRef({ guid: att.guid, localPath: att.localPath });
+  const {
+    accountLease,
+    contentUnavailable,
+    renderSourceLifetime,
+    sourceGrantIsCurrent,
+    value: contact,
+  } = useParsedTextAttachment(att, parseVCard);
   const opening = useRef<ContactOpenOperation | null>(null);
-  const sourceTransitionPending =
-    activeAttachment.current.guid !== att.guid ||
-    activeAttachment.current.localPath !== att.localPath;
-
-  const revokeSourceLifetime = useCallback((): void => {
-    const nextLifetime = sourceLifetimeRef.current + 1;
-    sourceLifetimeRef.current = nextLifetime;
-    setRenderSourceLifetime(nextLifetime);
-    setParsed(null);
-  }, []);
-
-  // Render a generic disabled card during a source transition. The layout commit then revokes the
-  // prior lifetime before a callback or delayed result can act for the replacement source.
-  useLayoutEffect(() => {
-    if (!sourceTransitionPending) return;
-    activeAttachment.current = { guid: att.guid, localPath: att.localPath };
-    revokeSourceLifetime();
-  }, [att.guid, att.localPath, revokeSourceLifetime, sourceTransitionPending]);
-
-  // The original lease never becomes current again after an account transition. Revoke the
-  // lifetime synchronously and force any briefly retained row to render generically.
-  useLayoutEffect(
-    () =>
-      subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
-        revokeSourceLifetime();
-        setAccountRetired(true);
-      }),
-    [accountLease, revokeSourceLifetime],
-  );
-
-  const sourceGrantIsCurrent = useCallback(
-    (sourceLifetime: number, attachmentGuid: string, localPath: string | null): boolean => {
-      const current = activeAttachment.current;
-      return (
-        accountLease.isCurrent() &&
-        sourceLifetimeRef.current === sourceLifetime &&
-        current.guid === attachmentGuid &&
-        current.localPath === localPath
-      );
-    },
-    [accountLease],
-  );
-
-  const contentUnavailable = accountRetired || !accountLease.isCurrent() || sourceTransitionPending;
-
-  useEffect(() => {
-    const path = att.localPath;
-    const parseSourceLifetime = renderSourceLifetime;
-    if (!path || contentUnavailable || !sourceGrantIsCurrent(parseSourceLifetime, att.guid, path)) {
-      return;
-    }
-    const attachmentGuid = att.guid;
-    let cancelled = false;
-    const canPublish = (): boolean => {
-      return !cancelled && sourceGrantIsCurrent(parseSourceLifetime, attachmentGuid, path);
-    };
-    void (async () => {
-      try {
-        const text = await readBoundedTextAttachment(path);
-        if (canPublish()) {
-          setParsed({
-            attachmentGuid,
-            localPath: path,
-            sourceLifetime: parseSourceLifetime,
-            value: parseVCard(text),
-          });
-        }
-      } catch {
-        if (canPublish()) {
-          setParsed({
-            attachmentGuid,
-            localPath: path,
-            sourceLifetime: parseSourceLifetime,
-            value: null,
-          });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [att.guid, att.localPath, contentUnavailable, renderSourceLifetime, sourceGrantIsCurrent]);
-
-  const contact =
-    !contentUnavailable &&
-    parsed?.attachmentGuid === att.guid &&
-    parsed.localPath === att.localPath &&
-    parsed.sourceLifetime === renderSourceLifetime
-      ? parsed.value
-      : null;
 
   const onPress = (): void => {
     const operationSourceLifetime = renderSourceLifetime;
@@ -195,9 +95,9 @@ export function ContactCard({ att, isFromMe, onLongPress }: ContactCardProps): R
     })();
   };
 
-  // A native open already admitted cannot be recalled. Its result publication remains fenced by
-  // the exact token/source/account checks above. A callback manually retained across an arbitrary
-  // same-account unmount is outside this source lifetime; React normally removes Pressability.
+  // A native open already admitted cannot be recalled. Its result publication stays fenced by the
+  // exact token/source/account/mounted checks, so a result that arrives after the card unmounts
+  // neither toasts nor downloads, and a callback retained across an unmount is inert.
   const title = contentUnavailable
     ? 'Contact'
     : (contact?.displayName ?? att.transferName ?? 'Contact');

@@ -27486,7 +27486,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress:mutator-call:1f8dbbc4c7e6",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 156,
+      "line": 56,
       "symbol": "ContactCard.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27499,7 +27499,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress:mutator-call:825631505f95",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 176,
+      "line": 76,
       "symbol": "ContactCard.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>",
@@ -27512,7 +27512,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>:mutator-call:d7520b586d39",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 184,
+      "line": 84,
       "symbol": "ContactCard.onPress.<callback:c626cc26f6>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27525,7 +27525,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard:mutator-reference:6f03b1e5f758",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 224,
+      "line": 124,
       "symbol": "ContactCard",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress",
@@ -27681,7 +27681,7 @@
     {
       "id": "src/ui/attachments/LocationCard.tsx#LocationCard.onPress:mutator-call:d714255e3467",
       "path": "src/ui/attachments/LocationCard.tsx",
-      "line": 164,
+      "line": 59,
       "symbol": "LocationCard.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27694,7 +27694,7 @@
     {
       "id": "src/ui/attachments/LocationCard.tsx#LocationCard:mutator-reference:0f964b79c990",
       "path": "src/ui/attachments/LocationCard.tsx",
-      "line": 227,
+      "line": 122,
       "symbol": "LocationCard",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/LocationCard.tsx#LocationCard.onPress",

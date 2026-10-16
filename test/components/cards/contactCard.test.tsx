@@ -861,6 +861,66 @@ describe('ContactCard — native open result ownership', () => {
     },
   );
 
+  it.each([
+    ['missing', { status: 'missing' }, false],
+    ['no_handler', { status: 'no_handler' }, false],
+    ['error', { status: 'error' }, false],
+    ['rejection', new Error('private-contact-unmount-error-aa-3b5c'), true],
+  ] as const)(
+    'drops a %s open result that arrives after the card unmounts (review M235)',
+    async (_outcome, result, rejects) => {
+      const nativeOpen = deferred<{ status: string }>();
+      mockVcfText = PRIVATE_VCARD;
+      mockOpenAttachmentFile.mockReturnValueOnce(nativeOpen.promise);
+      const view = await renderWithTheme(<ContactCard att={localAttachment()} isFromMe={false} />);
+      const press = retainConfiguredPress(
+        await screen.findByRole('button', { name: `Contact: ${PRIVATE_NAME}` }),
+      );
+      await invokeConfiguredPress(press);
+      expect(mockOpenAttachmentFile).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        view.unmount();
+      });
+      await act(async () => {
+        if (rejects) nativeOpen.reject(result);
+        else nativeOpen.resolve(result as { status: string });
+        await nativeOpen.promise.catch(() => undefined);
+      });
+
+      expect(download).not.toHaveBeenCalled();
+      expect(useToastStore.getState().current).toBeNull();
+    },
+  );
+
+  it('makes a press kept across an unmount do nothing (review M235)', async () => {
+    mockVcfText = PRIVATE_VCARD;
+    const localView = await renderWithTheme(
+      <ContactCard att={localAttachment()} isFromMe={false} />,
+    );
+    const openPress = retainConfiguredPress(
+      await screen.findByRole('button', { name: `Contact: ${PRIVATE_NAME}` }),
+    );
+    await act(async () => {
+      localView.unmount();
+    });
+    const downloadView = await renderWithTheme(
+      <ContactCard att={localAttachment({ localPath: null })} isFromMe={false} />,
+    );
+    const downloadPress = retainConfiguredPress(
+      screen.getByRole('button', { name: `Contact: ${PRIVATE_TRANSFER_NAME}` }),
+    );
+    await act(async () => {
+      downloadView.unmount();
+    });
+
+    await invokeConfiguredPress(openPress);
+    await invokeConfiguredPress(downloadPress);
+
+    expect(mockOpenAttachmentFile).not.toHaveBeenCalled();
+    expect(download).not.toHaveBeenCalled();
+  });
+
   it('keeps a fresh A open pending across A → B → A while the old A result and finally stay inert', async () => {
     const oldAOpen = deferred<{ status: string }>();
     const freshAOpen = deferred<{ status: string }>();

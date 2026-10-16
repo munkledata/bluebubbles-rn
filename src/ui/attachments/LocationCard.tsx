@@ -1,28 +1,19 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
-import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
-import { parseVLocation, resolveDisplayPoint, safeOpenUrl, type VLocationData } from '@utils';
+import { parseVLocation, resolveDisplayPoint, safeOpenUrl } from '@utils';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { showExternalOpenFailure } from '../toast/external-open-feedback';
-import { readBoundedTextAttachment } from './readBoundedTextAttachment';
-import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { useParsedTextAttachment } from './useParsedTextAttachment';
 
 interface LocationCardProps {
   att: AttachmentRow;
   isFromMe: boolean;
   /** The bubble's message-menu action, fired on a hold instead of the attachment's own tap. */
   onLongPress?: () => void;
-}
-
-interface ParsedLocationState {
-  attachmentGuid: string;
-  localPath: string;
-  sourceLifetime: number;
-  value: VLocationData | null;
 }
 
 interface LocationOpenOperation {
@@ -40,111 +31,15 @@ interface LocationOpenOperation {
 export function LocationCard({ att, isFromMe, onLongPress }: LocationCardProps): React.JSX.Element {
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
-  const [parsed, setParsed] = useState<ParsedLocationState | null>(null);
-  const accountLease = useScreenAccountLease();
-  const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
-  const sourceLifetimeRef = useRef(0);
-  // The ref revokes old native callbacks synchronously. Committed state gives a recycled row a
-  // fresh callback after the new attachment source becomes current.
-  const [renderSourceLifetime, setRenderSourceLifetime] = useState(0);
-  const activeAttachment = useRef({ guid: att.guid, localPath: att.localPath });
-  const mountedRef = useRef(true);
+  const {
+    accountLease,
+    contentUnavailable,
+    parsed,
+    renderSourceLifetime,
+    sourceGrantIsCurrent,
+    value: loc,
+  } = useParsedTextAttachment(att, parseVLocation);
   const openingRef = useRef<LocationOpenOperation | null>(null);
-  const sourceTransitionPending =
-    activeAttachment.current.guid !== att.guid ||
-    activeAttachment.current.localPath !== att.localPath;
-
-  const revokeSourceLifetime = useCallback((): void => {
-    const nextLifetime = sourceLifetimeRef.current + 1;
-    sourceLifetimeRef.current = nextLifetime;
-    setRenderSourceLifetime(nextLifetime);
-    setParsed(null);
-  }, []);
-
-  // Render a generic disabled card during a source transition. The layout commit then revokes the
-  // previous lifetime before any callback or delayed parse can act for the replacement source.
-  useLayoutEffect(() => {
-    if (!sourceTransitionPending) return;
-    activeAttachment.current = { guid: att.guid, localPath: att.localPath };
-    revokeSourceLifetime();
-  }, [att.guid, att.localPath, revokeSourceLifetime, sourceTransitionPending]);
-
-  // The captured lease never becomes current again after an account transition. Force the final
-  // mounted row to render generically as well as revoking its callbacks and delayed file read.
-  useLayoutEffect(() => {
-    mountedRef.current = true;
-    const unsubscribe = subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
-      revokeSourceLifetime();
-      setAccountRetired(true);
-    });
-    return () => {
-      mountedRef.current = false;
-      openingRef.current = null;
-      unsubscribe();
-    };
-  }, [accountLease, revokeSourceLifetime]);
-
-  const sourceGrantIsCurrent = useCallback(
-    (sourceLifetime: number, attachmentGuid: string, localPath: string | null): boolean => {
-      const current = activeAttachment.current;
-      return (
-        mountedRef.current &&
-        accountLease.isCurrent() &&
-        sourceLifetimeRef.current === sourceLifetime &&
-        current.guid === attachmentGuid &&
-        current.localPath === localPath
-      );
-    },
-    [accountLease],
-  );
-
-  const contentUnavailable = accountRetired || !accountLease.isCurrent() || sourceTransitionPending;
-
-  useEffect(() => {
-    const path = att.localPath;
-    const parseSourceLifetime = renderSourceLifetime;
-    if (!path || contentUnavailable || !sourceGrantIsCurrent(parseSourceLifetime, att.guid, path)) {
-      return;
-    }
-    const attachmentGuid = att.guid;
-    let cancelled = false;
-    const canPublish = (): boolean => {
-      return !cancelled && sourceGrantIsCurrent(parseSourceLifetime, attachmentGuid, path);
-    };
-    void (async () => {
-      try {
-        const text = await readBoundedTextAttachment(path);
-        if (canPublish()) {
-          setParsed({
-            attachmentGuid,
-            localPath: path,
-            sourceLifetime: parseSourceLifetime,
-            value: parseVLocation(text),
-          });
-        }
-      } catch {
-        if (canPublish()) {
-          setParsed({
-            attachmentGuid,
-            localPath: path,
-            sourceLifetime: parseSourceLifetime,
-            value: null,
-          });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [att.guid, att.localPath, contentUnavailable, renderSourceLifetime, sourceGrantIsCurrent]);
-
-  const loc =
-    !contentUnavailable &&
-    parsed?.attachmentGuid === att.guid &&
-    parsed.localPath === att.localPath &&
-    parsed.sourceLifetime === renderSourceLifetime
-      ? parsed.value
-      : null;
 
   // Keep the shared finite-pair validator between parsed data and every rendered/native value.
   const point = resolveDisplayPoint(loc?.latitude, loc?.longitude);

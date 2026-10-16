@@ -362,6 +362,56 @@ describe('LocationCard — tap contract', () => {
     expect(useToastStore.getState().current).toBeNull();
   });
 
+  it.each([
+    ['refused', false, false],
+    ['rejected', new Error('private-location-unmount-error-c4d8'), true],
+  ] as const)(
+    'drops a %s map handoff that settles after the card unmounts (review M235)',
+    async (_outcome, result, rejects) => {
+      const open = deferred<boolean>();
+      (safeOpenUrl as jest.Mock).mockReturnValue(open.promise);
+      const view = await renderWithTheme(
+        <LocationCard att={makeAtt({ localPath: PRIVATE_PATH })} isFromMe={false} />,
+      );
+      await screen.findByText('37.7749, -122.4194');
+      fireEvent.press(screen.getByLabelText('Location'));
+      await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        view.unmount();
+      });
+      await act(async () => {
+        if (rejects) open.reject(result);
+        else open.resolve(result as boolean);
+        await open.promise.catch(() => undefined);
+      });
+
+      expect(useToastStore.getState().current).toBeNull();
+    },
+  );
+
+  it('makes a press kept across an unmount do nothing (review M235)', async () => {
+    const mapView = await renderWithTheme(
+      <LocationCard att={makeAtt({ localPath: PRIVATE_PATH })} isFromMe={false} />,
+    );
+    await screen.findByText('37.7749, -122.4194');
+    const mapPress = retainConfiguredPress(screen.getByRole('button', { name: 'Location' }));
+    await act(async () => {
+      mapView.unmount();
+    });
+    const downloadView = await renderWithTheme(<LocationCard att={makeAtt()} isFromMe={false} />);
+    const downloadPress = retainConfiguredPress(screen.getByRole('button', { name: 'Location' }));
+    await act(async () => {
+      downloadView.unmount();
+    });
+
+    await invokeConfiguredPress(mapPress);
+    await invokeConfiguredPress(downloadPress);
+
+    expect(safeOpenUrl).not.toHaveBeenCalled();
+    expect(download).not.toHaveBeenCalled();
+  });
+
   it('localPath but unparseable loc → does nothing (no open, no download)', async () => {
     mockLocText = 'BEGIN:VCARD\nFN:Not a location\nEND:VCARD';
     await renderWithTheme(
