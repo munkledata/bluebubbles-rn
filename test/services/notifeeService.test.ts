@@ -51,7 +51,6 @@ import {
   clearLockedNotification,
   postNotification,
   prepareNotificationPresentationState,
-  reconcileMessageNotificationGroup,
   reconcileMessageNotificationGroupAfterRemoval,
   requestNotificationPermission,
   scheduleReminderNotification,
@@ -299,6 +298,14 @@ function installStatefulTray(initial: Record<string, any>[] = []): {
       mockCancelDisplayedAll.mockImplementation(async () => undefined);
     },
   };
+}
+
+/**
+ * Run the shared message-group rebuild through its remaining public entry point: a removed message
+ * child (review M103 deleted the post-unlock entry, which App Lock always skipped).
+ */
+function reconcileGroup(): Promise<void> {
+  return reconcileMessageNotificationGroupAfterRemoval(displayedMessageChild(1, 1));
 }
 
 function displayedMessageChild(chatId: number, messageId: number): Record<string, any> {
@@ -1282,7 +1289,7 @@ describe('postNotification — detailed message', () => {
       expect(state.tray.has('gator-message-1')).toBe(true);
       expect(state.tray.has('gator-message-3')).toBe(true);
       expect(JSON.stringify(state.tray.get('gator-message-summary'))).not.toContain('PRIVATE_');
-      await expect(reconcileMessageNotificationGroup()).resolves.toBeUndefined();
+      await expect(reconcileGroup()).resolves.toBeUndefined();
     } finally {
       state.restore();
     }
@@ -1336,7 +1343,7 @@ describe('postNotification — detailed message', () => {
       expect(state.tray.size).toBe(0);
 
       useLockStore.setState({ locked: false });
-      await reconcileMessageNotificationGroup();
+      await reconcileGroup();
       expect(state.tray.size).toBe(0);
     } finally {
       state.restore();
@@ -1392,11 +1399,11 @@ describe('postNotification — detailed message', () => {
         expect(mockDisplay).toHaveBeenCalledTimes(3);
 
         state.tray.delete('gator-message-1');
-        await reconcileMessageNotificationGroup();
+        await reconcileGroup();
         expect(state.tray.get('gator-message-3')).toBe(survivor);
         expect(state.tray.get('gator-message-summary')).toBe(summary);
         state.tray.delete('gator-message-3');
-        await reconcileMessageNotificationGroup();
+        await reconcileGroup();
         expect(state.tray.size).toBe(0);
         expect(mockDisplay).toHaveBeenCalledTimes(3);
       } finally {
@@ -1431,7 +1438,7 @@ describe('postNotification — detailed message', () => {
           mockVault.get.mockRejectedValue(new Error('vault unavailable'));
         else mockVault.get.mockResolvedValue('invalid');
 
-        await reconcileMessageNotificationGroup();
+        await reconcileGroup();
 
         expect(mockGetDisplayed).not.toHaveBeenCalled();
         expect(mockDisplay).not.toHaveBeenCalled();
@@ -1458,7 +1465,7 @@ describe('postNotification — detailed message', () => {
           finishRead = resolve;
         });
       });
-      const pending = reconcileMessageNotificationGroup();
+      const pending = reconcileGroup();
       await started;
       if (change === 'account-retirement') pauseRealtimeDeliveries();
       else {
@@ -1486,7 +1493,7 @@ describe('postNotification — detailed message', () => {
         useLockStore.getState().setEnabled(true);
         return [...state.tray].map(([id, notification]) => ({ id, notification }));
       });
-      await reconcileMessageNotificationGroup();
+      await reconcileGroup();
       expect(mockDisplay).not.toHaveBeenCalled();
       expect(mockCancel).not.toHaveBeenCalled();
       expect([...state.tray.values()]).toEqual([first, second]);
@@ -1530,13 +1537,13 @@ describe('postNotification — detailed message', () => {
           finishRead = resolve;
         });
       });
-      const pending = reconcileMessageNotificationGroup();
+      const pending = reconcileGroup();
       await started;
       await jest.advanceTimersByTimeAsync(2_000);
       await pending;
       expect(mockGetDisplayed).not.toHaveBeenCalled();
       useLockStore.setState({ hydrated: true });
-      await reconcileMessageNotificationGroup();
+      await reconcileGroup();
       expect(mockGetDisplayed).toHaveBeenCalledTimes(1);
       const displayCount = mockDisplay.mock.calls.length;
       const cancelCount = mockCancel.mock.calls.length;
@@ -1621,11 +1628,11 @@ describe('postNotification — detailed message', () => {
       mockCancel.mockClear();
       mockGetDisplayed.mockRejectedValueOnce(new Error('tray unavailable'));
 
-      await expect(reconcileMessageNotificationGroup()).resolves.toBeUndefined();
+      await expect(reconcileGroup()).resolves.toBeUndefined();
 
       expect([...state.tray]).toEqual(before);
       expect(mockCancel).not.toHaveBeenCalled();
-      await expect(reconcileMessageNotificationGroup()).resolves.toBeUndefined();
+      await expect(reconcileGroup()).resolves.toBeUndefined();
       expect([...state.tray]).toEqual(before);
     } finally {
       state.restore();

@@ -1,7 +1,6 @@
 const pauseRealtime = jest.fn();
 const resumeRealtime = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const flushErrorReports = jest.fn<Promise<void>, []>(() => Promise.resolve());
-const reconcileMessageNotificationGroup = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const clearLockedNotification = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const beginAppLockNotificationPrivacy = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const commitAppLockNotificationPrivacy = jest.fn();
@@ -19,7 +18,6 @@ const clearCurrentShareShortcuts = jest.fn(() => true);
 jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }));
 jest.mock('@/services/errors', () => ({ flushErrorReports }));
 jest.mock('@/services/notifications/notifeeService', () => ({
-  reconcileMessageNotificationGroup,
   clearLockedNotification,
   beginAppLockNotificationPrivacy,
   commitAppLockNotificationPrivacy,
@@ -57,7 +55,6 @@ beforeEach(() => {
   pauseRealtime.mockReset();
   resumeRealtime.mockReset().mockResolvedValue(undefined);
   flushErrorReports.mockReset().mockResolvedValue(undefined);
-  reconcileMessageNotificationGroup.mockReset().mockResolvedValue(undefined);
   clearLockedNotification.mockReset().mockResolvedValue(undefined);
   beginAppLockNotificationPrivacy.mockReset().mockResolvedValue(undefined);
   commitAppLockNotificationPrivacy.mockReset();
@@ -348,7 +345,6 @@ describe('completeUnlock', () => {
     expect(useLockStore.getState().locked).toBe(true);
     expect(resumeRealtime).not.toHaveBeenCalled();
     expect(flushErrorReports).not.toHaveBeenCalled();
-    expect(reconcileMessageNotificationGroup).not.toHaveBeenCalled();
     expect(clearLockedNotification).not.toHaveBeenCalled();
     expect(recoverOutgoing).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
@@ -369,7 +365,6 @@ describe('completeUnlock', () => {
     expect(useLockStore.getState().locked).toBe(false);
     expect(resumeRealtime).toHaveBeenCalledTimes(1);
     expect(flushErrorReports).toHaveBeenCalledTimes(1);
-    expect(reconcileMessageNotificationGroup).toHaveBeenCalledTimes(1);
     // The user is now in the app: a stale "You have new messages" must not linger in the tray.
     expect(clearLockedNotification).toHaveBeenCalledTimes(1);
     expect(recoverOutgoing).toHaveBeenCalledTimes(1);
@@ -384,7 +379,6 @@ describe('completeUnlock', () => {
   it('keeps every recovery non-blocking after authentication succeeds', async () => {
     let finishRealtime!: () => void;
     let finishFlush!: () => void;
-    let finishNotificationRepair!: () => void;
     let finishOutgoing!: (result: { eligible: number; sent: number }) => void;
     resumeRealtime.mockReturnValueOnce(
       new Promise<void>((resolve) => {
@@ -394,11 +388,6 @@ describe('completeUnlock', () => {
     flushErrorReports.mockReturnValueOnce(
       new Promise<void>((resolve) => {
         finishFlush = resolve;
-      }),
-    );
-    reconcileMessageNotificationGroup.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        finishNotificationRepair = resolve;
       }),
     );
     recoverOutgoing.mockReturnValueOnce(
@@ -417,12 +406,10 @@ describe('completeUnlock', () => {
     expect(useLockStore.getState().locked).toBe(false);
     expect(resumeRealtime).toHaveBeenCalledTimes(1);
     expect(flushErrorReports).toHaveBeenCalledTimes(1);
-    expect(reconcileMessageNotificationGroup).toHaveBeenCalledTimes(1);
     expect(recoverOutgoing).toHaveBeenCalledTimes(1);
 
     finishRealtime();
     finishFlush();
-    finishNotificationRepair();
     finishOutgoing({ eligible: 0, sent: 0 });
   });
 
@@ -438,7 +425,6 @@ describe('completeUnlock', () => {
 
     expect(resumeRealtime).toHaveBeenCalledTimes(1);
     expect(flushErrorReports).toHaveBeenCalledTimes(1);
-    expect(reconcileMessageNotificationGroup).toHaveBeenCalledTimes(1);
     expect(recoverOutgoing).not.toHaveBeenCalled();
   });
 
@@ -448,14 +434,12 @@ describe('completeUnlock', () => {
     expect(useLockStore.getState().locked).toBe(false);
     expect(resumeRealtime).not.toHaveBeenCalled();
     expect(flushErrorReports).not.toHaveBeenCalled();
-    expect(reconcileMessageNotificationGroup).not.toHaveBeenCalled();
     expect(recoverOutgoing).not.toHaveBeenCalled();
   });
 
   it('does not re-lock or reject when any post-unlock recovery fails', async () => {
     const realtimeFailure = new Error('socket unavailable');
     const flushFailure = new Error('report queue unavailable');
-    const notificationFailure = new Error('notification tray unavailable');
     const outgoingFailure = new Error('send queue unavailable');
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     useSessionStore.setState({
@@ -465,7 +449,6 @@ describe('completeUnlock', () => {
     });
     resumeRealtime.mockRejectedValueOnce(realtimeFailure);
     flushErrorReports.mockRejectedValueOnce(flushFailure);
-    reconcileMessageNotificationGroup.mockRejectedValueOnce(notificationFailure);
     recoverOutgoing.mockRejectedValueOnce(outgoingFailure);
 
     await expect(completeUnlock()).resolves.toBeUndefined();
@@ -475,7 +458,6 @@ describe('completeUnlock', () => {
     expect(warn.mock.calls).toEqual([
       ['[realtime] post-unlock resume failed', realtimeFailure],
       ['[errors] post-unlock flush failed', flushFailure],
-      ['[notif] post-unlock message-group repair failed', notificationFailure],
       ['[send] post-unlock recovery failed', outgoingFailure],
     ]);
     warn.mockRestore();

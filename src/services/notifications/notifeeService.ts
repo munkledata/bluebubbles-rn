@@ -2432,15 +2432,6 @@ function runTrackedMessageGroupReconciliation(): Promise<void> {
 }
 
 /**
- * Repair the current message group after a privacy gate opens. While App Lock is effective, native
- * removal events deliberately leave the tray untouched; successful warm unlock calls this narrow
- * pass so a summary cannot remain stale until another message or restart.
- */
-export function reconcileMessageNotificationGroup(): Promise<void> {
-  return runTrackedMessageGroupReconciliation();
-}
-
-/**
  * Reconcile Android message history against the supplied account database after a sync/repair.
  * Registration precedes the FIFO wait so Disconnect drains an admitted reconciliation.
  */

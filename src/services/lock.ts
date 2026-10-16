@@ -11,7 +11,6 @@ import {
   beginAppLockNotificationPrivacy,
   clearLockedNotification,
   commitAppLockNotificationPrivacy,
-  reconcileMessageNotificationGroup,
   releaseAppLockNotificationPrivacyBarrier,
 } from './notifications/notifeeService';
 import { clearCurrentShareShortcuts } from './shortcuts/shareShortcuts';
@@ -172,9 +171,6 @@ export async function completeUnlock(): Promise<void> {
     });
     void flushErrorReports().catch((error: unknown) => {
       logger.warn('[errors] post-unlock flush failed', error);
-    });
-    void reconcileMessageNotificationGroup().catch((error: unknown) => {
-      logger.warn('[notif] post-unlock message-group repair failed', error);
     });
     if (!isDevServer()) {
       void recoverOutgoing().catch((error: unknown) => {
