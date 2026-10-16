@@ -519,55 +519,19 @@ class BootCoordinatorImpl<TSession extends object> implements BootCoordinator {
         // password-bearing result, let alone repopulate the retired run slot that invalidate just
         // cleared. The outer settlement ownership check will return the run's terminal state.
         if (!this.ownsStage(run, stage)) return 'completed';
-        if (!outcome || typeof outcome !== 'object') {
-          throw new BootAdapterContractError(stage);
-        }
-        const candidate = outcome as Record<string, unknown>;
-
-        let kind: unknown;
-        try {
-          kind = candidate.kind;
-        } catch {
-          throw new BootAdapterContractError(stage);
-        }
-        // A getter/Proxy trap may synchronously invalidate or replace this run. In that case do
-        // not inspect any later property, especially the password-bearing session value.
-        if (!this.ownsStage(run, stage)) return 'completed';
-        if (kind === 'setup') {
+        if (outcome?.kind === 'setup') {
           run.session = { kind: 'empty' };
           return 'setup';
         }
-        if (kind !== 'connected') throw new BootAdapterContractError(stage);
-
-        let hasSession: boolean;
-        try {
-          hasSession = Object.prototype.hasOwnProperty.call(candidate, 'session');
-        } catch {
+        // The adapter returns a plain typed object and the validator is pure, so anything other
+        // than a validated connected session is a broken contract (review M124).
+        if (
+          outcome?.kind !== 'connected' ||
+          this.options.validateSession(outcome.session) !== true
+        ) {
           throw new BootAdapterContractError(stage);
         }
-        if (!this.ownsStage(run, stage)) return 'completed';
-        if (!hasSession) throw new BootAdapterContractError(stage);
-
-        let session: unknown;
-        try {
-          session = candidate.session;
-        } catch {
-          throw new BootAdapterContractError(stage);
-        }
-        if (!this.ownsStage(run, stage)) return 'completed';
-
-        let validatedSession: TSession | null = null;
-        try {
-          if (this.options.validateSession(session) === true) validatedSession = session;
-        } catch {
-          throw new BootAdapterContractError(stage);
-        }
-        // The injected validator may synchronously invalidate/re-enter. Check after it and
-        // immediately before retaining the exact run-owned value.
-        if (!this.ownsStage(run, stage)) return 'completed';
-        if (!validatedSession) throw new BootAdapterContractError(stage);
-
-        run.session = { kind: 'connected', value: validatedSession };
+        run.session = { kind: 'connected', value: outcome.session };
         return 'completed';
       }
       case 'database': {
