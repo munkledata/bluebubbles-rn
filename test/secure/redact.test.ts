@@ -75,6 +75,18 @@ describe('redaction', () => {
     );
   });
 
+  it('scans long runs in linear time, so one large log line cannot stall redaction (M131)', () => {
+    // A word boundary every character made the email and labeled-identifier patterns rescan the
+    // whole run from each boundary: about 3 s for 32 KiB and 13.6 s for 64 KiB before the fix.
+    const emailLike = 'a.'.repeat(16 * 1024); // e-mail local-part characters, never an '@'
+    const identifierLike = 'a-'.repeat(16 * 1024); // identifier characters, never 'guid'/'uuid'
+    for (const input of [emailLike, identifierLike]) {
+      const started = Date.now();
+      expect(redactUrls(input)).toBe(input);
+      expect(Date.now() - started).toBeLessThan(1_000);
+    }
+  });
+
   it('preserves ordinary numbers, dates, endpoint paths and stack locations', () => {
     const line =
       'status=500 row=1234567890 at sync (/app/src/redact.test.ts:123:45) date=2026-08-04 timestamp=1700000009000';
