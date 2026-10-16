@@ -223,6 +223,16 @@ export async function persistServerConnection(
     await deps.vault.set('serverPassword', password);
     if (!attemptIsCurrent(deps)) return cancelledResult();
     if (upgrade.kind === 'valid') {
+      // Disconnect revoked or waived every bearer it held before writing this tombstone, so a
+      // replaced-credential record that outlived it is the old account's and must not reach the new
+      // session (review M130). Clear it before the tombstone, which keeps a failure retryable.
+      if ((await deps.vault.get('replacedServerCredential')) !== null) {
+        await deps.vault.delete('replacedServerCredential');
+        if (!attemptIsCurrent(deps)) return cancelledResult();
+        if ((await deps.vault.get('replacedServerCredential')) !== null) {
+          throw new Error('replaced-credential record deletion was not confirmed');
+        }
+      }
       // A keyless tombstone may be retired only as part of this completely new explicit session.
       await deps.vault.delete('serverCredentialUpgrade');
       if (!attemptIsCurrent(deps)) return cancelledResult();

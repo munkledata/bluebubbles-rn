@@ -1061,6 +1061,14 @@ async function captureScopedCredentialRevocationTargets(
       origin: upgrade.journal.origin,
       credential: upgrade.journal.candidateCredential,
     });
+    // A replacement journal can be the only custody of the bearer it replaced: its record write
+    // failed, or the app stopped before it (review M130). Version 2 bearers are always scoped.
+    if (upgrade.journal.version === 2) {
+      remember({
+        origin: upgrade.journal.origin,
+        credential: upgrade.journal.previousCredential,
+      });
+    }
   }
   // A replacement's old bearer still awaiting revocation is revoked with the rest (review M130).
   // An unreadable record names nothing that could be sent; it is simply removed afterwards.
@@ -1086,13 +1094,16 @@ async function writeCredentialUpgradeRevokedTombstone(): Promise<void> {
   }
 }
 
-/** Drop a replaced bearer's record once it is revoked or Disconnect waived the server step. */
+/**
+ * Drop a replaced bearer's record once it is revoked or Disconnect waived the server step. Confirmed
+ * like the tombstone: a record left behind would be revoked against this server from the next
+ * account's session (review M130).
+ */
 async function forgetReplacedServerCredential(): Promise<void> {
-  try {
-    await vault.delete('replacedServerCredential');
-  } catch (error) {
-    // Its bearer is already revoked or deliberately forgotten; a later attempt finds it dead.
-    logger.warn('[forget] replaced-credential record delete failed', error);
+  if ((await vault.get('replacedServerCredential')) === null) return;
+  await vault.delete('replacedServerCredential');
+  if ((await vault.get('replacedServerCredential')) !== null) {
+    throw new Error('replaced-credential record deletion was not confirmed');
   }
 }
 

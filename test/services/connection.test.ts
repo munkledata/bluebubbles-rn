@@ -2,10 +2,12 @@ import { ApiError } from '@core/api/errors';
 import {
   ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE,
   createCredentialUpgradeCandidate,
+  createReplacedCredentialRecord,
   InMemoryVault,
   logger,
   revokedCredentialUpgradeJournal,
   serializeCredentialUpgradeJournal,
+  serializeReplacedCredentialRecord,
   SERVER_SESSION_STATE,
   type AccountRevocationMarker,
   type SecureVault,
@@ -72,6 +74,73 @@ describe('connectToServer', () => {
 
     expect(await vault.get('serverCredentialUpgrade')).toBeNull();
     expect(await vault.get('serverSessionState')).toBe(SERVER_SESSION_STATE.active);
+  });
+
+  describe('a replaced-credential record left by the previous account (review M130)', () => {
+    const OLD_BEARER = `bbd_device_v1_${'O'.repeat(43)}`;
+    const record = serializeReplacedCredentialRecord(
+      createReplacedCredentialRecord('https://old', OLD_BEARER),
+    );
+    const tombstone = serializeCredentialUpgradeJournal(revokedCredentialUpgradeJournal());
+
+    it('is cleared together with the tombstone by the new account’s first save', async () => {
+      const vault = new InMemoryVault();
+      await vault.set('serverCredentialUpgrade', tombstone);
+      await vault.set('replacedServerCredential', record);
+
+      await expect(
+        connectToServer('https://srv', SCOPED_CREDENTIAL, {
+          fetchServerInfo: async () => upToDate,
+          vault,
+          revocationMarker,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+
+      expect(await vault.get('replacedServerCredential')).toBeNull();
+      expect(await vault.get('serverCredentialUpgrade')).toBeNull();
+    });
+
+    it('fails the connect closed, tombstone kept, when it cannot be cleared', async () => {
+      const backing = new InMemoryVault();
+      await backing.set('serverCredentialUpgrade', tombstone);
+      await backing.set('replacedServerCredential', record);
+      const keepsRecord: SecureVault = {
+        get: (key) => backing.get(key),
+        set: (key, value) => backing.set(key, value),
+        delete: async (key) => {
+          if (key !== 'replacedServerCredential') await backing.delete(key);
+        },
+      };
+
+      await expect(
+        connectToServer('https://srv', SCOPED_CREDENTIAL, {
+          fetchServerInfo: async () => upToDate,
+          vault: keepsRecord,
+          revocationMarker,
+        }),
+      ).resolves.toMatchObject({ ok: false, kind: 'unknown' });
+      expect(await backing.get('replacedServerCredential')).toBe(record);
+      expect(await backing.get('serverCredentialUpgrade')).toBe(tombstone);
+      expect(await backing.get('serverSessionState')).toBe(SERVER_SESSION_STATE.writing);
+    });
+
+    it('is never touched by a same-account address change, which still owes its revocation', async () => {
+      const vault = new InMemoryVault();
+      await vault.set('serverSessionState', SERVER_SESSION_STATE.active);
+      await vault.set('serverAddress', 'https://old');
+      await vault.set('serverPassword', SCOPED_CREDENTIAL);
+      await vault.set('replacedServerCredential', record);
+
+      await expect(
+        persistServerConnection('https://new', SCOPED_CREDENTIAL, upToDate, {
+          vault,
+          revocationMarker,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+
+      expect(await vault.get('serverAddress')).toBe('https://new');
+      expect(await vault.get('replacedServerCredential')).toBe(record);
+    });
   });
 
   it('fails closed when upgrade-state removal is unconfirmed or a live candidate exists', async () => {

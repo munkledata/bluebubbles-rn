@@ -293,6 +293,9 @@ import { useSessionStore } from '@state/sessionStore';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
 import {
+  acknowledgeCredentialUpgradePushAdoption,
+  beginCredentialUpgradePushAdoption,
+  createCredentialReplacementCandidate,
   createCredentialUpgradeCandidate,
   createReplacedCredentialRecord,
   ERROR_DIAGNOSTIC_SITES,
@@ -302,6 +305,8 @@ import {
   serializeReplacedCredentialRecord,
   SERVER_SESSION_STATE,
 } from '@core/secure';
+// The defining module, because this suite mocks the '@core/realtime' barrel.
+import { FCM_PUSH_ENCRYPTION_TYPE_V3 } from '@core/realtime/fcmPushEnvelopeIdentity';
 import {
   activateForegroundBootSession,
   connect,
@@ -711,13 +716,15 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
       origin: null,
       password: null,
     });
-    // Only the custody the wipe must revoke or retire, including a replaced bearer (M130).
+    // Only the custody the wipe must revoke or retire, including a replaced bearer (M130), plus
+    // the check that no replaced-credential record is left before Disconnect reports success.
     expect(vaultGet.mock.calls.map(([key]) => key)).toEqual([
       'serverAddress',
       'serverPassword',
       'serverCredentialUpgrade',
       'replacedServerCredential',
       'serverCredentialUpgrade',
+      'replacedServerCredential',
     ]);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(startSync).not.toHaveBeenCalled();
@@ -2295,6 +2302,55 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       expect(revokeSelf).not.toHaveBeenCalled();
       expect(vaultValues.has('replacedServerCredential')).toBe(false);
     });
+
+    it('revokes the old bearer that only a replacement journal still holds (review M130)', async () => {
+      // The replacement finished, but its record write failed: the journal is the only custody.
+      vaultValues.delete('replacedServerCredential');
+      const adopted = acknowledgeCredentialUpgradePushAdoption(
+        beginCredentialUpgradePushAdoption(
+          createCredentialReplacementCandidate('https://old.example', replaced, live),
+          {
+            name: 'Gator (Android 36)',
+            provider: 'fcm',
+            token: 'current-fcm-token',
+            pushEncryption: {
+              type: FCM_PUSH_ENCRYPTION_TYPE_V3,
+              key: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+            },
+          },
+        ),
+        {
+          id: '33333333-3333-4333-8333-333333333333',
+          pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+          pushEncryptionIdentity: {
+            serverInstallationId: '11111111-1111-4111-8111-111111111111',
+            principalId: '22222222-2222-4222-8222-222222222222',
+            deviceId: '33333333-3333-4333-8333-333333333333',
+          },
+        },
+      );
+      vaultValues.set('serverCredentialUpgrade', serializeCredentialUpgradeJournal(adopted));
+
+      await expect(forget()).resolves.toBeUndefined();
+
+      expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', live);
+      expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', replaced);
+      expect(revokeSelf).toHaveBeenCalledTimes(2);
+      expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+    });
+
+    it('fails Disconnect when a present record cannot be confirmed deleted (review M130)', async () => {
+      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      vaultDelete.mockImplementation(async (key: string) => {
+        // The keystore reports success but keeps this one value.
+        if (key !== 'replacedServerCredential') vaultValues.delete(key);
+      });
+
+      await expect(forget()).rejects.toThrow(
+        'Scoped credential retirement for the previous connection could not be confirmed.',
+      );
+      expect(vaultValues.has('replacedServerCredential')).toBe(true);
+    });
   });
 
   it('finishes Disconnect for a bearer the server proves dead with two independent 401s', async () => {
@@ -3243,11 +3299,8 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       'serverSessionState',
       SERVER_SESSION_STATE.forgotten,
     );
-    expect(vaultDelete.mock.calls.map(([key]) => key)).toEqual([
-      'replacedServerCredential',
-      'serverAddress',
-      'serverPassword',
-    ]);
+    // No replaced-credential record exists, so none is deleted.
+    expect(vaultDelete.mock.calls.map(([key]) => key)).toEqual(['serverAddress', 'serverPassword']);
     expect(vaultValues.get('serverAddress')).toBe('https://old.example');
     expect(vaultValues.get('serverPassword')).toBe('hunter2');
     await expect(
