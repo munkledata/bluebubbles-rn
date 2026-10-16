@@ -2,9 +2,9 @@
  * In-flight upload control: how many attachment uploads may transfer at once, and the handles that
  * let the user stop one.
  *
- * PURE (no expo imports) for the same reason as `uploadErrors.ts` and `trackedUpload.ts` —
- * `attachmentUpload.ts` imports expo-file-system and cannot be loaded in the node jest project at
- * all, so anything worth testing has to live outside it.
+ * PURE (no expo imports) for the same reason as `uploadErrors.ts` and `trackedUpload.ts`:
+ * `attachmentUpload.ts` imports expo-file-system, so a node jest test can load it only with that
+ * module mocked. Logic kept out here is tested directly, without any mock.
  *
  * The gate deliberately mirrors the one `downloadService` already runs for the download side: same
  * acquire/release shape, same FIFO wake order, same default of 2. Two is the compromise that side

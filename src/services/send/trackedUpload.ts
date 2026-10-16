@@ -2,8 +2,8 @@
  * Report an attachment upload's byte progress to a sink for the duration of ONE attempt.
  *
  * PURE (no expo imports) for exactly the reason `uploadErrors.ts` is: `attachmentUpload.ts`
- * imports `expo-file-system` and therefore cannot be loaded in the node jest project at all — but
- * the part that must not break can be tested here.
+ * imports `expo-file-system`, so a node jest test can load it only with that module mocked. The
+ * part that must not break is tested here directly.
  *
  * What must not break is the SETTLE. The sink entry is what draws the spinner on the bubble and
  * what keeps the composer's upload bar on screen, so an entry that is started and never settled

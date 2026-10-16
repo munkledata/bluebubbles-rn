@@ -24,14 +24,29 @@ write: the bubble vanished while the phone carried on streaming the entire file 
 | [`src/state/uploadStore.ts`](../src/state/uploadStore.ts)                                         | Presentation-only byte state, keyed by attachment guid   | yes               |
 | [`src/services/send/trackedUpload.ts`](../src/services/send/trackedUpload.ts)                     | Opens/forwards/settles a progress entry for one attempt  | yes               |
 | [`src/services/send/uploadControl.ts`](../src/services/send/uploadControl.ts)                     | Concurrency gate + cancel registry                       | yes               |
-| [`src/services/send/attachmentUpload.ts`](../src/services/send/attachmentUpload.ts)               | The expo wiring that binds all of the above              | **no**            |
+| [`src/services/send/attachmentUpload.ts`](../src/services/send/attachmentUpload.ts)               | The expo wiring that binds all of the above              | with a mock       |
 | [`src/ui/attachments/UploadProgressOverlay.tsx`](../src/ui/attachments/UploadProgressOverlay.tsx) | Ring + byte pill on the bubble                           | component project |
 | [`src/ui/conversations/UploadStatusBar.tsx`](../src/ui/conversations/UploadStatusBar.tsx)         | Per-chat summary bar above the composer                  | component project |
 
-**Why so many small files.** `attachmentUpload.ts` imports `expo-file-system` and therefore cannot
-be loaded in the node jest project _at all_. Anything left inside it is permanently untestable, so
-the logic worth proving lives outside it and the native bits are injected — the same split
+**Why so many small files.** `attachmentUpload.ts` imports `expo-file-system`, so a node jest test
+can load it only with that module mocked (`test/services/attachmentUploadTransport.test.ts` does, to
+prove the transport and cancel wiring). The logic worth proving still lives outside it, with the
+native bits injected, so most of it is tested directly without any mock: the same split
 `uploadErrors.ts` already used.
+
+## Routes and the multipart filename
+
+- **RCS** (the original path): `POST /message/attachment/upload` with `chatGuid`, `tempGuid`,
+  `name` and, on capable servers, `clientAttemptGeneration`.
+- **iMessage** (narrow and capability-fenced): only when the server advertises
+  `supports_imessage_attachment_upload` (voice notes `supports_imessage_voice_upload`, captions
+  `supports_imessage_attachment_caption_upload`), only in a one-to-one chat (`iMessage;-;…` or
+  `any;-;…`), and only one JPEG, PNG or PDF up to 10 MiB, or one M4A voice note (sent with
+  `uploadKind: 'imessage_voice'`). A caption must be non-blank and at most 64 KiB. The form stays
+  minimal: no `name` field and no attempt generation. A stale queue row can never infer this mode.
+- **Filename (`gatorFileName`):** the picker often caches a file under a random UUID. The patched
+  `createUploadTask` (`patches/expo-file-system+57.0.7.patch`) takes `gatorFileName` and sends it as
+  the multipart filename, so the server sees the original name on both routes.
 
 ---
 

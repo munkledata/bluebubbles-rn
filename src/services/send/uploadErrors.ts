@@ -8,8 +8,8 @@
  * "Directory for '…' doesn't exist.", `ensurePermission` → "Location '…' isn't readable.") plus
  * the usual POSIX wording.
  *
- * PURE (no expo imports) so it stays testable in the node jest project — `attachmentUpload.ts`
- * itself can't be, since it imports expo-file-system.
+ * PURE (no expo imports) so it is tested directly in the node jest project. `attachmentUpload.ts`
+ * imports expo-file-system, so a node test can load it only with that module mocked.
  */
 
 const LOCAL_FILE_PATTERNS =
