@@ -586,9 +586,12 @@ These four DEV results stop at the then-current migration head `0038`; they do n
   current 44-migration registry ended at `0044_custom_folder_unread_badge`; the disposable contract passed **28/28**,
   relaunch passed **7/7 READY / 12/12 final / 3/3 host**, active-WAL death passed **9/9 / 12/12 / 5/5**, and
   active-migration death passed **11/11 / 15/15 / 6/6**. All **108/108** retained report booleans were true. The
-  configured 2026-09-01 07:17 UTC schedule occurrence remained unobserved through 08:17:09 UTC, so child
-  `DB-03C1-SCHEDULED-ANDROID-CI` remains open until one genuine `event=schedule` run passes and its reports are
-  validated.
+  configured 2026-09-01 07:17 UTC schedule occurrence remained unobserved through 08:17:09 UTC. Child
+  `DB-03C1-SCHEDULED-ANDROID-CI` was later closed by genuine scheduled run 33508444928 on 2026-09-19 (see the
+  work plan), but the weekly lane is not reliably green since: it passed on 2026-09-29, failed in "Run real
+  Android database lanes" on 2026-10-06 (run 37476974988), and was skipped on 2026-10-13 because earlier jobs
+  failed. The non-database failures in those runs (dependency audit, guard steps) were addressed by `eb6293d` and
+  `896ddaf`. Treat the database lane as unconfirmed until the next genuine `event=schedule` run passes it again.
 
 ### Replacement candidate native/device proof
 
