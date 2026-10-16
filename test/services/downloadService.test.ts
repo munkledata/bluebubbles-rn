@@ -1552,7 +1552,11 @@ describe('ensureDownloaded', () => {
       expect(observedSignal?.aborted).toBe(false);
 
       current = false;
-      await jest.advanceTimersByTimeAsync(100);
+      // The scope is checked once a second (review M157): a stalled transfer still stops within a
+      // second of Disconnect, without waking every 100 ms for up to 15 minutes.
+      await jest.advanceTimersByTimeAsync(999);
+      expect(observedSignal?.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
 
       await expect(run).resolves.toBeNull();
       expect(observedSignal?.aborted).toBe(true);

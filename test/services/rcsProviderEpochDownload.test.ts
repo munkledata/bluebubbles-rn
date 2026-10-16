@@ -196,7 +196,7 @@ describe('RCS provider-epoch attachment fetch admission', () => {
       await started;
       expect(useDownloadStore.getState().status[photo.guid]).toBe('downloading');
       ownerCurrent = false;
-      await jest.advanceTimersByTimeAsync(101);
+      await jest.advanceTimersByTimeAsync(1_001);
 
       await expect(task).resolves.toBeNull();
       expect(useDownloadStore.getState().status[photo.guid]).toBeUndefined();
@@ -275,7 +275,7 @@ describe('RCS provider-epoch attachment fetch admission', () => {
       useDownloadStore.getState().reset();
       resumeRealtimeDeliveries();
       useDownloadStore.getState().start(photo.guid);
-      await jest.advanceTimersByTimeAsync(101);
+      await jest.advanceTimersByTimeAsync(1_001);
 
       await expect(task).resolves.toBeNull();
       expect(useDownloadStore.getState().status[photo.guid]).toBe('downloading');
@@ -321,7 +321,7 @@ describe('RCS provider-epoch attachment fetch admission', () => {
     expect(
       state.setServerInfoForTransport(state.origin!, state.transportRevision, info(EPOCH_B)),
     ).toBe(true);
-    await jest.advanceTimersByTimeAsync(101);
+    await jest.advanceTimersByTimeAsync(1_001);
 
     await expect(task).resolves.toBeNull();
     expect(fetch).toHaveBeenCalledTimes(1);

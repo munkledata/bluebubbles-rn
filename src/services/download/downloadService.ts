@@ -24,7 +24,9 @@ export const ATTACHMENT_IMAGE_MAX_PIXELS = 64 * 1024 * 1024;
 /** Automatic work gets a short absolute deadline; a tap may spend longer on a large attachment. */
 export const AUTOMATIC_DOWNLOAD_TIMEOUT_MS = 2 * 60 * 1000;
 export const MANUAL_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
-const DOWNLOAD_SCOPE_POLL_MS = 100;
+// How often a running transfer re-checks its account/RCS scope. A stale transfer stops within a
+// second; the DB commit is separately fenced, so this only bounds wasted network time (M157).
+const DOWNLOAD_SCOPE_POLL_MS = 1_000;
 
 export interface AttachmentFetchRequest {
   readonly mode: AttachmentDownloadMode;
