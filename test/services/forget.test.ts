@@ -322,6 +322,7 @@ import {
 } from '@/services/boot/foregroundBootInvalidation';
 import { readFcmSessionState } from '@/services/notifications/fcmSessionGate';
 import { uploadRegistry } from '@/services/send/uploadControl';
+import { flushMicrotasks, waitForMicrotaskCondition } from '../support/async';
 /* eslint-enable import/first */
 
 beforeEach(async () => {
@@ -433,10 +434,6 @@ function productionBootContext(): {
     reportIssue,
     disposers,
   };
-}
-
-async function flushMicrotasks(count = 30): Promise<void> {
-  for (let index = 0; index < count; index += 1) await Promise.resolve();
 }
 
 async function productionBootAttempt(context: BootStageContext): Promise<ForegroundBootAttempt> {
@@ -815,7 +812,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     );
 
     const hydration = bootSavedSession();
-    for (let i = 0; i < 100 && releaseHydration == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseHydration != null, 'releaseHydration', 100);
     expect(releaseHydration).toEqual(expect.any(Function));
     expect(startSync).not.toHaveBeenCalled();
     expect(startRealtime).not.toHaveBeenCalled();
@@ -851,7 +848,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     );
 
     const attempt = connect('https://new.example', 'new-secret');
-    for (let i = 0; i < 500 && releaseHydration == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseHydration != null, 'releaseHydration', 500);
     expect(releaseHydration).toEqual(expect.any(Function));
     expect(useSessionStore.getState().status).toBe('connecting');
     expect(startSync).not.toHaveBeenCalled();
@@ -900,7 +897,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     );
 
     const hydration = bootSavedSession();
-    for (let i = 0; i < 100 && releaseRecovery == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseRecovery != null, 'releaseRecovery', 100);
 
     expect(releaseRecovery).toEqual(expect.any(Function));
     expect(useSessionStore.getState().status).toBe('loading');
@@ -939,7 +936,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     );
 
     const attempt = connect('https://new.example', 'new-secret');
-    for (let i = 0; i < 500 && releaseRecovery == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseRecovery != null, 'releaseRecovery', 500);
 
     expect(releaseRecovery).toEqual(expect.any(Function));
     expect(useSessionStore.getState().status).toBe('connecting');
@@ -988,7 +985,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
       );
 
       const first = connect('https://new.example', 'new-secret');
-      for (let i = 0; i < 500 && releaseRecovery == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseRecovery != null, 'releaseRecovery', 500);
       expect(releaseRecovery).toEqual(expect.any(Function));
 
       await jest.advanceTimersByTimeAsync(45_000);
@@ -1119,7 +1116,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
         });
 
       const first = connect('https://slow.example', 'slow-secret');
-      for (let i = 0; i < 500 && releaseCandidate == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseCandidate != null, 'releaseCandidate', 500);
       expect(releaseCandidate).toEqual(expect.any(Function));
       await jest.advanceTimersByTimeAsync(45_000);
       await first;
@@ -1178,7 +1175,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
       });
 
       const staleAttempt = connect('https://slow-gate.example', 'slow-secret');
-      for (let i = 0; i < 500 && releaseOldRead == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseOldRead != null, 'releaseOldRead', 500);
       expect(releaseOldRead).toEqual(expect.any(Function));
       await jest.advanceTimersByTimeAsync(10_000);
       await staleAttempt;
@@ -1286,7 +1283,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
       );
 
       const attempt = connect('https://new.example', 'new-secret');
-      for (let i = 0; i < 500 && releaseHydration == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseHydration != null, 'releaseHydration', 500);
       expect(releaseHydration).toEqual(expect.any(Function));
       const options = hydrateAllStores.mock.calls.at(-1)?.[0];
       expect(options?.shouldCommit?.()).toBe(true);
@@ -1363,7 +1360,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     );
 
     const hydration = bootSavedSession();
-    for (let i = 0; i < 100 && releaseRecovery == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseRecovery != null, 'releaseRecovery', 100);
     expect(releaseRecovery).toEqual(expect.any(Function));
 
     const disconnect = forget();
@@ -1392,7 +1389,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     );
 
     const attempt = connect('https://new.example', 'new-secret');
-    for (let i = 0; i < 500 && releaseHydration == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseHydration != null, 'releaseHydration', 500);
     expect(releaseHydration).toEqual(expect.any(Function));
     const options = hydrateAllStores.mock.calls.at(-1)?.[0] as
       { shouldCommit?: () => boolean } | undefined;
@@ -1618,7 +1615,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     const hydration = bootSavedSession();
     // Disconnect deliberately crosses several bounded cleanup barriers before it opens the DB.
     // Poll the observable callback instead of depending on an exact microtask count.
-    for (let i = 0; i < 100 && releaseWipe == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseWipe != null, 'releaseWipe', 100);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
 
     const reconnect = connect('https://new.example', 'new-secret');
@@ -1681,7 +1678,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     });
 
     const hydration = bootSavedSession();
-    for (let i = 0; i < 100 && releaseWipe == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseWipe != null, 'releaseWipe', 100);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(hydrateAllStores).not.toHaveBeenCalled();
 
@@ -1733,7 +1730,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     });
 
     const reconnect = connect('https://new.example', 'new-secret');
-    for (let i = 0; i < 100 && releaseWipe == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseWipe != null, 'releaseWipe', 100);
 
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(connectToServer).not.toHaveBeenCalled();
@@ -1881,7 +1878,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
       });
 
       const attempt = connect('https://new.example', 'new-secret');
-      for (let i = 0; i < 100 && releaseWipe == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseWipe != null, 'releaseWipe', 100);
 
       expect(markerMarkRevoked).toHaveBeenCalledTimes(1);
       expect(clearLocalCache).toHaveBeenCalledTimes(1);
@@ -1912,7 +1909,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     });
 
     const attempt = connect('https://new.example', 'new-secret');
-    for (let i = 0; i < 100 && releaseFirstPass == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseFirstPass != null, 'releaseFirstPass', 100);
 
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(connectToServer).not.toHaveBeenCalled();
@@ -1955,7 +1952,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     expect(useSessionStore.getState().status).toBe('connecting');
     const second = connect('https://second.example', 'second-secret');
     await second;
-    for (let i = 0; i < 100 && releaseFirst == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseFirst != null, 'releaseFirst', 100);
 
     expect(candidateClient).toHaveBeenCalledTimes(1);
     expect(candidateClient).toHaveBeenCalledWith('https://first.example', 'first-secret');
@@ -1997,7 +1994,11 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     );
 
     const candidate = connect('https://candidate.example', 'candidate-secret');
-    for (let i = 0; i < 200 && releaseCandidateFetch == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(
+      () => releaseCandidateFetch != null,
+      'releaseCandidateFetch',
+      200,
+    );
     expect(connectToServer).toHaveBeenCalledTimes(1);
 
     const wipe = forget();
@@ -2057,7 +2058,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     );
 
     const candidate = connect('https://candidate.example', 'candidate-secret');
-    for (let i = 0; i < 200 && releaseAddressWrite == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseAddressWrite != null, 'releaseAddressWrite', 200);
     expect(releaseAddressWrite).toEqual(expect.any(Function));
 
     // The candidate's address write is still suspended. Disconnect closes authorization
@@ -2067,7 +2068,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     const wipe = forget().then(() => {
       wipeSettled = true;
     });
-    await flushMicrotasks();
+    await flushMicrotasks(30);
     expect(accountRevoked).toBe(true);
     expect(wipeSettled).toBe(false);
     expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.writing);
@@ -2133,14 +2134,18 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
 
     const firstWipe = forget();
     const candidate = connect('https://candidate.example', 'candidate-secret');
-    for (let i = 0; i < 200 && releaseFirstWipe == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseFirstWipe != null, 'releaseFirstWipe', 200);
     holdVaultReads = true;
     releaseFirstWipe();
-    for (let i = 0; i < 500 && heldInspectionReads < 4; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(
+      () => heldInspectionReads >= 4,
+      'heldInspectionReads >= 4',
+      500,
+    );
     expect(heldInspectionReads).toBe(4);
 
     const secondWipe = forget();
-    for (let i = 0; i < 200 && releaseSecondWipe == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseSecondWipe != null, 'releaseSecondWipe', 200);
     expect(releaseSecondWipe).toEqual(expect.any(Function));
 
     releaseVaultReads();
@@ -2172,7 +2177,11 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     });
 
     const candidate = connect('https://candidate.example', 'candidate-secret');
-    for (let i = 0; i < 200 && releaseSessionStateRead == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(
+      () => releaseSessionStateRead != null,
+      'releaseSessionStateRead',
+      200,
+    );
     expect(releaseSessionStateRead).toEqual(expect.any(Function));
 
     const wipe = forget();
@@ -2233,7 +2242,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(vaultValues.has('serverCredentialUpgrade')).toBe(false);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
 
-    await flushMicrotasks();
+    await flushMicrotasks(30);
     await expect(forget()).resolves.toBeUndefined();
 
     expect(fixedCredentialClient).toHaveBeenCalledTimes(2);
@@ -2353,7 +2362,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
     expect(revokeSelf).toHaveBeenCalledTimes(1);
 
-    await flushMicrotasks();
+    await flushMicrotasks(30);
     await expect(forgetOnThisPhoneOnly()).resolves.toBeUndefined();
 
     // The local-only run never contacts the server, then retires local custody completely.
@@ -2633,7 +2642,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     const first = forget();
     const second = forget();
     expect(second).toBe(first);
-    for (let i = 0; i < 100 && releaseWipe == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseWipe != null, 'releaseWipe', 100);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(markerMarkRevoked).toHaveBeenCalledTimes(1);
     expect(deleteFcmToken).toHaveBeenCalledTimes(1);
@@ -2681,7 +2690,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     });
 
     const firstAttempt = connect('https://new.example', 'new-secret');
-    for (let i = 0; i < 100 && rejectRetirement == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => rejectRetirement != null, 'rejectRetirement', 100);
     expect(deleteFcmToken).toHaveBeenCalledTimes(1);
     expect(connectToServer).not.toHaveBeenCalled();
 
@@ -2896,7 +2905,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(useSessionStore.getState().password).toBeNull();
     expect(clearLocalCache).not.toHaveBeenCalled();
 
-    for (let i = 0; i < 200 && releaseTombstone == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseTombstone != null, 'releaseTombstone', 200);
     expect(releaseTombstone).toEqual(expect.any(Function));
     releaseTombstone();
     await expect(run).resolves.toBeUndefined();
@@ -2921,7 +2930,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       });
 
       const run = forget();
-      for (let i = 0; i < 200 && releaseTombstone == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseTombstone != null, 'releaseTombstone', 200);
       expect(releaseTombstone).toEqual(expect.any(Function));
       const rejected = expect(run).rejects.toThrow(
         'Secure credential retirement did not finish in time.',
@@ -2937,14 +2946,14 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       );
 
       releaseTombstone?.();
-      await flushMicrotasks();
+      await flushMicrotasks(30);
       await connect('https://new.example', 'new-secret');
 
       expect(clearLocalCache).toHaveBeenCalledTimes(2);
       expect(connectToServer).toHaveBeenCalledTimes(1);
     } finally {
       releaseTombstone?.();
-      await flushMicrotasks();
+      await flushMicrotasks(30);
       jest.useRealTimers();
     }
   });
@@ -2974,7 +2983,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
           settled = true;
         },
       );
-      for (let i = 0; i < 200 && releaseTombstone == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseTombstone != null, 'releaseTombstone', 200);
       expect(releaseTombstone).toEqual(expect.any(Function));
 
       await jest.advanceTimersByTimeAsync(60_000);
@@ -2986,7 +2995,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       expect(clearLocalCache).toHaveBeenCalledTimes(1);
     } finally {
       releaseTombstone?.();
-      await flushMicrotasks();
+      await flushMicrotasks(30);
       jest.useRealTimers();
     }
   });
@@ -3009,7 +3018,11 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       });
 
       const run = forget();
-      for (let i = 0; i < 200 && releaseTokenRetirement == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(
+        () => releaseTokenRetirement != null,
+        'releaseTokenRetirement',
+        200,
+      );
       expect(releaseTokenRetirement).toEqual(expect.any(Function));
       const rejected = expect(run).rejects.toThrow(
         'Push notification retirement for the previous connection could not be confirmed.',
@@ -3025,7 +3038,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       );
 
       releaseTokenRetirement?.();
-      await flushMicrotasks();
+      await flushMicrotasks(30);
       await connect('https://new.example', 'new-secret');
 
       expect(deleteFcmToken).toHaveBeenCalledTimes(2);
@@ -3033,7 +3046,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       expect(connectToServer).toHaveBeenCalledTimes(1);
     } finally {
       releaseTokenRetirement?.();
-      await flushMicrotasks();
+      await flushMicrotasks(30);
       jest.useRealTimers();
     }
   });
@@ -3056,7 +3069,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       });
 
       const run = forget();
-      for (let i = 0; i < 200 && releaseDatabase == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseDatabase != null, 'releaseDatabase', 200);
       expect(releaseDatabase).toEqual(expect.any(Function));
       const rejected = expect(run).rejects.toThrow(
         'Local data from the previous connection could not be fully removed.',
@@ -3105,7 +3118,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
 
     try {
       const firstAttempt = connect('https://new.example', 'new-secret');
-      for (let i = 0; i < 500 && releaseRealtime == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseRealtime != null, 'releaseRealtime', 500);
       expect(releaseRealtime).toEqual(expect.any(Function));
 
       await jest.advanceTimersByTimeAsync(5_000);
@@ -3120,7 +3133,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       );
 
       releaseRealtime();
-      await flushMicrotasks();
+      await flushMicrotasks(30);
       await connect('https://new.example', 'new-secret');
       expect(retireFcmDeviceEncryptionState).toHaveBeenCalledTimes(1);
       expect(clearLocalCache).toHaveBeenCalledTimes(2);
@@ -3619,7 +3632,7 @@ describe('forget() — in-flight realtime delivery is drained before private sta
     );
 
     const run = forget();
-    for (let i = 0; i < 10 && releaseRealtime == null; i += 1) await Promise.resolve();
+    await waitForMicrotaskCondition(() => releaseRealtime != null, 'releaseRealtime', 10);
     await Promise.resolve();
 
     expect(cancelAllNotifications).not.toHaveBeenCalled();
@@ -3662,7 +3675,7 @@ describe('forget() — foreground boot handoff', () => {
       void successor.then(() => {
         successorSettled = true;
       });
-      for (let i = 0; i < 100 && releaseWipe == null; i += 1) await Promise.resolve();
+      await waitForMicrotaskCondition(() => releaseWipe != null, 'releaseWipe', 100);
       expect(releaseWipe).toEqual(expect.any(Function));
       expect(successorSettled).toBe(false);
 

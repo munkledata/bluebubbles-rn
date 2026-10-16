@@ -28,3 +28,17 @@ export async function waitForCondition(
   }
   if (!condition()) throw new Error(`${label} did not happen within ${maxTurns} event-loop turns`);
 }
+
+/**
+ * Like waitForCondition, but one microtask at a time, for a test that must act before any timer
+ * or I/O callback can run. It fails loudly instead of falling through when the condition never
+ * holds, so a changed number of awaits cannot make a test pass without reaching its setup.
+ */
+export async function waitForMicrotaskCondition(
+  condition: () => boolean,
+  label: string,
+  maxRounds = 500,
+): Promise<void> {
+  for (let round = 0; round < maxRounds && !condition(); round += 1) await Promise.resolve();
+  if (!condition()) throw new Error(`${label} did not happen within ${maxRounds} microtask rounds`);
+}

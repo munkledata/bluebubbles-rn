@@ -1592,6 +1592,10 @@ describe('account-scoped attachment retries', () => {
     }
   });
 
+  // These tests check jest.getTimerCount() on purpose (review M008). Each one installs fake timers
+  // itself, so the count sees only this download's timers, and it is the one signal for a retry
+  // timer left scheduled after cancellation: the timer's callback guards make a leaked one harmless,
+  // so no fetch count can show it. Every count is paired with a check of what actually runs.
   it('does not run an RCS retry timer after Disconnect and a new generation resumes', async () => {
     const { db } = await createTestDb();
     activeDb = db;
@@ -1768,6 +1772,8 @@ describe('account-scoped attachment retries', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(discard).toHaveBeenCalledWith('file:///attachments/deleted/photo.jpg');
     expect(jest.getTimerCount()).toBe(0);
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('stops a sleeping RCS retry when its message is deleted before the retry commits', async () => {
@@ -1796,6 +1802,8 @@ describe('account-scoped attachment retries', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(discard).toHaveBeenCalledWith('file:///attachments/deleted-while-waiting/photo.jpg');
     expect(jest.getTimerCount()).toBe(0);
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect((await getAttachmentByGuid(db, attachment.guid))?.localPath).toBeNull();
   });
 
