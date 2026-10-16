@@ -57,7 +57,16 @@ import {
 import { syncMessageState, MESSAGE_STATE_FOREGROUND_MAX_PAGES } from './messageStateSync';
 import type { SyncApi } from './types';
 
-export function supportsMessageStateSync(info: ServerInfo): boolean {
+/** All four advertisements must hold for message-state sync (and its delete ownership) to run. */
+export function supportsMessageStateSync(
+  info: Pick<
+    ServerInfo,
+    | 'supports_message_state_sync'
+    | 'message_state_sync_version'
+    | 'supports_provider_repair_snapshot'
+    | 'imessage_provider_epoch'
+  >,
+): boolean {
   return (
     info.supports_message_state_sync === true &&
     info.message_state_sync_version === 1 &&

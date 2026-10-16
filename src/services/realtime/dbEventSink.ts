@@ -33,6 +33,7 @@ import {
   withDbTransaction,
 } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { supportsMessageStateSync } from '../sync/providerRepair';
 import { IncomingEventDependencyPendingError } from './incomingEventErrors';
 
 /** Private rollback signal for a delivery whose account generation changed mid-transaction. */
@@ -179,6 +180,8 @@ export class DbEventSink implements EventSink {
       | (RcsProviderServerInfo & {
           imessage_provider_epoch?: string | null;
           supports_message_state_sync?: boolean | null;
+          message_state_sync_version?: number | null;
+          supports_provider_repair_snapshot?: boolean | null;
         })
       | null
       | undefined,
@@ -523,9 +526,12 @@ export class DbEventSink implements EventSink {
             this.db,
             context,
             async (transactionContext) => {
+              // Only a server whose message-state sync actually runs owns iMessage deletes; the
+              // flag alone does not, and dropping the event there lost the delete (review M019).
+              const info = this.getRcsProviderInfo?.();
               if (
                 !looksLikeRcsMessageGuid(guid) &&
-                (this.getRcsProviderInfo?.()?.supports_message_state_sync === true ||
+                ((info != null && supportsMessageStateSync(info)) ||
                   (await getMessageStateAuthorityWithinTransaction(transactionContext)))
               ) {
                 await markDurableDbPhase(transactionContext, context);

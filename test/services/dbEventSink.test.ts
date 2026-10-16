@@ -1127,6 +1127,57 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
     expect(committedDates).toEqual([1700000009000]);
   });
 
+  it.each([
+    ['only sets the flag', { supports_message_state_sync: true }, 1700000009000],
+    [
+      'fully supports message-state sync',
+      {
+        supports_message_state_sync: true,
+        message_state_sync_version: 1,
+        supports_provider_repair_snapshot: true,
+        imessage_provider_epoch: '11111111-1111-4111-8111-111111111111',
+      },
+      null,
+    ],
+  ] as const)(
+    'applies a live delete unless the server %s (review M019)',
+    async (_label, capability, expectedDate) => {
+      const { db, raw } = await createTestDb();
+      await new DbEventSink(db).onEvent(
+        {
+          type: 'new-message',
+          message: Message.parse({
+            guid: 'del-capability',
+            text: 'delete me',
+            dateCreated: 1700000000000,
+            handle: { address: 'bob@x.com' },
+            chats: [{ guid: 'cCap', displayName: 'Bob', participants: [{ address: 'bob@x.com' }] }],
+          }),
+        },
+        'socket',
+      );
+      const sink = new DbEventSink(db, undefined, undefined, undefined, () => ({
+        ...RCS_PROVIDER_INFO,
+        ...capability,
+      }));
+
+      await sink.onEvent(
+        {
+          type: 'message-deleted',
+          payload: { guid: 'del-capability', chatGuid: 'cCap', dateDeleted: 1700000009000 },
+        },
+        'socket',
+      );
+
+      // Only a server whose message-state sync actually runs owns deletes; a flag alone does not,
+      // and dropping the live event there would lose the delete.
+      const row = raw
+        .prepare('SELECT date_deleted d FROM messages WHERE guid = ?')
+        .get('del-capability') as { d: number | null };
+      expect(row.d).toBe(expectedDate);
+    },
+  );
+
   it('applies a delete carrying ONLY a guid (chat resolved from the row; date falls back to now)', async () => {
     const { db, raw } = await createTestDb();
     const router = await seedInbound(db, 'del-bare', 'cBare');
