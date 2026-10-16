@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { sql } from 'drizzle-orm';
 import { Chat, Message } from '@core/models';
 import {
+  applyMessageStateWithinTransaction,
   deleteChatLocal,
   findChatByParticipantAddresses,
   getAttachmentCacheEntry,
@@ -17,6 +18,7 @@ import {
   resumeChatPurges,
   restoreDeletedChatWithinTransaction,
   setChatArchiveWithinTransaction,
+  setMessageStateAuthorityWithinTransaction,
   setChatPinWithinTransaction,
   swapPinnedChatOrder,
   upsertChats,
@@ -1181,6 +1183,70 @@ describe('chat actions repo', () => {
       raw.prepare('SELECT guid, date_deleted AS dateDeleted FROM messages ORDER BY guid').all(),
     ).toEqual([
       { guid: 'h1', dateDeleted: 4000 },
+      { guid: 'h2', dateDeleted: null },
+    ]);
+  });
+
+  it('keeps a server-deleted message hidden after restore, but only from a trusted ledger (M063)', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+    const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
+    await upsertMessages(db, [received('h1', 1000), received('h2', 2000)], () => chatId, handles);
+    const providerEpoch = '11111111-1111-4111-8111-111111111111';
+    const ledgerEpoch = '22222222-2222-4222-8222-222222222222';
+    await withDbTransaction(db, async (context) => {
+      await setMessageStateAuthorityWithinTransaction(context, {
+        version: 1,
+        provider: 'imessage',
+        providerEpoch,
+        ledgerEpoch,
+        cursor: 'cursor-1',
+        snapshotSequence: '1',
+        sequence: '1',
+      });
+      // The Mac deleted h1 in the installed ledger.
+      await applyMessageStateWithinTransaction(context, {
+        version: 1,
+        provider: 'imessage',
+        providerEpoch,
+        ledgerEpoch,
+        sequence: '2',
+        kind: 'deleted',
+        guid: 'h1',
+        chatGuid: 'c1',
+        dateDeleted: 3000,
+      });
+    });
+    // h2's only deletion comes from an older ledger, which is no longer trusted.
+    raw
+      .prepare(
+        `INSERT INTO message_server_states
+           (guid, chat_guid, provider_epoch, ledger_epoch, sequence, kind, date_deleted)
+         VALUES (?, ?, ?, ?, ?, 'deleted', ?)`,
+      )
+      .run('h2', 'c1', providerEpoch, '33333333-3333-4333-8333-333333333333', '9', 3500);
+    // The chat was then deleted and its purge interrupted: the boundary hides both stored rows.
+    raw
+      .prepare('UPDATE chats SET deleted_at = 5000, history_deleted_at = 5000 WHERE guid = ?')
+      .run('c1');
+    raw.prepare('UPDATE messages SET date_deleted = 5000 WHERE chat_id = ?').run(chatId);
+
+    const restored = await withDbTransaction(db, (context) =>
+      restoreDeletedChatWithinTransaction(context, {
+        guid: 'c1',
+        expectedDeletedAt: 5000,
+        historyExhausted: true,
+        repairedReadFloor: null,
+      }),
+    );
+
+    expect(restored).toBe(true);
+    // Restore removes only the chat-history hiding: the trusted server deletion stays.
+    expect(
+      raw.prepare('SELECT guid, date_deleted AS dateDeleted FROM messages ORDER BY guid').all(),
+    ).toEqual([
+      { guid: 'h1', dateDeleted: 3000 },
       { guid: 'h2', dateDeleted: null },
     ]);
   });
