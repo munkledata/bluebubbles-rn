@@ -24,6 +24,7 @@ import {
   revokeReplacedCredentialRuntime,
   type CredentialUpgradeRuntimeDependencies,
 } from '@/services/credentialUpgradeRuntime';
+import { flushMicrotasks, waitForMicrotaskCondition } from '../support/async';
 
 const ORIGIN = 'https://gator.example';
 const PREVIOUS = 'legacy shared password';
@@ -90,6 +91,9 @@ function dependencies(
     beginExclusiveTransition: () => {
       vault.events.push('exclusive');
       return true;
+    },
+    checkBearerAccepted: async () => {
+      vault.events.push('bearer-check');
     },
     fetchCandidateServerInfo: async () => {
       vault.events.push('candidate-info');
@@ -311,7 +315,7 @@ describe('scoped credential upgrade runtime', () => {
           revokeCandidate: async () => {
             throw unauthorized;
           },
-          fetchCandidateServerInfo: async () => {
+          checkBearerAccepted: async () => {
             throw unauthorized;
           },
         }),
@@ -561,7 +565,7 @@ describe('replaced scoped credential (M130)', () => {
           revokePreviousCredential: async () => {
             throw unauthorized();
           },
-          fetchCandidateServerInfo: async () => {
+          checkBearerAccepted: async () => {
             throw unauthorized();
           },
         }),
@@ -570,23 +574,63 @@ describe('replaced scoped credential (M130)', () => {
     expect(await rejected.get('replacedServerCredential')).toBeNull();
 
     const stillValid = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
-    const fetchCandidateServerInfo = jest.fn(async () => ({
-      server_version: '2.0.0',
-      supports_scoped_device_credentials: true,
-      supports_fcm_push_encryption_v3: true,
-    }));
+    const checkBearerAccepted = jest.fn(async () => undefined);
     await expect(
       revokeReplacedCredentialRuntime(
         dependencies(stillValid, {
           revokePreviousCredential: async () => {
             throw unauthorized();
           },
-          fetchCandidateServerInfo,
+          checkBearerAccepted,
         }),
       ),
     ).resolves.toBe('pending');
-    expect(fetchCandidateServerInfo).toHaveBeenCalledWith(ORIGIN, PREVIOUS_SCOPED);
+    expect(checkBearerAccepted).toHaveBeenCalledWith(ORIGIN, PREVIOUS_SCOPED);
     expect(await stillValid.get('replacedServerCredential')).not.toBeNull();
+  });
+
+  it('runs one record operation at a time, so a second revocation finds the record gone', async () => {
+    const vault = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const revokePreviousCredential = jest.fn(async () => {
+      await held;
+    });
+    const deps = dependencies(vault, { revokePreviousCredential });
+
+    const first = revokeReplacedCredentialRuntime(deps);
+    const second = revokeReplacedCredentialRuntime(deps);
+    await waitForMicrotaskCondition(
+      () => revokePreviousCredential.mock.calls.length === 1,
+      'first revocation',
+      50,
+    );
+    await flushMicrotasks(20);
+    expect(revokePreviousCredential).toHaveBeenCalledTimes(1);
+
+    release();
+    await expect(first).resolves.toBe('revoked');
+    await expect(second).resolves.toBe('none');
+    expect(revokePreviousCredential).toHaveBeenCalledTimes(1);
+  });
+
+  it('never forgets a newer record that appeared while its revocation was in flight', async () => {
+    const vault = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
+    const newer = serializeReplacedCredentialRecord(
+      createReplacedCredentialRecord(ORIGIN, OLDER_SCOPED),
+    );
+    const revokePreviousCredential = jest.fn(async () => {
+      // A writer outside the record lock lands mid-revocation.
+      await vault.set('replacedServerCredential', newer);
+    });
+
+    await expect(
+      revokeReplacedCredentialRuntime(dependencies(vault, { revokePreviousCredential })),
+    ).resolves.toBe('revoked');
+    expect(revokePreviousCredential).toHaveBeenCalledWith(ORIGIN, PREVIOUS_SCOPED);
+    expect(await vault.get('replacedServerCredential')).toBe(newer);
   });
 
   it('finishes an earlier pending revocation before starting another replacement', async () => {

@@ -150,6 +150,11 @@ function createRuntimeDependencies(
     },
     fetchCandidateServerInfo: (origin, credential) =>
       serverApi.serverInfo(fixedCredentialClient(origin, credential, isCurrent)),
+    checkBearerAccepted: async (origin, credential) => {
+      await withBearerDeadline((signal) =>
+        serverApi.serverInfo(fixedCredentialClient(origin, credential, isCurrent), signal),
+      );
+    },
     prepareV3Registration: async (origin) => {
       const [{ getMessaging, getToken }, stored] = await Promise.all([
         import('@react-native-firebase/messaging'),

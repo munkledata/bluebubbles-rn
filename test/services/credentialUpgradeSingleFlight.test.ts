@@ -73,6 +73,8 @@ jest.mock('@/services/notifications/fcmRegistrationCoordinator', () => ({
 }));
 
 // eslint-disable-next-line import/first
+import { serverApi } from '@core/api';
+// eslint-disable-next-line import/first
 import { ApiError } from '@core/api/errors';
 // eslint-disable-next-line import/first
 import {
@@ -395,6 +397,7 @@ describe('replaced-credential wiring (M130)', () => {
   type ReplacementDeps = {
     releasePreviousPushTarget(origin: string, previous: string): Promise<'released' | 'refused'>;
     revokePreviousCredential(origin: string, previous: string): Promise<void>;
+    checkBearerAccepted(origin: string, credential: string): Promise<void>;
   };
 
   /** Run one replacement whose runtime only hands its real dependencies to `use`. */
@@ -488,6 +491,39 @@ describe('replaced-credential wiring (M130)', () => {
       expect.any(Function),
     );
     expect(mockRevokeSelf).toHaveBeenCalledWith(
+      { kind: 'fixed-candidate-client' },
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('checks a rejected bearer with its own time-limited request (M130 follow-up)', async () => {
+    let captured!: ReplacementDeps;
+    await withReplacementDeps(async (deps) => {
+      captured = deps;
+    });
+    const serverInfo = jest.mocked(serverApi.serverInfo);
+    // A server that never answers: only the request's own deadline can end the check.
+    serverInfo.mockImplementationOnce(
+      (_client: unknown, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('bearer check aborted')));
+        }),
+    );
+    jest.useFakeTimers();
+    try {
+      const check = captured.checkBearerAccepted(mockSession.origin, OLD);
+      const outcome = expect(check).rejects.toThrow('bearer check aborted');
+      await jest.advanceTimersByTimeAsync(60_000);
+      await outcome;
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(mockFixedCredentialClient).toHaveBeenLastCalledWith(
+      mockSession.origin,
+      OLD,
+      expect.any(Function),
+    );
+    expect(serverInfo).toHaveBeenCalledWith(
       { kind: 'fixed-candidate-client' },
       expect.any(AbortSignal),
     );

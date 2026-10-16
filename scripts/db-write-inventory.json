@@ -16917,7 +16917,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:bf13093c9436",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 437,
+      "line": 442,
       "symbol": "runCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:2bf8034a53>",
@@ -16930,7 +16930,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:2bf8034a53>:mutator-call:9d767b824bbf",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 466,
+      "line": 471,
       "symbol": "runCredentialUpgrade.<callback:2bf8034a53>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade",
@@ -16943,7 +16943,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade:mutator-call:9eca083a6ce1",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 494,
+      "line": 499,
       "symbol": "beginScopedCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16956,7 +16956,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#beginScopedCredentialReplacement:mutator-call:ec167bc062b1",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 501,
+      "line": 506,
       "symbol": "beginScopedCredentialReplacement",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16969,7 +16969,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#resumeScopedCredentialUpgrade:mutator-call:1fdf0f274b9d",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 508,
+      "line": 513,
       "symbol": "resumeScopedCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",
@@ -16982,7 +16982,7 @@
     {
       "id": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate:mutator-call:ab2e71099acf",
       "path": "src/services/credentialUpgrade.ts",
-      "line": 513,
+      "line": 518,
       "symbol": "discardScopedCredentialUpgradeCandidate",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#runCredentialUpgrade",

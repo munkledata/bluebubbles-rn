@@ -38,6 +38,11 @@ export interface CredentialUpgradeRuntimeDependencies {
   /** Pauses socket/rotation work before this journal performs or resumes any mutation. */
   beginExclusiveTransition(): boolean;
   fetchCandidateServerInfo(origin: string, credential: string): Promise<ServerInfo>;
+  /**
+   * A short, time-limited server-info request made with exactly this bearer. Rejects with a 401
+   * ApiError when the server no longer accepts it.
+   */
+  checkBearerAccepted(origin: string, credential: string): Promise<void>;
   prepareV3Registration(origin: string): Promise<CredentialUpgradeFcmRegistration>;
   persistPendingV3(origin: string, registration: CredentialUpgradeFcmRegistration): Promise<void>;
   registerV3(
@@ -220,7 +225,7 @@ async function revokeExactBearer(
   } catch (error) {
     if (!(error instanceof ApiError && error.status === 401)) return 'retry';
     try {
-      await deps.fetchCandidateServerInfo(origin, credential);
+      await deps.checkBearerAccepted(origin, credential);
       return 'retry';
     } catch (validationError) {
       return validationError instanceof ApiError && validationError.status === 401
@@ -228,6 +233,20 @@ async function revokeExactBearer(
         : 'retry';
     }
   }
+}
+
+/**
+ * One replaced-credential record operation at a time (review M130 follow-up). A revocation reads
+ * the record, revokes its bearer over the network and then forgets it; a replacement writes a newer
+ * record. Interleaved, the slower revocation could delete a record whose bearer it never revoked.
+ * A task must never start another record operation, or it would wait for itself.
+ */
+let replacedCredentialRecordTail: Promise<unknown> = Promise.resolve();
+
+function withReplacedCredentialRecord<T>(task: () => Promise<T>): Promise<T> {
+  const run = replacedCredentialRecordTail.then(task, task);
+  replacedCredentialRecordTail = run.catch(() => undefined);
+  return run;
 }
 
 /** Move custody of a replaced bearer to its own record; true once the write is confirmed. */
@@ -247,10 +266,16 @@ async function recordReplacedCredential(
   }
 }
 
+/** Forget the record only while it still holds exactly `expected`; true once it is gone. */
 async function forgetReplacedCredential(
   deps: CredentialUpgradeRuntimeDependencies,
+  expected: string | null,
 ): Promise<boolean> {
   try {
+    const stored = await deps.vault.get(REPLACED_CREDENTIAL_KEY);
+    if (stored === null) return true;
+    // A newer record belongs to a later replacement; it is not ours to forget.
+    if (stored !== expected) return true;
     await deps.vault.delete(REPLACED_CREDENTIAL_KEY);
     return (await deps.vault.get(REPLACED_CREDENTIAL_KEY)) === null;
   } catch {
@@ -263,7 +288,13 @@ async function forgetReplacedCredential(
  * server confirms. Never touches the live credential: a record naming it, or one that cannot be
  * read, is dropped without any server call.
  */
-export async function revokeReplacedCredentialRuntime(
+export function revokeReplacedCredentialRuntime(
+  deps: CredentialUpgradeRuntimeDependencies,
+): Promise<'none' | 'revoked' | 'pending' | 'cancelled'> {
+  return withReplacedCredentialRecord(() => revokeReplacedCredentialRecord(deps));
+}
+
+async function revokeReplacedCredentialRecord(
   deps: CredentialUpgradeRuntimeDependencies,
 ): Promise<'none' | 'revoked' | 'pending' | 'cancelled'> {
   let stored: string | null;
@@ -280,7 +311,7 @@ export async function revokeReplacedCredentialRuntime(
   const inspected = inspectReplacedCredentialRecord(stored);
   if (inspected.kind === 'absent') return 'none';
   if (inspected.kind === 'invalid' || inspected.record.credential === mainCredential) {
-    return (await forgetReplacedCredential(deps)) ? 'none' : 'pending';
+    return (await forgetReplacedCredential(deps, stored)) ? 'none' : 'pending';
   }
   const { origin, credential } = inspected.record;
   const revoked = await revokeExactBearer(
@@ -291,7 +322,7 @@ export async function revokeReplacedCredentialRuntime(
   );
   if (!deps.isCurrent()) return 'cancelled';
   if (revoked !== 'revoked') return 'pending';
-  return (await forgetReplacedCredential(deps)) ? 'revoked' : 'pending';
+  return (await forgetReplacedCredential(deps, stored)) ? 'revoked' : 'pending';
 }
 
 function isPushTargetOwned(error: unknown): boolean {
@@ -356,7 +387,9 @@ async function finishPromotion(
   const replacement = journal.version === 2;
   const custodyMoved =
     !replacement ||
-    (await recordReplacedCredential(deps, journal.origin, journal.previousCredential));
+    (await withReplacedCredentialRecord(() =>
+      recordReplacedCredential(deps, journal.origin, journal.previousCredential),
+    ));
   let cleanupPending = !custodyMoved;
   if (custodyMoved) {
     try {
