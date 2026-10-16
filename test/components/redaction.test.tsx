@@ -53,7 +53,7 @@ jest.mock('expo-router', () => {
     useFocusEffect: (effect: React.EffectCallback) => ReactLib.useEffect(effect, [effect]),
   };
 });
-jest.mock('@/features/findmy/use-find-my-polling', () => ({
+jest.mock('@features/findmy/useFindMyPolling', () => ({
   useFindMyPolling: (...args: unknown[]) => mockUseFindMyPolling(...args),
 }));
 jest.mock('react-native-maps', () => {
