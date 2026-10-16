@@ -8,19 +8,14 @@ const kotlinRoot = resolve(
 );
 const moduleSource = readFileSync(resolve(kotlinRoot, 'GatorBoundedDownloadModule.kt'), 'utf8');
 const policySource = readFileSync(resolve(kotlinRoot, 'SyncedBackgroundCachePolicy.kt'), 'utf8');
-const serviceSource = readFileSync(
-  resolve(repoRoot, 'src/services/backgrounds/syncedBackground.ts'),
-  'utf8',
-);
 
-describe('synced-background global disk quota contract', () => {
-  it('pins one native-owned 100 MiB and 256-file global budget', () => {
-    expect(policySource).toMatch(/SYNCED_BACKGROUND_CACHE_MAX_BYTES = 100L \* 1024 \* 1024\b/);
-    expect(policySource).toMatch(/SYNCED_BACKGROUND_CACHE_MAX_FILES = 256\b/);
-    expect(serviceSource).toMatch(/SYNCED_BACKGROUND_CACHE_MAX_BYTES = 100 \* 1024 \* 1024\b/);
-    expect(serviceSource).toMatch(/SYNCED_BACKGROUND_CACHE_MAX_FILES = 256\b/);
-  });
-
+/**
+ * Native structure the Kotlin unit tests cannot see: the bridge shape, API-level guards and the
+ * absence of recursive or unbounded file APIs. The shared constants are compared in
+ * nativeLimitDrift.test.ts and the service's repair behavior in syncedBackgroundCacheRepair.test.ts
+ * (review M206).
+ */
+describe('synced-background native cache contract', () => {
   it('does not expose a caller-selected root or quota through the native bridge', () => {
     expect(moduleSource).toMatch(
       /AsyncFunction\("pruneSyncedBackgroundCache"\) \{ keepUri: String\? ->/,
@@ -63,9 +58,7 @@ describe('synced-background global disk quota contract', () => {
     }
   });
 
-  it('keeps survivor metadata bounded and serializes service work for an immediate hard cap', () => {
-    expect(policySource).toMatch(/SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS = 0L\b/);
-    expect(serviceSource).toMatch(/SYNCED_BACKGROUND_MAX_CONCURRENT = 1\b/);
+  it('keeps survivor metadata bounded', () => {
     expect(policySource).toMatch(/PriorityQueue\(oldestFirst\)/);
     expect(policySource).toMatch(/HashSet<String>\(selectedOld\.size\)/);
     expect(policySource).toMatch(/entry\.modifiedAtMs >= recentCutoffMs/);
@@ -83,30 +76,5 @@ describe('synced-background global disk quota contract', () => {
       moduleSource.indexOf('OnDestroy'),
     );
     expect(retirementBridge).not.toMatch(/deleteRecursively/);
-  });
-
-  it('runs after a committed URI and queues startup pruning through the shared slot', () => {
-    expect(serviceSource).toMatch(/await pruneSyncedBackgroundCacheBestEffort\(dest\.uri\)/);
-    expect(serviceSource).toMatch(
-      /startupCacheMaintenance \?\?= withBackgroundWorkSlot\(\(\) =>\s*pruneSyncedBackgroundCacheBestEffort\(null\),?\s*\)/,
-    );
-  });
-
-  it('coalesces, serializes, and generation-bounds delayed repair', () => {
-    expect(serviceSource).toMatch(
-      /SYNCED_BACKGROUND_CACHE_REPAIR_DELAY_MS\s*=\s*\n?\s*SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS \+ 1_000/,
-    );
-    expect(serviceSource).toMatch(/SYNCED_BACKGROUND_CACHE_REPAIR_MAX_ATTEMPTS = 2\b/);
-    expect(serviceSource).toMatch(
-      /if \(!result\.withinQuota\) scheduleSyncedBackgroundQuotaRepair\(\)/,
-    );
-    expect(serviceSource).toMatch(/clearTimeout\(quotaRepairTimer\)/);
-    expect(serviceSource).toMatch(/pruneNativeSyncedBackgroundCache\(null\)/);
-    expect(serviceSource).toMatch(/quotaRepairGeneration \+= 1/);
-    expect(serviceSource).toMatch(/void withBackgroundWorkSlot\(async \(\) =>/);
-    expect(serviceSource).toMatch(/generation !== quotaRepairGeneration/);
-    expect(serviceSource).toMatch(
-      /catch\(\(error: unknown\).*quotaRepairAttemptsRemaining > 0\) armSyncedBackgroundQuotaRepair\(generation\)/s,
-    );
   });
 });

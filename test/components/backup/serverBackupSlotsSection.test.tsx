@@ -53,41 +53,21 @@ jest.mock('@/services/backup/backupService', () => {
   };
 });
 
-jest.mock('@/services/backup/serverBackupSlots', () => {
-  class ServerBackupSlotError extends Error {
-    readonly kind: string;
-
-    constructor(errorKind: string) {
-      super(`server-backup-slot:${errorKind}`);
-      this.name = 'ServerBackupSlotError';
-      this.kind = errorKind;
-    }
-  }
-
-  return {
-    SERVER_BACKUP_SLOT_LIMITS: {
-      nameCharacters: 80,
-      ciphertextCharacters: 900 * 1024,
-      slots: 10,
-    },
-    ServerBackupSlotError,
-    normalizeServerBackupSlotName: (value: string) => {
-      const normalized = value.normalize('NFC').trim();
-      if (
-        normalized.length === 0 ||
-        normalized.length > 80 ||
-        /[\u0000-\u001f\u007f-\u009f]/u.test(normalized)
-      ) {
-        throw new ServerBackupSlotError('invalid-name');
-      }
-      return normalized;
-    },
-    listServerBackupSlots: (...args: unknown[]) => mockListServerBackupSlots(...args),
-    saveServerBackupSlot: (...args: unknown[]) => mockSaveServerBackupSlot(...args),
-    restoreServerBackupSlot: (...args: unknown[]) => mockRestoreServerBackupSlot(...args),
-    deleteServerBackupSlot: (...args: unknown[]) => mockDeleteServerBackupSlot(...args),
-  };
-});
+// The real slot module below imports the HTTP client, whose `ky` dependency this project does not
+// transform. The faked calls never reach either.
+jest.mock('@core/api', () => ({ backupsApi: {} }));
+jest.mock('@/services/clients', () => ({ http: {}, accountHttp: {} }));
+jest.mock('@/services/backup/serverBackupSlots', () => ({
+  // Limits, the error class and name normalization are the real ones, so this screen test cannot
+  // drift from them (review M206). Only the four server calls are faked.
+  ...jest.requireActual<typeof import('@/services/backup/serverBackupSlots')>(
+    '@/services/backup/serverBackupSlots',
+  ),
+  listServerBackupSlots: (...args: unknown[]) => mockListServerBackupSlots(...args),
+  saveServerBackupSlot: (...args: unknown[]) => mockSaveServerBackupSlot(...args),
+  restoreServerBackupSlot: (...args: unknown[]) => mockRestoreServerBackupSlot(...args),
+  deleteServerBackupSlot: (...args: unknown[]) => mockDeleteServerBackupSlot(...args),
+}));
 
 // eslint-disable-next-line import/first
 import { UnimplementedEndpointError } from '@core/api/errors';
@@ -98,6 +78,7 @@ import {
 } from '@/services/backup/backupService';
 // eslint-disable-next-line import/first
 import {
+  SERVER_BACKUP_SLOT_LIMITS,
   ServerBackupSlotError,
   type ServerBackupSlot,
   type ServerBackupSlotsSnapshot,
@@ -386,6 +367,15 @@ describe('ServerBackupSlotsSection save flow', () => {
       'river-lantern-orbit-92',
     );
     expect(save.props.accessibilityState.disabled).toBe(false);
+
+    // The field and the save check both use the real slot-name limit (review M206).
+    const nameInput = screen.getByLabelText('Server backup name');
+    const limit = SERVER_BACKUP_SLOT_LIMITS.nameCharacters;
+    expect(nameInput.props.maxLength).toBe(limit);
+    await fireEvent.changeText(nameInput, 'x'.repeat(limit));
+    expect(save.props.accessibilityState.disabled).toBe(false);
+    await fireEvent.changeText(nameInput, 'x'.repeat(limit + 1));
+    expect(save.props.accessibilityState.disabled).toBe(true);
   });
 
   it('saves a normalized name, publishes the slot, and clears the secret fields', async () => {
