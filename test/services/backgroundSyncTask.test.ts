@@ -324,6 +324,35 @@ describe('the Expo background task adapter', () => {
     }
   });
 
+  it('lets the admission budget run out while the callback is still alive (review M187)', async () => {
+    jest.useFakeTimers({ now: 20_000 });
+    const run = deferred<{ result: 'retry'; reason: 'wake-budget-exhausted' }>();
+    let wakeBudgetMs = Number.NaN;
+    let capturedScope: { isCurrent(): boolean } | undefined;
+    mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
+      wakeBudgetMs = deps.wakeBudgetMs;
+      capturedScope = deps.captureAccountScope();
+      return run.promise;
+    });
+
+    try {
+      const result = Promise.resolve(task?.());
+      await settleMicrotasks();
+
+      // When the orchestrator's own budget runs out, the callback must still be alive. Otherwise
+      // that budget can never fire and every deadline stop reads as 'account-changed'.
+      jest.advanceTimersByTime(wakeBudgetMs);
+      await settleMicrotasks();
+      expect(capturedScope?.isCurrent()).toBe(true);
+
+      run.resolve({ result: 'retry', reason: 'wake-budget-exhausted' });
+      await expect(result).resolves.toBe('failed');
+    } finally {
+      run.resolve({ result: 'retry', reason: 'wake-budget-exhausted' });
+      jest.useRealTimers();
+    }
+  });
+
   it('does not let the retired legacy toggle authorize a background diagnostic upload', async () => {
     const db = { name: 'db' };
     const client = { name: 'http' };

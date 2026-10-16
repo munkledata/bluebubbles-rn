@@ -13316,7 +13316,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>:mutator-call:a0022079e125",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 172,
+      "line": 177,
       "symbol": "recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#runDueScheduled",
@@ -13329,7 +13329,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#flushBackgroundDiagnostics:mutator-call:145fd58a6e05",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 218,
+      "line": 223,
       "symbol": "flushBackgroundDiagnostics",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportQueueService.ts#runErrorReportQueue",
@@ -13342,7 +13342,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#executeBackgroundSyncTask:mutator-reference:c97a4dc21610",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 269,
+      "line": 274,
       "symbol": "executeBackgroundSyncTask",
       "operation": "mutator-reference",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -13355,7 +13355,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:cdab1e96e395",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 273,
+      "line": 278,
       "symbol": "executeBackgroundSyncTask.synchronize",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#incrementalSync",
@@ -13368,7 +13368,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:a20f74733af0",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 284,
+      "line": 289,
       "symbol": "executeBackgroundSyncTask.drainOutgoing",
       "operation": "mutator-call",
       "target": "src/services/send/outgoingQueueService.ts#runOutgoingQueue",
@@ -13381,7 +13381,7 @@
     {
       "id": "src/services/background/backgroundSync.ts#executeBackgroundSyncTask.flushDiagnostics:mutator-call:18bb7af02cb5",
       "path": "src/services/background/backgroundSync.ts",
-      "line": 314,
+      "line": 319,
       "symbol": "executeBackgroundSyncTask.flushDiagnostics",
       "operation": "mutator-call",
       "target": "src/services/background/backgroundSync.ts#flushBackgroundDiagnostics",

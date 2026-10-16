@@ -47,7 +47,12 @@ export const BACKGROUND_OUTGOING_MAX_ROWS = 10;
  */
 export const BACKGROUND_CALLBACK_WORK_WINDOW_MS = 50_000;
 export const BACKGROUND_CALLBACK_FINALIZATION_WINDOW_MS = 55_000;
-export const BACKGROUND_WAKE_ADMISSION_BUDGET_MS = BACKGROUND_CALLBACK_WORK_WINDOW_MS;
+/**
+ * The orchestrator stops starting new phases here, ten seconds before the work window closes, so
+ * its own budget fires (as 'wake-budget-exhausted') while the callback is still alive. With equal
+ * windows the callback ended first and every deadline stop read as 'account-changed' (review M187).
+ */
+export const BACKGROUND_WAKE_ADMISSION_BUDGET_MS = 40_000;
 /** Per attachment attempt; safely below the queue row's 120-second ownership lease. */
 export const BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS = 60_000;
 
