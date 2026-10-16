@@ -746,6 +746,34 @@ describe('replaced scoped credential (M130)', () => {
     expect(revokePreviousCredential).not.toHaveBeenCalled();
   });
 
+  it('empties a revoked bearer’s record the keystore will not delete, so nothing stays blocked (M130 third review)', async () => {
+    const vault = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
+    const realDelete = vault.delete.bind(vault);
+    jest.spyOn(vault, 'delete').mockImplementation(async (key) => {
+      // The keystore reports success but keeps this one key.
+      if (key !== 'replacedServerCredential') await realDelete(key);
+    });
+    const revokePreviousCredential = jest.fn(async () => undefined);
+    const deps = dependencies(vault, { revokePreviousCredential });
+
+    await expect(revokeReplacedCredentialRuntime(deps)).resolves.toBe('revoked');
+    expect(await vault.get('replacedServerCredential')).toBe('');
+    await expect(revokeReplacedCredentialRuntime(deps)).resolves.toBe('none');
+    expect(revokePreviousCredential).toHaveBeenCalledTimes(1);
+  });
+
+  it('empties a record naming the live credential when the keystore will not delete it (M130 third review)', async () => {
+    const vault = await withRecord(CANDIDATE, CANDIDATE);
+    jest.spyOn(vault, 'delete').mockRejectedValue(new Error('Keystore delete unavailable'));
+    const revokePreviousCredential = jest.fn(async () => undefined);
+
+    await expect(
+      revokeReplacedCredentialRuntime(dependencies(vault, { revokePreviousCredential })),
+    ).resolves.toBe('none');
+    expect(revokePreviousCredential).not.toHaveBeenCalled();
+    expect(await vault.get('replacedServerCredential')).toBe('');
+  });
+
   it('never forgets a newer record that appeared while its revocation was in flight', async () => {
     const vault = await withRecord(CANDIDATE, PREVIOUS_SCOPED);
     const newer = serializeReplacedCredentialRecord(

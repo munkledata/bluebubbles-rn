@@ -379,7 +379,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
         if (replacing) {
           const status = await inspectScopedCredentialUpgradeStatus();
           if (!accountLease.isCurrent()) return;
-          // A paused outcome proves the adopting journal was saved, even if the check below cannot.
+          // A paused outcome proves the adopting journal was saved, whatever the check below reads:
+          // a failed check proves nothing, and 'none' means a concurrent resume already finished it,
+          // so the entry must not invite resubmitting a credential that is now live (review M130).
           const confirmedSaved =
             outcome.notificationsPaused === true ||
             status.kind === 'candidate' ||

@@ -1,4 +1,5 @@
 import type { ServerInfo } from '@core/models';
+import { logger } from '@core/secure';
 import type { ConnectResult } from '@/services/connection';
 import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ServerRotationCoordinator } from '@/services/realtime/serverRotationCoordinator';
@@ -156,7 +157,8 @@ describe('approveServerRotation', () => {
 
     it('keeps the change waiting, retryable, when that revocation fails unexpectedly (M130 second review)', async () => {
       const { deps, requestId, settleReplacedCredential, persistCandidate } = setup();
-      settleReplacedCredential.mockRejectedValueOnce(new Error('module failed to load'));
+      const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      settleReplacedCredential.mockRejectedValueOnce(new TypeError('module failed to load'));
 
       await expect(
         approveServerRotation(requestId, 'correct-password', false, deps),
@@ -167,6 +169,10 @@ describe('approveServerRotation', () => {
       });
       expect(persistCandidate).not.toHaveBeenCalled();
       expect(deps.coordinator.current(requestId)).not.toBeNull();
+      // Logged by error name only, so a repeating failure is visible without leaking details.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('replaced credential'), {
+        errorName: 'TypeError',
+      });
     });
 
     it('drops the change when ownership moves during that revocation', async () => {

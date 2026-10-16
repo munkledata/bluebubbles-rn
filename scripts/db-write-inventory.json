@@ -407,7 +407,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.confirmDiscardCredential.onConfirm:mutator-call:ffe1420d9aaf",
       "path": "app/(app)/server-management.tsx",
-      "line": 534,
+      "line": 536,
       "symbol": "ServerManagementScreen.confirmDiscardCredential.onConfirm",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential",
@@ -420,7 +420,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796",
       "path": "app/(app)/server-management.tsx",
-      "line": 542,
+      "line": 544,
       "symbol": "ServerManagementScreen.onDiscardCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate",
@@ -433,7 +433,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.<callback:7bf4151522>:mutator-call:6b73b09a1510",
       "path": "app/(app)/server-management.tsx",
-      "line": 908,
+      "line": 910,
       "symbol": "ServerManagementScreen.<callback:7bf4151522>",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential",

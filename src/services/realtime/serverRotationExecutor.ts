@@ -1,6 +1,6 @@
 import { strictServerOrigin } from '@core/config';
 import type { ServerInfo } from '@core/models';
-import { isScopedDeviceCredential } from '@core/secure';
+import { isScopedDeviceCredential, logger } from '@core/secure';
 import { useSessionStore } from '@state/sessionStore';
 import { timingSafeEqual, utf8Encode } from '@utils/bytes';
 import type { ConnectResult } from '../connection';
@@ -252,9 +252,12 @@ export async function approveServerRotation(
   let previousCredential: 'settled' | 'pending' | 'cancelled';
   try {
     previousCredential = await deps.settleReplacedCredential(beforeCommitCurrent);
-  } catch {
+  } catch (error) {
     // An unexpected failure must not leave the prompt waiting: treat it like a revocation that
     // could not finish, which the user can retry.
+    logger.warn('[realtime] server rotation could not revoke the replaced credential', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
     previousCredential = 'pending';
   }
   if (previousCredential === 'cancelled' || !beforeCommitCurrent()) {

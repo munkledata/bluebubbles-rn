@@ -11,6 +11,7 @@ import {
   inspectReplacedCredentialRecord,
   isScopedDeviceCredential,
   resolveCredentialUpgrade,
+  retireReplacedCredentialRecord,
   serializeCredentialUpgradeJournal,
   serializeReplacedCredentialRecord,
   SERVER_SESSION_STATE,
@@ -252,9 +253,11 @@ async function revokeExactBearer(
  * record. Interleaved, the slower revocation could delete a record whose bearer it never revoked.
  * A task must never start another record operation, or it would wait for itself.
  *
- * Safe outside the lock: Disconnect reads and deletes the record only after tracked account work
- * has drained, the new-account commit clears it only behind Disconnect's tombstone, and the
- * post-promotion check for a missing live session only reads it.
+ * Outside the lock: Disconnect reads and clears the record after tracked account work has drained.
+ * An address change's revocation step is not tracked and can overlap it. That is harmless: revoking
+ * an already-revoked bearer still succeeds, and the step clears only the exact record it read. The
+ * new-account commit clears the record only behind Disconnect's tombstone, and the post-promotion
+ * check for a missing live session only reads it.
  */
 let replacedCredentialRecordTail: Promise<unknown> = Promise.resolve();
 
@@ -281,7 +284,11 @@ async function recordReplacedCredential(
   }
 }
 
-/** Forget the record only while it still holds exactly `expected`; true once it is gone. */
+/**
+ * Forget the record only while it still holds exactly `expected`; true once no valid record
+ * remains. A keystore that keeps the key gets the record emptied instead, so a revoked bearer can
+ * never block later replacements or address changes (review M130).
+ */
 async function forgetReplacedCredential(
   deps: CredentialUpgradeRuntimeDependencies,
   expected: string | null,
@@ -291,8 +298,7 @@ async function forgetReplacedCredential(
     if (stored === null) return true;
     // A newer record belongs to a later replacement; it is not ours to forget.
     if (stored !== expected) return true;
-    await deps.vault.delete(REPLACED_CREDENTIAL_KEY);
-    return (await deps.vault.get(REPLACED_CREDENTIAL_KEY)) === null;
+    return await retireReplacedCredentialRecord(deps.vault);
   } catch {
     return false;
   }
