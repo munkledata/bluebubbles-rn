@@ -57,6 +57,7 @@ jest.mock('expo-application', () => ({
 }));
 jest.mock('@native/biometrics', () => ({
   isBiometricAvailable: jest.fn(),
+  hasDeviceCredential: jest.fn(),
   authenticate: jest.fn(),
 }));
 jest.mock('@native/screenSecurity', () => ({
@@ -98,7 +99,7 @@ jest.mock('@db/repositories', () => ({
 // eslint-disable-next-line import/first
 import SettingsScreen from '../../../app/(app)/settings';
 // eslint-disable-next-line import/first
-import { authenticate, isBiometricAvailable } from '@native/biometrics';
+import { authenticate, hasDeviceCredential, isBiometricAvailable } from '@native/biometrics';
 // eslint-disable-next-line import/first
 import { getSecureScreenState, setSecureScreenEnabled } from '@native/screenSecurity';
 // eslint-disable-next-line import/first
@@ -144,6 +145,7 @@ import {
 
 const mockIsBiometricAvailable = isBiometricAvailable as jest.Mock;
 const mockAuthenticate = authenticate as jest.Mock;
+const mockHasDeviceCredential = hasDeviceCredential as jest.Mock;
 const mockGetSecureScreenState = getSecureScreenState as jest.Mock;
 const mockSetSecureScreenEnabled = setSecureScreenEnabled as jest.Mock;
 const mockForget = forget as jest.Mock;
@@ -215,6 +217,7 @@ beforeEach(() => {
   useTransportHealthStore.getState().setSocketState(transportGeneration, 'connected');
   useDialogStore.setState({ current: null, queue: [] });
   mockIsBiometricAvailable.mockResolvedValue(true);
+  mockHasDeviceCredential.mockResolvedValue(true);
   mockGetSecureScreenState.mockReturnValue({ available: true, enabled: false });
   mockSetSecureScreenEnabled.mockReset();
   mockForget.mockResolvedValue(undefined);
@@ -613,10 +616,30 @@ describe('SettingsScreen — App Lock biometric gate', () => {
     expect(mockAuthenticate).toHaveBeenCalledTimes(2);
   });
 
-  it('lets App Lock be turned off when the phone has no fingerprint, face or PIN set up', async () => {
+  it('still asks for the PIN when the phone has a screen lock but no fingerprint', async () => {
+    // The lock screen accepts the PIN, so removing every fingerprint must not open the switch.
+    useLockStore.setState({ enabled: true, locked: false, hydrated: true });
+    mockIsBiometricAvailable.mockResolvedValue(false);
+    mockHasDeviceCredential.mockResolvedValue(true);
+    mockAuthenticate.mockResolvedValueOnce(false);
+    await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText('Require biometric unlock to open the app'),
+        'valueChange',
+        false,
+      );
+    });
+    await waitFor(() => expect(mockAuthenticate).toHaveBeenCalledTimes(1));
+    expect(mockSetAppLock).not.toHaveBeenCalled();
+  });
+
+  it('lets App Lock be turned off when the phone has no screen lock of any kind', async () => {
     // Nothing could ever unlock Gator again in that state, so the switch must not trap the user.
     useLockStore.setState({ enabled: true, locked: false, hydrated: true });
     mockIsBiometricAvailable.mockResolvedValue(false);
+    mockHasDeviceCredential.mockResolvedValue(false);
     await renderWithTheme(<SettingsScreen />);
 
     await act(async () => {

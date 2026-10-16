@@ -14,6 +14,15 @@ export async function isBiometricAvailable(): Promise<boolean> {
   return hasHardware && isEnrolled;
 }
 
+/**
+ * True when the phone has any screen lock (PIN, pattern, password or biometric). `authenticate`
+ * falls back to it, so it can confirm a change even after every fingerprint was removed.
+ */
+export async function hasDeviceCredential(): Promise<boolean> {
+  const level = await LocalAuthentication.getEnrolledLevelAsync();
+  return level !== LocalAuthentication.SecurityLevel.NONE;
+}
+
 /** Prompt for biometrics/passcode. Returns true on success. */
 export async function authenticate(reason = 'Unlock Gator'): Promise<boolean> {
   const result = await LocalAuthentication.authenticateAsync({
