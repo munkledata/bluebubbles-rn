@@ -294,6 +294,73 @@ describe('backfillServerAvatars', () => {
     ).toBeNull();
   });
 
+  describe('deletes a replaced app-owned photo once nothing points at it (review M208)', () => {
+    const deletedName = (name: string) =>
+      MockFile.mockDeletes.some((uri) => uri.endsWith(`/${name}`));
+
+    it('deletes the previous version after the photo changes', async () => {
+      const t = await seedNeedy();
+      mockQuery
+        .mockResolvedValueOnce([contactWithPhoto])
+        .mockResolvedValueOnce([{ ...contactWithPhoto, avatarEtag: 'e2' }]);
+
+      expect(await backfillServerAvatars(t.db, http)).toBe(1);
+      expect(deletedName(avatarFileName('c1', 'e1'))).toBe(false);
+      expect(await backfillServerAvatars(t.db, http)).toBe(1);
+
+      expect(deletedName(avatarFileName('c1', 'e1'))).toBe(true);
+      expect(deletedName(avatarFileName('c1', 'e2'))).toBe(false);
+    });
+
+    it('keeps the previous version while another handle still shows it', async () => {
+      const t = await createTestDb();
+      await upsertHandles(t.db, [
+        { address: '+15551234567', displayName: '+15551234567' },
+        { address: 'friend@example.com', displayName: 'friend@example.com' },
+      ]);
+      mockQuery
+        .mockResolvedValueOnce([{ ...contactWithPhoto, emails: ['friend@example.com'] }])
+        .mockResolvedValueOnce([{ ...contactWithPhoto, avatarEtag: 'e2' }]);
+
+      expect(await backfillServerAvatars(t.db, http)).toBe(2);
+      expect(await backfillServerAvatars(t.db, http)).toBe(1);
+
+      // The email handle was not in the second response, so it still shows the e1 file.
+      expect(deletedName(avatarFileName('c1', 'e1'))).toBe(false);
+    });
+
+    it('deletes a photo cleared because its endpoint became ambiguous', async () => {
+      const t = await seedNeedy();
+      mockQuery
+        .mockResolvedValueOnce([contactWithPhoto])
+        .mockResolvedValueOnce([
+          contactWithPhoto,
+          { id: 'c2', hasAvatar: true, phoneNumbers: ['+44 555 123 4567'], avatarEtag: 'e2' },
+        ]);
+
+      expect(await backfillServerAvatars(t.db, http)).toBe(1);
+      expect(await backfillServerAvatars(t.db, http)).toBe(0);
+
+      expect(deletedName(avatarFileName('c1', 'e1'))).toBe(true);
+    });
+
+    it.each([
+      ['an encoded slash', 'generation-0/media-%2F..%2F..%2Fgator.db.img'],
+      ['an encoded backslash', 'generation-0/media-x%5Cy.img'],
+      ['a nested folder', 'generation-0/nested/media-x.img'],
+      ['a parent-folder step', 'generation-0/../media-x.img'],
+    ])('never deletes a stored path with %s, which it did not create', async (_label, rest) => {
+      const t = await seedNeedy();
+      const foreign = `file:///doc/server-contact-avatars/${rest}`;
+      t.raw.prepare('UPDATE handles SET avatar = ? WHERE address = ?').run(foreign, '+15551234567');
+      MockFile.mockDisk.set(foreign, 10);
+      mockQuery.mockResolvedValueOnce([contactWithPhoto]);
+
+      expect(await backfillServerAvatars(t.db, http)).toBe(1);
+      expect(MockFile.mockDeletes).not.toContain(foreign);
+    });
+  });
+
   it('rejects a blank server contact id and clears an older app-owned avatar', async () => {
     const t = await seedNeedy();
     mockQuery

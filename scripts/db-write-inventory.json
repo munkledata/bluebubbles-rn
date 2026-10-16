@@ -16800,7 +16800,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:5b53f755ddd8",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 120,
+      "line": 121,
       "symbol": "backfillServerAvatars.<callback:f825ab541f>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16813,7 +16813,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:b52fdca006d4",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 120,
+      "line": 121,
       "symbol": "backfillServerAvatars.<callback:f825ab541f>",
       "operation": "mutator-call",
       "target": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>",
@@ -16826,7 +16826,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>:mutator-call:560760fae756",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 122,
+      "line": 123,
       "symbol": "backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
@@ -16839,7 +16839,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>:mutator-call:e3874437fe75",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 179,
+      "line": 181,
       "symbol": "backfillServerAvatars.<callback:c50932e614>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16852,7 +16852,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>:mutator-call:e8f26a3863e3",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 179,
+      "line": 181,
       "symbol": "backfillServerAvatars.<callback:c50932e614>",
       "operation": "mutator-call",
       "target": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>.<callback:f60ab1f80c>",
@@ -16865,7 +16865,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>.<callback:f60ab1f80c>:mutator-call:41ca6c4297af",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 182,
+      "line": 184,
       "symbol": "backfillServerAvatars.<callback:c50932e614>.<callback:f60ab1f80c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
@@ -16878,7 +16878,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>:mutator-call:05e6050537bf",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 219,
+      "line": 222,
       "symbol": "backfillServerAvatars.<callback:040f876c1f>",
       "operation": "mutator-call",
       "target": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>.<callback:65e7af77ab>",
@@ -16891,7 +16891,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>:mutator-call:8ece3083bfa0",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 219,
+      "line": 222,
       "symbol": "backfillServerAvatars.<callback:040f876c1f>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16904,7 +16904,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>.<callback:65e7af77ab>:mutator-call:ccc901a79e13",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 222,
+      "line": 225,
       "symbol": "backfillServerAvatars.<callback:040f876c1f>.<callback:65e7af77ab>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",

@@ -8,6 +8,7 @@ import {
 } from '@utils/contactMatch';
 import {
   handlesNeedingAvatar,
+  isHandleAvatarReferenced,
   kvGet,
   kvSetWithinTransaction,
   setHandleServerAvatarWithinTransaction,
@@ -124,6 +125,7 @@ export async function backfillServerAvatars(
         );
       });
       if (commitStatus === 'paused' || !lease.isCurrent()) return 0;
+      await deleteAvatarIfUnreferenced(db, serverAvatarRoot.uri, h.avatar, lease);
     }
     if (byKey.size === 0) return 0;
 
@@ -193,6 +195,7 @@ export async function backfillServerAvatars(
           if (downloadedNow) discardFile(dest);
           return written;
         }
+        if (h.avatar) await deleteAvatarIfUnreferenced(db, serverAvatarRoot.uri, h.avatar, lease);
         // A device-contact refresh can install a photo while this network download is in flight.
         // The repository's compare-and-swap preserves that device photo; do not report a write that
         // deliberately did not happen.
@@ -238,5 +241,46 @@ function isReusableAvatar(file: File): boolean {
     return Number.isSafeInteger(file.size) && file.size > 0 && file.size <= SERVER_AVATAR_MAX_BYTES;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Delete a replaced or cleared server avatar once no handle shows it (review M208); before, every
+ * changed photo stayed on disk until Forget. Handles of one contact share a file, so a file another
+ * handle still shows is kept. Best-effort: after any failure the file waits for Forget's sweep.
+ */
+async function deleteAvatarIfUnreferenced(
+  db: AppDatabase,
+  rootUri: string,
+  uri: string,
+  lease: RealtimeDeliveryLease,
+): Promise<void> {
+  const file = ownedAvatarFile(rootUri, uri);
+  if (!file) return;
+  try {
+    // Tracked, so Disconnect waits for this read instead of closing the database under it.
+    await runTrackedRealtimeWork(lease, async (activeLease) => {
+      if (!activeLease.isCurrent() || (await isHandleAvatarReferenced(db, uri))) return;
+      if (activeLease.isCurrent()) deleteOwnedFile(file);
+    });
+  } catch {
+    logger.warn('[contacts] could not check whether a replaced server avatar is still shown');
+  }
+}
+
+/**
+ * The file a stored avatar uri names, but only in the shape this module creates: one `media-….img`
+ * directly inside a `generation-N` folder. An encoded slash or backslash could name another folder
+ * natively, so such a uri is never deleted.
+ */
+function ownedAvatarFile(rootUri: string, uri: string): File | null {
+  const prefix = `${rootUri.replace(/\/+$/, '')}/`;
+  if (!uri.startsWith(prefix)) return null;
+  const rest = uri.slice(prefix.length);
+  if (!/^generation-\d+\/media-[^/\\]+\.img$/.test(rest) || /%(?:2f|5c)/i.test(rest)) return null;
+  try {
+    return new File(uri);
+  } catch {
+    return null;
   }
 }

@@ -635,3 +635,11 @@ export function setHandleServerAvatarWithinTransaction(
     return rows.length > 0;
   });
 }
+
+/** Whether any handle still shows this avatar uri; one server photo file can serve several handles. */
+export async function isHandleAvatarReferenced(db: AppDatabase, uri: string): Promise<boolean> {
+  const rows = await db.all<{ referenced: number }>(
+    sql`SELECT 1 AS referenced FROM handles WHERE avatar = ${uri} LIMIT 1`,
+  );
+  return rows.length > 0;
+}

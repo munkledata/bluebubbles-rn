@@ -516,6 +516,11 @@ legacy-shortcut cleanup path ran. A clean-install result must not be relabeled a
 - [ ] **`EXACT PLAY CANDIDATE` (`REVIEW-888`):** With downloads working, Storage & File Privacy shows
       no Repair Downloads row. Do not manufacture an oversized cache on a tester phone; if an upgrade
       naturally shows the paused-downloads warning, run Repair Downloads and record the result.
+- [ ] **`LOCAL-DEV SUPPORTING ONLY` (review M208):** On a disposable debuggable build, give a
+      synthetic contact that exists only on the Mac a photo and let Gator show it. Change the photo on
+      the Mac, then reopen Gator until the new photo shows. Listing the photo folder with
+      `adb shell run-as <dev-package> ls -R files/server-contact-avatars` must show one file for
+      that contact, not the old and new versions. Record only the file count.
 
 ### 4. Multipart uploads, concurrency, and cancellation
 
