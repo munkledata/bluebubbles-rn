@@ -181,6 +181,7 @@ let mockRecoveryRequest:
   | ((
       chatGuid: string | null,
       context?: { generation: number; signal?: AbortSignal; isCurrent(): boolean },
+      reason?: 'missing-data' | 'restored-message',
     ) => Promise<void> | void)
   | undefined;
 jest.mock('@core/api', () => ({
@@ -928,6 +929,25 @@ describe('startRealtime optional setup containment', () => {
 
     await resumeRealtime();
     expect(mockMaybeResumeSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('repairs a restored message with a deletion sync alone (review M111)', async () => {
+    jest.resetModules();
+    const { startRealtime } = await import('@/services/realtimeControl');
+    await startRealtime();
+    await flushMicrotasks(12);
+    if (!mockRecoveryRequest) throw new Error('DB sink did not register its recovery callback');
+
+    await mockRecoveryRequest(null, { generation: 0, isCurrent: () => true }, 'restored-message');
+    await flushMicrotasks(12);
+
+    expect(mockRecoverRealtimePrerequisite).toHaveBeenCalledTimes(1);
+    expect(mockRecoverRealtimePrerequisite).toHaveBeenCalledWith(
+      expect.anything(),
+      { kind: 'sync-deletions' },
+      0,
+      expect.any(Object),
+    );
   });
 
   it.each(['delay-first', 'recovery-first'] as const)(

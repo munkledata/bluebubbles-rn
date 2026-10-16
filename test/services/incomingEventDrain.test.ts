@@ -129,7 +129,11 @@ describe('incoming event drain', () => {
         nextAttemptAt: START + INCOMING_EVENT_DEPENDENCY_RETRY_MS,
       });
       expect(recover).toHaveBeenCalledTimes(1);
-      expect(recover).toHaveBeenCalledWith(null, expect.objectContaining({ generation: 7 }));
+      expect(recover).toHaveBeenCalledWith(
+        null,
+        expect.objectContaining({ generation: 7 }),
+        'missing-data',
+      );
       expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 0 });
 
       await sink.onEvent(

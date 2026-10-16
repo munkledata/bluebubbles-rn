@@ -612,7 +612,7 @@ describe('DbEventSink (live path)', () => {
         chatGuid: 'cNotHydrated',
       }),
     );
-    expect(requestRecovery).toHaveBeenCalledWith('cNotHydrated', context);
+    expect(requestRecovery).toHaveBeenCalledWith('cNotHydrated', context, 'missing-data');
     expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
     expect(
       (
@@ -745,7 +745,7 @@ describe('DbEventSink (live path)', () => {
         reason: 'chat-unavailable',
       }),
     );
-    expect(requestRecovery).toHaveBeenCalledWith('cReadNotHydrated', context);
+    expect(requestRecovery).toHaveBeenCalledWith('cReadNotHydrated', context, 'missing-data');
     expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
 
     // The compatibility direct path has no durable receipt to retain; preserve its historical no-op.
@@ -785,7 +785,7 @@ describe('DbEventSink (live path)', () => {
         reason: 'message-unavailable',
       }),
     );
-    expect(requestRecovery).toHaveBeenCalledWith('cReadEmpty', context);
+    expect(requestRecovery).toHaveBeenCalledWith('cReadEmpty', context, 'missing-data');
     expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
   });
 
@@ -812,7 +812,7 @@ describe('DbEventSink (live path)', () => {
         eventType: 'participant-added',
       }),
     );
-    expect(requestRecovery).toHaveBeenCalledWith(null, context);
+    expect(requestRecovery).toHaveBeenCalledWith(null, context, 'missing-data');
     expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
   });
 
@@ -840,7 +840,7 @@ describe('DbEventSink (live path)', () => {
       ),
     ).rejects.toBeInstanceOf(RealtimeGroupMutationUnavailableError);
 
-    expect(requestRecovery).toHaveBeenCalledWith('cMalformedGroup', context);
+    expect(requestRecovery).toHaveBeenCalledWith('cMalformedGroup', context, 'missing-data');
   });
 });
 

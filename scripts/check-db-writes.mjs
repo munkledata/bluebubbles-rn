@@ -2625,9 +2625,9 @@ function dbProcessRelaunchCertificateCandidate({
       withCurrentDeliveryTransaction,
       '89571d272f5cd53c5d70cc98412afbb3ba505b2b6705982475a1400aa38dbf89',
     ],
-    [dbEventSinkConstructor, '147e068aa447b86390ff716f4c4890070e59c836d19eb16d41b55558c45fcba2'],
+    [dbEventSinkConstructor, '194b0d05967ba18c5ace5fd07e48cd743452714b2adcb212d2612330bf880fb7'],
     [dbEventSinkLinkContacts, '0815eb9769042c9b5d8be504720e727f05cdde857fd255d692afdb391b3e3e2d'],
-    [dbEventSinkOnEvent, '8c8cb3c05c4e208fa2a34b53ec5a559f5e1ca9b0ea266c0434f1eb3190abd89a'],
+    [dbEventSinkOnEvent, 'd7ad94229a73dedcdd31e0f696a93a83016c7a8ddf5883f9d0245300df110960'],
     [restoreBackup, 'afe947d418d3b5d0c940d03ceb4670bfd793fc28f3ca0e87a15b675c7be5cc49'],
     [
       restorePreparedBackupWithinTransaction,
@@ -9213,7 +9213,7 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      'aeea1bb6e65da085414ecd3c99d25a7eafac6274b2f46fd740f36b8694b1bc45' ||
+      'c9df432a9bff9400cc56c6e2be3788cf589c672f90608530f639f60698869d17' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
       .digest('hex') !== '55909d52f17e7e73d7ec600c9f18b9ab4dea322963e84ecf1e4700971ef42ff0' ||

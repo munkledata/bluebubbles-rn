@@ -676,13 +676,17 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
                       scope: attachmentCacheScope,
                     });
                   },
-                  (chatGuid, context) =>
-                    requestRealtimeRecovery(
-                      db,
-                      chatGuid ? { kind: 'sync-chat', chatGuid } : { kind: 'sync-account' },
-                      context,
-                      true,
-                    ),
+                  (chatGuid, context, reason) =>
+                    // An applied live restore needs only the message-state catch-up, and no event
+                    // waits on it (review M111); missing data repairs its chat or the account.
+                    reason === 'restored-message'
+                      ? requestRealtimeRecovery(db, { kind: 'sync-deletions' }, context)
+                      : requestRealtimeRecovery(
+                          db,
+                          chatGuid ? { kind: 'sync-chat', chatGuid } : { kind: 'sync-account' },
+                          context,
+                          true,
+                        ),
                   () => realtimeRcsProviderInfo(),
                 ),
                 db,

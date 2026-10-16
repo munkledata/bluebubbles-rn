@@ -170,10 +170,15 @@ export class DbEventSink implements EventSink {
     private readonly onAttachmentCacheRetirement?: (
       context?: EventDeliveryContext,
     ) => void | Promise<void>,
-    /** Requests bounded recovery when a durable DB event is missing prerequisite synced data. */
+    /**
+     * Requests bounded recovery: 'missing-data' when a durable DB event lacks prerequisite synced
+     * data (the event waits on it), 'restored-message' when an applied live restore only needs the
+     * message-state catch-up (review M111).
+     */
     private readonly onRecoveryNeeded?: (
       chatGuid: string | null,
       context?: EventDeliveryContext,
+      reason?: 'missing-data' | 'restored-message',
     ) => void | Promise<void>,
     /** Production admission snapshot; omitted only by legacy unit tests with non-RCS fixtures. */
     private readonly getRcsProviderInfo?: () =>
@@ -191,9 +196,10 @@ export class DbEventSink implements EventSink {
     chatGuid: string | null,
     context: EventDeliveryContext,
     details: Record<string, unknown>,
+    reason: 'missing-data' | 'restored-message' = 'missing-data',
   ): Promise<void> {
     try {
-      await this.onRecoveryNeeded?.(chatGuid, context);
+      await this.onRecoveryNeeded?.(chatGuid, context, reason);
     } catch (error) {
       logger.warn('[dbEventSink] durable-event recovery request failed', { ...details, error });
     }
@@ -492,7 +498,7 @@ export class DbEventSink implements EventSink {
         // REST remains the authority for gaps and unknown restored payloads. A realtime receipt
         // deliberately never moves its checkpoint, even when a higher sequence arrived first.
         if (event.payload.kind === 'restored' && context?.isCurrent()) {
-          await this.requestRecovery(null, context, { eventType: event.type });
+          await this.requestRecovery(null, context, { eventType: event.type }, 'restored-message');
         }
         break;
       }

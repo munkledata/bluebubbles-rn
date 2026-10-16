@@ -620,6 +620,17 @@ describe('versioned message state', () => {
     expect((await getMessageStateAuthority(db))?.sequence).toBe('12');
     expect(raw.prepare('SELECT * FROM message_deletion_ledger').all()).toEqual([]);
   });
+  it('asks a deletion sync, not a missing-data repair, after a live restore (review M111)', async () => {
+    const requestRecovery = jest.fn();
+    const context = { generation: 1, isCurrent: () => true };
+    await new DbEventSink(db, undefined, undefined, requestRecovery).onEvent(
+      { type: 'message-state-changed', payload: changed('12', 'restored') },
+      'socket',
+      context,
+    );
+    expect(requestRecovery).toHaveBeenCalledTimes(1);
+    expect(requestRecovery).toHaveBeenCalledWith(null, context, 'restored-message');
+  });
   it('preserves a newer ownerless deletion arriving during exact restore hydration', async () => {
     await withDbTransaction(db, (context) =>
       applyMessageStateWithinTransaction(context, { ...changed('12', 'restored'), chatGuid: null }),
