@@ -57,6 +57,47 @@ import {
   type ComposerTextAdmission,
 } from './useComposerAuthoringSession';
 
+/** One schedule sheet's immutable snapshot of the composer it was opened from. */
+interface PendingSchedule {
+  text: string;
+  draft: string;
+  when: number;
+  attachment?: PendingAttachment;
+  owner: ComposerProps['isSubmitOwnerCurrent'];
+  onSchedule: ComposerProps['onSchedule'];
+  onScheduleAttachment: ComposerProps['onScheduleAttachment'];
+}
+
+/** The live composer state a pending schedule must still match. */
+interface ScheduleContext {
+  scheduleAvailable: boolean;
+  text: string;
+  pending: PendingAttachment[];
+  onSchedule: ComposerProps['onSchedule'];
+  onScheduleAttachment: ComposerProps['onScheduleAttachment'];
+  isSubmitOwnerCurrent: ComposerProps['isSubmitOwnerCurrent'];
+}
+
+/**
+ * True while a schedule sheet still describes what the composer holds: same draft text, the same
+ * single attachment (or none), the same handlers and a current owner. Used both to close a stale
+ * sheet while rendering and to refuse a stale confirmation (review M228).
+ */
+function isPendingScheduleCurrent(sched: PendingSchedule, current: ScheduleContext): boolean {
+  return (
+    current.scheduleAvailable &&
+    current.text === sched.draft &&
+    current.isSubmitOwnerCurrent === sched.owner &&
+    sched.owner?.() !== false &&
+    current.isSubmitOwnerCurrent?.() !== false &&
+    (sched.attachment
+      ? current.pending.length === 1 &&
+        current.pending[0] === sched.attachment &&
+        current.onScheduleAttachment === sched.onScheduleAttachment
+      : current.pending.length === 0 && current.onSchedule === sched.onSchedule)
+  );
+}
+
 interface ComposerProps {
   /** Send an ordinary text message. */
   onSend: (text: string) => ComposerTextAdmission;
@@ -218,15 +259,7 @@ export const Composer = React.memo(function Composer({
   const bubble = translucent ? [styles.ctrlBubble, { backgroundColor: chip }] : null;
   const [trayOpen, setTrayOpen] = useState(false);
   // One opening owns an immutable draft snapshot; only its explicit confirmation can commit.
-  const [pendingSchedule, setPendingSchedule] = useState<{
-    text: string;
-    draft: string;
-    when: number;
-    attachment?: PendingAttachment;
-    owner: ComposerProps['isSubmitOwnerCurrent'];
-    onSchedule: ComposerProps['onSchedule'];
-    onScheduleAttachment: ComposerProps['onScheduleAttachment'];
-  } | null>(null);
+  const [pendingSchedule, setPendingSchedule] = useState<PendingSchedule | null>(null);
   const pendingScheduleRef = useRef(pendingSchedule);
   pendingScheduleRef.current = pendingSchedule;
   const [scheduleSaving, setScheduleSaving] = useState(false);
@@ -772,7 +805,7 @@ export const Composer = React.memo(function Composer({
     textFormatting.length === 0 &&
     ((pending.length === 0 && !!trimmed && !!onSchedule) ||
       (pending.length === 1 && !!onScheduleAttachment));
-  const scheduleContext = useRef({
+  const scheduleContext = useRef<ScheduleContext>({
     scheduleAvailable,
     text,
     pending,
@@ -788,19 +821,7 @@ export const Composer = React.memo(function Composer({
     onScheduleAttachment,
     isSubmitOwnerCurrent,
   };
-  if (
-    pendingSchedule &&
-    (!scheduleAvailable ||
-      text !== pendingSchedule.draft ||
-      isSubmitOwnerCurrent !== pendingSchedule.owner ||
-      pendingSchedule.owner?.() === false ||
-      (pendingSchedule.attachment
-        ? pending.length !== 1 ||
-          pending[0] !== pendingSchedule.attachment ||
-          onScheduleAttachment !== pendingSchedule.onScheduleAttachment
-        : pending.length !== 0 || onSchedule !== pendingSchedule.onSchedule) ||
-      isSubmitOwnerCurrent?.() === false)
-  ) {
+  if (pendingSchedule && !isPendingScheduleCurrent(pendingSchedule, scheduleContext.current)) {
     pendingScheduleRef.current = null;
     setPendingSchedule(null);
   }
@@ -1217,17 +1238,8 @@ export const Composer = React.memo(function Composer({
             const current = scheduleContext.current;
             if (
               !mountedRef.current ||
-              !current.scheduleAvailable ||
               scheduleSavingRef.current ||
-              sched.owner?.() === false ||
-              current.isSubmitOwnerCurrent !== sched.owner ||
-              current.isSubmitOwnerCurrent?.() === false ||
-              current.text !== sched.draft ||
-              (sched.attachment
-                ? current.pending.length !== 1 ||
-                  current.pending[0] !== sched.attachment ||
-                  current.onScheduleAttachment !== sched.onScheduleAttachment
-                : current.pending.length !== 0 || current.onSchedule !== sched.onSchedule)
+              !isPendingScheduleCurrent(sched, current)
             )
               return;
             if (!Number.isFinite(when) || when <= Date.now()) {
