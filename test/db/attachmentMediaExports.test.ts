@@ -1,10 +1,12 @@
 import {
   ATTACHMENT_MEDIA_EXPORT_MAX_PENDING_AGE_MS,
   cancelPendingAttachmentMediaExportsWithinTransaction,
+  claimAttachmentCachePathsForRetirement,
   claimNextAttachmentMediaExport,
   completeAttachmentMediaExport,
   enqueueAttachmentMediaExport,
   failAttachmentMediaExport,
+  getAttachmentCacheQuotaSnapshot,
   maintainAttachmentMediaExports,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
@@ -158,5 +160,85 @@ describe('attachment media export receipts', () => {
         )
         .get(claim!.id),
     ).toEqual({ state: 'terminal', lastErrorCode: 'expired' });
+  });
+});
+
+/**
+ * A Photos export must keep its source file in the attachment cache until it is saved or gives up
+ * (review M081). The protection reads SQLite's own clock, so these times are relative to the real
+ * one rather than to NOW above.
+ */
+describe('attachment media export cache protection', () => {
+  const HOUR = 60 * 60_000;
+
+  async function seedCachedExport(receipt: {
+    createdAt: number;
+    expiresAt: number;
+    attempts: number;
+    leaseExpiresAt: number | null;
+  }) {
+    const { db, raw } = await createTestDb();
+    seedEligibleImage(raw, 'cached-export');
+    raw.prepare('UPDATE attachments SET local_path = ? WHERE guid = ?').run(PATH, 'cached-export');
+    raw
+      .prepare(
+        `INSERT INTO attachment_cache_entries
+           (path, bytes, last_used_at, state, attempts, next_retry_at)
+         VALUES (?, 1024, 1, 'active', 0, 0)`,
+      )
+      .run(PATH);
+    raw
+      .prepare(
+        `INSERT INTO attachment_media_exports
+           (attachment_guid, destination, created_at, expires_at, attempts,
+            lease_token, lease_expires_at)
+         VALUES ('cached-export', 'gallery', ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        receipt.createdAt,
+        receipt.expiresAt,
+        receipt.attempts,
+        receipt.leaseExpiresAt === null ? null : 'worker-lease',
+        receipt.leaseExpiresAt ?? 0,
+      );
+    return db;
+  }
+
+  const wall = Date.now();
+  const unexpired = { createdAt: wall - HOUR, expiresAt: wall + HOUR };
+  const expired = { createdAt: wall - 2 * HOUR, expiresAt: wall - HOUR };
+
+  it.each([
+    [
+      'a pending receipt before it expires',
+      true,
+      { ...unexpired, attempts: 0, leaseExpiresAt: null },
+    ],
+    ['a receipt past its expiry', false, { ...expired, attempts: 0, leaseExpiresAt: null }],
+    ['a receipt out of attempts', false, { ...unexpired, attempts: 3, leaseExpiresAt: null }],
+    [
+      'a live save attempt after expiry',
+      true,
+      { ...expired, attempts: 3, leaseExpiresAt: wall + HOUR },
+    ],
+    [
+      'a save attempt whose lease ran out',
+      false,
+      { ...expired, attempts: 3, leaseExpiresAt: wall - HOUR },
+    ],
+  ])('%s: protects the cached file = %s', async (_label, protects, receipt) => {
+    const db = await seedCachedExport(receipt);
+
+    const snapshot = await getAttachmentCacheQuotaSnapshot(db);
+    expect(snapshot.candidates.map((candidate) => candidate.path)).toEqual(protects ? [] : [PATH]);
+
+    const claim = await withDbTransaction(db, (context) =>
+      claimAttachmentCachePathsForRetirement(context, [PATH]),
+    );
+    expect(claim).toEqual(
+      protects
+        ? { status: 'refused', reason: 'media_export_protected', paths: [PATH] }
+        : { status: 'claimed', paths: [PATH], clearedReferences: 1 },
+    );
   });
 });
