@@ -188,7 +188,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
       ? 'Unavailable'
       : '—';
   const attemptedHealthQueries = scopedCredentialSession
-    ? healthQueries.filter((_query, index) => index !== 2 && index !== 6)
+    ? healthQueries.filter((q) => q !== fcmQ && q !== alertsQ)
     : healthQueries;
   const refreshing = accountCurrent && attemptedHealthQueries.some((q) => q.isFetching);
   // True when EVERY read failed → the server isn't answering the health channels at all (offline

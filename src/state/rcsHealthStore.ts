@@ -15,8 +15,6 @@ import { create } from 'zustand';
 interface RcsHealthState {
   /** The `alertType` from the last `rcs-alert` event, or null if none seen this session. */
   lastAlertType: string | null;
-  /** When the last alert arrived (ms epoch), for potential future staleness display. */
-  lastAlertAt: number | null;
   /** Apply an incoming `rcs-alert`. */
   setAlert: (alertType: string | null | undefined) => void;
   /** Account teardown: discard the previous server's bridge-health signal. */
@@ -25,7 +23,6 @@ interface RcsHealthState {
 
 export const useRcsHealthStore = create<RcsHealthState>((set) => ({
   lastAlertType: null,
-  lastAlertAt: null,
-  setAlert: (alertType) => set({ lastAlertType: alertType ?? null, lastAlertAt: Date.now() }),
-  reset: () => set({ lastAlertType: null, lastAlertAt: null }),
+  setAlert: (alertType) => set({ lastAlertType: alertType ?? null }),
+  reset: () => set({ lastAlertType: null }),
 }));

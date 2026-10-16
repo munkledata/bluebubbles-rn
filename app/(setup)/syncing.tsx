@@ -8,8 +8,8 @@ import { createI18n } from '@utils/i18n';
 
 /**
  * First-run sync progress. Shown right after a successful connect (scan/manual) so the user sees
- * the initial sync happen instead of landing on an empty inbox. Subscribes to the sync store;
- * auto-advances to the inbox when the sync completes (or lets the user skip / continue on error).
+ * the initial sync happen instead of landing on an empty inbox. Subscribes to the sync store and
+ * moves on to the permission choices when the sync completes (or lets the user skip / continue).
  */
 export default function Syncing(): React.JSX.Element {
   const theme = useTheme();

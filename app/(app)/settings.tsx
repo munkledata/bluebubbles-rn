@@ -95,7 +95,7 @@ const notificationPermissionLabel = (
     : 'Android notification status is unavailable.';
 };
 
-/** Settings: theme presets + contacts sync (more sections land in later phases). */
+/** Settings: this phone's preferences, account, privacy and maintenance sections. */
 export default function SettingsScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();

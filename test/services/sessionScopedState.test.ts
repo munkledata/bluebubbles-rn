@@ -138,7 +138,6 @@ describe('resetSessionScopedState', () => {
     expect(useTypingStore.getState().typing).toEqual({});
     expect(useRcsHealthStore.getState()).toMatchObject({
       lastAlertType: null,
-      lastAlertAt: null,
     });
     expect(useTransportHealthStore.getState()).toMatchObject({
       active: false,

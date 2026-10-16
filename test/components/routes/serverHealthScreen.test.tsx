@@ -322,7 +322,7 @@ beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
   useSessionStore.setState({ serverInfo: null, password: 'health-legacy-password' });
-  useRcsHealthStore.setState({ lastAlertType: null, lastAlertAt: null });
+  useRcsHealthStore.setState({ lastAlertType: null });
   useToastStore.setState({ current: null, queue: [] });
   resolveAllChannels();
 });
@@ -740,7 +740,6 @@ describe('ServerHealthScreen — ordinary presentation and account ownership', (
     arrangePrivateHealth();
     useRcsHealthStore.setState({
       lastAlertType: RCS_ALERT_TYPES.gaiaLoggedOut,
-      lastAlertAt: 1,
     });
     const { client } = await renderScreen();
     await waitForHealthQueries(client);
@@ -759,7 +758,6 @@ describe('ServerHealthScreen — ordinary presentation and account ownership', (
     arrangePrivateHealth();
     useRcsHealthStore.setState({
       lastAlertType: RCS_ALERT_TYPES.phoneNotResponding,
-      lastAlertAt: 1,
     });
     const { client } = await renderScreen();
     await waitForHealthQueries(client);
@@ -844,7 +842,6 @@ describe('ServerHealthScreen — ordinary presentation and account ownership', (
     arrangePrivateHealth(null);
     useRcsHealthStore.setState({
       lastAlertType: RCS_ALERT_TYPES.gaiaLoggedOut,
-      lastAlertAt: Number.MAX_SAFE_INTEGER,
     });
     const renderedA = await renderScreen();
     await waitForHealthQueries(renderedA.client);
@@ -884,7 +881,7 @@ describe('ServerHealthScreen — ordinary presentation and account ownership', (
     await unmountScreen(renderedA);
     resumeRealtimeDeliveries();
     for (const mock of Object.values(mocks)) mock.mockClear();
-    useRcsHealthStore.setState({ lastAlertType: null, lastAlertAt: null });
+    useRcsHealthStore.setState({ lastAlertType: null });
     arrangePrivateHealth();
     mocks.fcmStatus.mockResolvedValue({
       configured: true,
