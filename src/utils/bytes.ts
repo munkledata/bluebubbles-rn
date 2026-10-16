@@ -78,3 +78,21 @@ export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
   return diff === 0;
 }
+
+/**
+ * Strict UTF-8 decode that works on Hermes: a replacement-character decode cannot round-trip
+ * malformed bytes, so any difference means the input was not valid UTF-8. `label` names the
+ * payload in a fixed error message and never includes its content. Shared by the backup secret
+ * box and FCM decryption (review M100).
+ */
+export function decodeStrictUtf8(bytes: Uint8Array, label: string): string {
+  const decoded = utf8Decode(bytes);
+  const roundTrip = utf8Encode(decoded);
+  if (
+    roundTrip.length !== bytes.length ||
+    roundTrip.some((value, index) => value !== bytes[index])
+  ) {
+    throw new Error(`${label} is not valid UTF-8`);
+  }
+  return decoded;
+}

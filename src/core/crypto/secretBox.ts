@@ -1,4 +1,4 @@
-import { fromBase64, toBase64, utf8Decode, utf8Encode } from '@utils/bytes';
+import { decodeStrictUtf8, fromBase64, toBase64, utf8Encode } from '@utils/bytes';
 import { decodeEnvelope, encodeEnvelope } from './envelope';
 import { ARGON2_INTERACTIVE, CRYPTO_SIZES, type CryptoBackend } from './types';
 
@@ -99,19 +99,6 @@ function isCanonicalBase64TokenForBytes(token: string, expectedBytes: number): b
   const expectedPadding = expectedBytes % 3 === 0 ? 0 : expectedBytes % 3 === 1 ? 2 : 1;
   const actualPadding = token.endsWith('==') ? 2 : token.endsWith('=') ? 1 : 0;
   return actualPadding === expectedPadding;
-}
-
-/** Hermes-portable strict UTF-8 validation: replacement decoding cannot round-trip bad bytes. */
-function decodeStrictUtf8(bytes: Uint8Array): string {
-  const decoded = utf8Decode(bytes);
-  const roundTrip = utf8Encode(decoded);
-  if (
-    roundTrip.length !== bytes.length ||
-    roundTrip.some((value, index) => value !== bytes[index])
-  ) {
-    throw new Error('secret box plaintext is not valid UTF-8');
-  }
-  return decoded;
 }
 
 function chunkNonce(prefix: Uint8Array, index: number): Uint8Array {
@@ -315,7 +302,7 @@ export class SecretBox {
         offset += chunk.length;
       }
       if (offset !== plaintext.length) throw new Error('incomplete chunked plaintext');
-      return decodeStrictUtf8(plaintext);
+      return decodeStrictUtf8(plaintext, 'secret box plaintext');
     } finally {
       key.fill(0);
     }
@@ -330,7 +317,7 @@ export class SecretBox {
     const key = await this.deriveKey(passphrase, salt);
     try {
       const plaintext = await this.backend.aeadDecrypt({ ciphertext: body, key, nonce });
-      return decodeStrictUtf8(plaintext);
+      return decodeStrictUtf8(plaintext, 'secret box plaintext');
     } finally {
       key.fill(0);
     }

@@ -1,5 +1,6 @@
 import {
   concatBytes,
+  decodeStrictUtf8,
   fromBase64,
   timingSafeEqual,
   toBase64,
@@ -38,5 +39,23 @@ describe('bytes', () => {
     expect(timingSafeEqual(Uint8Array.from([1, 2, 3]), Uint8Array.from([1, 2, 3]))).toBe(true);
     expect(timingSafeEqual(Uint8Array.from([1, 2, 3]), Uint8Array.from([1, 2, 4]))).toBe(false);
     expect(timingSafeEqual(Uint8Array.from([1, 2]), Uint8Array.from([1, 2, 3]))).toBe(false);
+  });
+});
+
+describe('decodeStrictUtf8 (review M100)', () => {
+  it('decodes valid UTF-8, including multi-byte characters', () => {
+    expect(decodeStrictUtf8(new Uint8Array([0x63, 0x61, 0x66, 0xc3, 0xa9]), 'test payload')).toBe(
+      'café',
+    );
+  });
+
+  it.each([
+    ['a lone continuation byte', [0x80]],
+    ['a truncated two-byte sequence', [0x61, 0xc3]],
+    ['an overlong encoding', [0xc0, 0xaf]],
+  ])('refuses %s with a fixed, labelled message', (_label, bytes) => {
+    expect(() => decodeStrictUtf8(new Uint8Array(bytes), 'test payload')).toThrow(
+      'test payload is not valid UTF-8',
+    );
   });
 });
