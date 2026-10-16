@@ -1,4 +1,5 @@
 import { logger } from '@core/secure';
+import { useLockStore } from '@state/lockStore';
 import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
@@ -12,7 +13,9 @@ import {
   takePostponedNotificationPress,
   type NotificationPressOccurrence,
   type NotificationTapReservation,
+  type PostponedNotificationPress,
 } from './pendingNav';
+import { effectivelyLocked } from './lockGate';
 import { resolveNotificationData } from './notificationRouting';
 
 /**
@@ -172,6 +175,17 @@ function isRealPress(initial: TappedNotification | null): boolean {
   return !!initial?.pressAction;
 }
 
+/** The foreground lock rule: an expired grace period already counts before `lock()` runs. */
+function appIsLocked(): boolean {
+  return effectivelyLocked(useLockStore.getState(), false);
+}
+
+function postponedPressOf(press: TappedNotification): PostponedNotificationPress | undefined {
+  const actionId = press.pressAction?.id;
+  const notificationId = press.notification?.id;
+  return actionId && notificationId ? { actionId, notificationId } : undefined;
+}
+
 /**
  * Drain a pending notification tap at foreground time and open its chat EXACTLY ONCE.
  *
@@ -199,10 +213,18 @@ export async function drainNotificationTap<T extends TappedNotification>(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
   if (!accountLease.isCurrent()) return;
+  // A resume that re-locks the app emits the same 'active' event as this drain. Read nothing then:
+  // the protected screens remount after unlock and drain again (review M102).
+  if (appIsLocked()) return;
   const raw = await getInitial();
   if (!accountLease.isCurrent()) return;
   const initial = isRealPress(raw) ? raw : null;
   const initialTap = initial ? reserveNotificationTap(initial, accountLease) : null;
+  if (appIsLocked()) {
+    // The launch event is consumed now; keep its tap and press for the post-unlock drain.
+    if (initial && initialTap) stashPendingNotification(initialTap, postponedPressOf(initial));
+    return;
+  }
   const pending = takePending();
   const tap = initialTap ?? pending;
   if (!tap) return;

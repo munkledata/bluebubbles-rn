@@ -25,6 +25,7 @@ import {
 } from '@/services/notifications/pendingNav';
 import { logger } from '@core/secure';
 import { resolveNotificationData } from '@/services/notifications/notificationRouting';
+import { useLockStore } from '@state/lockStore';
 import {
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -351,6 +352,76 @@ describe('drainNotificationTap', () => {
     await drainNotificationTap(async () => null, takePendingNotification, press, navigate);
     expect(navigate.openChat).toHaveBeenCalledTimes(1);
     expect(press).toHaveBeenCalledTimes(1);
+  });
+
+  describe('while the app is locked (M102)', () => {
+    beforeEach(() => {
+      useLockStore.setState({
+        enabled: true,
+        hydrated: true,
+        locked: true,
+        lastBackgrounded: null,
+      });
+    });
+    afterEach(() => {
+      useLockStore.setState({ enabled: false, locked: false, lastBackgrounded: null });
+    });
+
+    it('reads nothing on a re-locking resume and opens the tap once after unlock', async () => {
+      // The resume that re-locks the app emits the same 'active' event this drain listens to.
+      const navigate = notificationNavigation();
+      const press = jest.fn();
+      const getInitial = jest.fn(async () => messageInitial);
+      const takePending = jest.fn(takePendingNotification);
+      await drainNotificationTap(getInitial, takePending, press, navigate);
+      expect(getInitial).not.toHaveBeenCalled();
+      expect(takePending).not.toHaveBeenCalled();
+      expect(mockResolveNotificationData).not.toHaveBeenCalled();
+      expect(navigate.openChat).not.toHaveBeenCalled();
+      expect(press).not.toHaveBeenCalled();
+
+      useLockStore.getState().unlock();
+      await drainNotificationTap(getInitial, takePending, press, navigate);
+      expect(navigate.openChat).toHaveBeenCalledTimes(1);
+      expect(press).toHaveBeenCalledWith(messageInitial);
+    });
+
+    it('keeps a launch tap read just before the lock engaged for the post-unlock drain', async () => {
+      useLockStore.setState({ locked: false });
+      const navigate = notificationNavigation();
+      const press = jest.fn();
+      const reminder = {
+        notification: {
+          id: 'gator-reminder-message-8-7000',
+          data: { chatGuid: 'c8', reminder: '1' },
+        },
+        pressAction: { id: 'reminder' },
+        pressOccurrenceId: `11111111-1111-4111-8111-111111111111:${++occurrenceSequence}`,
+      };
+      await drainNotificationTap(
+        async () => {
+          useLockStore.getState().lock();
+          return reminder;
+        },
+        takePendingNotification,
+        press,
+        navigate,
+      );
+      expect(mockResolveNotificationData).not.toHaveBeenCalled();
+      expect(navigate.openChat).not.toHaveBeenCalled();
+      expect(press).not.toHaveBeenCalled();
+
+      useLockStore.getState().unlock();
+      await drainNotificationTap(async () => null, takePendingNotification, press, navigate);
+      expect(navigate.openChat).toHaveBeenCalledTimes(1);
+      expect(press).toHaveBeenCalledTimes(1);
+      expect(press).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notification: { id: 'gator-reminder-message-8-7000', data: reminder.notification.data },
+          pressAction: { id: 'reminder' },
+        }),
+      );
+    });
   });
 
   it('drains BOTH sources but navigates only once (same press, no double-push)', async () => {
