@@ -1,17 +1,13 @@
 import {
-  answerFaceTimeCall,
   createFaceTimeLink,
   isCanonicalAppleFaceTimeLink,
   isCanonicalFaceTimeCallAddress,
-  isCanonicalFaceTimeCallUuid,
-  leaveFaceTimeCall,
   startFaceTimeCall,
 } from '@core/api/endpoints/facetime';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 
 const TEMP_GUID = 'temp-link1234';
-const CALL_UUID = '01234567-89ab-cdef-0123-456789abcdef';
 const FACE_TIME_LINK = `https://facetime.apple.com/join#v=1&p=${'A'.repeat(22)}&k=${'A'.repeat(43)}`;
 
 function fakeHttp(result: unknown): { http: HttpClient; post: jest.Mock } {
@@ -220,115 +216,4 @@ describe('FaceTime call-start endpoint', () => {
     expect((error as ApiError).serverErrorType).toBe('facetime_call_start_outcome_unknown');
     expect((error as ApiError).cause).toBeUndefined();
   });
-});
-
-describe('FaceTime call-control endpoints', () => {
-  it.each([
-    ['answer', answerFaceTimeCall, { answered: true }],
-    ['leave', leaveFaceTimeCall, { left: true }],
-  ] as const)(
-    'POSTs one exact non-retrying %s body and accepts its reserved marker',
-    async (action, control, ack) => {
-      const transport = fakeHttp(ack);
-
-      await expect(
-        control(transport.http, { callUuid: CALL_UUID, tempGuid: TEMP_GUID }),
-      ).resolves.toEqual(ack);
-      expect(transport.post).toHaveBeenCalledTimes(1);
-      expect(transport.post).toHaveBeenCalledWith(`/facetime/call/${action}`, expect.anything(), {
-        captureErrorDetail: true,
-        retry: false,
-        json: { callUuid: CALL_UUID, tempGuid: TEMP_GUID },
-      });
-    },
-  );
-
-  it('matches the helper lowercase UUID grammar exactly and rejects invalid input before HTTP', async () => {
-    expect(isCanonicalFaceTimeCallUuid(CALL_UUID)).toBe(true);
-    expect(isCanonicalFaceTimeCallUuid('00000000-0000-0000-0000-000000000000')).toBe(true);
-    expect(isCanonicalFaceTimeCallUuid(CALL_UUID.toUpperCase())).toBe(false);
-    expect(isCanonicalFaceTimeCallUuid(`{${CALL_UUID}}`)).toBe(false);
-    expect(isCanonicalFaceTimeCallUuid(CALL_UUID.slice(0, -1))).toBe(false);
-
-    const transport = fakeHttp({ answered: true });
-    await expect(
-      answerFaceTimeCall(transport.http, {
-        callUuid: CALL_UUID.toUpperCase(),
-        tempGuid: TEMP_GUID,
-      }),
-    ).rejects.toThrow('lowercase call UUID');
-    await expect(
-      answerFaceTimeCall(transport.http, {
-        callUuid: CALL_UUID,
-        tempGuid: 'replayable-user-value',
-      }),
-    ).rejects.toThrow('temporary GUID');
-    expect(transport.post).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ['answer', answerFaceTimeCall, { answered: false }, 'facetime_call_answer_outcome_unknown'],
-    [
-      'answer',
-      answerFaceTimeCall,
-      { answered: true, rejected: true },
-      'facetime_call_answer_outcome_unknown',
-    ],
-    ['leave', leaveFaceTimeCall, { left: false }, 'facetime_call_leave_outcome_unknown'],
-    [
-      'leave',
-      leaveFaceTimeCall,
-      { left: true, rejected: true },
-      'facetime_call_leave_outcome_unknown',
-    ],
-  ] as const)(
-    'turns malformed or mixed %s result into action-specific outcome-unknown',
-    async (_action, control, ack, errorType) => {
-      const transport = fakeHttp(ack);
-      const error = await control(transport.http, {
-        callUuid: CALL_UUID,
-        tempGuid: TEMP_GUID,
-      }).catch((caught: unknown) => caught);
-
-      expect(error).toBeInstanceOf(ApiError);
-      expect((error as ApiError).serverErrorType).toBe(errorType);
-      expect((error as ApiError).cause).toBeUndefined();
-      expect(String(error)).not.toContain(CALL_UUID);
-      expect(transport.post).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it.each([
-    ['answer', answerFaceTimeCall, 'facetime_call_answer_rejected'],
-    ['leave', leaveFaceTimeCall, 'facetime_call_leave_rejected'],
-  ] as const)(
-    'passes through an exact typed %s refusal and redacts parse failure',
-    async (_action, control, refusalType) => {
-      const refused = ApiError.fromStatus(409, 'rejected', undefined, refusalType);
-      const refusalPost = jest.fn(async () => {
-        throw refused;
-      });
-      await expect(
-        control({ post: refusalPost } as unknown as HttpClient, {
-          callUuid: CALL_UUID,
-          tempGuid: TEMP_GUID,
-        }),
-      ).rejects.toBe(refused);
-
-      const parseFailure = new ApiError('parse_error', 'hostile mixed response', 200, {
-        callUuid: CALL_UUID,
-      });
-      const parsePost = jest.fn(async () => {
-        throw parseFailure;
-      });
-      const error = await control({ post: parsePost } as unknown as HttpClient, {
-        callUuid: CALL_UUID,
-        tempGuid: TEMP_GUID,
-      }).catch((caught: unknown) => caught);
-      expect(error).toBeInstanceOf(ApiError);
-      expect((error as ApiError).serverErrorType).toBe(`facetime_call_${_action}_outcome_unknown`);
-      expect((error as ApiError).cause).toBeUndefined();
-      expect(String(error)).not.toContain(CALL_UUID);
-    },
-  );
 });

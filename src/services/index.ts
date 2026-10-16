@@ -33,54 +33,18 @@ export async function runDevPerf02InboxBenchmark(
 export { ensureSyncedBackgroundForChat } from './backgrounds/syncedBackground';
 export { computeBackgroundIsLight } from './backgrounds/luminance';
 export { startAppleFaceTimeCall } from './facetimeCallUiService';
-export {
-  answerExactFaceTimeCall,
-  leaveExactFaceTimeCall,
-  startExactFaceTimeCall,
-  type ControlAppleFaceTimeCallArgs,
-  type FaceTimeCallControlResult,
-  type FaceTimeCallStartResult,
-  type StartAppleFaceTimeCallArgs,
-} from './facetimeCallService';
 export { createAppleFaceTimeLink } from './facetimeLinkUiService';
-export { createExactFaceTimeLink, type FaceTimeLinkCreationResult } from './facetimeLinkService';
 export { renameAppleGroup } from './groupRenameUiService';
-export {
-  renameExactIMessageGroup,
-  type RenameAppleGroupArgs,
-  type RenameAppleGroupResult,
-} from './groupRenameService';
 export {
   prepareAppleGroupPhotoSet,
   removeAppleGroupPhoto,
   type PreparedAppleGroupPhotoSet,
 } from './groupPhotoUiService';
 export {
-  prepareExactIMessageGroupPhotoSet,
-  removeExactIMessageGroupPhoto,
-  type AppleGroupPhotoResult,
-  type PickedGroupPhoto,
-  type PreparedIMessageGroupPhotoSet,
-  type RemoveAppleGroupPhotoArgs,
-  type SetAppleGroupPhotoArgs,
-} from './groupPhotoService';
-export {
   addAppleGroupParticipant,
   leaveAppleGroup,
   removeAppleGroupParticipant,
 } from './groupParticipantUiService';
-export {
-  addExactIMessageGroupParticipant,
-  exactSortedIMessageGroupRoster,
-  leaveExactIMessageGroup,
-  removeExactIMessageGroupParticipant,
-  type AddAppleGroupParticipantArgs,
-  type AddAppleGroupParticipantResult,
-  type LeaveAppleGroupArgs,
-  type LeaveAppleGroupResult,
-  type RemoveAppleGroupParticipantArgs,
-  type RemoveAppleGroupParticipantResult,
-} from './groupParticipantService';
 
 export { vault, http, accountHttp, getSecretBox, runCryptoSelfTest } from './clients';
 export { requestServerAddressChange, type ServerAddressChangeRequest } from './serverAddressChange';
