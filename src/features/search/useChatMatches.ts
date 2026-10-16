@@ -34,14 +34,20 @@ interface ChatMatchEnvelope {
  * hits are unioned in after the same 200 ms settled-input delay.
  *
  * The search page passes `contentMatches: false` for its "Chats" section because body hits are
- * rendered separately with their matching snippets. Short/empty input is deliberately idle and
+ * rendered separately with their matching snippets. `archive: 'all'` also finds archived chats
+ * (the folder picker); every other caller keeps the inbox's active-only default. Short/empty input is deliberately idle and
  * returns `[]`; this hook's only production caller does not use it as an inbox data source.
  */
 export function useChatMatches(
   query: string,
-  opts?: { contentMatches?: boolean; accountLease?: RealtimeDeliveryLease },
+  opts?: {
+    contentMatches?: boolean;
+    accountLease?: RealtimeDeliveryLease;
+    archive?: 'active' | 'all';
+  },
 ): ReactiveState<InboxRow[]> {
   const contentMatches = opts?.contentMatches ?? true;
+  const archive = opts?.archive ?? 'active';
   const [fallbackLease] = useState(() => opts?.accountLease ?? captureRealtimeDeliveryLease());
   const accountLease = opts?.accountLease ?? fallbackLease;
   const [retiredGeneration, setRetiredGeneration] = useState<number | null>(() =>
@@ -52,7 +58,7 @@ export function useChatMatches(
   const accountCurrent = retiredGeneration !== accountLease.generation && accountLease.isCurrent();
   const term = normalizeGlobalSearchQuery(query);
   const validQuery = isGlobalSearchQueryValid(term);
-  const searchKey = JSON.stringify([accountLease.generation, term, contentMatches]);
+  const searchKey = JSON.stringify([accountLease.generation, term, contentMatches, archive]);
   const committedSearchKeyRef = useRef(searchKey);
   // A previously settled A must not become current on the first A -> empty -> A render. The effect
   // commits each input key and clears its old marker before the timer can settle; this render-time
@@ -115,6 +121,7 @@ export function useChatMatches(
           query: term,
           messageMatchGuids,
           limit: 50,
+          archive,
           shouldContinue: isCurrent,
         });
       } catch (error) {

@@ -89,6 +89,8 @@ export interface InboxSearchOptions {
   limit?: number;
   /** Stop an obsolete term/account scan between bounded SQL pages. */
   shouldContinue?: () => boolean;
+  /** 'active' (the inbox default) or 'all', which also finds archived chats (folder picker). */
+  archive?: 'active' | 'all';
 }
 
 export interface CustomFolderInboxPage extends InboxPage {
@@ -735,6 +737,8 @@ export async function searchChatsForInboxPage(
   const [firstGram, ...otherGrams] = uniqueInboxSearchBigrams(foldedQuery);
   if (firstGram == null) throw new Error('Inbox search has no bigram.');
   const otherGramsJson = JSON.stringify(otherGrams);
+  const archive = opts.archive ?? 'active';
+  const activeOnly = archive === 'active' ? sql`AND c.is_archived = 0` : sql``;
   const checkCurrent = (): void => {
     if (opts.shouldContinue?.() === false) throw new InboxSearchCancelledError();
   };
@@ -813,7 +817,7 @@ export async function searchChatsForInboxPage(
           -- Resolve capped ids by rowid, not an archive-index scan of the active inbox per page.
           FROM chats c NOT INDEXED
          WHERE c.id IN (SELECT id FROM classified_ids WHERE isCandidate = 1)
-           AND c.is_archived = 0
+           ${activeOnly}
            AND c.is_pinned IN (0, 1)
            AND ${chatVisible('c')}
       )
@@ -902,7 +906,7 @@ export async function searchChatsForInboxPage(
     selectedGuids.length === 0
       ? []
       : await queryChatsForInbox(db, {
-          archive: 'active',
+          archive,
           sender: 'any',
           chatGuids: selectedGuids,
           limit,

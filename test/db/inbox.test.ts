@@ -78,6 +78,32 @@ async function seedChat(
 }
 
 describe('listChatsForInbox', () => {
+  it('searches archived chats only when asked (review M248)', async () => {
+    const t = await createTestDb();
+    const insert = t.raw.prepare(`
+      INSERT INTO chats (
+        guid, chat_identifier, display_name, style, is_archived, is_pinned,
+        pin_order, latest_message_date, deleted_at
+      ) VALUES (?, ?, ?, 45, ?, 0, NULL, ?, NULL)
+    `);
+    insert.run('active-match', 'active-match', 'Café active', 0, 2_000);
+    insert.run('archived-match', 'archived-match', 'Café archived', 1, 9_000);
+
+    const guids = async (archive?: 'active' | 'all'): Promise<string[]> =>
+      (
+        await searchChatsForInboxPage(t.db, {
+          query: 'café',
+          limit: 10,
+          ...(archive ? { archive } : {}),
+        })
+      ).rows.map((row) => row.guid);
+
+    // The inbox keeps searching active chats; the folder picker asks for every chat.
+    expect(await guids()).toEqual(['active-match']);
+    expect(await guids('active')).toEqual(['active-match']);
+    expect(await guids('all')).toEqual(['archived-match', 'active-match']);
+  });
+
   it('searches lightweight identity pages past 128 rows and decorates only the ordered result cap', async () => {
     const t = await createTestDb();
     const insert = t.raw.prepare(`

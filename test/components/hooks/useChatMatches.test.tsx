@@ -129,6 +129,7 @@ describe('useChatMatches', () => {
       query: 'lunch',
       messageMatchGuids: ['c-2'],
       limit: 50,
+      archive: 'active',
       shouldContinue: expect.any(Function),
     });
     expect(result.current.data?.map((r) => r.id)).toEqual([2]);
@@ -147,10 +148,26 @@ describe('useChatMatches', () => {
       query: 'work',
       messageMatchGuids: [],
       limit: 50,
+      archive: 'active',
       shouldContinue: expect.any(Function),
     });
     // Still name-matches row 2 ("Work").
     expect(result.current.data?.map((r) => r.id)).toEqual([2]);
+  });
+
+  it('searches archived chats too when asked (review M248)', async () => {
+    await renderHook(
+      ({ q }: { q: string }) => useChatMatches(q, { contentMatches: false, archive: 'all' }),
+      { initialProps: { q: 'work' } },
+    );
+    await advance(200);
+    expect(mockChatSearch).toHaveBeenCalledWith(undefined, {
+      query: 'work',
+      messageMatchGuids: [],
+      limit: 50,
+      archive: 'all',
+      shouldContinue: expect.any(Function),
+    });
   });
 
   it('is case-insensitive on the name filter', async () => {

@@ -1,13 +1,15 @@
 import { FlashList } from '@shopify/flash-list';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import {
   MAX_CUSTOM_FOLDER_MEMBERS,
   type CustomFolderListRow,
   type InboxRow,
 } from '@db/repositories';
 import { useChats } from '@features/conversations/useChats';
+import { GLOBAL_SEARCH_MAX_CODE_POINTS, isGlobalSearchQueryValid } from '@features/search/query';
+import { useChatMatches } from '@features/search/useChatMatches';
 import {
   CustomFolderMembershipLimitError,
   MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL,
@@ -20,6 +22,7 @@ import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/del
 import { resolveTitle } from '@utils';
 import {
   Avatar,
+  Icon,
   readableTextOn,
   Screen,
   ScreenHeader,
@@ -112,6 +115,15 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
     archive: 'all',
     pageSize: 50,
     enabled: accountCurrent && folderId != null,
+  });
+  // A chat far down the list (or archived) is found by name instead of by scrolling (review
+  // M248). Results replace the list while searching; the selection set is unaffected.
+  const [searchText, setSearchText] = useState('');
+  const searching = isGlobalSearchQueryValid(searchText);
+  const matches = useChatMatches(searchText, {
+    contentMatches: false,
+    archive: 'all',
+    accountLease,
   });
 
   useEffect(() => {
@@ -333,7 +345,10 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
     }
   };
 
-  const rows = useMemo(() => chats.data ?? [], [chats.data]);
+  const rows = useMemo(
+    () => (searching ? matches.data : chats.data) ?? [],
+    [chats.data, matches.data, searching],
+  );
   const visibleError = selection.validationError ?? saveError;
   const renderItem = useCallback(
     ({ item }: { item: InboxRow }): React.JSX.Element => {
@@ -443,8 +458,8 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
             </Text>
             <Text style={[styles.summaryNote, { color: theme.color.secondaryLabel }]}>
               Archived and temporarily unavailable conversations stay selected. Scroll to load more
-              available conversations. The unread badge setting changes only the folder list; it
-              does not mark messages read.
+              available conversations, or search by name. The unread badge setting changes only the
+              folder list; it does not mark messages read.
             </Text>
             {visibleError ? (
               <Text
@@ -456,6 +471,39 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
                 {visibleError}
               </Text>
             ) : null}
+            <View
+              style={[styles.searchShell, { backgroundColor: theme.color.secondaryBackground }]}
+            >
+              <Icon name="search" size={18} color={theme.color.secondaryLabel} />
+              <TextInput
+                value={searchText}
+                // Bounded by code points but not normalized, so the field shows exactly what was
+                // typed (as folder search does); the lookup normalizes its own copy.
+                onChangeText={(value) =>
+                  setSearchText(Array.from(value).slice(0, GLOBAL_SEARCH_MAX_CODE_POINTS).join(''))
+                }
+                // Android counts UTF-16 units here; reserve two for each JavaScript code point.
+                maxLength={GLOBAL_SEARCH_MAX_CODE_POINTS * 2}
+                placeholder="Search conversations"
+                placeholderTextColor={theme.color.tertiaryLabel}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                accessibilityLabel="Search conversations to add"
+                style={[styles.searchInput, { color: theme.color.label }]}
+              />
+              {searchText.length > 0 ? (
+                <Pressable
+                  onPress={() => setSearchText('')}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                  hitSlop={8}
+                  style={styles.clearSearch}
+                >
+                  <Icon name="close-circle" size={19} color={theme.color.tertiaryLabel} />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
           <FlashList
             data={rows}
@@ -463,20 +511,24 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
             keyExtractor={(row: InboxRow) => row.guid}
             renderItem={renderItem}
             ItemSeparatorComponent={InboxSeparator}
-            onEndReached={chats.hasMore ? chats.loadMore : undefined}
+            onEndReached={!searching && chats.hasMore ? chats.loadMore : undefined}
             onEndReachedThreshold={0.5}
             ListEmptyComponent={
               <View style={styles.empty}>
-                {chats.isLoading ? (
+                {(searching ? matches.isLoading : chats.isLoading) ? (
                   <ActivityIndicator color={theme.color.tint} />
                 ) : (
                   <Text
                     selectable
                     style={[styles.emptyText, { color: theme.color.secondaryLabel }]}
                   >
-                    {chats.error
-                      ? 'Couldn’t load conversations. Go back and try again.'
-                      : 'No conversations are available to add.'}
+                    {searching
+                      ? matches.error
+                        ? 'Couldn’t search conversations. Try again.'
+                        : 'No conversations match your search.'
+                      : chats.error
+                        ? 'Couldn’t load conversations. Go back and try again.'
+                        : 'No conversations are available to add.'}
                   </Text>
                 )}
               </View>
@@ -502,6 +554,17 @@ const styles = StyleSheet.create({
   summaryCount: { fontSize: 15, fontWeight: '600' },
   summaryNote: { fontSize: 12, lineHeight: 17, paddingTop: 3 },
   saveError: { fontSize: 13, lineHeight: 18, paddingTop: 8 },
+  searchShell: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 12,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  searchInput: { flex: 1, minWidth: 0, paddingVertical: 8, fontSize: 16 },
+  clearSearch: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   row: {
     minHeight: 64,
     flexDirection: 'row',

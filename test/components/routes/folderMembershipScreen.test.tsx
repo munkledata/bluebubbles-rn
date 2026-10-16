@@ -56,6 +56,10 @@ jest.mock('@shopify/flash-list', () => {
 // A small per-folder limit makes the limit branch reachable with three conversations.
 jest.mock('@db/repositories', () => ({ MAX_CUSTOM_FOLDER_MEMBERS: 2 }));
 jest.mock('@features/conversations/useChats', () => ({ useChats: () => mockChats }));
+const mockMatches = jest.fn();
+jest.mock('@features/search/useChatMatches', () => ({
+  useChatMatches: (query: string, options: unknown) => mockMatches(query, options),
+}));
 jest.mock('@/services/customFolderCommands', () => {
   // The limit error and the total are the real ones; only the database commands are faked.
   const { CustomFolderMembershipLimitError, MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL } =
@@ -88,6 +92,7 @@ jest.mock('@ui', () => {
   const { Pressable, Text, View } = require('react-native');
   return {
     Avatar: () => null,
+    Icon: () => null,
     readableTextOn: () => '#ffffff',
     useTheme: () => ({
       color: {
@@ -164,6 +169,7 @@ beforeEach(() => {
     isLoading: false,
     error: null,
   };
+  mockMatches.mockReset().mockReturnValue({ data: [], isLoading: false, error: null });
 });
 
 describe('folder membership screen', () => {
@@ -175,6 +181,43 @@ describe('folder membership screen', () => {
     expect(conversation('Bob').props.accessibilityState.checked).toBe(false);
     expect(save().props.accessibilityState.disabled).toBe(true);
     expect(mockLoadMembership).toHaveBeenCalledWith(7, mockAccountLease);
+  });
+
+  it('finds any chat by search, archived ones too, and keeps every selection (review M248)', async () => {
+    mockMatches.mockImplementation((query: string) => ({
+      data: query === 'old' ? [{ ...chat('c9', 'Old friends'), isArchived: 1 }] : [],
+      isLoading: false,
+      error: null,
+    }));
+    mockReplace.mockResolvedValue({ status: 'current', value: true } as never);
+    await renderLoaded(['c1']);
+
+    await fireEvent.changeText(screen.getByLabelText('Search conversations to add'), 'old');
+    expect(mockMatches).toHaveBeenLastCalledWith(
+      'old',
+      expect.objectContaining({ archive: 'all', contentMatches: false }),
+    );
+    // The results replace the list while searching.
+    expect(screen.queryByRole('checkbox', { name: 'Alice' })).toBeNull();
+    expect(screen.getByText('Archived · Conversation')).toBeTruthy();
+    await fireEvent.press(conversation('Old friends'));
+    expect(screen.getByText('2 selected')).toBeTruthy();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Clear search' }));
+    expect(conversation('Alice').props.accessibilityState.checked).toBe(true);
+    await fireEvent.press(save());
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith(7, ['c1', 'c9'], mockAccountLease),
+    );
+  });
+
+  it('says when a search matches nothing (review M248)', async () => {
+    await renderLoaded(['c1']);
+
+    await fireEvent.changeText(screen.getByLabelText('Search conversations to add'), 'zz');
+
+    expect(screen.getByText('No conversations match your search.')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: 'Alice' })).toBeNull();
   });
 
   it('enables Save only while the selection differs from what was loaded', async () => {
