@@ -112,7 +112,13 @@ function deferred<T>(): Deferred<T> {
 
 beforeEach(() => {
   mockLease.isCurrent.mockReturnValue(true);
-  mockVault.get.mockReset();
+  // Tests below run the serialized path, which a resume reaches only when a journal is stored
+  // (review M133); the mocked runtimes stand in for what that journal says.
+  mockVault.get
+    .mockReset()
+    .mockImplementation(async (key: string) =>
+      key === 'serverCredentialUpgrade' ? '{"stored":"journal"}' : null,
+    );
   mockRunTrackedRealtimeWork.mockImplementation(
     async (_lease: unknown, task: (lease: typeof mockLease) => Promise<unknown>) => {
       await task(mockLease);
@@ -674,14 +680,63 @@ describe('resume without a stored upgrade (review M133)', () => {
     expect(mockResumeCredentialUpgradeRuntime).toHaveBeenCalledTimes(1);
   });
 
-  it('takes the serialized path when the session changes during the read', async () => {
+  it('applies only to resume: begin, replace and discard still run with no journal', async () => {
+    journalRead(async () => null);
+
+    await expect(beginScopedCredentialUpgrade('device-candidate')).resolves.toEqual({
+      kind: 'adopted',
+    });
+    await expect(
+      beginScopedCredentialReplacement(`bbd_device_v1_${'P'.repeat(43)}`),
+    ).resolves.toEqual({ kind: 'adopted' });
+    await expect(discardScopedCredentialUpgradeCandidate()).resolves.toEqual({ kind: 'discarded' });
+    expect(mockBeginCredentialUpgradeRuntime).toHaveBeenCalledTimes(1);
+    expect(mockBeginCredentialReplacementRuntime).toHaveBeenCalledTimes(1);
+    expect(mockDiscardCredentialUpgradeCandidateRuntime).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      'Disconnect retires the account',
+      () => {
+        mockLease.isCurrent.mockReturnValue(false);
+        return () => undefined;
+      },
+    ],
+    [
+      'the session moves to a new transport',
+      () => {
+        const revision = mockSession.transportRevision;
+        mockSession.transportRevision = revision + 1;
+        return () => {
+          mockSession.transportRevision = revision;
+        };
+      },
+    ],
+  ])('answers cancelled at once when %s during the read', async (_label, change) => {
+    // The real tracker refuses work for a retired lease.
+    mockRunTrackedRealtimeWork.mockImplementation(
+      async (lease: typeof mockLease, task: (current: typeof mockLease) => Promise<unknown>) => {
+        if (!lease.isCurrent()) return 'paused';
+        await task(lease);
+        return 'delivered';
+      },
+    );
+    let restore: () => void = () => undefined;
     journalRead(async () => {
-      mockLease.isCurrent.mockReturnValue(false);
+      restore = change();
       return null;
     });
 
-    await resumeScopedCredentialUpgrade({ restartRealtime: false });
-    // A stale "absent" answer is not trusted: the serialized path decides instead.
-    expect(mockRunSerializedFcmRegistration).toHaveBeenCalledTimes(1);
+    try {
+      await expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).resolves.toEqual({
+        kind: 'cancelled',
+      });
+      await flushMicrotasks();
+      expect(mockRunSerializedFcmRegistration).not.toHaveBeenCalled();
+      expect(mockRevokeReplacedCredentialRuntime).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
   });
 });

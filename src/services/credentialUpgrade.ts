@@ -438,10 +438,10 @@ function revokeReplacedCredentialInBackground(): void {
   void attempt.then(clear, clear);
 }
 
-/** True only when this still-current session has no stored upgrade journal at all. */
-async function upgradeJournalIsAbsent(isCurrent: () => boolean): Promise<boolean> {
+/** True only when the vault read succeeded and found no stored upgrade journal. */
+async function upgradeJournalIsAbsent(): Promise<boolean> {
   try {
-    return (await vault.get('serverCredentialUpgrade')) === null && isCurrent();
+    return (await vault.get('serverCredentialUpgrade')) === null;
   } catch {
     return false;
   }
@@ -475,8 +475,13 @@ function runCredentialUpgrade(
     try {
       // Nothing to resume is the common case at every reconnect. Answer it without joining the
       // push-registration queue, where a slow token request would hold up realtime startup (review
-      // M133). A stored journal, a failed read or a changed session take the serialized path.
-      if (mode === 'resume' && (await upgradeJournalIsAbsent(isCurrent))) return { kind: 'idle' };
+      // M133). A stored journal or a failed read takes the serialized path. A session that changed
+      // during the read never becomes current again, so that path could only end cancelled.
+      if (mode === 'resume') {
+        const absent = await upgradeJournalIsAbsent();
+        if (!isCurrent()) return { kind: 'cancelled' };
+        if (absent) return { kind: 'idle' };
+      }
       const tracked = await runTrackedRealtimeWork(lease, () =>
         runSerializedFcmRegistration(async () => {
           outcome =
