@@ -54,6 +54,7 @@ import {
 } from '@/services/download/attachmentMediaExportQueue';
 import {
   captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 
@@ -89,6 +90,10 @@ const mockComplete = completeAttachmentMediaExport as jest.Mock;
 const mockFail = failAttachmentMediaExport as jest.Mock;
 
 beforeEach(() => {
+  // Queued mockResolvedValueOnce values a test never consumed would leak into the next one.
+  for (const mock of [mockMaintain, mockPermission, mockClaim, mockComplete, mockFail, mockSave]) {
+    mock.mockReset();
+  }
   resumeRealtimeDeliveries();
   appState.currentState = 'active';
   featureState.hydrated = true;
@@ -154,4 +159,107 @@ it('claims, saves with check-only permission, and completes one targeted receipt
     expect.any(Function),
   );
   expect(mockFail).not.toHaveBeenCalled();
+});
+
+/** A claimed receipt for attachment `att-<id>`. */
+function claimed(id: number) {
+  return {
+    id,
+    attachmentGuid: `att-${id}`,
+    destination: 'album' as const,
+    localPath: `file:///documents/attachments/att-${id}/image.jpg`,
+    attempts: 1,
+    claimVersion: 1,
+    leaseToken: `token-${id}`,
+    leaseExpiresAt: 99,
+  };
+}
+
+// Saving to Photos cannot be undone, so every path around that call needs its own proof (M147).
+describe('failure paths around the irreversible save', () => {
+  it('records a denied save and stops the drain', async () => {
+    mockClaim.mockResolvedValueOnce(claimed(1)).mockResolvedValueOnce(claimed(2));
+    mockSave.mockResolvedValueOnce('denied');
+
+    await expect(
+      drainPendingAttachmentMediaExports(captureRealtimeDeliveryLease()),
+    ).resolves.toEqual({ savedImages: 0, destination: null });
+    expect(mockFail).toHaveBeenCalledTimes(1);
+    expect(mockFail).toHaveBeenCalledWith(
+      mockDb,
+      { id: 1, claimVersion: 1, leaseToken: 'token-1' },
+      'permission-denied',
+      expect.any(Function),
+    );
+    // Denied permission applies to every receipt: the second is never claimed or saved.
+    expect(mockClaim).toHaveBeenCalledTimes(1);
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it('records a missing source and a native error, then saves the next receipt', async () => {
+    mockClaim
+      .mockResolvedValueOnce(claimed(1))
+      .mockResolvedValueOnce(claimed(2))
+      .mockResolvedValueOnce(claimed(3));
+    mockSave
+      .mockResolvedValueOnce('skipped')
+      .mockResolvedValueOnce('error')
+      .mockResolvedValueOnce('saved');
+
+    await expect(
+      drainPendingAttachmentMediaExports(captureRealtimeDeliveryLease()),
+    ).resolves.toEqual({ savedImages: 1, destination: 'album' });
+    expect(mockFail.mock.calls.map((call) => [call[1].id, call[2]])).toEqual([
+      [1, 'source-missing'],
+      [2, 'native-error'],
+    ]);
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(mockComplete.mock.calls[0]![1]).toEqual({
+      id: 3,
+      claimVersion: 1,
+      leaseToken: 'token-3',
+    });
+    // The fourth claim finds nothing left.
+    expect(mockClaim).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not count a save whose completion lost its claim', async () => {
+    mockClaim.mockResolvedValueOnce(claimed(1));
+    mockComplete.mockResolvedValueOnce(false);
+
+    await expect(
+      drainPendingAttachmentMediaExports(captureRealtimeDeliveryLease()),
+    ).resolves.toEqual({ savedImages: 0, destination: null });
+    expect(mockSave).toHaveBeenCalledTimes(1);
+    expect(mockFail).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'the account lease is retired',
+      () => {
+        // Disconnect's pause waits for this drain, so it is not awaited here.
+        void pauseRealtimeDeliveries();
+      },
+    ],
+    [
+      'App Lock engages',
+      () => {
+        lockState.locked = true;
+      },
+    ],
+  ])('never saves once %s between the claim and the save', async (_label, interrupt) => {
+    mockClaim.mockImplementationOnce(async () => {
+      interrupt();
+      return claimed(1);
+    });
+
+    await expect(
+      drainPendingAttachmentMediaExports(captureRealtimeDeliveryLease()),
+    ).resolves.toEqual({ savedImages: 0, destination: null });
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(mockFail).not.toHaveBeenCalled();
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
 });
