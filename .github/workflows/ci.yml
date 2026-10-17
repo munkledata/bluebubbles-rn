@@ -165,12 +165,13 @@ jobs:
       - name: Verify toolchain pins
         run: node scripts/check-toolchain.mjs
 
+      # No `cache: gradle`: setup-java caches only ~/.gradle, but this job's Gradle home is the
+      # path-mapped /var/tmp/gator-gradle above, so that cache never restored or saved anything.
       - name: Set up Java
         uses: actions/setup-java@d7793b545071e98d581d3bf084a51c3213318a07 # v4.9.0
         with:
           distribution: temurin
           java-version: 17
-          cache: gradle
 
       - name: Install pinned Android SDK inputs
         run: >-
