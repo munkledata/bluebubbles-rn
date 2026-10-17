@@ -19,6 +19,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  EXPECTED_UPLOAD_CERTIFICATE_SHA256,
   MANAGED_DIRECTORY_REMOVAL_OPTIONS,
   androidReleaseWorkspacePaths,
   assertSourceVerifiedByCi,
@@ -32,6 +33,7 @@ import {
   probeReleaseValidationTools,
   requireEnvironmentCredential,
   removeManagedEasDirectory,
+  requireExpectedUploadCertificate,
   stageGoogleServicesFile,
   verifyReleaseNativePathProof,
 } from './release-android.mjs';
@@ -327,6 +329,21 @@ test('a missing validation tool stops validation without blaming the artifact', 
       error.message.includes('cannot run jarsigner') &&
       error.message.includes('the run stays built') &&
       error.message.includes('spawn jarsigner ENOENT'),
+  );
+});
+
+test('accepts only the reviewed Play upload certificate', () => {
+  assert.match(EXPECTED_UPLOAD_CERTIFICATE_SHA256, /^[0-9A-F]{2}(?::[0-9A-F]{2}){31}$/);
+  assert.equal(
+    requireExpectedUploadCertificate(EXPECTED_UPLOAD_CERTIFICATE_SHA256),
+    EXPECTED_UPLOAD_CERTIFICATE_SHA256,
+  );
+  const otherKey = `00${EXPECTED_UPLOAD_CERTIFICATE_SHA256.slice(2)}`;
+  assert.throws(
+    () => requireExpectedUploadCertificate(otherKey),
+    (error) =>
+      error.message.includes(otherKey) &&
+      error.message.includes('not the reviewed Play upload certificate'),
   );
 });
 

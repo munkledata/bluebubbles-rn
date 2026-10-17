@@ -888,6 +888,11 @@ test('pins retained native-build evidence and rejects ambient EAS bypass control
       "requirePhase(state, 'built');",
       'probe its local validation tools before it can fail an artifact',
     ],
+    [
+      'uploadCertificateSha256: requireExpectedUploadCertificate(\n      uploadCertificateFingerprint(artifactPath),\n    ),',
+      'uploadCertificateSha256: uploadCertificateFingerprint(artifactPath),',
+      'refuse an AAB that the reviewed upload certificate did not sign',
+    ],
   ]) {
     const mutated = source.replace(expected, replacement);
     assert.notEqual(mutated, source, expected);

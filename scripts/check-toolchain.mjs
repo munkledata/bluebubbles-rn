@@ -219,6 +219,10 @@ export function validateReleaseRunnerSource(source) {
       "requirePhase(state, 'built');\n    probeReleaseValidationTools();",
       'probe its local validation tools before it can fail an artifact',
     ],
+    [
+      'uploadCertificateSha256: requireExpectedUploadCertificate(\n      uploadCertificateFingerprint(artifactPath),\n    ),',
+      'refuse an AAB that the reviewed upload certificate did not sign',
+    ],
   ]) {
     if (source.split(marker).length !== 2) {
       errors.push(`Android release runner must ${requirement}`);

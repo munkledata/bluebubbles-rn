@@ -1551,6 +1551,24 @@ export function probeReleaseValidationTools(run = runCapture) {
   }
 }
 
+/**
+ * SHA-256 of the Play upload certificate that signed every release so far (receipts for
+ * versionCodes 58-79). A certificate fingerprint is public and cannot sign anything; pinning it lets
+ * validation refuse an AAB signed by any other key before promotion or submission. If the upload key
+ * is ever reset through Play Console, update this pin in the same reviewed change.
+ */
+export const EXPECTED_UPLOAD_CERTIFICATE_SHA256 =
+  '6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43';
+
+export function requireExpectedUploadCertificate(fingerprint) {
+  if (fingerprint !== EXPECTED_UPLOAD_CERTIFICATE_SHA256) {
+    throw new Error(
+      `AAB upload certificate ${String(fingerprint)} is not the reviewed Play upload certificate`,
+    );
+  }
+  return fingerprint;
+}
+
 function uploadCertificateFingerprint(artifactPath) {
   runCapture('jarsigner', ['-verify', artifactPath]);
   const output = runCapture('keytool', [
@@ -1596,7 +1614,9 @@ function inspectReleaseArtifact(artifactPath, state) {
     ...identity,
     bytes,
     sha256: sha256File(artifactPath),
-    uploadCertificateSha256: uploadCertificateFingerprint(artifactPath),
+    uploadCertificateSha256: requireExpectedUploadCertificate(
+      uploadCertificateFingerprint(artifactPath),
+    ),
   };
 }
 
