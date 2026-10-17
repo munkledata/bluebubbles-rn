@@ -90,8 +90,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 - Many public repository helpers open their own transaction. Inspect the implementation before
   composing writers; do not infer safety from a harmless-looking call name.
 - Run `node scripts/check-db-writes.mjs --report`. Every `nested-coordinator` finding is a defect,
-  never an allowlist candidate. The report exits non-zero while any nested-coordinator, unresolved,
-  or structural finding remains.
+  never an allowlist candidate. The report exits non-zero whenever `--check` would fail.
 - A write issued outside an owner while any transaction is open can silently join the other
   transaction. Put every dependent DB write inside the same short owner callback.
 - Transaction callbacks must be DB-only and bounded. Do not hold the mutex across network, native

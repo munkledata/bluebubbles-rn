@@ -16602,17 +16602,24 @@ if (invokedDirectly) {
           inventory,
           requireApproved: false,
         });
+        // The exact --check verdict: it also refuses every unreviewed approval and every
+        // nested-coordinator or unresolved finding, so the report never looks like a pass while
+        // --check would fail.
+        const checkErrors = validateDbWriteInventory({
+          findings,
+          inventory,
+          requireApproved: true,
+        });
         const countContext = (context) =>
           findings.filter((finding) => finding.detectedContext === context).length;
         const nested = countContext('nested-coordinator');
         const unresolved = countContext('unresolved');
         console.log(
-          `DB write inventory report: ${findings.length} mutations; ${errors.length} structural/membership errors; ${nested} nested-coordinator; ${unresolved} unresolved.`,
+          `DB write inventory report: ${findings.length} mutations; ${errors.length} structural/membership errors; ${checkErrors.length - errors.length} approval errors; ${nested} nested-coordinator; ${unresolved} unresolved.`,
         );
-        // --check can never accept these, so the report fails too instead of looking like a pass.
-        if (errors.length + nested + unresolved > 0) {
+        if (checkErrors.length + nested + unresolved > 0) {
           console.error(
-            'DB write inventory report found problems: every nested-coordinator finding is a defect, an unresolved write has no detected owner, and structural errors mean the inventory needs reconciling.',
+            'DB write inventory report found problems that --check rejects: every nested-coordinator finding is a defect, an unresolved write has no detected owner, approval errors mean an entry is not yet reviewed, and structural errors mean the inventory needs reconciling.',
           );
           process.exitCode = 1;
         }

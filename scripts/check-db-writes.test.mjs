@@ -9866,8 +9866,8 @@ test('every coordinated-delegation path names a file that still exists', () => {
 });
 
 // Review item M033: AGENTS.md prescribes --report while iterating, so it must count the findings
-// that --check can never accept and exit non-zero on any problem, instead of always exiting 0.
-test('report mode counts nested and unresolved findings and fails on any problem', () => {
+// that --check can never accept and exit non-zero exactly when --check would fail.
+test('report mode counts nested and unresolved findings and fails whenever --check would', () => {
   const base = {
     'src/db/schema.ts': `export const messages = {};`,
     'src/db/transaction.ts': `
@@ -9884,7 +9884,7 @@ test('report mode counts nested and unresolved findings and fails on any problem
       approve: true,
       status: 0,
       summary:
-        /: 3 mutations; 0 structural\/membership errors; 0 nested-coordinator; 0 unresolved\./,
+        /: 3 mutations; 0 structural\/membership errors; 0 approval errors; 0 nested-coordinator; 0 unresolved\./,
     },
     {
       name: 'unresolved',
@@ -9892,7 +9892,7 @@ test('report mode counts nested and unresolved findings and fails on any problem
       approve: true,
       status: 1,
       summary:
-        /: 1 mutations; 0 structural\/membership errors; 0 nested-coordinator; 1 unresolved\./,
+        /: 1 mutations; 0 structural\/membership errors; 1 approval errors; 0 nested-coordinator; 1 unresolved\./,
     },
     {
       name: 'nested',
@@ -9904,7 +9904,7 @@ test('report mode counts nested and unresolved findings and fails on any problem
       approve: true,
       status: 1,
       summary:
-        /: 5 mutations; 0 structural\/membership errors; 2 nested-coordinator; 0 unresolved\./,
+        /: 5 mutations; 0 structural\/membership errors; 2 approval errors; 2 nested-coordinator; 0 unresolved\./,
     },
     {
       name: 'unapproved',
@@ -9912,7 +9912,16 @@ test('report mode counts nested and unresolved findings and fails on any problem
       approve: false,
       status: 1,
       summary:
-        /: 3 mutations; 3 structural\/membership errors; 0 nested-coordinator; 0 unresolved\./,
+        /: 3 mutations; 3 structural\/membership errors; 0 approval errors; 0 nested-coordinator; 0 unresolved\./,
+    },
+    {
+      // What `--reconcile --write` adds for a new write: present, but not yet reviewed.
+      name: 'unreviewed',
+      body: ownedWrite,
+      approve: 'skeleton',
+      status: 1,
+      summary:
+        /: 3 mutations; 0 structural\/membership errors; 9 approval errors; 0 nested-coordinator; 0 unresolved\./,
     },
   ];
   for (const testCase of cases) {
@@ -9925,9 +9934,13 @@ test('report mode counts nested and unresolved findings and fails on any problem
       `,
     });
     try {
-      const inventory = testCase.approve
-        ? reviewedInventory(scanDbWrites({ root }))
-        : { version: 1, entries: [] };
+      const findings = scanDbWrites({ root });
+      const inventory =
+        testCase.approve === 'skeleton'
+          ? createInventorySkeleton(findings)
+          : testCase.approve
+            ? reviewedInventory(findings)
+            : { version: 1, entries: [] };
       mkdirSync(resolve(root, 'scripts'), { recursive: true });
       writeFileSync(
         resolve(root, 'scripts/db-write-inventory.json'),
