@@ -75,7 +75,7 @@ const DIRECT_COORDINATED_CONTEXTS = new Set([
  * delegation proof below. This is only an eligibility boundary: an unsafe or dynamic target stays
  * unresolved, and callers in composition roots remain unresolved even when they target these files.
  */
-const COORDINATED_DELEGATION_PATHS = new Set([
+export const COORDINATED_DELEGATION_PATHS = new Set([
   'app/(app)/_layout.tsx',
   'app/(app)/chat/[guid].tsx',
   'app/(app)/chat-settings/[guid].tsx',

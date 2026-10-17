@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -17,6 +18,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  COORDINATED_DELEGATION_PATHS,
   classifySqlOperation,
   createInventorySkeleton,
   parseDbWriteCliArgs,
@@ -9851,6 +9853,16 @@ test('CLI dry-run is byte-immutable, explicit write applies, and a second write 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// Review item M034: an entry for a deleted file certifies nothing and hides that the list drifted
+// (it once kept src/services/chat/groupManagement.ts after the file was removed).
+test('every coordinated-delegation path names a file that still exists', () => {
+  assert.ok(COORDINATED_DELEGATION_PATHS.size > 0);
+  const missing = [...COORDINATED_DELEGATION_PATHS].filter(
+    (path) => !existsSync(resolve(PROJECT_ROOT, path)),
+  );
+  assert.deepEqual(missing, []);
 });
 
 // Review item M033: AGENTS.md prescribes --report while iterating, so it must count the findings
