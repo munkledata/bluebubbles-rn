@@ -880,22 +880,54 @@ export function removeRetainedSigningCredentials(state, workspaceOptions) {
 }
 
 /**
- * Message tail for a failed build that kept its workspace for inspection. Deletes the signing
- * credentials first, says whether that worked, and names the command that removes the rest.
+ * Best effort: deletes the signing files that a kept or half-cleaned workspace still holds, and
+ * returns one clause saying what happened, for the error the caller is about to raise.
+ */
+function deleteSigningFilesClause(
+  state,
+  { workspaceOptions, removeCredentials = removeRetainedSigningCredentials } = {},
+) {
+  try {
+    const removed = removeCredentials(state, workspaceOptions);
+    return removed.length > 0
+      ? `signing files deleted: ${removed.join(', ')}`
+      : 'no signing files were left';
+  } catch (error) {
+    return `deleting signing files FAILED: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+/**
+ * Message tail for a failed build that kept its workspace for inspection: deletes the signing
+ * files first, says exactly what happened, and names the command that removes the rest.
  */
 export function retainedWorkspaceNotice(
   state,
-  workspaceOptions,
-  removeCredentials = removeRetainedSigningCredentials,
+  { descendantsRunning = false, workspaceOptions, removeCredentials } = {},
 ) {
-  let credentials;
+  const clause = deleteSigningFilesClause(state, { workspaceOptions, removeCredentials });
+  const running = descendantsRunning
+    ? '; the EAS build was still running, so it may write them again'
+    : '';
+  return `. The workspace was kept for inspection (${clause}${running}). Remove it with: npm run release:android:cleanup -- --run ${state.runId}`;
+}
+
+/**
+ * Full workspace cleanup. When it fails, the workspace and its signing files stay on disk, so
+ * delete the signing files first and say so in the error.
+ */
+export function cleanUpBuildWorkspaces(
+  state,
+  { removeWorkspaces = removeManagedBuildWorkspaces, removeCredentials } = {},
+) {
   try {
-    removeCredentials(state, workspaceOptions);
-    credentials = 'its signing keystore and password file were deleted';
+    removeWorkspaces(state);
   } catch (error) {
-    credentials = `deleting its signing keystore and password file FAILED (${error instanceof Error ? error.message : String(error)})`;
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)} (${deleteSigningFilesClause(state, { removeCredentials })})`,
+      { cause: error },
+    );
   }
-  return `. The workspace was kept for inspection and ${credentials}; delete the rest with: npm run release:android:cleanup -- --run ${state.runId}`;
 }
 
 export function removeManagedEasDirectory(state, workspaceOptions) {
@@ -1562,10 +1594,12 @@ async function build(options) {
       writeState(state);
       let retainedWorkspaceNote = '';
       if (outcome?.retainWorkspace) {
-        retainedWorkspaceNote = retainedWorkspaceNotice(state);
+        retainedWorkspaceNote = retainedWorkspaceNotice(state, {
+          descendantsRunning: outcome?.descendantsRunning === true,
+        });
       } else {
         try {
-          removeManagedBuildWorkspaces(state);
+          cleanUpBuildWorkspaces(state);
         } catch (error) {
           throw new Error(
             `release build failed and its terminal receipt is durable, but temporary workspace cleanup also failed; run release:android:cleanup -- --run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
@@ -1583,7 +1617,7 @@ async function build(options) {
       finishedAt,
       persistReceipt: () => writeImmutableJson(runFile(runId, 'build.json'), buildReceipt),
       persistState: writeState,
-      cleanupWorkspaces: () => removeManagedBuildWorkspaces(state),
+      cleanupWorkspaces: () => cleanUpBuildWorkspaces(state),
     });
     process.stdout.write(`Built ${runId}; validate artifact.pending.aab before promotion.\n`);
   });
@@ -2171,7 +2205,7 @@ function reconcileBuilding(state) {
       finishedAt: receipt.finishedAt,
       persistReceipt: () => {},
       persistState: writeState,
-      cleanupWorkspaces: () => removeManagedBuildWorkspaces(state),
+      cleanupWorkspaces: () => cleanUpBuildWorkspaces(state),
       successHistoryPhase: 'reconcile',
     });
     process.stdout.write(`Reconciled ${state.runId} to built without invoking EAS.\n`);
@@ -2197,7 +2231,9 @@ function reconcileBuilding(state) {
       failure,
       history: [...state.history, historyEntry('reconcile', 'build_failed')],
     });
-    throw new Error(`reconciled ${state.runId} as a terminal failed build`);
+    throw new Error(
+      `reconciled ${state.runId} as a terminal failed build (${deleteSigningFilesClause(state)}); remove its workspace with: npm run release:android:cleanup -- --run ${state.runId}`,
+    );
   }
 
   const pendingPath = runFile(state.runId, 'artifact.pending.aab');
@@ -2228,7 +2264,7 @@ function reconcileBuilding(state) {
     history: [...state.history, historyEntry('reconcile', 'build_unknown')],
   });
   throw new Error(
-    `reconciled ${state.runId} as terminal because an interrupted build has no conclusive receipt`,
+    `reconciled ${state.runId} as terminal because an interrupted build has no conclusive receipt (${deleteSigningFilesClause(state)}); remove its workspace with: npm run release:android:cleanup -- --run ${state.runId}`,
   );
 }
 

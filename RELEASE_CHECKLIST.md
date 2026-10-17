@@ -312,10 +312,11 @@ from the remote EAS version counter. A local build still contacts EAS and may co
 `versionCode` before compilation finishes, so a failed build run is never retried silently.
 If preparation, build, or submission is interrupted, use
 `npm run release:android:reconcile -- --run <run-id>`. Safely rerun validation or promotion from
-their recorded state. Reconciliation never invokes EAS or submits an artifact. A build whose
-native-path proof or receipt binding fails keeps its EAS workspace for inspection; the runner
-deletes the signing keystore and `credentials.json` from it at once and prints
-`npm run release:android:cleanup -- --run <run-id>` to remove the rest.
+their recorded state. Reconciliation never invokes EAS or submits an artifact. Whenever a build
+leaves its EAS workspace on disk (kept for inspection after a failed native-path proof or receipt
+binding, a workspace cleanup that fails, or an interrupted build that reconcile closes), the runner
+first deletes the signing keystore and `credentials.json` from it, says what it deleted, and points
+to `npm run release:android:cleanup -- --run <run-id>` for the rest.
 
 Build from a clean generated Android project. CI must perform the equivalent checks before release:
 

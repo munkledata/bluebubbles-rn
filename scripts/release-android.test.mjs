@@ -29,6 +29,7 @@ import {
   findLocalBranchObjectId,
   isValidReleaseBuildReceipt,
   isValidReleaseNativePathProof,
+  cleanUpBuildWorkspaces,
   prepareManagedEasDirectory,
   probeReleaseValidationTools,
   requireEnvironmentCredential,
@@ -409,23 +410,67 @@ test("credential removal refuses a workspace that is not this run's own", async 
   });
 });
 
-test('a failed build that keeps its workspace reports the credential deletion and cleanup', (t) => {
+test('a failed build that keeps its workspace reports exactly what happened to its signing files', (t) => {
   const fixture = nativeWorkspaceFixture(t, '-retained-notice');
   const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
   mkdirSync(paths.source);
   writeFileSync(join(paths.source, 'credentials.json'), '{}');
   const cleanup = `npm run release:android:cleanup -- --run ${fixture.state.runId}`;
+  const options = { workspaceOptions: fixture.options };
 
-  const notice = retainedWorkspaceNotice(fixture.state, fixture.options);
+  const notice = retainedWorkspaceNotice(fixture.state, options);
   assert.equal(existsSync(join(paths.source, 'credentials.json')), false);
-  assert.match(notice, /signing keystore and password file were deleted/);
+  assert.match(notice, /signing files deleted: credentials\.json/);
+  assert.doesNotMatch(notice, /still running/);
   assert.ok(notice.endsWith(cleanup), notice);
 
-  const failed = retainedWorkspaceNotice(fixture.state, fixture.options, () => {
-    throw new Error('disk is read-only');
+  assert.match(retainedWorkspaceNotice(fixture.state, options), /no signing files were left/);
+  assert.match(
+    retainedWorkspaceNotice(fixture.state, { ...options, descendantsRunning: true }),
+    /the EAS build was still running, so it may write them again/,
+  );
+  const failed = retainedWorkspaceNotice(fixture.state, {
+    ...options,
+    removeCredentials: () => {
+      throw new Error('disk is read-only');
+    },
   });
-  assert.match(failed, /password file FAILED \(disk is read-only\)/);
+  assert.match(failed, /deleting signing files FAILED: disk is read-only/);
   assert.ok(failed.endsWith(cleanup), failed);
+  removeManagedEasDirectory(fixture.state, fixture.options);
+});
+
+test('a workspace cleanup that fails still deletes the signing files first', (t) => {
+  const fixture = nativeWorkspaceFixture(t, '-cleanup-failure-credentials');
+  const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+  mkdirSync(paths.source);
+  writeFileSync(join(paths.source, 'credentials.json'), '{}');
+  const removeCredentials = (state) => removeRetainedSigningCredentials(state, fixture.options);
+
+  assert.throws(
+    () =>
+      cleanUpBuildWorkspaces(fixture.state, {
+        removeWorkspaces: () => {
+          throw new Error('run-owned Gradle daemons could not be stopped');
+        },
+        removeCredentials,
+      }),
+    (error) =>
+      error.message.includes('run-owned Gradle daemons could not be stopped') &&
+      error.message.includes('signing files deleted: credentials.json'),
+  );
+  assert.equal(existsSync(join(paths.source, 'credentials.json')), false);
+
+  let workspacesRemoved = false;
+  cleanUpBuildWorkspaces(fixture.state, {
+    removeWorkspaces: () => {
+      workspacesRemoved = true;
+    },
+    removeCredentials: () => {
+      throw new Error('a successful cleanup must not touch credentials separately');
+    },
+  });
+  assert.equal(workspacesRemoved, true);
   removeManagedEasDirectory(fixture.state, fixture.options);
 });
 

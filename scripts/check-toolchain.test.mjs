@@ -894,8 +894,8 @@ test('pins retained native-build evidence and rejects ambient EAS bypass control
       'refuse an AAB that the reviewed upload certificate did not sign',
     ],
     [
-      'retainedWorkspaceNote = retainedWorkspaceNotice(state);',
-      "retainedWorkspaceNote = '';",
+      'retainedWorkspaceNote = retainedWorkspaceNotice(state, {',
+      'retainedWorkspaceNote = ({',
       'delete the signing credentials from a workspace a failed build keeps',
     ],
   ]) {

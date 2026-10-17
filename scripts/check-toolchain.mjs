@@ -224,7 +224,7 @@ export function validateReleaseRunnerSource(source) {
       'refuse an AAB that the reviewed upload certificate did not sign',
     ],
     [
-      'retainedWorkspaceNote = retainedWorkspaceNotice(state);',
+      'retainedWorkspaceNote = retainedWorkspaceNotice(state, {',
       'delete the signing credentials from a workspace a failed build keeps',
     ],
   ]) {
