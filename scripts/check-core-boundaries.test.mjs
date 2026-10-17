@@ -48,7 +48,12 @@ test('accepts Node-compatible packages and imports that stay inside core', () =>
   const root = fixture({
     'src/core/example.ts': `
       import ky from 'ky';
+      import { z as zod } from 'zod';
       import { bytes } from '@utils/bytes';
+      import { compareVersions } from '@utils/version';
+      import { graphemes } from '@utils/grapheme';
+      import { models } from '@core/models';
+      import * as core from '@core';
       import { model } from './model';
       export { z } from 'zod/v4';
     `,
@@ -82,6 +87,47 @@ test('rejects platform packages, cross-layer aliases, and relative escapes', () 
     assert.ok(errors.some((error) => error.includes('"@/services/bootstrap"')));
     assert.ok(errors.some((error) => error.includes('"expo-crypto"')));
     assert.ok(errors.some((error) => error.includes('"../../native/crypto"')));
+  } finally {
+    rmSync(root, { recursive: true });
+  }
+});
+
+test('rejects every package, utility, and path outside the core import allowlist', () => {
+  const root = fixture({
+    'src/core/nested/example.ts': `
+      import { open } from '@op-engineering/op-sqlite';
+      import { MMKV } from 'react-native-mmkv';
+      import messaging from '@react-native-firebase/messaging';
+      import { sql } from 'drizzle-orm';
+      import { readFileSync } from 'node:fs';
+      import { sign } from 'zodiac';
+      import { extra } from '@core-extra/thing';
+      import { groupMessages } from '@utils/messageGrouping';
+      import { route } from '../../../app/route';
+    `,
+  });
+  const file = resolve(root, 'src/core/nested/example.ts');
+
+  try {
+    const errors = validateCoreImports({ root, files: [file] });
+    const refused = [
+      '@op-engineering/op-sqlite',
+      'react-native-mmkv',
+      '@react-native-firebase/messaging',
+      'drizzle-orm',
+      'node:fs',
+      'zodiac',
+      '@core-extra/thing',
+      '@utils/messageGrouping',
+      '../../../app/route',
+    ];
+    for (const specifier of refused) {
+      assert.ok(
+        errors.some((error) => error.includes(`"${specifier}"`)),
+        specifier,
+      );
+    }
+    assert.equal(errors.length, refused.length);
   } finally {
     rmSync(root, { recursive: true });
   }

@@ -14,8 +14,14 @@ const UI_DB_OWNER_DIRECTORIES = ['app', 'src/ui'];
 const PRODUCTION_DIRECTORIES = ['app', 'src'];
 const PRODUCTION_ENTRY_FILES = ['index.js'];
 const EMBEDDED_WEBVIEW_MODULES = ['react-native-webview', '@expo/dom-webview', 'expo/dom/internal'];
-const FORBIDDEN_SOURCE_DIRECTORIES = ['db', 'features', 'native', 'services', 'state', 'ui'];
-const FORBIDDEN_ALIASES = ['@db', '@features', '@native', '@services', '@state', '@ui'];
+// src/core must run unchanged everywhere the app runs (screens, headless tasks, Node tests), so it
+// may import only these packages, its own modules, and these reviewed platform-free utilities.
+// Anything else, including React Native, Expo, native drivers and the other app layers, is refused.
+// src/utils also holds modules that import the database and app state, so utilities are listed
+// one by one instead of allowing the whole @utils alias.
+const CORE_ALLOWED_PACKAGES = ['zod', 'ky'];
+const CORE_ALLOWED_ALIASES = ['@core', '@/core'];
+const CORE_ALLOWED_UTILITY_MODULES = new Set(['@utils/bytes', '@utils/grapheme', '@utils/version']);
 const SOURCE_EXTENSIONS = ['.tsx', '.jsx', '.mts', '.cts', '.mjs', '.cjs', '.ts', '.js'];
 const RAW_DB_DRIVER_MODULE = '@op-engineering/op-sqlite';
 const RAW_DB_DRIVER_HANDLE_TYPES = new Set([
@@ -119,40 +125,18 @@ function isEmbeddedWebViewModule(specifier) {
   );
 }
 
-function isForbiddenPackage(specifier) {
-  return (
-    specifier === 'react' ||
-    specifier.startsWith('react/') ||
-    specifier === 'react-native' ||
-    specifier.startsWith('react-native/') ||
-    specifier === 'zustand' ||
-    specifier.startsWith('zustand/') ||
-    specifier === 'expo' ||
-    specifier.startsWith('expo/') ||
-    specifier.startsWith('expo-') ||
-    specifier.startsWith('@expo/')
-  );
-}
-
-function isForbiddenAlias(specifier) {
-  return (
-    FORBIDDEN_ALIASES.some((alias) => specifier === alias || specifier.startsWith(`${alias}/`)) ||
-    FORBIDDEN_SOURCE_DIRECTORIES.some(
-      (directory) => specifier === `@/${directory}` || specifier.startsWith(`@/${directory}/`),
-    )
-  );
-}
-
 function isInside(candidate, directory) {
   const path = relative(directory, candidate);
   return path === '' || (!path.startsWith(`..${sep}`) && path !== '..');
 }
 
-function isForbiddenRelativeImport({ root, file, specifier }) {
-  if (!specifier.startsWith('.')) return false;
-  const target = resolve(file, '..', specifier);
-  return FORBIDDEN_SOURCE_DIRECTORIES.some((directory) =>
-    isInside(target, resolve(root, 'src', directory)),
+function isAllowedCoreImport({ root, file, specifier }) {
+  if (specifier.startsWith('.')) {
+    return isInside(resolve(file, '..', specifier), resolve(root, CORE_DIRECTORY));
+  }
+  if (CORE_ALLOWED_UTILITY_MODULES.has(specifier)) return true;
+  return [...CORE_ALLOWED_PACKAGES, ...CORE_ALLOWED_ALIASES].some(
+    (allowed) => specifier === allowed || specifier.startsWith(`${allowed}/`),
   );
 }
 
@@ -180,12 +164,10 @@ export function validateCoreImports({ root, files }) {
     for (const specifier of importSpecifiers(source, file)) {
       if (specifier === '<non-literal>') {
         errors.push(`${relative(root, file)} uses a non-literal require/import.`);
-      } else if (
-        isForbiddenPackage(specifier) ||
-        isForbiddenAlias(specifier) ||
-        isForbiddenRelativeImport({ root, file, specifier })
-      ) {
-        errors.push(`${relative(root, file)} imports forbidden boundary "${specifier}".`);
+      } else if (!isAllowedCoreImport({ root, file, specifier })) {
+        errors.push(
+          `${relative(root, file)} imports forbidden boundary "${specifier}"; src/core may import only the CORE_ALLOWED_* entries in scripts/check-core-boundaries.mjs.`,
+        );
       }
     }
   }
