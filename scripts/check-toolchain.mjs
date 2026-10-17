@@ -215,6 +215,10 @@ export function validateReleaseRunnerSource(source) {
       "proofError.releaseFailureCode = 'native_path_proof_failed';",
       'terminalize a failed native-path proof explicitly',
     ],
+    [
+      "requirePhase(state, 'built');\n    probeReleaseValidationTools();",
+      'probe its local validation tools before it can fail an artifact',
+    ],
   ]) {
     if (source.split(marker).length !== 2) {
       errors.push(`Android release runner must ${requirement}`);

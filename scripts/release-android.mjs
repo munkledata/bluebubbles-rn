@@ -1526,6 +1526,31 @@ async function build(options) {
   });
 }
 
+/**
+ * Host tools that artifact validation runs. Validation probes them before judging the artifact: a
+ * missing or broken local tool must stop the command with the run still 'built' (retryable), not
+ * mark a good artifact failed, because a failed run cannot be rebuilt without consuming another
+ * remote versionCode.
+ */
+const RELEASE_VALIDATION_TOOL_PROBES = Object.freeze([
+  ['unzip', ['-v']],
+  ['jarsigner', ['-help']],
+  ['keytool', ['-help']],
+]);
+
+export function probeReleaseValidationTools(run = runCapture) {
+  for (const [command, args] of RELEASE_VALIDATION_TOOL_PROBES) {
+    try {
+      run(command, [...args]);
+    } catch (error) {
+      throw new Error(
+        `release validation cannot run ${command}; the run stays built, so fix the tool and re-run validate: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  }
+}
+
 function uploadCertificateFingerprint(artifactPath) {
   runCapture('jarsigner', ['-verify', artifactPath]);
   const output = runCapture('keytool', [
@@ -1581,6 +1606,7 @@ async function validate(options) {
   await withReleaseLock(runId, 'validate', async () => {
     const state = readState(runId);
     requirePhase(state, 'built');
+    probeReleaseValidationTools();
     const artifactPath = runFile(runId, 'artifact.pending.aab');
     let artifact;
     let buildReceiptBinding;

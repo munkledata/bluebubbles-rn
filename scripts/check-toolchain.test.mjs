@@ -883,6 +883,11 @@ test('pins retained native-build evidence and rejects ambient EAS bypass control
       "proofError.releaseFailureCode = 'build_start_failed';",
       'terminalize a failed native-path proof',
     ],
+    [
+      "requirePhase(state, 'built');\n    probeReleaseValidationTools();",
+      "requirePhase(state, 'built');",
+      'probe its local validation tools before it can fail an artifact',
+    ],
   ]) {
     const mutated = source.replace(expected, replacement);
     assert.notEqual(mutated, source, expected);

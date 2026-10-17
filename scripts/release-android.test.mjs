@@ -29,6 +29,7 @@ import {
   isValidReleaseBuildReceipt,
   isValidReleaseNativePathProof,
   prepareManagedEasDirectory,
+  probeReleaseValidationTools,
   requireEnvironmentCredential,
   removeManagedEasDirectory,
   stageGoogleServicesFile,
@@ -298,6 +299,35 @@ test('does not recreate a Gradle home while finishing partial workspace cleanup'
 
   assert.equal(existsSync(unexpectedStopMarker), false);
   assert.equal(existsSync(paths.container), false);
+});
+
+test('probes every local artifact-validation tool before an artifact is judged', () => {
+  const calls = [];
+  probeReleaseValidationTools((command, args) => {
+    calls.push([command, ...args]);
+    return { status: 0, signal: null, stdout: '', stderr: '' };
+  });
+  assert.deepEqual(calls, [
+    ['unzip', '-v'],
+    ['jarsigner', '-help'],
+    ['keytool', '-help'],
+  ]);
+});
+
+test('a missing validation tool stops validation without blaming the artifact', () => {
+  assert.throws(
+    () =>
+      probeReleaseValidationTools((command) => {
+        if (command === 'jarsigner') {
+          throw new Error('jarsigner could not start: spawn jarsigner ENOENT');
+        }
+        return { status: 0, signal: null, stdout: '', stderr: '' };
+      }),
+    (error) =>
+      error.message.includes('cannot run jarsigner') &&
+      error.message.includes('the run stays built') &&
+      error.message.includes('spawn jarsigner ENOENT'),
+  );
 });
 
 test('uses bounded retries for run-owned recursive directory removal', () => {
