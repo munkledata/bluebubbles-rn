@@ -14,6 +14,7 @@ import {
   attachmentIsUserFileSql,
   chatVisible,
   messageHasVisibleContentSql,
+  messageVisibleInChatSql,
 } from './chatVisibility';
 import { requireChatIdByGuidWithinTransaction } from './chats';
 import type { OutgoingInsertResult } from './outgoing';
@@ -370,8 +371,7 @@ async function queryAttachmentByGuid(
     ? sql`AND a.hide_attachment = 0
           AND a.is_retracted = 0
           AND ${attachmentIsUserFileSql('a', 'm')}
-          AND ${messageHasVisibleContentSql('m')}
-          AND m.date_deleted IS NULL`
+          AND ${messageVisibleInChatSql('m', 'c')}`
     : sql``;
   const rows = await db.all<AttachmentRow>(sql`
     SELECT a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
@@ -447,8 +447,7 @@ export async function listChatImageAttachmentsByAttachmentGuid(
       AND a.hide_attachment = 0
       AND a.is_retracted = 0
       AND ${attachmentIsUserFileSql('a', 'm')}
-      AND ${messageHasVisibleContentSql('m')}
-      AND m.date_deleted IS NULL
+      AND ${messageVisibleInChatSql('m', 'c')}
     ORDER BY m.date_created ASC, a.id ASC
   `);
   return { items: rows, index: rows.findIndex((r: AttachmentRow) => r.guid === guid) };
@@ -526,12 +525,7 @@ export async function listChatDocumentAttachmentsPage(
       AND a.hide_attachment = 0
       AND a.is_retracted = 0
       AND ${attachmentIsUserFileSql('a', 'm')}
-      AND ${messageHasVisibleContentSql('m')}
-      AND m.date_deleted IS NULL
-      AND (
-        c.deleted_at IS NULL
-        OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
-      )
+      AND ${messageVisibleInChatSql('m', 'c')}
       AND LOWER(COALESCE(a.mime_type, '')) NOT IN (${inlineImageMimeList()})
       AND LOWER(COALESCE(a.mime_type, '')) NOT GLOB 'video/*'
     ORDER BY (m.date_created IS NULL) ASC, m.date_created DESC, a.id DESC
@@ -577,8 +571,7 @@ export async function listChatAttachmentsByKind(
       AND a.hide_attachment = 0
       AND a.is_retracted = 0
       AND ${attachmentIsUserFileSql('a', 'm')}
-      AND ${messageHasVisibleContentSql('m')}
-      AND m.date_deleted IS NULL
+      AND ${messageVisibleInChatSql('m', 'c')}
     ORDER BY m.date_created DESC, a.id DESC
     LIMIT ${limit * 4}
   `);
@@ -608,8 +601,7 @@ export async function listChatAttachmentsByKind(
     JOIN chats c ON c.id = m.chat_id
     WHERE c.guid = ${chatGuid}
       AND m.text LIKE '%http%'
-      AND ${messageHasVisibleContentSql('m')}
-      AND m.date_deleted IS NULL
+      AND ${messageVisibleInChatSql('m', 'c')}
       AND m.associated_message_type IS NULL
     ORDER BY m.date_created DESC, m.id DESC
     LIMIT ${limit * 4}
@@ -741,12 +733,7 @@ export function updateAttachmentLocalPathWithinTransaction(
          SELECT 1 FROM messages m
          JOIN chats c ON c.id = m.chat_id
           WHERE m.id = attachments.message_id
-            AND m.date_deleted IS NULL
-            AND ${messageHasVisibleContentSql('m')}
-            AND (
-              c.deleted_at IS NULL
-              OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
-            )
+            AND ${messageVisibleInChatSql('m', 'c')}
        )
     RETURNING id
   `);
@@ -779,12 +766,7 @@ export function replaceVisibleAttachmentLocalPathWithinTransaction(
          SELECT 1 FROM messages m
          JOIN chats c ON c.id = m.chat_id
           WHERE m.id = attachments.message_id
-            AND m.date_deleted IS NULL
-            AND ${messageHasVisibleContentSql('m')}
-            AND (
-              c.deleted_at IS NULL
-              OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
-            )
+            AND ${messageVisibleInChatSql('m', 'c')}
        )
     RETURNING id
   `);

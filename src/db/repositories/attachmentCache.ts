@@ -9,7 +9,7 @@ import {
   attachmentMediaExportOwnerEligibleSql,
   attachmentMediaExportProtectsCacheSql,
 } from './attachmentMediaExports';
-import { messageHasVisibleContentSql } from './chatVisibility';
+import { messageVisibleInChatSql } from './chatVisibility';
 
 /**
  * Transaction-only mutations and read-only queries for the encrypted attachment-cache ledger.
@@ -227,12 +227,7 @@ export async function listInactiveAttachmentCachePaths(
             OR (
               c.id IS NOT NULL
               AND a.is_retracted = 0
-              AND m.date_deleted IS NULL
-              AND ${messageHasVisibleContentSql('m')}
-              AND (
-                c.deleted_at IS NULL
-                OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
-              )
+              AND ${messageVisibleInChatSql('m', 'c')}
             )
           )
       )

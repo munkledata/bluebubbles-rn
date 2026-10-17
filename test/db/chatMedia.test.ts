@@ -1,5 +1,6 @@
 import { Attachment, Chat, Message } from '@core/models';
 import {
+  getVisibleAttachmentByGuid,
   listChatAttachmentsByKind,
   listChatDocumentAttachmentsPage,
   listChatImageAttachmentsByAttachmentGuid,
@@ -439,5 +440,75 @@ describe('listChatImageAttachmentsByAttachmentGuid (fullscreen carousel)', () =>
     const strip = await listChatAttachmentsByKind(db, 'c1');
     expect(strip.photos.map((a) => a.guid)).toEqual(['img-3', 'img-2', 'img-1']);
     expect(strip.documents.map((a) => a.guid)).toEqual(['svg-1', 'tiff-1']);
+  });
+});
+
+// Review item M082: every attachment view follows one visibility rule. While a deleted chat's old
+// messages are still being erased (or until an interrupted erase resumes at the next launch), its
+// pre-deletion photos, videos and links stay hidden everywhere, exactly like its documents.
+describe('deleted-chat cutoff on every attachment view (M082)', () => {
+  it('hides pre-deletion photos, videos and links but shows newer ones', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    const map = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'c1', participants: [{ address: 'a@x.com' }] })],
+      handles,
+    );
+    const chatId = map.get('c1')!;
+    const media = (guid: string, dateCreated: number | null, mimeType: string) =>
+      Message.parse({
+        guid: `m-${guid}`,
+        dateCreated,
+        hasAttachments: true,
+        handle: { address: 'a@x.com' },
+        attachments: [Attachment.parse({ guid, mimeType, transferName: `${guid}.bin` })],
+      });
+    const link = (guid: string, dateCreated: number, url: string) =>
+      Message.parse({ guid, text: `see ${url}`, dateCreated, handle: { address: 'a@x.com' } });
+    await upsertMessages(
+      db,
+      [
+        media('old-photo', 100, 'image/jpeg'),
+        media('old-video', 110, 'video/mp4'),
+        link('m-old-link', 120, 'https://old.test/x'),
+        // A message without a date counts as history from before the deletion.
+        media('undated-photo', null, 'image/jpeg'),
+        media('new-photo', 300, 'image/jpeg'),
+        media('new-video', 310, 'video/mp4'),
+        link('m-new-link', 320, 'https://new.test/y'),
+      ],
+      () => chatId,
+      handles,
+    );
+    raw.prepare('UPDATE chats SET deleted_at = 200 WHERE guid = ?').run('c1');
+
+    const strip = await listChatAttachmentsByKind(db, 'c1');
+    expect(strip.photos.map((row) => row.guid)).toEqual(['new-photo']);
+    expect(strip.videos.map((row) => row.guid)).toEqual(['new-video']);
+    expect(strip.links.map((row) => row.url)).toEqual(['https://new.test/y']);
+
+    const carousel = await listChatImageAttachmentsByAttachmentGuid(db, 'new-photo');
+    expect(carousel.items.map((row) => row.guid)).toEqual(['new-photo']);
+    expect(carousel.index).toBe(0);
+    expect((await listChatImageAttachmentsByAttachmentGuid(db, 'old-photo')).index).toBe(-1);
+
+    expect(await getVisibleAttachmentByGuid(db, 'old-photo')).toBeNull();
+    expect(await getVisibleAttachmentByGuid(db, 'undated-photo')).toBeNull();
+    expect((await getVisibleAttachmentByGuid(db, 'new-photo'))?.guid).toBe('new-photo');
+
+    // Restoring the chat clears the cutoff, so its whole history shows again.
+    raw.prepare('UPDATE chats SET deleted_at = NULL WHERE guid = ?').run('c1');
+    const restored = await listChatAttachmentsByKind(db, 'c1');
+    expect(restored.photos.map((row) => row.guid)).toEqual([
+      'new-photo',
+      'old-photo',
+      'undated-photo',
+    ]);
+    expect(restored.links.map((row) => row.url)).toEqual([
+      'https://new.test/y',
+      'https://old.test/x',
+    ]);
+    expect((await getVisibleAttachmentByGuid(db, 'old-photo'))?.guid).toBe('old-photo');
   });
 });

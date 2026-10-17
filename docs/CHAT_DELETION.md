@@ -94,6 +94,15 @@ Without this, deleting a never-opened thread (the spam or unknown-sender case pe
 whose marker is NULL) and later writing to the same person again badged the entire re-synced history
 as unread. The guard is strictly newer, so the marker only ever moves forward.
 
+## Attachment views apply the same cutoff
+
+While the purge is still running, or until an interrupted purge resumes at the next launch, the old
+rows still exist. Every attachment view hides them through one rule, `messageVisibleInChatSql` in
+`src/db/repositories/chatVisibility.ts`. That covers the shared-documents list, the photo viewer and
+its carousel, the conversation-details photo, video and link strip, the cache-retirement check, and
+the media-export queue. Anything at or before `deleted_at` is hidden, and a message without a date
+counts as history. The conversation thread itself relies on the purge instead (review M082).
+
 ## Chat-scoped rows, and two deliberate exclusions
 
 None of these tables has a foreign key to `chats`, so nothing cascades. Without the explicit deletes,

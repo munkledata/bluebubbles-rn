@@ -5399,7 +5399,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#listPastedAttachmentProtectionPaths:mutator-call:543990b98095",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 418,
+      "line": 413,
       "symbol": "listPastedAttachmentProtectionPaths",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5412,7 +5412,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-insert:99e2263a1304",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 477,
+      "line": 472,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-insert",
       "target": "attachment_cache_entries",
@@ -5425,7 +5425,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-delete:045962bd8b71",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 506,
+      "line": 501,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5438,7 +5438,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-update:9609800f7a37",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 515,
+      "line": 510,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-update",
       "target": "attachments",
@@ -5451,7 +5451,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess:sql-update:3ca8ab1b4190",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 619,
+      "line": 614,
       "symbol": "recordAttachmentCacheAccess",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5464,7 +5464,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:c78a3766ee18",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 656,
+      "line": 651,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5477,7 +5477,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-update:27b8750a28ca",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 663,
+      "line": 658,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-update",
       "target": "attachments",
@@ -5490,7 +5490,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:b9564831e666",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 678,
+      "line": 673,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-delete",
       "target": "attachment_cache_entries",
@@ -5503,7 +5503,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-delete:ff6e109326d8",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 908,
+      "line": 903,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5516,7 +5516,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:0fd63f0dd34a",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 918,
+      "line": 913,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5529,7 +5529,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:300d170b9271",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 935,
+      "line": 930,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-update",
       "target": "attachments",
@@ -5542,7 +5542,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#scheduleAttachmentCacheRetirementRetry:sql-update:94a4794dc91e",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 966,
+      "line": 961,
       "symbol": "scheduleAttachmentCacheRetirementRetry",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5555,7 +5555,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted:sql-delete:f009e63ebbd9",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 1015,
+      "line": 1010,
       "symbol": "confirmAttachmentCacheEntryDeleted",
       "operation": "sql-delete",
       "target": "attachment_cache_entries",
@@ -5568,7 +5568,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction:sql-update:64e6cf3df554",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 169,
+      "line": 167,
       "symbol": "maintainAttachmentMediaExportsWithinTransaction",
       "operation": "sql-update",
       "target": "attachment_media_exports",
@@ -5581,7 +5581,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction:sql-update:79f7006a9658",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 184,
+      "line": 182,
       "symbol": "maintainAttachmentMediaExportsWithinTransaction",
       "operation": "sql-update",
       "target": "attachment_media_exports",
@@ -5594,7 +5594,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction:sql-delete:2fff9a9d83b1",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 204,
+      "line": 202,
       "symbol": "maintainAttachmentMediaExportsWithinTransaction",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5607,7 +5607,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction:sql-delete:6695af9f3cd7",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 214,
+      "line": 212,
       "symbol": "maintainAttachmentMediaExportsWithinTransaction",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5620,7 +5620,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExports:mutator-call:93f0d2e3ba95",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 237,
+      "line": 235,
       "symbol": "maintainAttachmentMediaExports",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExports.<callback:251ac9a6e9>",
@@ -5633,7 +5633,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExports:mutator-call:e16a5b9be00e",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 237,
+      "line": 235,
       "symbol": "maintainAttachmentMediaExports",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5646,7 +5646,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExports.<callback:251ac9a6e9>:mutator-call:7cd1c5e01b33",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 239,
+      "line": 237,
       "symbol": "maintainAttachmentMediaExports.<callback:251ac9a6e9>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction",
@@ -5659,7 +5659,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#ensureReceiptSlotWithinTransaction:sql-delete:0de9c8eb607e",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 256,
+      "line": 254,
       "symbol": "ensureReceiptSlotWithinTransaction",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5672,7 +5672,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#enqueueAttachmentMediaExport:mutator-call:2d8222eae3ac",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 295,
+      "line": 293,
       "symbol": "enqueueAttachmentMediaExport",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#enqueueAttachmentMediaExport.<callback:0a9fbff424>",
@@ -5685,7 +5685,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#enqueueAttachmentMediaExport:mutator-call:b441c99f1ca0",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 295,
+      "line": 293,
       "symbol": "enqueueAttachmentMediaExport",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5698,7 +5698,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#enqueueAttachmentMediaExport.<callback:0a9fbff424>:mutator-call:63fe833fe08c",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 299,
+      "line": 297,
       "symbol": "enqueueAttachmentMediaExport.<callback:0a9fbff424>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction",
@@ -5711,7 +5711,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#enqueueAttachmentMediaExport.<callback:0a9fbff424>:mutator-call:6abb93a24f1a",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 327,
+      "line": 325,
       "symbol": "enqueueAttachmentMediaExport.<callback:0a9fbff424>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#ensureReceiptSlotWithinTransaction",
@@ -5724,7 +5724,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#enqueueAttachmentMediaExport:sql-insert:29472dcdfc96",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 334,
+      "line": 332,
       "symbol": "enqueueAttachmentMediaExport",
       "operation": "sql-insert",
       "target": "attachment_media_exports",
@@ -5737,7 +5737,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#claimNextAttachmentMediaExport:mutator-call:69d37aa3062a",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 388,
+      "line": 386,
       "symbol": "claimNextAttachmentMediaExport",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5750,7 +5750,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#claimNextAttachmentMediaExport:mutator-call:f1b5f6c4b12b",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 388,
+      "line": 386,
       "symbol": "claimNextAttachmentMediaExport",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#claimNextAttachmentMediaExport.<callback:336242f45c>",
@@ -5763,7 +5763,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#claimNextAttachmentMediaExport.<callback:336242f45c>:mutator-call:202536312c69",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 394,
+      "line": 392,
       "symbol": "claimNextAttachmentMediaExport.<callback:336242f45c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction",
@@ -5776,7 +5776,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#claimNextAttachmentMediaExport:sql-update:fd24dba8ff92",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 404,
+      "line": 402,
       "symbol": "claimNextAttachmentMediaExport",
       "operation": "sql-update",
       "target": "attachment_media_exports",
@@ -5789,7 +5789,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#completeAttachmentMediaExport:mutator-call:69dba2b832c3",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 466,
+      "line": 464,
       "symbol": "completeAttachmentMediaExport",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5802,7 +5802,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#completeAttachmentMediaExport:mutator-call:894a53d87a20",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 466,
+      "line": 464,
       "symbol": "completeAttachmentMediaExport",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#completeAttachmentMediaExport.<callback:c11eee2354>",
@@ -5815,7 +5815,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#completeAttachmentMediaExport:sql-update:0cdb2787ab02",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 471,
+      "line": 469,
       "symbol": "completeAttachmentMediaExport",
       "operation": "sql-update",
       "target": "attachment_media_exports",
@@ -5828,7 +5828,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#failAttachmentMediaExport:mutator-call:21bb35f33716",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 499,
+      "line": 497,
       "symbol": "failAttachmentMediaExport",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#failAttachmentMediaExport.<callback:81f64b0602>",
@@ -5841,7 +5841,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#failAttachmentMediaExport:mutator-call:2fc0f223f07b",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 499,
+      "line": 497,
       "symbol": "failAttachmentMediaExport",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5854,7 +5854,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#failAttachmentMediaExport:sql-update:8a5eecf81aa6",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 518,
+      "line": 516,
       "symbol": "failAttachmentMediaExport",
       "operation": "sql-update",
       "target": "attachment_media_exports",
@@ -5867,7 +5867,7 @@
     {
       "id": "src/db/repositories/attachmentMediaExports.ts#cancelPendingAttachmentMediaExportsWithinTransaction:sql-delete:eda83f91e310",
       "path": "src/db/repositories/attachmentMediaExports.ts",
-      "line": 545,
+      "line": 543,
       "symbol": "cancelPendingAttachmentMediaExportsWithinTransaction",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5880,7 +5880,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-delete:899e9481fcb6",
       "path": "src/db/repositories/attachments.ts",
-      "line": 91,
+      "line": 92,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-delete",
       "target": "attachments",
@@ -5893,7 +5893,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-update:08e96c608c66",
       "path": "src/db/repositories/attachments.ts",
-      "line": 93,
+      "line": 94,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-update",
       "target": "attachments",
@@ -5906,7 +5906,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-insert:60b5aec7b47b",
       "path": "src/db/repositories/attachments.ts",
-      "line": 100,
+      "line": 101,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-insert",
       "target": "attachments",
@@ -5919,7 +5919,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:fc8d72883c5b",
       "path": "src/db/repositories/attachments.ts",
-      "line": 669,
+      "line": 661,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "messages",
@@ -5932,7 +5932,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:eca25accb829",
       "path": "src/db/repositories/attachments.ts",
-      "line": 689,
+      "line": 681,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "attachments",
@@ -5945,7 +5945,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:5374f7183358",
       "path": "src/db/repositories/attachments.ts",
-      "line": 699,
+      "line": 691,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "outgoingQueue",
@@ -5958,7 +5958,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-update:1de3c8263d4f",
       "path": "src/db/repositories/attachments.ts",
-      "line": 712,
+      "line": 704,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -5969,9 +5969,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentsBranches.test.ts; test/services/sendAttachmentService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction:sql-update:4a6955646223",
+      "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction:sql-update:d61058bed5fd",
       "path": "src/db/repositories/attachments.ts",
-      "line": 735,
+      "line": 727,
       "symbol": "updateAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -5982,9 +5982,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/downloadService.test.ts; test/db/messageDeletionLedger.test.ts"
     },
     {
-      "id": "src/db/repositories/attachments.ts#replaceVisibleAttachmentLocalPathWithinTransaction:sql-update:43f358f5c0de",
+      "id": "src/db/repositories/attachments.ts#replaceVisibleAttachmentLocalPathWithinTransaction:sql-update:d9a854ec7dfe",
       "path": "src/db/repositories/attachments.ts",
-      "line": 772,
+      "line": 759,
       "symbol": "replaceVisibleAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -5997,7 +5997,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:420a1a02f6e6",
       "path": "src/db/repositories/attachments.ts",
-      "line": 807,
+      "line": 789,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6010,7 +6010,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:814cc10efe69",
       "path": "src/db/repositories/attachments.ts",
-      "line": 807,
+      "line": 789,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>",
@@ -6023,7 +6023,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>:mutator-call:8bfa38b73ef8",
       "path": "src/db/repositories/attachments.ts",
-      "line": 808,
+      "line": 790,
       "symbol": "updateAttachmentLocalPath.<callback:64ad543547>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction",

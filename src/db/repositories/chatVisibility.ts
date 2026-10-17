@@ -43,6 +43,27 @@ export function messageHasVisibleContentSql(alias: string) {
 }
 
 /**
+ * Whether a message still shows in its chat for attachment purposes: not deleted, with visible
+ * content, and newer than the chat's local deletion cutoff (`chats.deleted_at`) while the chat is
+ * deleted. A message without a date counts as history from before the deletion. Every attachment
+ * list, lookup, cache and media-export check, and the conversation-details links list, use this one
+ * rule (review M082); callers keep their own attachment-level checks. The conversation thread
+ * itself relies on the chat purge instead. Aliases are fixed internal literals at every caller.
+ */
+export function messageVisibleInChatSql(messageAlias: string, chatAlias: string) {
+  const m = sql.raw(messageAlias);
+  const c = sql.raw(chatAlias);
+  return sql`(
+    ${m}.date_deleted IS NULL
+    AND ${messageHasVisibleContentSql(messageAlias)}
+    AND (
+      ${c}.deleted_at IS NULL
+      OR (${m}.date_created IS NOT NULL AND ${m}.date_created > ${c}.deleted_at)
+    )
+  )`;
+}
+
+/**
  * One load-bearing definition of a qualifying unread message.
  *
  * The local-deletion floor prevents re-synced pre-delete history from becoming unread when its
