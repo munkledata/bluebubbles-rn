@@ -813,19 +813,20 @@ function readOwnedEasMarker(path, ownerUid) {
   }
 }
 
-export function removeManagedEasDirectory(state, workspaceOptions) {
+/** This run's EAS container paths after every ownership check, or null once it no longer exists. */
+function ownedEasContainerPaths(state, workspaceOptions) {
   const paths = androidReleaseWorkspacePaths(state.runId, workspaceOptions);
   assertTemporaryParent(paths.parent, {
     productionPath: paths.parent === RELEASE_NATIVE_TEMP_PARENT,
   });
-  if (!existsSync(paths.root)) return;
+  if (!existsSync(paths.root)) return null;
   assertOwnedPrivateDirectory(
     paths.root,
     'Android release temporary root',
     paths.ownerUid,
     paths.parent,
   );
-  if (!existsSync(paths.container)) return;
+  if (!existsSync(paths.container)) return null;
   assertOwnedPrivateDirectory(
     paths.container,
     'Android release temporary container',
@@ -841,6 +842,65 @@ export function removeManagedEasDirectory(state, workspaceOptions) {
   ) {
     throw new Error('EAS workspace ownership marker does not match this release run');
   }
+  return paths;
+}
+
+/**
+ * The pinned EAS local-build plugin writes the upload keystore (`keystore-<uuid>`) and a
+ * `credentials.json` holding its passwords straight into its build directory. A failed build can
+ * keep its workspace for inspection; this deletes those files at once, so the kept evidence never
+ * holds signing material while it waits for `release:android:cleanup`. Returns the removed names.
+ */
+export function removeRetainedSigningCredentials(state, workspaceOptions) {
+  const paths = ownedEasContainerPaths(state, workspaceOptions);
+  if (!paths || !existsSync(paths.work)) return [];
+  assertOwnedPrivateDirectory(
+    paths.work,
+    'Android release EAS work directory',
+    paths.ownerUid,
+    paths.container,
+  );
+  if (!existsSync(paths.source)) return [];
+  const buildDirectoryState = lstatSync(paths.source);
+  if (!buildDirectoryState.isDirectory() || buildDirectoryState.isSymbolicLink()) {
+    throw new Error('retained EAS build directory must be a real directory');
+  }
+  assertDescendant(realpathSync(paths.work), realpathSync(paths.source), 'EAS build directory');
+  const removed = [];
+  for (const entry of readdirSync(paths.source)) {
+    if (entry !== 'credentials.json' && !entry.startsWith('keystore-')) continue;
+    const path = resolve(paths.source, entry);
+    if (lstatSync(path).isDirectory()) {
+      throw new Error(`retained EAS build directory has an unexpected directory: ${entry}`);
+    }
+    unlinkSync(path);
+    removed.push(entry);
+  }
+  return removed.sort();
+}
+
+/**
+ * Message tail for a failed build that kept its workspace for inspection. Deletes the signing
+ * credentials first, says whether that worked, and names the command that removes the rest.
+ */
+export function retainedWorkspaceNotice(
+  state,
+  workspaceOptions,
+  removeCredentials = removeRetainedSigningCredentials,
+) {
+  let credentials;
+  try {
+    removeCredentials(state, workspaceOptions);
+    credentials = 'its signing keystore and password file were deleted';
+  } catch (error) {
+    credentials = `deleting its signing keystore and password file FAILED (${error instanceof Error ? error.message : String(error)})`;
+  }
+  return `. The workspace was kept for inspection and ${credentials}; delete the rest with: npm run release:android:cleanup -- --run ${state.runId}`;
+}
+
+export function removeManagedEasDirectory(state, workspaceOptions) {
+  const paths = ownedEasContainerPaths(state, workspaceOptions);
+  if (!paths) return;
 
   const expectedEntries = new Set(['.owner.json', 'work', 'gradle-home']);
   const unexpectedEntries = readdirSync(paths.container).filter(
@@ -1500,7 +1560,10 @@ async function build(options) {
         ...failure,
       });
       writeState(state);
-      if (!outcome?.retainWorkspace) {
+      let retainedWorkspaceNote = '';
+      if (outcome?.retainWorkspace) {
+        retainedWorkspaceNote = retainedWorkspaceNotice(state);
+      } else {
         try {
           removeManagedBuildWorkspaces(state);
         } catch (error) {
@@ -1511,7 +1574,7 @@ async function build(options) {
         }
       }
       throw new Error(
-        `release build failed; run ${runId} is terminal because its remote versionCode may have advanced${failure.detail ? `: ${failure.detail}` : ''}`,
+        `release build failed; run ${runId} is terminal because its remote versionCode may have advanced${failure.detail ? `: ${failure.detail}` : ''}${retainedWorkspaceNote}`,
       );
     }
 

@@ -223,6 +223,10 @@ export function validateReleaseRunnerSource(source) {
       'uploadCertificateSha256: requireExpectedUploadCertificate(\n      uploadCertificateFingerprint(artifactPath),\n    ),',
       'refuse an AAB that the reviewed upload certificate did not sign',
     ],
+    [
+      'retainedWorkspaceNote = retainedWorkspaceNotice(state);',
+      'delete the signing credentials from a workspace a failed build keeps',
+    ],
   ]) {
     if (source.split(marker).length !== 2) {
       errors.push(`Android release runner must ${requirement}`);

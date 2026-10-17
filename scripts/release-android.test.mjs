@@ -33,7 +33,9 @@ import {
   probeReleaseValidationTools,
   requireEnvironmentCredential,
   removeManagedEasDirectory,
+  removeRetainedSigningCredentials,
   requireExpectedUploadCertificate,
+  retainedWorkspaceNotice,
   stageGoogleServicesFile,
   verifyReleaseNativePathProof,
 } from './release-android.mjs';
@@ -345,6 +347,86 @@ test('accepts only the reviewed Play upload certificate', () => {
       error.message.includes(otherKey) &&
       error.message.includes('not the reviewed Play upload certificate'),
   );
+});
+
+test('a retained build workspace keeps its evidence but loses its signing credentials', (t) => {
+  const fixture = nativeWorkspaceFixture(t, '-retained-credentials');
+  const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+  // The pinned EAS local-build plugin writes both files straight into its build directory.
+  const keystore = 'keystore-0b3c8a52-6f1d-4a8e-9d2f-1c2b3a4d5e6f';
+  mkdirSync(join(paths.source, 'android', 'app'), { recursive: true });
+  writeFileSync(join(paths.source, keystore), 'keystore bytes');
+  writeFileSync(join(paths.source, 'credentials.json'), '{"keystorePassword":"fixture"}');
+  writeFileSync(join(paths.source, 'android', 'app', 'build.gradle'), 'evidence');
+  writeFileSync(join(paths.source, 'package.json'), '{}');
+
+  assert.deepEqual(removeRetainedSigningCredentials(fixture.state, fixture.options), [
+    'credentials.json',
+    keystore,
+  ]);
+  assert.equal(existsSync(join(paths.source, keystore)), false);
+  assert.equal(existsSync(join(paths.source, 'credentials.json')), false);
+  assert.equal(
+    readFileSync(join(paths.source, 'android', 'app', 'build.gradle'), 'utf8'),
+    'evidence',
+  );
+  assert.equal(existsSync(join(paths.source, 'package.json')), true);
+  assert.deepEqual(removeRetainedSigningCredentials(fixture.state, fixture.options), []);
+
+  removeManagedEasDirectory(fixture.state, fixture.options);
+  assert.deepEqual(removeRetainedSigningCredentials(fixture.state, fixture.options), []);
+});
+
+test("credential removal refuses a workspace that is not this run's own", async (t) => {
+  await t.test('wrong ownership token', () => {
+    const fixture = nativeWorkspaceFixture(t, '-retained-wrong-token');
+    const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+    mkdirSync(paths.source);
+    writeFileSync(join(paths.source, 'credentials.json'), '{}');
+    assert.throws(
+      () =>
+        removeRetainedSigningCredentials(
+          { ...fixture.state, workspace: { token: 'different-token' } },
+          fixture.options,
+        ),
+      /ownership marker does not match/,
+    );
+    assert.equal(existsSync(join(paths.source, 'credentials.json')), true);
+  });
+
+  await t.test('symlinked build directory', () => {
+    const fixture = nativeWorkspaceFixture(t, '-retained-symlink');
+    const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+    const outside = join(fixture.options.temporaryParent, 'outside-build');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'credentials.json'), '{}');
+    symlinkSync(outside, paths.source);
+    assert.throws(
+      () => removeRetainedSigningCredentials(fixture.state, fixture.options),
+      /retained EAS build directory must be a real directory/,
+    );
+    assert.equal(existsSync(join(outside, 'credentials.json')), true);
+  });
+});
+
+test('a failed build that keeps its workspace reports the credential deletion and cleanup', (t) => {
+  const fixture = nativeWorkspaceFixture(t, '-retained-notice');
+  const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+  mkdirSync(paths.source);
+  writeFileSync(join(paths.source, 'credentials.json'), '{}');
+  const cleanup = `npm run release:android:cleanup -- --run ${fixture.state.runId}`;
+
+  const notice = retainedWorkspaceNotice(fixture.state, fixture.options);
+  assert.equal(existsSync(join(paths.source, 'credentials.json')), false);
+  assert.match(notice, /signing keystore and password file were deleted/);
+  assert.ok(notice.endsWith(cleanup), notice);
+
+  const failed = retainedWorkspaceNotice(fixture.state, fixture.options, () => {
+    throw new Error('disk is read-only');
+  });
+  assert.match(failed, /password file FAILED \(disk is read-only\)/);
+  assert.ok(failed.endsWith(cleanup), failed);
+  removeManagedEasDirectory(fixture.state, fixture.options);
 });
 
 test('uses bounded retries for run-owned recursive directory removal', () => {
