@@ -60,11 +60,15 @@ share-intent code; it records device-only failure modes that Node tests cannot r
 
 ## Local setup
 
-The reviewed toolchain is exact:
+CI and EAS builds use the exact reviewed toolchain (`.nvmrc`, `eas.json` and `packageManager`):
 
 - Node `24.19.0`
 - npm `11.17.0`
 - Android target only; JDK 17 and the Android SDK are needed for a local native build
+
+On your own machine, `check-toolchain.mjs` also accepts later releases of the same major line
+(Node 24.x from 24.19.0, npm 11.x from 11.17.0), so newer security patches do not fail the check.
+Release receipts record the exact versions a release used.
 
 ```sh
 nvm install

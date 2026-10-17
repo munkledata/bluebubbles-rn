@@ -232,6 +232,24 @@ export function validateReleaseRunnerSource(source) {
   return errors;
 }
 
+/**
+ * Whether a tool reports `minimum` or a later release of the same major line. The pinned files
+ * (.nvmrc, eas.json and packageManager) keep CI and EAS builds exact; the machine running a check
+ * may carry newer security patches, and release receipts record the exact versions it used.
+ */
+function isSameMajorAtLeast(actual, minimum) {
+  const parse = (version) =>
+    /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version))?.slice(1).map(Number) ?? null;
+  const found = parse(actual);
+  const required = parse(minimum);
+  if (!found || !required || found[0] !== required[0]) return false;
+  return found[1] > required[1] || (found[1] === required[1] && found[2] >= required[2]);
+}
+
+function sameMajorAtLeastLabel(minimum) {
+  return `${minimum} or a later ${minimum.split('.')[0]}.x`;
+}
+
 export function validateToolchain({
   actualNode,
   childNpm,
@@ -248,8 +266,10 @@ export function validateToolchain({
   if (nvmNode !== REQUIRED_NODE_VERSION) {
     errors.push(`.nvmrc is ${nvmNode}, but the reviewed Node version is ${REQUIRED_NODE_VERSION}`);
   }
-  if (actualNode !== REQUIRED_NODE_VERSION) {
-    errors.push(`runtime is ${actualNode}, but Node ${REQUIRED_NODE_VERSION} is required`);
+  if (!isSameMajorAtLeast(actualNode, REQUIRED_NODE_VERSION)) {
+    errors.push(
+      `runtime is ${actualNode}, but Node ${sameMajorAtLeastLabel(REQUIRED_NODE_VERSION)} is required`,
+    );
   }
   if (packageJson?.engines?.node !== REQUIRED_NODE_ENGINE) {
     errors.push(
@@ -261,11 +281,15 @@ export function validateToolchain({
       `package.json packageManager is ${String(packageJson?.packageManager)}, but ${expectedPackageManager} is required`,
     );
   }
-  if (childNpm !== REQUIRED_NPM_VERSION) {
-    errors.push(`npm on PATH is ${childNpm}, but npm ${REQUIRED_NPM_VERSION} is required`);
+  if (!isSameMajorAtLeast(childNpm, REQUIRED_NPM_VERSION)) {
+    errors.push(
+      `npm on PATH is ${childNpm}, but npm ${sameMajorAtLeastLabel(REQUIRED_NPM_VERSION)} is required`,
+    );
   }
-  if (invokingNpm != null && invokingNpm !== REQUIRED_NPM_VERSION) {
-    errors.push(`invoking npm is ${invokingNpm}, but npm ${REQUIRED_NPM_VERSION} is required`);
+  if (invokingNpm != null && !isSameMajorAtLeast(invokingNpm, REQUIRED_NPM_VERSION)) {
+    errors.push(
+      `invoking npm is ${invokingNpm}, but npm ${sameMajorAtLeastLabel(REQUIRED_NPM_VERSION)} is required`,
+    );
   }
 
   if (hasNpmShrinkwrap) {

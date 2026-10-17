@@ -108,6 +108,36 @@ test('accepts direct node invocation when npm on PATH is still pinned', () => {
   assert.deepEqual(validateToolchain({ ...validInput(), invokingNpm: undefined }), []);
 });
 
+test('accepts later Node 24 and npm 11 releases on the machine running the check', () => {
+  assert.deepEqual(
+    validateToolchain({
+      ...validInput(),
+      actualNode: '24.21.0',
+      childNpm: '11.19.0',
+      invokingNpm: '11.19.0',
+    }),
+    [],
+  );
+});
+
+test('rejects a runtime outside the reviewed major line or below its minimum', () => {
+  const cases = [
+    [{ actualNode: '25.0.0' }, 'runtime is 25.0.0'],
+    [{ actualNode: '24.18.9' }, 'runtime is 24.18.9'],
+    [{ actualNode: '23.99.0' }, 'runtime is 23.99.0'],
+    [{ actualNode: '24.21.0-nightly20261016' }, 'runtime is 24.21.0-nightly20261016'],
+    [{ childNpm: '12.0.0' }, 'npm on PATH is 12.0.0'],
+    [{ childNpm: '11.16.9' }, 'npm on PATH is 11.16.9'],
+    [{ childNpm: 'unavailable (spawn npm ENOENT)' }, 'npm on PATH is unavailable'],
+    [{ invokingNpm: '10.9.2' }, 'invoking npm is 10.9.2'],
+  ];
+  for (const [override, expected] of cases) {
+    const errors = validateToolchain({ ...validInput(), ...override });
+    assert.equal(errors.length, 1, expected);
+    assert.ok(errors[0].includes(expected), `${expected}: ${errors[0]}`);
+  }
+});
+
 test('rejects Android architecture drift in every EAS environment', () => {
   for (const profile of ['development', 'preview', 'production']) {
     for (const replacement of [undefined, 'x86_64', 'arm64-v8a,x86_64,armeabi-v7a']) {
