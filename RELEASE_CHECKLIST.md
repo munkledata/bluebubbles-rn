@@ -222,7 +222,9 @@ Open, or Production promotion, or earlier if Play flags the internal app.
 
 ## 2. Toolchain, dependencies, and static gates
 
-Run from a clean checkout with the versions declared by `.nvmrc` and `package.json`:
+Run from a clean checkout with Node and npm that `check:toolchain` accepts: the `.nvmrc` and
+`packageManager` versions or a later release of the same major line. Local release builds use the
+machine's versions, and the release receipts record them exactly.
 
 ```sh
 node --test scripts/check-workflow-security.test.mjs

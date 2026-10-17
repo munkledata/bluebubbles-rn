@@ -60,7 +60,8 @@ share-intent code; it records device-only failure modes that Node tests cannot r
 
 ## Local setup
 
-CI and EAS builds use the exact reviewed toolchain (`.nvmrc`, `eas.json` and `packageManager`):
+CI and EAS cloud builds use the exact reviewed toolchain (`.nvmrc`, `eas.json` and
+`packageManager`):
 
 - Node `24.19.0`
 - npm `11.17.0`
@@ -68,7 +69,8 @@ CI and EAS builds use the exact reviewed toolchain (`.nvmrc`, `eas.json` and `pa
 
 On your own machine, `check-toolchain.mjs` also accepts later releases of the same major line
 (Node 24.x from 24.19.0, npm 11.x from 11.17.0), so newer security patches do not fail the check.
-Release receipts record the exact versions a release used.
+That includes local release builds: `eas build --local` uses the machine's Node and npm (it only
+warns when `eas.json` names another Node), and release receipts record the exact versions used.
 
 ```sh
 nvm install
