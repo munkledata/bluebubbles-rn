@@ -18,10 +18,14 @@ const EMBEDDED_WEBVIEW_MODULES = ['react-native-webview', '@expo/dom-webview', '
 // may import only these packages, its own modules, and these reviewed platform-free utilities.
 // Anything else, including React Native, Expo, native drivers and the other app layers, is refused.
 // src/utils also holds modules that import the database and app state, so utilities are listed
-// one by one instead of allowing the whole @utils alias.
-const CORE_ALLOWED_PACKAGES = ['zod', 'ky'];
+// one by one instead of allowing the whole @utils alias, and each listed utility file is checked
+// with this same allowlist (unicode-segmenter is the pure-JS package @utils/grapheme wraps).
+const CORE_ALLOWED_PACKAGES = ['zod', 'ky', 'unicode-segmenter'];
 const CORE_ALLOWED_ALIASES = ['@core', '@/core'];
-const CORE_ALLOWED_UTILITY_MODULES = new Set(['@utils/bytes', '@utils/grapheme', '@utils/version']);
+const CORE_ALLOWED_UTILITIES = ['bytes', 'grapheme', 'version'];
+const CORE_ALLOWED_UTILITY_MODULES = new Set(
+  CORE_ALLOWED_UTILITIES.map((name) => `@utils/${name}`),
+);
 const SOURCE_EXTENSIONS = ['.tsx', '.jsx', '.mts', '.cts', '.mjs', '.cjs', '.ts', '.js'];
 const RAW_DB_DRIVER_MODULE = '@op-engineering/op-sqlite';
 const RAW_DB_DRIVER_HANDLE_TYPES = new Set([
@@ -132,7 +136,18 @@ function isInside(candidate, directory) {
 
 function isAllowedCoreImport({ root, file, specifier }) {
   if (specifier.startsWith('.')) {
-    return isInside(resolve(file, '..', specifier), resolve(root, CORE_DIRECTORY));
+    const target = resolve(file, '..', specifier);
+    return (
+      isInside(target, resolve(root, CORE_DIRECTORY)) ||
+      CORE_ALLOWED_UTILITIES.some((name) => target === resolve(root, 'src/utils', name))
+    );
+  }
+  // TypeScript and Jest resolve `@core/../db/database` to src/db/database.ts, so a non-relative
+  // path may not contain `.`, `..` or empty segments that could climb out of an allowed root.
+  if (
+    specifier.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+  ) {
+    return false;
   }
   if (CORE_ALLOWED_UTILITY_MODULES.has(specifier)) return true;
   return [...CORE_ALLOWED_PACKAGES, ...CORE_ALLOWED_ALIASES].some(
@@ -166,7 +181,7 @@ export function validateCoreImports({ root, files }) {
         errors.push(`${relative(root, file)} uses a non-literal require/import.`);
       } else if (!isAllowedCoreImport({ root, file, specifier })) {
         errors.push(
-          `${relative(root, file)} imports forbidden boundary "${specifier}"; src/core may import only the CORE_ALLOWED_* entries in scripts/check-core-boundaries.mjs.`,
+          `${relative(root, file)} imports forbidden boundary "${specifier}"; src/core and its reviewed utilities may import only the CORE_ALLOWED_* entries in scripts/check-core-boundaries.mjs.`,
         );
       }
     }
@@ -806,8 +821,12 @@ export function validateSynchronousRuntimeCycles({ root, files }) {
 }
 
 export function runCoreBoundaryCheck({ root = process.cwd() } = {}) {
-  const core = resolve(root, CORE_DIRECTORY);
-  const files = sourceFiles(core);
+  const files = [
+    ...sourceFiles(resolve(root, CORE_DIRECTORY)),
+    ...CORE_ALLOWED_UTILITIES.map((name) => resolve(root, 'src/utils', `${name}.ts`)).filter(
+      (file) => existsSync(file),
+    ),
+  ];
   const errors = validateCoreImports({ root, files });
   if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
   return { files: files.length };

@@ -133,6 +133,70 @@ test('rejects every package, utility, and path outside the core import allowlist
   }
 });
 
+test('rejects alias and package paths that climb out of an allowed root', () => {
+  const root = fixture({
+    'src/core/example.ts': `
+      import { db } from '@core/../db/database';
+      import { layout } from '@/core/../../app/_layout';
+      import { native } from 'zod/../react-native';
+      import { same } from '@core/./models';
+      import { trailing } from 'ky/';
+    `,
+  });
+  const file = resolve(root, 'src/core/example.ts');
+
+  try {
+    const errors = validateCoreImports({ root, files: [file] });
+    const refused = [
+      '@core/../db/database',
+      '@/core/../../app/_layout',
+      'zod/../react-native',
+      '@core/./models',
+      'ky/',
+    ];
+    for (const specifier of refused) {
+      assert.ok(
+        errors.some((error) => error.includes(`"${specifier}"`)),
+        specifier,
+      );
+    }
+    assert.equal(errors.length, refused.length);
+  } finally {
+    rmSync(root, { recursive: true });
+  }
+});
+
+test('checks the reviewed utilities that core may import with the same allowlist', () => {
+  const root = fixture({
+    'src/core/example.ts': `import { compareVersions } from '@utils/version';`,
+    'src/utils/version.ts': `
+      import { isDev } from './isDev';
+      import { useSessionStore } from '@state/sessionStore';
+      import { bytes } from './bytes';
+      export const compareVersions = () => 0;
+    `,
+    'src/utils/bytes.ts': `export const bytes = 1;`,
+    'src/utils/grapheme.ts': `import Graphemer from 'unicode-segmenter/grapheme';`,
+    'src/utils/isDev.ts': `import { useSessionStore } from '@state/sessionStore';`,
+  });
+
+  try {
+    assert.throws(
+      () => runCoreBoundaryCheck({ root }),
+      (error) =>
+        error.message.includes('src/utils/version.ts imports forbidden boundary "./isDev"') &&
+        error.message.includes(
+          'src/utils/version.ts imports forbidden boundary "@state/sessionStore"',
+        ) &&
+        !error.message.includes('"./bytes"') &&
+        !error.message.includes('src/utils/grapheme.ts') &&
+        !error.message.includes('src/utils/isDev.ts'),
+    );
+  } finally {
+    rmSync(root, { recursive: true });
+  }
+});
+
 test('rejects a non-literal dynamic import because its boundary cannot be checked', () => {
   const root = fixture({
     'src/core/example.ts': `
