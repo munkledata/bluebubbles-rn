@@ -9853,6 +9853,86 @@ test('CLI dry-run is byte-immutable, explicit write applies, and a second write 
   }
 });
 
+// Review item M033: AGENTS.md prescribes --report while iterating, so it must count the findings
+// that --check can never accept and exit non-zero on any problem, instead of always exiting 0.
+test('report mode counts nested and unresolved findings and fails on any problem', () => {
+  const base = {
+    'src/db/schema.ts': `export const messages = {};`,
+    'src/db/transaction.ts': `
+      export async function withDbTransaction(db, callback) { return callback(db); }
+    `,
+  };
+  const ownedWrite = `export function ownWrite(db) {
+    return withDbTransaction(db, async () => db.delete(messages));
+  }`;
+  const cases = [
+    {
+      name: 'clean',
+      body: ownedWrite,
+      approve: true,
+      status: 0,
+      summary:
+        /: 3 mutations; 0 structural\/membership errors; 0 nested-coordinator; 0 unresolved\./,
+    },
+    {
+      name: 'unresolved',
+      body: `export function looseWrite(db) { return db.delete(messages); }`,
+      approve: true,
+      status: 1,
+      summary:
+        /: 1 mutations; 0 structural\/membership errors; 0 nested-coordinator; 1 unresolved\./,
+    },
+    {
+      name: 'nested',
+      body: `export function nested(db) {
+        return withDbTransaction(db, async () =>
+          withDbTransaction(db, async () => db.delete(messages)),
+        );
+      }`,
+      approve: true,
+      status: 1,
+      summary:
+        /: 5 mutations; 0 structural\/membership errors; 2 nested-coordinator; 0 unresolved\./,
+    },
+    {
+      name: 'unapproved',
+      body: ownedWrite,
+      approve: false,
+      status: 1,
+      summary:
+        /: 3 mutations; 3 structural\/membership errors; 0 nested-coordinator; 0 unresolved\./,
+    },
+  ];
+  for (const testCase of cases) {
+    const root = fixture({
+      ...base,
+      'src/services/owner.ts': `
+        import { withDbTransaction } from '../db/transaction';
+        import { messages } from '../db/schema';
+        ${testCase.body}
+      `,
+    });
+    try {
+      const inventory = testCase.approve
+        ? reviewedInventory(scanDbWrites({ root }))
+        : { version: 1, entries: [] };
+      mkdirSync(resolve(root, 'scripts'), { recursive: true });
+      writeFileSync(
+        resolve(root, 'scripts/db-write-inventory.json'),
+        `${JSON.stringify(inventory, null, 2)}\n`,
+      );
+      const run = spawnSync(process.execPath, [DB_WRITE_SCANNER_CLI, '--report'], {
+        cwd: root,
+        encoding: 'utf8',
+      });
+      assert.equal(run.status, testCase.status, `${testCase.name}: ${run.stderr}`);
+      assert.match(run.stdout, testCase.summary, testCase.name);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 // Review item 486: a number shared by differently named cards is still a known sender. Pin every
 // write of both contact-linking passes, the flag helper, and its migration.
 test('certifies exactly the reviewed ambiguous-contact writes', () => {

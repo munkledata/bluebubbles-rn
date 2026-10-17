@@ -16602,9 +16602,20 @@ if (invokedDirectly) {
           inventory,
           requireApproved: false,
         });
+        const countContext = (context) =>
+          findings.filter((finding) => finding.detectedContext === context).length;
+        const nested = countContext('nested-coordinator');
+        const unresolved = countContext('unresolved');
         console.log(
-          `DB write inventory report: ${findings.length} mutations; ${errors.length} structural/membership errors.`,
+          `DB write inventory report: ${findings.length} mutations; ${errors.length} structural/membership errors; ${nested} nested-coordinator; ${unresolved} unresolved.`,
         );
+        // --check can never accept these, so the report fails too instead of looking like a pass.
+        if (errors.length + nested + unresolved > 0) {
+          console.error(
+            'DB write inventory report found problems: every nested-coordinator finding is a defect, an unresolved write has no detected owner, and structural errors mean the inventory needs reconciling.',
+          );
+          process.exitCode = 1;
+        }
       }
     }
   } catch (error) {
