@@ -300,6 +300,12 @@ npm run release:android:submit -- --run <run-id>
 npm run release:android:submit -- --run <run-id> --execute
 ```
 
+Validation first checks that `unzip`, `jarsigner` and `keytool` run; a missing local tool stops it
+with the run still `built`, so install the tool and rerun validate. Validation refuses an AAB that
+the pinned upload certificate did not sign (`EXPECTED_UPLOAD_CERTIFICATE_SHA256` in
+`scripts/release-android.mjs`; update it in a reviewed change only if the upload key is reset in
+Play Console).
+
 Use `dist/release/<run-id>/validation.json` and `promotion.json` for the version, exact source,
 environment, size, SHA-256, and upload-certificate record. Do not infer identity from a filename or
 from the remote EAS version counter. A local build still contacts EAS and may consume a remote
