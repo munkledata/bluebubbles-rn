@@ -8,7 +8,7 @@
     "node": ">=24.19.0 <25"
   },
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "patch-package --error-on-fail",
     "start": "expo start",
     "android": "expo run:android",
     "test:android:db": "node --test scripts/run-android-db-contract.test.mjs && node scripts/run-android-db-contract.mjs",

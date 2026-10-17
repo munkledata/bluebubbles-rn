@@ -2037,9 +2037,11 @@ export function findNativeErrorPrivacyFindings({ root = process.cwd() } = {}) {
   if (
     packageJson.dependencies?.['react-native'] !== '0.86.3' ||
     installedPackage.version !== '0.86.3' ||
-    packageJson.scripts?.postinstall !== 'patch-package'
+    packageJson.scripts?.postinstall !== 'patch-package --error-on-fail'
   ) {
-    errors.push('native error privacy requires pinned RN 0.86.3 and patch-package postinstall');
+    errors.push(
+      'native error privacy requires pinned RN 0.86.3 and patch-package --error-on-fail postinstall',
+    );
   }
 
   // The DB library writes directly to Android/RNLog, outside FLog containment. Pin both the

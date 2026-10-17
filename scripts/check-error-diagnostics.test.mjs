@@ -1102,7 +1102,19 @@ test('pins release C++ error containment, committed patch, and source-build wiri
     ],
     [
       'package.json',
-      (source) => source.replace('"postinstall": "patch-package"', '"postinstall": "echo skipped"'),
+      (source) =>
+        source.replace(
+          '"postinstall": "patch-package --error-on-fail"',
+          '"postinstall": "echo skipped"',
+        ),
+    ],
+    [
+      'package.json',
+      (source) =>
+        source.replace(
+          '"postinstall": "patch-package --error-on-fail"',
+          '"postinstall": "patch-package"',
+        ),
     ],
     ['app.config.ts', (source) => source + '\nconfig.plugins = [];\n'],
     ['app.config.ts', (source) => source.replace("'./plugins/withStartupPrivacy',", '')],

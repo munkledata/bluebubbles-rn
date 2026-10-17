@@ -332,7 +332,7 @@ const shareMainActivitySource = applyMainActivityShareCapture(baseMainActivitySo
 
 const redirectContainmentPackageJson = {
   main: 'index.js',
-  scripts: { postinstall: 'patch-package' },
+  scripts: { postinstall: 'patch-package --error-on-fail' },
   dependencies: {
     'expo-background-task': '57.0.21',
     'expo-file-system': '57.0.7',
@@ -2126,7 +2126,14 @@ test('rejects drift anywhere in the Expo file-system redirect containment chain'
       mutate(input) {
         input.packageJson.scripts.postinstall = 'node scripts/noop.mjs';
       },
-      error: 'postinstall must run patch-package',
+      error: 'postinstall must run patch-package --error-on-fail',
+    },
+    {
+      label: 'postinstall hook that tolerates a failed patch',
+      mutate(input) {
+        input.packageJson.scripts.postinstall = 'patch-package';
+      },
+      error: 'postinstall must run patch-package --error-on-fail',
     },
     {
       label: 'source-build selection',

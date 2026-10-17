@@ -1170,8 +1170,10 @@ export function validateExpoFileSystemRedirectContainment({
   const postinstallSteps = String(packageJson?.scripts?.postinstall ?? '')
     .split(/\s*&&\s*/)
     .filter(Boolean);
-  if (!postinstallSteps.includes('patch-package')) {
-    errors.push('package.json postinstall must run patch-package');
+  // Without --error-on-fail, patch-package exits 0 off CI even when a patch no longer applies, so
+  // a local install would silently build unpatched libraries.
+  if (!postinstallSteps.includes('patch-package --error-on-fail')) {
+    errors.push('package.json postinstall must run patch-package --error-on-fail');
   }
 
   const sourceBuild = packageJson?.expo?.autolinking?.android?.buildFromSource;
