@@ -306,11 +306,11 @@ test('checkout discovery includes untracked source but excludes ignored output a
   );
 });
 
-test('current repository inventory pins the 14 assets, 13 local components, and SQLCipher notice', () => {
+test('current repository inventory pins the 14 assets, 14 local components, and SQLCipher notice', () => {
   const { inventory } = buildInventory(ROOT);
 
   assert.equal(inventory.summary.assetFiles, 14);
-  assert.equal(inventory.summary.localComponents, 13);
+  assert.equal(inventory.summary.localComponents, 14);
   assert.equal(inventory.summary.pendingAssetProvenance, 14);
   assert.equal(inventory.coverage.exactAab, false);
   assert.deepEqual(inventory.inventoryIssues, []);

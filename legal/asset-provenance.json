@@ -27,6 +27,7 @@
     { "path": "plugins/withGradleJvmMemory.js", "provenanceStatus": "unresolved" },
     { "path": "plugins/withNoWebSocketRedirects.js", "provenanceStatus": "unresolved" },
     { "path": "plugins/withNotificationIcon.js", "provenanceStatus": "unresolved" },
+    { "path": "plugins/withPrivateNotificationActivity.js", "provenanceStatus": "unresolved" },
     { "path": "plugins/withShareTargets.js", "provenanceStatus": "unresolved" },
     { "path": "plugins/withStartupPrivacy.js", "provenanceStatus": "unresolved" },
     { "path": "plugins/withSystemCaNetworkSecurity.js", "provenanceStatus": "unresolved" }
