@@ -227,6 +227,10 @@ export function validateReleaseRunnerSource(source) {
       'retainedWorkspaceNote = retainedWorkspaceNotice(state, {',
       'delete the signing credentials from a workspace a failed build keeps',
     ],
+    [
+      'if (error?.hostToolFailure === true) {',
+      'keep a run built when a local tool fails during validation',
+    ],
   ]) {
     if (source.split(marker).length !== 2) {
       errors.push(`Android release runner must ${requirement}`);

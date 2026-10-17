@@ -136,7 +136,18 @@ function requireFlag(options, name, message) {
   if (options.get(name) !== true) throw new Error(message ?? `--${name} is required`);
 }
 
-function runCapture(command, args, { cwd = ROOT, env = process.env, allowFailure = false } = {}) {
+/** An error from the machine running a tool, not from whatever the tool was checking. */
+function hostToolFailure(message) {
+  const error = new Error(message);
+  error.hostToolFailure = true;
+  return error;
+}
+
+export function runCapture(
+  command,
+  args,
+  { cwd = ROOT, env = process.env, allowFailure = false } = {},
+) {
   const result = spawnSync(command, args, {
     cwd,
     env,
@@ -144,9 +155,16 @@ function runCapture(command, args, { cwd = ROOT, env = process.env, allowFailure
     maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  if (result.error) throw new Error(`${command} could not start: ${result.error.message}`);
+  if (result.error) throw hostToolFailure(`${command} could not start: ${result.error.message}`);
   if (!allowFailure && result.status !== 0) {
     const detail = [result.stderr?.trim(), result.stdout?.trim()].filter(Boolean).join('\n');
+    // A tool killed by a signal (for example a JVM the OS ends under memory pressure) says nothing
+    // about its inputs.
+    if (result.signal != null) {
+      throw hostToolFailure(
+        `${command} was killed by ${result.signal}${detail ? `:\n${detail}` : ''}`,
+      );
+    }
     throw new Error(`${command} exited ${String(result.status)}${detail ? `:\n${detail}` : ''}`);
   }
   return {
@@ -1731,6 +1749,14 @@ async function validate(options) {
       artifact = inspectReleaseArtifact(artifactPath, state);
       buildReceiptBinding = readBoundReleaseBuildReceipt(state, artifact);
     } catch (error) {
+      // A local tool that could not start or was killed mid-check says nothing about the artifact,
+      // so the run stays built for another validate, as with the up-front probe.
+      if (error?.hostToolFailure === true) {
+        throw new Error(
+          `release validation was interrupted by a local tool failure; the run stays built, so re-run validate: ${error.message}`,
+          { cause: error },
+        );
+      }
       const retainedArtifact = moveFailedArtifact(runId);
       const failure = {
         phase: 'validate',

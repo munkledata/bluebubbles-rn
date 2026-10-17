@@ -300,8 +300,9 @@ npm run release:android:submit -- --run <run-id>
 npm run release:android:submit -- --run <run-id> --execute
 ```
 
-Validation first checks that `unzip`, `jarsigner` and `keytool` run; a missing local tool stops it
-with the run still `built`, so install the tool and rerun validate. Validation refuses an AAB that
+Validation first checks that `unzip`, `jarsigner` and `keytool` run. A missing local tool, or one
+that cannot start or is killed mid-check, stops it with the run still `built`, so fix the tool and
+rerun validate. Validation refuses an AAB that
 the pinned upload certificate did not sign (`EXPECTED_UPLOAD_CERTIFICATE_SHA256` in
 `scripts/release-android.mjs`; update it in a reviewed change only if the upload key is reset in
 Play Console).

@@ -37,6 +37,7 @@ import {
   removeRetainedSigningCredentials,
   requireExpectedUploadCertificate,
   retainedWorkspaceNotice,
+  runCapture,
   stageGoogleServicesFile,
   verifyReleaseNativePathProof,
 } from './release-android.mjs';
@@ -317,6 +318,28 @@ test('probes every local artifact-validation tool before an artifact is judged',
     ['jarsigner', '-help'],
     ['keytool', '-help'],
   ]);
+});
+
+test('a tool that cannot start or is killed is a host failure, not an artifact failure', () => {
+  const thrown = (action) => {
+    try {
+      action();
+    } catch (error) {
+      return error;
+    }
+    assert.fail('expected the command to throw');
+  };
+  const missing = thrown(() => runCapture('gator-no-such-tool-for-release-tests', []));
+  assert.equal(missing.hostToolFailure, true);
+  assert.match(missing.message, /could not start/);
+
+  const killed = thrown(() => runCapture('/bin/sh', ['-c', 'kill -KILL $$']));
+  assert.equal(killed.hostToolFailure, true);
+  assert.match(killed.message, /\/bin\/sh was killed by SIGKILL/);
+
+  const exited = thrown(() => runCapture('/bin/sh', ['-c', 'exit 3']));
+  assert.notEqual(exited.hostToolFailure, true);
+  assert.match(exited.message, /exited 3/);
 });
 
 test('a missing validation tool stops validation without blaming the artifact', () => {

@@ -898,6 +898,11 @@ test('pins retained native-build evidence and rejects ambient EAS bypass control
       'retainedWorkspaceNote = ({',
       'delete the signing credentials from a workspace a failed build keeps',
     ],
+    [
+      'if (error?.hostToolFailure === true) {',
+      'if (false) {',
+      'keep a run built when a local tool fails during validation',
+    ],
   ]) {
     const mutated = source.replace(expected, replacement);
     assert.notEqual(mutated, source, expected);
