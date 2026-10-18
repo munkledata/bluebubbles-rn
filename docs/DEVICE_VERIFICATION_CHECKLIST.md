@@ -1369,6 +1369,10 @@ authoritative candidate procedure.
       `[fcm] device token registration failed` in the log; a clean connect should not log
       that. _(2026-07-23 adb, v0.1.28: cold start + 20s observation — no failure line logged.
       Release build has no positive success line, so this is verified by absence, as written.)_
+- [ ] **`EXACT PACKAGED CANDIDATE` — banner clears when the network returns (M116, added
+      2026-10-18):** With Gator open and connected, turn on airplane mode for at least 4 minutes (long
+      enough for the socket's reconnect backoff to reach about a minute), then turn it off. The
+      "Connection problem" banner clears within a few seconds instead of staying for up to a minute.
 
 ---
 

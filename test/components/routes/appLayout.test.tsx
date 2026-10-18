@@ -81,6 +81,11 @@ jest.mock('@/services', () => ({
 jest.mock('@/services/send', () => ({
   recoverOutgoing: jest.fn(() => Promise.resolve({ eligible: 0, sent: 0 })),
 }));
+const mockStopNetworkRecovery = jest.fn();
+const mockStartNetworkRecovery = jest.fn((_retry: () => boolean) => mockStopNetworkRecovery);
+jest.mock('@/services/realtime/networkRecoveryRetry', () => ({
+  startNetworkRecoveryRetry: (retry: () => boolean) => mockStartNetworkRecovery(retry),
+}));
 jest.mock('@/services/download/attachmentMediaExportQueue', () => ({
   drainPendingAttachmentMediaExports: jest.fn(() => Promise.resolve()),
 }));
@@ -340,6 +345,21 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockConnectionBanner).toHaveBeenCalledTimes(1);
     expect(mockConnectionBanner.mock.calls[0]?.[0].onRetry).toBe(mockRetryRealtime);
     expect(mockConnectionBanner.mock.calls[0]?.[0].onHeightChange).toEqual(expect.any(Function));
+  });
+
+  it('restarts the socket on network recovery with the same Retry action while mounted', async () => {
+    // Review M116: the banner kept saying "Connection problem" for up to a minute after the
+    // network returned, until the socket's own backoff ran out.
+    const view = await renderWithTheme(<AppLayout />);
+
+    expect(mockStartNetworkRecovery).toHaveBeenCalledTimes(1);
+    expect(mockStartNetworkRecovery).toHaveBeenCalledWith(mockRetryRealtime);
+    expect(mockStopNetworkRecovery).not.toHaveBeenCalled();
+
+    await act(async () => {
+      view.unmount();
+    });
+    expect(mockStopNetworkRecovery).toHaveBeenCalledTimes(1);
   });
 
   it("opens Server Management from the banner's Fix without stacking a second copy", async () => {

@@ -56,7 +56,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:96e551b4af14",
       "path": "app/(app)/_layout.tsx",
-      "line": 146,
+      "line": 147,
       "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
@@ -69,7 +69,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:b2420ad62c5c",
       "path": "app/(app)/_layout.tsx",
-      "line": 166,
+      "line": 167,
       "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRealtime",
@@ -82,7 +82,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:96e551b4af14:2",
       "path": "app/(app)/_layout.tsx",
-      "line": 169,
+      "line": 170,
       "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
@@ -95,7 +95,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:cc9500dd8a49",
       "path": "app/(app)/_layout.tsx",
-      "line": 174,
+      "line": 175,
       "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
       "operation": "mutator-call",
       "target": "src/services/send/index.ts#recoverOutgoing",
@@ -108,7 +108,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5bd646a3ed>:mutator-call:4ffa3931c74a",
       "path": "app/(app)/_layout.tsx",
-      "line": 193,
+      "line": 194,
       "symbol": "ConnectedAppLayout.<callback:5bd646a3ed>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",

@@ -33,6 +33,7 @@ import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
+import { startNetworkRecoveryRetry } from '@/services/realtime/networkRecoveryRetry';
 import { isDevServer } from '@utils/isDev';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
@@ -192,6 +193,10 @@ function ConnectedAppLayout(): React.JSX.Element {
   useEffect(() => {
     void flushErrorReports();
   }, []);
+
+  // Restart the live socket as soon as the device network returns, instead of leaving the banner
+  // on "Connection problem" until the socket's own reconnect backoff runs out (review M116).
+  useEffect(() => startNetworkRecoveryRetry(retryRealtimeConnection), []);
 
   // Drain a pending notification tap and open its chat. Reads BOTH the notify-kit launch event
   // (getInitialNotification) and the pendingNav stash a background-alive tap leaves behind, once.
