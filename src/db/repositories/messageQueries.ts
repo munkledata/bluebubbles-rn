@@ -807,15 +807,15 @@ export async function queryCustomFolderMessageMatchBatch(
   beforeRowid: number | null,
 ): Promise<CustomFolderMessageMatchBatch> {
   const below = beforeRowid == null ? sql`` : sql`AND rowid < ${beforeRowid}`;
-  const window = await db.all<{ low: number | null; count: number }>(sql`
+  const candidateWindow = await db.all<{ low: number | null; count: number }>(sql`
     SELECT MIN(rowid) AS low, COUNT(*) AS count
       FROM (SELECT rowid FROM messages_fts
              WHERE messages_fts MATCH ${match} ${below}
              ORDER BY rowid DESC
              LIMIT ${CUSTOM_FOLDER_MESSAGE_MATCH_BATCH})
   `);
-  const low = window[0]?.low ?? null;
-  const count = window[0]?.count ?? 0;
+  const low = candidateWindow[0]?.low ?? null;
+  const count = candidateWindow[0]?.count ?? 0;
   if (low == null || count === 0) return { chatGuids: [], nextBeforeRowid: null };
   const upper = beforeRowid == null ? sql`` : sql`AND f.rowid < ${beforeRowid}`;
   const rows = await db.all<{ guid: string }>(sql`
