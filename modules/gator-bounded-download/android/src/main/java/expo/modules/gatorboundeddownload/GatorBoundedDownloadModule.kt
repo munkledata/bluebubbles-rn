@@ -214,7 +214,7 @@ class GatorBoundedDownloadModule : Module() {
       val context = appContext.reactContext
         ?: throw IllegalStateException("Android context is unavailable")
       // The root is fixed natively: JavaScript cannot redirect this deletion primitive to another
-      // app-private directory. Construct API-26 NIO only after the explicit version gate.
+      // app-private directory.
       val root = File(context.filesDir, SYNCED_BACKGROUND_CACHE_DIRECTORY)
       val fileSystem = newBoundedDirectoryStreamFileSystem()
       val result = synchronized(syncedBackgroundPruneLock) {
