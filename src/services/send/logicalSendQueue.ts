@@ -8,7 +8,7 @@ export const LOGICAL_SEND_MAX_RETAINED = 32;
 /**
  * Chats that may send at the same time (review M089). One keeps today's single global order.
  * Raise it (to 3) only after a Mac + phone test shows Messages.app and the RCS bridge accept
- * simultaneous sends to different chats.
+ * simultaneous sends to different chats; two queue tests pin this value on purpose.
  */
 export const LOGICAL_SEND_MAX_ACTIVE_CHATS = 1;
 

@@ -492,6 +492,74 @@ describe('per-chat send turns', () => {
     }
   });
 
+  it('hands the one turn to the next chat after the ordering window at the shipped limit', async () => {
+    jest.useFakeTimers();
+    const owner = generationHarness();
+    const queue = createLogicalSendQueue({ subscribeInvalidation: owner.subscribe });
+    const a1 = deferred<void>();
+    const b1 = deferred<void>();
+    const starts: string[] = [];
+    try {
+      const runs = [
+        queue.run(owner.lease(), CHAT_A, job(starts, 'A1', a1)),
+        queue.run(owner.lease(), CHAT_B, job(starts, 'B1', b1)),
+        queue.run(owner.lease(), CHAT_A, job(starts, 'A2')),
+      ];
+      await flushMicrotasks();
+      await jest.advanceTimersByTimeAsync(LOGICAL_SEND_ORDER_WINDOW_MS - 1);
+      expect(starts).toEqual(['A1']);
+      await jest.advanceTimersByTimeAsync(1);
+      await flushMicrotasks();
+      // A1 is still running, but the single turn moved on to the next send in admission order.
+      expect(starts).toEqual(['A1', 'B1']);
+      expect(queue.retained).toBe(3);
+
+      a1.resolve(undefined);
+      await flushMicrotasks();
+      expect(starts).toEqual(['A1', 'B1']);
+
+      b1.resolve(undefined);
+      await Promise.all(runs);
+      expect(starts).toEqual(['A1', 'B1', 'A2']);
+    } finally {
+      a1.resolve(undefined);
+      b1.resolve(undefined);
+      jest.useRealTimers();
+    }
+  });
+
+  it("does not let a send retired by Disconnect free the next account's turn in its chat", async () => {
+    const owner = generationHarness();
+    const queue = createLogicalSendQueue({
+      subscribeInvalidation: owner.subscribe,
+      maxActiveChats: 2,
+    });
+    const retired = deferred<void>();
+    const current = deferred<void>();
+    const starts: string[] = [];
+    const retiredRun = queue.run(owner.lease(), CHAT_A, job(starts, 'old-A', retired));
+    await flushMicrotasks();
+
+    owner.retire();
+    owner.resume();
+    const currentRuns = [
+      queue.run(owner.lease(), CHAT_A, job(starts, 'new-A1', current)),
+      queue.run(owner.lease(), CHAT_A, job(starts, 'new-A2')),
+    ];
+    await flushMicrotasks();
+    expect(starts).toEqual(['old-A', 'new-A1']);
+
+    // The retired send finishing late must not release new-A1's turn: new-A2 keeps waiting.
+    retired.resolve(undefined);
+    await retiredRun;
+    await flushMicrotasks();
+    expect(starts).toEqual(['old-A', 'new-A1']);
+
+    current.resolve(undefined);
+    await Promise.all(currentRuns);
+    expect(starts).toEqual(['old-A', 'new-A1', 'new-A2']);
+  });
+
   it('refuses a send without a chat key before counting it', async () => {
     const owner = generationHarness();
     const queue = createLogicalSendQueue({ subscribeInvalidation: owner.subscribe });
