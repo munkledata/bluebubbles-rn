@@ -639,6 +639,10 @@ only the product-owned bounded intake described in
       2026-10-18):** Smoke only: share one synthetic photo and one PDF into Gator and send them; both
       still route and send. The unreadable-claim path itself (discard, message, next share staged) is
       host-tested only, because a real device cannot produce an unreadable claim on demand.
+- [ ] **`EXACT PACKAGED CANDIDATE` — sent or removed shared files stay gone (M224, added
+      2026-10-18):** Direct Share one synthetic photo with a caption into a chat, send it, then press
+      Back: no "Discard shared item?" prompt and no attachment returns to the tray. Then share two
+      photos into New Message, remove both, and pick an existing chat: neither photo reappears.
 
 ### 7. Received stickers
 

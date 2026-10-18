@@ -3325,18 +3325,13 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
         'coordinated-delegation',
       ],
       [
-        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:cbcee720e66e',
+        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:ec3cc25fd6>.<callback:f613d3ead3>:mutator-call:ffe2eca9b54b',
         'src/services/share/shareIntake.ts#readShareIntakeReceipt',
         'coordinated-delegation',
       ],
       [
         'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:08da8e75312d',
         'src/services/share/shareIntake.ts#discardShareIntakeItem',
-        'coordinated-delegation',
-      ],
-      [
-        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:c383ac695596',
-        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
         'coordinated-delegation',
       ],
       [
@@ -7564,9 +7559,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:sql-update:fb0297907ce8',
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
-      'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:cbcee720e66e',
+      'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:ec3cc25fd6>.<callback:f613d3ead3>:mutator-call:ffe2eca9b54b',
       'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:08da8e75312d',
-      'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:c383ac695596',
       'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ce62f399b8c2',
       'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:1204bfcb57bb',
       'src/services/backup/backupService.ts#buildCurrentBackup.<callback:2bd1ecedc4>:mutator-call:3ea042f4e17e',
@@ -7574,7 +7568,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 130);
+  assert.equal(selected.length, 129);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

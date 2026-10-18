@@ -1,15 +1,16 @@
 /* eslint-disable import/first -- Jest mocks must be registered before importing their consumers. */
 const mockReadReceipt = jest.fn();
 const mockReceiptComplete = jest.fn();
-const mockConsumeBatch = jest.fn();
+const mockConsumeIfComplete = jest.fn();
+const mockFileSettled = jest.fn();
 const mockDrain = jest.fn();
 const mockShowDialog = jest.fn();
 
 jest.mock('@/services/share/shareIntake', () => ({
   readShareIntakeReceipt: (...args: unknown[]) => mockReadReceipt(...args),
   isShareIntakeReceiptComplete: (...args: unknown[]) => mockReceiptComplete(...args),
-  isShareIntakeFileSettled: () => false,
-  consumeShareIntakeBatch: (...args: unknown[]) => mockConsumeBatch(...args),
+  isShareIntakeFileSettled: (...args: unknown[]) => mockFileSettled(...args),
+  consumeShareIntakeBatchIfComplete: (...args: unknown[]) => mockConsumeIfComplete(...args),
   drainShareIntake: (...args: unknown[]) => mockDrain(...args),
   discardShareIntakeItem: jest.fn(),
   admitShareIntakeTextDraft: jest.fn(),
@@ -77,7 +78,8 @@ beforeEach(() => {
   stageShare();
   mockReadReceipt.mockResolvedValue(OPEN_RECEIPT);
   mockReceiptComplete.mockReturnValue(false);
-  mockConsumeBatch.mockResolvedValue(true);
+  mockFileSettled.mockReturnValue(false);
+  mockConsumeIfComplete.mockResolvedValue(true);
   mockDrain.mockResolvedValue(undefined);
 });
 
@@ -91,19 +93,55 @@ describe('useChatShareIntake', () => {
     const { result } = await openShare();
     expect(result.current.ownedShareBatchId).toBe(BATCH);
     expect(result.current.shareBatchPending).toBe(true);
-    expect(mockConsumeBatch).not.toHaveBeenCalled();
+    expect(mockConsumeIfComplete).not.toHaveBeenCalled();
 
-    mockReceiptComplete.mockReturnValue(true);
     await act(async () => {
       result.current.onShareAdmissionApplied({} as never);
     });
 
     await waitFor(() => expect(result.current.shareBatchPending).toBe(false));
-    expect(mockConsumeBatch).toHaveBeenCalledWith(
-      BATCH,
+    // The same service finisher as the share handler and New Message: it re-reads the receipt and
+    // acknowledges only a complete one.
+    expect(mockConsumeIfComplete).toHaveBeenCalledWith(
+      result.current.ownedShareIdentity,
       expect.objectContaining({ drainNext: false }),
     );
     expect(mockDrain).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the share pending when its receipt is not complete yet', async () => {
+    mockConsumeIfComplete.mockResolvedValue(false);
+    const { result } = await openShare();
+
+    await act(async () => {
+      result.current.onShareAdmissionApplied({} as never);
+    });
+
+    await waitFor(() => expect(mockConsumeIfComplete).toHaveBeenCalledTimes(1));
+    expect(result.current.shareBatchPending).toBe(true);
+    expect(mockDrain).not.toHaveBeenCalled();
+  });
+
+  // M224: finishing (or Back-discarding) re-ran the receipt load; the deleted receipt then read as
+  // "nothing settled" and every shared file came back into the tray.
+  it('does not put already-sent files back once the share finishes', async () => {
+    const completeReceipt = {
+      destination: { chatGuid: CHAT },
+      newChatPlan: null,
+      items: { 'file:00': 'settled' },
+    };
+    mockReadReceipt.mockResolvedValueOnce(completeReceipt).mockResolvedValue(null);
+    mockReceiptComplete.mockImplementation((receipt: unknown) => receipt === completeReceipt);
+    mockFileSettled.mockImplementation((receipt: unknown) => receipt === completeReceipt);
+
+    const { result } = await openShare();
+    await waitFor(() => expect(result.current.shareBatchPending).toBe(false));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.remainingSharedAttachments).toEqual([]);
+    expect(mockReadReceipt).toHaveBeenCalledTimes(1);
   });
 
   it('stays quiet when this chat can take the shared files', async () => {

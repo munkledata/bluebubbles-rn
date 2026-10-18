@@ -9,7 +9,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import {
   admitShareIntakeTextDraft,
-  consumeShareIntakeBatch,
+  consumeShareIntakeBatchIfComplete,
   discardShareIntakeItem,
   drainShareIntake,
   isShareIntakeFileSettled,
@@ -109,19 +109,20 @@ export function useChatShareIntake({
   // The person chose to keep the shared text here although its files cannot come along.
   const [sharedTextChosenHere, setSharedTextChosenHere] = useState(false);
   const shareFinalizingRef = useRef(false);
+  // The receipt is applied once per share. Finishing or discarding deletes it, and a later re-run
+  // would read that as "nothing settled" and offer every shared file again (M224).
+  const appliedReceiptBatchRef = useRef<string | null>(null);
 
   const finalizeShareIfReady = useCallback((): void => {
     if (!ownedShareBatchId || !shareBatchPending || !accountLease.isCurrent()) return;
     if (!ownedShareIdentity || shareFinalizingRef.current) return;
     shareFinalizingRef.current = true;
-    void runAccountOperation(accountLease, async () => {
-      const receipt = await readShareIntakeReceipt(ownedShareIdentity);
-      if (!receipt || !isShareIntakeReceiptComplete(receipt)) return false;
-      return consumeShareIntakeBatch(ownedShareBatchId, {
+    void runAccountOperation(accountLease, () =>
+      consumeShareIntakeBatchIfComplete(ownedShareIdentity, {
         lease: accountLease,
         drainNext: false,
-      });
-    })
+      }),
+    )
       .then((result) => {
         if (result.ok && result.value) {
           setShareBatchPending(false);
@@ -204,6 +205,7 @@ export function useChatShareIntake({
   // ordinals and forces any partially handled batch back to its original destination.
   useEffect(() => {
     if (!ownedShareIdentity || !accountLease.isCurrent()) return;
+    if (appliedReceiptBatchRef.current === ownedShareIdentity.batchId) return;
     let alive = true;
     let loadedReceipt: Awaited<ReturnType<typeof readShareIntakeReceipt>> = null;
     void runTrackedRealtimeWork(accountLease, async () => {
@@ -224,6 +226,7 @@ export function useChatShareIntake({
           );
           return;
         }
+        appliedReceiptBatchRef.current = ownedShareIdentity.batchId;
         setRemainingSharedAttachments(
           sharedAttachments.filter(
             (file) =>

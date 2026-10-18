@@ -257,7 +257,7 @@ jest.mock('@/services', () => ({
 }));
 jest.mock('@/services/share/shareIntake', () => ({
   admitShareIntakeTextDraft: jest.fn(async () => ({ draft: 'Shared text' })),
-  consumeShareIntakeBatch: jest.fn(),
+  consumeShareIntakeBatchIfComplete: jest.fn(),
   discardShareIntakeItem: jest.fn(async () => undefined),
   discardShareIntakeBatch: jest.fn(),
   drainShareIntake: jest.fn(() => Promise.resolve()),
@@ -366,7 +366,7 @@ import { showDialog } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
 import {
   admitShareIntakeTextDraft,
-  consumeShareIntakeBatch,
+  consumeShareIntakeBatchIfComplete,
   discardShareIntakeBatch,
   drainShareIntake,
   isShareIntakeReceiptComplete,
@@ -394,7 +394,7 @@ const useNewScreenEffectMock = useNewScreenEffect as jest.Mock;
 const useChatBackgroundUriMock = useChatBackgroundUri as jest.Mock;
 const mockGetContactsPermissionState = getContactsPermissionState as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
-const mockConsumeShareIntakeBatch = consumeShareIntakeBatch as jest.Mock;
+const mockConsumeShareIntakeBatchIfComplete = consumeShareIntakeBatchIfComplete as jest.Mock;
 const mockDiscardShareIntakeBatch = discardShareIntakeBatch as jest.Mock;
 const mockDrainShareIntake = drainShareIntake as jest.Mock;
 const mockAdmitShareIntakeTextDraft = admitShareIntakeTextDraft as jest.Mock;
@@ -529,7 +529,7 @@ beforeEach(() => {
   mockKbVisible = false;
   mockVoiceRecorderProps = undefined;
   mockMessagePreview = null;
-  mockConsumeShareIntakeBatch.mockReset().mockResolvedValue(true);
+  mockConsumeShareIntakeBatchIfComplete.mockReset().mockResolvedValue(true);
   mockDiscardShareIntakeBatch.mockReset().mockResolvedValue(true);
   mockDrainShareIntake.mockReset().mockResolvedValue(undefined);
   mockGetShareIntakeReceipt.mockReset().mockResolvedValue(null);
@@ -777,8 +777,6 @@ describe('ChatScreen — exact native share handoff', () => {
       newChatPlan: null,
       items: {},
     });
-    mockIsShareIntakeReceiptComplete.mockReturnValueOnce(false).mockReturnValueOnce(true);
-
     await renderWithTheme(<ChatScreen />);
 
     await waitFor(() => expect(mockCaptured.composer?.initialAttachments).toEqual([SHARED_FILE]));
@@ -787,7 +785,7 @@ describe('ChatScreen — exact native share handoff', () => {
       batchId: SHARE_BATCH,
       files: [SHARED_FILE],
     });
-    expect(mockConsumeShareIntakeBatch).not.toHaveBeenCalled();
+    expect(mockConsumeShareIntakeBatchIfComplete).not.toHaveBeenCalled();
 
     await act(async () => {
       mockCaptured.composer!.onAdmissionApplied({
@@ -798,15 +796,15 @@ describe('ChatScreen — exact native share handoff', () => {
     });
 
     await waitFor(() =>
-      expect(mockConsumeShareIntakeBatch).toHaveBeenCalledWith(
-        SHARE_BATCH,
+      expect(mockConsumeShareIntakeBatchIfComplete).toHaveBeenCalledWith(
+        expect.objectContaining({ batchId: SHARE_BATCH }),
         expect.objectContaining({
           drainNext: false,
           lease: expect.objectContaining({ isCurrent: expect.any(Function) }),
         }),
       ),
     );
-    expect(mockConsumeShareIntakeBatch.mock.invocationCallOrder[0]!).toBeLessThan(
+    expect(mockConsumeShareIntakeBatchIfComplete.mock.invocationCallOrder[0]!).toBeLessThan(
       mockDrainShareIntake.mock.invocationCallOrder[0]!,
     );
     expect(mockDiscardShareIntakeBatch).not.toHaveBeenCalled();
@@ -992,7 +990,7 @@ describe('ChatScreen — exact native share handoff', () => {
 
     expect(mockCaptured.composer?.initialAttachments).toBeUndefined();
     expect(mockCaptured.composer?.onAdmissionApplied).toBeUndefined();
-    expect(mockConsumeShareIntakeBatch).not.toHaveBeenCalled();
+    expect(mockConsumeShareIntakeBatchIfComplete).not.toHaveBeenCalled();
     expect(useShareIntentStore.getState().batchId).toBe(SHARE_BATCH);
   });
 
@@ -1025,7 +1023,7 @@ describe('ChatScreen — exact native share handoff', () => {
         }),
       ),
     );
-    expect(mockConsumeShareIntakeBatch).not.toHaveBeenCalled();
+    expect(mockConsumeShareIntakeBatchIfComplete).not.toHaveBeenCalled();
     expect(mockNavigationDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' });
     expect(mockNavigationDispatch.mock.invocationCallOrder[0]!).toBeLessThan(
       mockDrainShareIntake.mock.invocationCallOrder[0]!,

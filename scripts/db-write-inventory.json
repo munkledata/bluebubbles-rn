@@ -13288,22 +13288,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/homeScreen.test.tsx; test/services/scheduledRecoveryBarrier.test.ts; test/services/outgoingQueueService.test.ts"
     },
     {
-      "id": "src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:c383ac695596",
-      "path": "src/features/conversations/useChatShareIntake.ts",
-      "line": 118,
-      "symbol": "useChatShareIntake.<callback:81fa7f80e0>.<callback:a5be709a07>",
-      "operation": "mutator-call",
-      "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
-      "detectedContext": "coordinated-delegation",
-      "owner": "SHARE-02 existing-chat intake lifecycle",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatScreen.test.tsx; test/db/shareIntakeReceipts.test.ts; test/services/share/shareIntake.test.ts; test/components/hooks/useChatShareIntake.test.tsx"
-    },
-    {
       "id": "src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:08da8e75312d",
       "path": "src/features/conversations/useChatShareIntake.ts",
-      "line": 159,
+      "line": 160,
       "symbol": "useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#discardShareIntakeItem",
@@ -13314,10 +13301,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatScreen.test.tsx; test/db/shareIntakeReceipts.test.ts; test/services/share/shareIntake.test.ts; test/components/hooks/useChatShareIntake.test.tsx"
     },
     {
-      "id": "src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:cbcee720e66e",
+      "id": "src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:ec3cc25fd6>.<callback:f613d3ead3>:mutator-call:ffe2eca9b54b",
       "path": "src/features/conversations/useChatShareIntake.ts",
-      "line": 210,
-      "symbol": "useChatShareIntake.<callback:1601131854>.<callback:f613d3ead3>",
+      "line": 212,
+      "symbol": "useChatShareIntake.<callback:ec3cc25fd6>.<callback:f613d3ead3>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
       "detectedContext": "coordinated-delegation",
@@ -13329,7 +13316,7 @@
     {
       "id": "src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ce62f399b8c2",
       "path": "src/features/conversations/useChatShareIntake.ts",
-      "line": 293,
+      "line": 296,
       "symbol": "useChatShareIntake.<callback:84297bce06>.<callback:16329d1004>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#admitShareIntakeTextDraft",
