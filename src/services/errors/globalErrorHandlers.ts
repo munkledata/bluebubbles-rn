@@ -3,7 +3,8 @@ import {
   isVerboseLocalLoggingEnabled,
   projectCapturedErrorDiagnostic,
 } from '@core/secure';
-import { captureError } from './errorReportSink';
+import { fileLogSink } from '../logging/fileLogSink';
+import { captureError, errorReportSink } from './errorReportSink';
 
 /**
  * Install app-wide handlers that funnel UNCAUGHT errors into the capture queue — the errors nothing
@@ -24,6 +25,37 @@ let errorUtilsRetryScheduled = false;
 let rejectionTrackerRetryScheduled = false;
 
 const INSTALL_RETRY_DELAY_MS = 0;
+
+/** How long a fatal crash waits for its App Logs line and report to reach disk (review M213). */
+const FATAL_PERSIST_BUDGET_MS = 750;
+
+/** Start one save without letting a missing or throwing sink break the crash hand-off. */
+function startSave(save: () => Promise<unknown>): Promise<unknown> {
+  try {
+    return save();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+/**
+ * React Native's fatal handler ends the process. Give the crash's own App Logs line (otherwise held
+ * for a 1.5 s batched write) and its encrypted report a bounded moment to reach disk first.
+ * Never rejects.
+ */
+function persistBeforeFatal(): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, FATAL_PERSIST_BUDGET_MS);
+  });
+  const saves = Promise.allSettled([
+    startSave(() => fileLogSink.flush()),
+    startSave(() => errorReportSink.whenDrainsSettled()),
+  ]);
+  return Promise.race([saves, budget]).then(() => {
+    if (timer !== undefined) clearTimeout(timer);
+  });
+}
 
 interface ErrorUtilsShape {
   getGlobalHandler?: () => ((error: unknown, isFatal?: boolean) => void) | undefined;
@@ -61,15 +93,31 @@ function installErrorUtils(): boolean {
   if (errorUtilsInstalled || !errorUtils?.setGlobalHandler) return false;
   try {
     const prev = errorUtils.getGlobalHandler?.();
+    let fatalHandOffStarted = false;
     errorUtils.setGlobalHandler((error, isFatal) => {
       captureError(error, isFatal ? 'fatal' : 'uncaught', { fatal: isFatal });
       // Preserve RN redbox/native fatal reporting without handing that separate native/logcat
       // path the original message, stack, cause, or custom fields. A development build keeps the
       // real error so its red screen and Metro log can locate the bug.
-      prev?.(
-        isVerboseLocalLoggingEnabled() ? error : privacySafeGlobalError(error, isFatal),
-        isFatal,
-      );
+      const forward = (): void => {
+        prev?.(
+          isVerboseLocalLoggingEnabled() ? error : privacySafeGlobalError(error, isFatal),
+          isFatal,
+        );
+      };
+      // Only the first fatal waits; anything after it, and every non-fatal error, goes straight on.
+      if (!isFatal || fatalHandOffStarted) {
+        forward();
+        return;
+      }
+      fatalHandOffStarted = true;
+      void persistBeforeFatal().then(() => {
+        try {
+          forward();
+        } catch {
+          // Nothing more can be reported once React Native's own fatal handler fails.
+        }
+      });
     });
     errorUtilsInstalled = true;
     return false;

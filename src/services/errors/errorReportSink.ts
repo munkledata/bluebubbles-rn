@@ -111,6 +111,14 @@ export class ErrorReportSink implements LogSink {
   }
 
   /**
+   * Settle once every database drain already in flight has finished, without retiring anything.
+   * A fatal crash waits on this (bounded) before React Native ends the process (review M213).
+   */
+  whenDrainsSettled(): Promise<void> {
+    return Promise.allSettled([...this.activeDrains]).then(() => undefined);
+  }
+
+  /**
    * Persist buffered reports into the encrypted `error_reports` table (best-effort). If the DB
    * isn't open yet the reports stay buffered and are retried on the next drain. Callable directly
    * (e.g. on a fatal error, to race the crash, or before an upload flush).

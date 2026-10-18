@@ -1,6 +1,17 @@
 const mockCaptureError = jest.fn();
+const mockWhenDrainsSettled = jest.fn<Promise<void>, []>();
+const mockFileLogFlush = jest.fn<Promise<boolean>, []>();
 
-jest.mock('@/services/errors/errorReportSink', () => ({ captureError: mockCaptureError }));
+jest.mock('@/services/errors/errorReportSink', () => ({
+  captureError: mockCaptureError,
+  errorReportSink: { whenDrainsSettled: () => mockWhenDrainsSettled() },
+}));
+jest.mock('@/services/logging/fileLogSink', () => ({
+  fileLogSink: { flush: () => mockFileLogFlush() },
+}));
+
+// eslint-disable-next-line import/first
+import { flushMicrotasks, waitForMicrotaskCondition } from '../support/async';
 
 interface ErrorUtilsTestShape {
   getGlobalHandler?: () => ((error: unknown, isFatal?: boolean) => void) | undefined;
@@ -32,6 +43,8 @@ describe('global error-handler privacy boundary', () => {
   beforeEach(() => {
     jest.resetModules();
     mockCaptureError.mockReset();
+    mockWhenDrainsSettled.mockReset().mockResolvedValue(undefined);
+    mockFileLogFlush.mockReset().mockResolvedValue(true);
     priorErrorUtils = globals.ErrorUtils;
     priorHermes = globals.HermesInternal;
     delete globals.ErrorUtils;
@@ -44,7 +57,7 @@ describe('global error-handler privacy boundary', () => {
     globals.HermesInternal = priorHermes;
   });
 
-  it('installs each hook once, preserves strict capture, and chains RN with a synthetic Error', () => {
+  it('installs each hook once, preserves strict capture, and chains RN with a synthetic Error', async () => {
     const previous = jest.fn();
     let installed: ((error: unknown, isFatal?: boolean) => void) | undefined;
     let rejectionOptions: HermesOptions | undefined;
@@ -64,6 +77,7 @@ describe('global error-handler privacy boundary', () => {
     installGlobalErrorHandlers();
     installed?.(raw, true);
     rejectionOptions?.onUnhandled?.(7, raw);
+    await waitForMicrotaskCondition(() => previous.mock.calls.length === 1, 'the fatal hand-off');
 
     expect(setGlobalHandler).toHaveBeenCalledTimes(1);
     expect(enablePromiseRejectionTracker).toHaveBeenCalledTimes(1);
@@ -82,6 +96,90 @@ describe('global error-handler privacy boundary', () => {
     expect(
       JSON.stringify({ name: safe.name, message: safe.message, stack: safe.stack }),
     ).not.toMatch(/alice@example\.com|AlicePassport|3035550199|private response/);
+  });
+
+  // Review M213: React Native's fatal handler ends the process before the crash's App Logs line
+  // (held for a 1.5 s batched write) or its encrypted report could reach disk.
+  function installFatalHandler(): {
+    readonly previous: jest.Mock;
+    readonly handle: (error: unknown, isFatal?: boolean) => void;
+  } {
+    const previous = jest.fn();
+    let installed: ((error: unknown, isFatal?: boolean) => void) | undefined;
+    globals.ErrorUtils = {
+      getGlobalHandler: () => previous,
+      setGlobalHandler: (handler) => {
+        installed = handler;
+      },
+    };
+    loadHandlers().installGlobalErrorHandlers();
+    return { previous, handle: (error, isFatal) => installed?.(error, isFatal) };
+  }
+
+  it('lets a fatal crash save its App Logs line and report before React Native ends the app', async () => {
+    let finishLog!: (saved: boolean) => void;
+    let finishReport!: () => void;
+    mockFileLogFlush.mockReturnValueOnce(new Promise((resolve) => (finishLog = resolve)));
+    mockWhenDrainsSettled.mockReturnValueOnce(new Promise((resolve) => (finishReport = resolve)));
+    const { previous, handle } = installFatalHandler();
+
+    handle(new TypeError('boom'), true);
+    expect(mockCaptureError).toHaveBeenCalledTimes(1);
+    expect(mockFileLogFlush).toHaveBeenCalledTimes(1);
+    expect(mockWhenDrainsSettled).toHaveBeenCalledTimes(1);
+
+    // Many microtask turns pass while both saves are pending: React Native must still wait.
+    await flushMicrotasks(50);
+    expect(previous).not.toHaveBeenCalled();
+
+    finishLog(true);
+    await flushMicrotasks(50);
+    expect(previous).not.toHaveBeenCalled();
+
+    finishReport();
+    await waitForMicrotaskCondition(() => previous.mock.calls.length === 1, 'the fatal hand-off');
+    expect(previous.mock.calls[0]?.[1]).toBe(true);
+  });
+
+  it('hands a fatal crash to React Native after 750 ms even if saving hangs', async () => {
+    jest.useFakeTimers();
+    mockFileLogFlush.mockReturnValue(new Promise(() => undefined));
+    mockWhenDrainsSettled.mockReturnValue(new Promise(() => undefined));
+    const { previous, handle } = installFatalHandler();
+
+    handle(new TypeError('boom'), true);
+    jest.advanceTimersByTime(749);
+    await Promise.resolve();
+    expect(previous).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(1);
+    await waitForMicrotaskCondition(() => previous.mock.calls.length === 1, 'the fatal hand-off');
+  });
+
+  it('forwards a second fatal and every non-fatal error at once', () => {
+    mockFileLogFlush.mockReturnValue(new Promise(() => undefined));
+    mockWhenDrainsSettled.mockReturnValue(new Promise(() => undefined));
+    const { previous, handle } = installFatalHandler();
+
+    handle(new TypeError('uncaught'), false);
+    expect(previous).toHaveBeenCalledTimes(1);
+
+    handle(new TypeError('first fatal'), true);
+    expect(previous).toHaveBeenCalledTimes(1);
+    handle(new TypeError('second fatal'), true);
+    expect(previous).toHaveBeenCalledTimes(2);
+    expect(mockFileLogFlush).toHaveBeenCalledTimes(1);
+  });
+
+  it('still hands a fatal crash over when a sink throws while starting to save', async () => {
+    mockFileLogFlush.mockImplementationOnce(() => {
+      throw new Error('file sink unavailable');
+    });
+    const { previous, handle } = installFatalHandler();
+
+    handle(new TypeError('boom'), true);
+
+    await waitForMicrotaskCondition(() => previous.mock.calls.length === 1, 'the fatal hand-off');
   });
 
   it('keeps the real error and React Native rejection warnings in a development build', () => {

@@ -1787,7 +1787,7 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
       'src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb:mutator-call:e3fd2f80780c',
       'src/services/errors/errorReportSink.ts#ErrorReportSink.scheduleDrain.<callback:1067ca9296>:mutator-call:c0f2f41e3a9e',
       'src/services/errors/errorReportSink.ts#captureError:mutator-call:a8184e42b9cb',
-      'src/services/errors/globalErrorHandlers.ts#installErrorUtils.<callback:e397e0fef7>:mutator-call:81604a405770',
+      'src/services/errors/globalErrorHandlers.ts#installErrorUtils.<callback:181322204d>:mutator-call:26bff69b932e',
       'src/services/errors/globalErrorHandlers.ts#installRejectionTracker.onUnhandled:mutator-call:b340f115e916',
       'src/services/errors/index.ts#ensureConsentObserver.<callback:a350d282b8>:mutator-call:81274b260511',
       'src/services/errors/index.ts#ensureConsentObserver:mutator-call:5631fb0106eb',

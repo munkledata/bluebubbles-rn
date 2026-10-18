@@ -19231,7 +19231,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb:mutator-call:e3fd2f80780c",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 136,
+      "line": 144,
       "symbol": "ErrorReportSink.flushToDb",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch",
@@ -19244,7 +19244,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch:mutator-call:06eb409e4d8d",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 156,
+      "line": 164,
       "symbol": "ErrorReportSink.persistBatch",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch.<callback:1dff19cd0c>",
@@ -19257,7 +19257,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch:mutator-call:7d8512b6a01a",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 156,
+      "line": 164,
       "symbol": "ErrorReportSink.persistBatch",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19270,7 +19270,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch.<callback:1dff19cd0c>:mutator-call:f63481bd7d44",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 162,
+      "line": 170,
       "symbol": "ErrorReportSink.persistBatch.<callback:1dff19cd0c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#insertErrorReportsWithinTransaction",
@@ -19283,7 +19283,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#captureError:mutator-call:a8184e42b9cb",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 215,
+      "line": 223,
       "symbol": "captureError",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb",
@@ -19294,10 +19294,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "src/services/errors/globalErrorHandlers.ts#installErrorUtils.<callback:e397e0fef7>:mutator-call:81604a405770",
+      "id": "src/services/errors/globalErrorHandlers.ts#installErrorUtils.<callback:181322204d>:mutator-call:26bff69b932e",
       "path": "src/services/errors/globalErrorHandlers.ts",
-      "line": 65,
-      "symbol": "installErrorUtils.<callback:e397e0fef7>",
+      "line": 98,
+      "symbol": "installErrorUtils.<callback:181322204d>",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#captureError",
       "detectedContext": "coordinated-delegation",
@@ -19309,7 +19309,7 @@
     {
       "id": "src/services/errors/globalErrorHandlers.ts#installRejectionTracker.onUnhandled:mutator-call:b340f115e916",
       "path": "src/services/errors/globalErrorHandlers.ts",
-      "line": 91,
+      "line": 139,
       "symbol": "installRejectionTracker.onUnhandled",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#captureError",

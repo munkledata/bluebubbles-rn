@@ -1318,6 +1318,11 @@ production-file behavior, signed/store provenance, scheduled CI, or release/phys
       with **Delete fixtures**. Pass: no error dialog, the real inbox is unchanged, and afterwards
       `adb shell run-as com.bluegreengatorapps.messages ls databases` lists no `perf01-cold-*.db` or
       `perf02-inbox-benchmark.db`. Record timings only.
+- [ ] **LOCAL DEV (M213, added 2026-10-18):** In a dev build, open React Native DevTools and run
+      `ErrorUtils.reportFatalError(new Error('M213 probe'))` in its console. After the red screen,
+      relaunch Gator and open Settings → App Logs: the newest entries include the `runtime.fatal`
+      line. Before the fix that line was usually lost, because the app ended before the 1.5 s
+      batched log write. The crash now waits at most 750 ms for that write and the error report.
 
 ---
 

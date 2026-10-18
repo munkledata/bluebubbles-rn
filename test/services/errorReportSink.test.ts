@@ -141,6 +141,39 @@ describe('ErrorReportSink', () => {
     expect(rows(raw).map((r) => r.message)).toEqual(['diagnostic.unclassified']);
   });
 
+  // Review M213: a fatal crash waits (bounded) for drains already in flight, without retiring them.
+  it('settles after an in-flight drain commits, without retiring the session', async () => {
+    const sink = new ErrorReportSink();
+    const insertStarted = Promise.withResolvers<void>();
+    const releaseInsert = Promise.withResolvers<void>();
+    const insertBatch = errorReportRepository.insertErrorReportsWithinTransaction;
+    jest
+      .spyOn(errorReportRepository, 'insertErrorReportsWithinTransaction')
+      .mockImplementationOnce(async (context, reports) => {
+        await insertBatch(context, reports);
+        insertStarted.resolve();
+        await releaseInsert.promise;
+      });
+
+    sink.write('error', '[fatal] runtime error');
+    const drain = sink.flushToDb();
+    await insertStarted.promise;
+
+    let settled = false;
+    const idle = sink.whenDrainsSettled().then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseInsert.resolve();
+    await Promise.all([drain, idle]);
+    expect(settled).toBe(true);
+    // Unlike resetSession, waiting retires nothing: the report committed.
+    expect(count(raw)).toBe(1);
+    await expect(sink.whenDrainsSettled()).resolves.toBeUndefined();
+  });
+
   it('cancels a scheduled old-account drain when the session resets', async () => {
     const sink = new ErrorReportSink();
     sink.write('error', '[account-a] pending timer');
