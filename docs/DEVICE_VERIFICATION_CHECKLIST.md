@@ -275,6 +275,11 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
 - [ ] **`EXACT PLAY CANDIDATE`:** With App Lock enabled, confirm a resume inside the configured
       grace period follows the unlocked path and a resume after expiry or a cold launch presents the
       lock gate before private DB-backed UI.
+- [ ] **`EXACT PACKAGED CANDIDATE` — Recents and Secure Screen after M179 (added 2026-10-18):** With
+      App Lock on and Secure Screen off, open a chat, go Home and open Recents: Gator's card shows
+      no chat content. Back in Gator a screenshot works. Turn Secure Screen on: screenshots and
+      screen recordings are black on every screen, including an open dialog. Resume inside the grace
+      period: content appears at once. M179 removed only the pre-Android-13 fallback.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Separate the push axes: App Lock disabled permits
       detailed background and killed-process presentation; App Lock enabled keeps notices generic
       in a still-live process, including after unlock and within its unexpired UI grace period.
@@ -648,6 +653,16 @@ only the product-owned bounded intake described in
       document from the chat's shared documents: each opens in its viewer. For a type with no viewer
       installed, the share sheet still appears. Opening now pins the file and passes the same native
       ownership check as sharing, so a file being cleaned up reports as missing and re-downloads.
+- [ ] **`EXACT PACKAGED CANDIDATE` — non-English file names and phone language (M170 + share digit
+      fix, added 2026-10-18):** Share synthetic files named `Отчёт.docx` and `报告.pdf` into a chat
+      and send them: they arrive as `attachment.docx` and `attachment.pdf` (before: `docx.bin` and
+      `pdf.pdf`). Then set the phone language to Arabic (Egypt), share one synthetic photo into
+      Gator and send it: it is accepted (before: every share was refused as malformed, because the
+      `00-` file prefix was written in Arabic digits). Switch the language back.
+- [ ] **`EXACT PACKAGED CANDIDATE` — pasted file types (M177, added 2026-10-18):** From an app that
+      can copy a file to the clipboard, paste a synthetic `.jpeg` photo and a `.docx` file into the
+      composer and send them: the photo shows as a photo and the document keeps its Word type
+      (before: both went as generic binary). Host evidence is a source-shape test only.
 
 ### 7. Received stickers
 
@@ -1469,6 +1484,10 @@ process-death, low-storage, and upgrade behavior.
       protected-file, and Android-version limitations are visible and understandable.
 - [ ] Confirm the exact candidate cannot be installed below Android 16/API 36, and that Settings →
       Storage & File Privacy accurately names Android 16 as the minimum supported version.
+- [ ] **`EXACT PACKAGED CANDIDATE` — download smoke after M163/M165 (added 2026-10-18):** Download
+      a received synthetic photo and a large video (progress moves; both open), set a synced chat
+      background, and cancel one large download midway (it stops and can be retried). The read loop
+      moved into a JVM-tested helper; the Android 8 check it dropped could never run on Android 16.
 
 ## (k) Reaction / action menu placement
 
