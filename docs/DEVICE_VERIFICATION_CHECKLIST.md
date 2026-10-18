@@ -1286,6 +1286,17 @@ pre-fallback eight-path absence gate all pass. This is controlled post-statement
 evidence only—not a statement-in-flight crash, power-loss/torn-write recovery, spontaneous OS death,
 production-file behavior, signed/store provenance, scheduled CI, or release/physical-device proof.
 
+- [ ] **LOCAL DEV (P6.5 stage 1):** Since P6.5 stage 1, the PERF-01 cold fixture and the PERF-02
+      query benchmark live in `src/db/devHarness/perfInboxFixtures.ts` and reach their throwaway
+      databases only through the doorway in `database.ts`. Use a dev build on an emulator or a spare
+      device (never over the Play build), signed in to a synthetic account. On Home, tap
+      **Measure PERF-02 queries** and wait for the dialog with the 1,000- and 10,000-chat results.
+      Then open **Measure cold inbox**, tap **Prepare 1,000**, run
+      `adb shell am kill com.bluegreengatorapps.messages`, relaunch, tap **Measure 1,000**, and finish
+      with **Delete fixtures**. Pass: no error dialog, the real inbox is unchanged, and afterwards
+      `adb shell run-as com.bluegreengatorapps.messages ls databases` lists no `perf01-cold-*.db` or
+      `perf02-inbox-benchmark.db`. Record timings only.
+
 ---
 
 ## (g) App lock (cold boot)

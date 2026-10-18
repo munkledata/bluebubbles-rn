@@ -1,12 +1,60 @@
-# Dev DB harness: moving it out of `database.ts` (design notes, paused)
+# Dev DB harness: moving it out of `database.ts` (design notes; stage 1 done)
 
-Status: **paused** (2026-10-13). Phase 6 step 5 of the 2026-10-09 Codex-review remediation planned
-to move the dev-only device self-test harness out of `src/db/database.ts` (about 3,700 of its 4,117
-lines) and replace the DB-write guard's call-by-call harness proofs with a few simpler rules. A
-read-only survey showed the simple version would drop real production-safety guarantees, so the
-owner paused it as its own planned project. These notes record what the survey found so the next
-attempt starts from facts. Line numbers refer to `scripts/check-db-writes.mjs` at commit `1a6a3c6`
-and will drift.
+Status: **stage 1 done** (2026-10-18, the PERF fixtures; see below). The rest is **paused**.
+Phase 6 step 5 of the 2026-10-09 Codex-review remediation planned to move the dev-only device
+self-test harness out of `src/db/database.ts` (about 3,700 of its 4,117 lines) and replace the
+DB-write guard's call-by-call harness proofs with a few simpler rules. A read-only survey showed the
+simple version would drop real production-safety guarantees, so the owner paused it (2026-10-13) as
+its own planned project. These notes record what the survey found so the next attempt starts from
+facts. Line numbers refer to `scripts/check-db-writes.mjs` at commit `1a6a3c6` and will drift.
+
+## Stage 1 (2026-10-18): PERF fixtures behind a doorway
+
+The PERF-01 cold fixture and the PERF-02 query benchmark moved unchanged from `database.ts` to
+`src/db/devHarness/perfInboxFixtures.ts`; `database.ts` went from 4,117 to 3,843 lines. The PERF rows
+and the "41 `open()` calls" in the table below describe the layout before this stage.
+
+- **Doorway (`database.ts`).** Five exports: `openThrowawayDatabase`, `closeThrowawayDatabase`,
+  `deleteThrowawayDatabase`, `migrateThrowawayDatabase` and `throwawayDrizzle`. They throw outside
+  `__DEV__`, accept only the three fixed fixture names (never `DB_NAME`), build the native `open()`
+  options themselves, and accept back only a handle they opened and have not closed (a private
+  `WeakSet`). A handle is a branded type exposing only `execute`, `reactiveExecute` and
+  `flushPendingReactiveQueries`. `opRunner` and `drizzleAdapter` stay private. This closes gap 7
+  (exact names) for PERF.
+- **Harness boundary.** The harness imports only the five doorway functions from `../database`,
+  plus `deviceInboxBenchmark`, `chatQueries`, `../types` and `@core/models`. It has no dynamic loads
+  or re-exports, and every use of a doorway function is a direct call inside one of the five
+  reviewed PERF functions (never a stored or exported value). Only `src/services/index.ts` may load
+  it. Imports are resolved with the TypeScript checker, so an alias such as
+  `@db/devHarness/../devHarness/…` still counts as a load.
+- **Guard.** `throwawayDatabaseDoorwayCandidate` pins the doorway (hashes, its private name list and
+  handle set, a real `__DEV__`, its exact native calls) and requires every call into it to be a
+  reviewed PERF call. No code anywhere may use a doorway function as a value: stored, put in an
+  object, re-exported, destructured from a namespace import or read by string key. The scanner's
+  general reference tracking covers only functions that write, and three of the five do not. The PERF-01 and PERF-02 proofs now pin the harness file. The production
+  adapter and startup proofs count the doorway's calls instead of each PERF call (gap 10, for PERF
+  only): `open()` 41→38, `drizzle()` 7→5, runner and migration calls 18→17, adapter calls 7→5.
+- **Measured.** Compared with a scan taken before the move, all 2,127 other findings kept their exact
+  contexts, including the 183 production approvals. The 18 PERF approvals were re-keyed by an
+  explicit map that checked each one's operation and target, and the doorway added 2 (2,147 total).
+- **Tests.** `test/db/perfInboxFixtures.test.ts` was written before the move. It pins the exact
+  native call log of every PERF path and passed afterwards with only its import path changed.
+  `test/db/throwawayDatabaseDoorway.test.ts` covers the refusals. Scanner exact-set tests list the
+  new IDs, and full-only tamper tests check that 7 PERF-02 and 18 doorway weakenings each lose the
+  throwaway approval.
+- **Unchanged on purpose.** PERF-02 still uses the shared write lock through
+  `deviceInboxBenchmark.ts` (gap 1). The production code it drives is still pinned by hash (gap 4).
+  Its throwaway-backed `source` still reaches production UI (gap 9).
+- **Device.** Not run on a device in this stage, because the PERF screens need a signed-in dev build.
+  The JavaScript bundle builds in both modes (`expo export --platform android`, with and without
+  `--dev`). The native calls are unchanged (call-log test). op-sqlite 17.1.2's `open()` returns a
+  plain JavaScript object, so the `WeakSet` needs no native support. The dev-build step is in
+  `docs/DEVICE_VERIFICATION_CHECKLIST.md` section (f).
+
+**Left for stage 2 (owner decides):** the driver contract self-test and the driver history self-test,
+together. The history test cannot move first: its caller stays in `database.ts`, where the doorway
+lives, and `check:architecture` rejects that import cycle. After that come the DB-02C relaunch waves
+and BACKUP-02.
 
 ## What the guard proves about the harness today
 
