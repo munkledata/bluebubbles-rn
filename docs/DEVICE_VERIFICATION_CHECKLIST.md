@@ -1022,6 +1022,16 @@ those rows is a current remediation or candidate requirement.
       and needed a Retry. Do not use a paired device credential with the Mac unreachable: Disconnect
       then cannot confirm the credential's revocation and stops on "could not safely finish clearing"
       on every retry (pre-existing dead end, open as of 2026-10-18).
+- [ ] **LOCAL DEV, before raising `LOGICAL_SEND_MAX_ACTIVE_CHATS` above 1 (M089, added
+      2026-10-18):** Build with the constant set to 3 against the real Mac. (1) With a slow uplink,
+      send a 10 MiB image in chat A, then text chat B at once: B sends promptly. (2) Send texts to
+      two iMessage chats within a second (composer plus a notification inline reply): each arrives
+      exactly once, in the right chat, on the recipients and in the Mac's Messages app. (3) Repeat
+      with two RCS chats, and with one RCS plus one iMessage chat. (4) In one chat send 5 texts, an
+      image and a tapback quickly: they arrive in order. (5) Kill the app with
+      `adb shell am kill com.bluegreengatorapps.messages`, then send inline replies to two chats.
+      (6) Disconnect while sends are in flight in two chats, then reconnect: nothing crosses
+      accounts. Any wrong chat, duplicate or AppleScript error means it stays at 1.
 
 ### 7. Claims and cleanup boundaries
 

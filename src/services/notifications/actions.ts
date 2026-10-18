@@ -422,7 +422,7 @@ async function replyTo(
   onQueued: () => void,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
-  const turn = await logicalSendQueue.acquire(accountLease);
+  const turn = await logicalSendQueue.acquire(accountLease, chatGuid);
   try {
     // DEV: simulate the round-trip locally so the reply shows Delivered without a server.
     if (isDevServer()) {
@@ -460,7 +460,7 @@ async function loveMessage(
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
   if (!isRcsChatGuid(chatGuid) || !messageGuid.startsWith('rcs-')) return;
-  const turn = await logicalSendQueue.acquire(accountLease);
+  const turn = await logicalSendQueue.acquire(accountLease, chatGuid);
   try {
     assertCurrentAccount(accountLease);
     const db = await ensureDatabase();

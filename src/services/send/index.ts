@@ -272,12 +272,13 @@ async function runScheduledAccountOperation<T>(
 async function runUiAccountOperation<T>(
   lease: RealtimeDeliveryLease,
   task: () => Promise<T>,
-  mode: 'immediate' | 'logical-send' = 'immediate',
+  mode: 'immediate' | { readonly logicalSendChat: string } = 'immediate',
   reportIssue?: SendIssueReporter,
 ): Promise<T | null> {
   try {
+    // A logical send takes its chat's ordering turn (review M089); other work runs immediately.
     const result = await runAccountOperation(lease, () =>
-      mode === 'logical-send' ? logicalSendQueue.run(lease, task) : task(),
+      mode === 'immediate' ? task() : logicalSendQueue.run(lease, mode.logicalSendChat, task),
     );
     return result.ok ? result.value : null;
   } catch (error) {
@@ -383,7 +384,7 @@ export function sendImage(
         captureSessionRcsCapabilityLease(),
       );
     },
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -424,7 +425,7 @@ export function sendVoice(
         },
         captureSessionRcsCapabilityLease(),
       ),
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -476,7 +477,7 @@ export function sendTextAttachment(
         },
         captureSessionRcsCapabilityLease(),
       ),
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -568,7 +569,7 @@ export function sendImages(
       }
       return sent;
     },
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -606,7 +607,7 @@ export function send(
         capability,
       );
     },
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -654,7 +655,7 @@ export function sendContactCard(
           }
         },
       ),
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -788,7 +789,7 @@ export async function acquireAndSendCurrentLocation(
           }
         },
       ),
-    'logical-send',
+    { logicalSendChat: chatGuid },
     options.reportIssue,
   );
   return result ? { status: 'queued', tempGuid: result.tempGuid } : { status: 'cancelled' };
@@ -843,7 +844,7 @@ export function react(
           capability?.serverInfo?.supports_imessage_reactions === true,
       );
     },
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -901,7 +902,7 @@ export function reply(
         capability,
       );
     },
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -934,7 +935,7 @@ export function sendEffect(
         capability,
       );
     },
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -970,7 +971,7 @@ export function sendMention(
         capability,
       );
     },
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }
@@ -1009,7 +1010,7 @@ export function sendFormatted(
         capability,
       );
     },
-    'logical-send',
+    { logicalSendChat: snapshot.chatGuid },
     reportIssue,
   );
 }

@@ -72,6 +72,51 @@ describe('logical send queue production wiring', () => {
     ]);
   });
 
+  // Review M089: turns are per chat, so every queue use must name the exact chat it sends to.
+  it('names the chat for every logical send turn', () => {
+    const keys: string[] = [];
+    for (const file of productionFiles) {
+      const source = ts.createSourceFile(
+        file,
+        readFileSync(path.join(PROJECT_ROOT, file), 'utf8'),
+        ts.ScriptTarget.Latest,
+        true,
+      );
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isPropertyAssignment(node) &&
+          ts.isIdentifier(node.name) &&
+          node.name.text === 'logicalSendChat'
+        ) {
+          expect(ts.isStringLiteralLike(node.initializer)).toBe(false);
+          keys.push(`${file} chat ${node.initializer.getText(source)}`);
+        }
+        if (
+          ts.isCallExpression(node) &&
+          ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === 'logicalSendQueue' &&
+          ['acquire', 'run'].includes(node.expression.name.text)
+        ) {
+          const chat = node.arguments[1];
+          expect(chat !== undefined && !ts.isStringLiteralLike(chat)).toBe(true);
+          keys.push(`${file} ${node.expression.name.text} ${chat?.getText(source) ?? '?'}`);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+    }
+    expect(keys.sort()).toEqual(
+      [
+        'src/services/notifications/actions.ts acquire chatGuid',
+        'src/services/notifications/actions.ts acquire chatGuid',
+        'src/services/send/index.ts run mode.logicalSendChat',
+        'src/services/send/index.ts chat chatGuid',
+        ...Array.from({ length: 11 }, () => 'src/services/send/index.ts chat snapshot.chatGuid'),
+      ].sort(),
+    );
+  });
+
   it('keeps new-chat creation as the sole explicit initial-message bypass', () => {
     // `/chat/new` atomically creates/deduplicates the thread and its first message before a chat
     // guid exists. It is intentionally outside the existing-chat FIFO; follow-up attachments use

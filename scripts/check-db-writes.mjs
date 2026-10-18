@@ -2607,7 +2607,7 @@ function dbProcessRelaunchCertificateCandidate({
     [syncAllChats, 'c020fac074e1490f98ec8d53ae0ccde29ba6c827abbdb302ead4a5990fc5beda'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
     [sendImageMessage, 'c17a1d44482187d7e6995858f44d603897c2555d3a5856ffabe8a5dcbe542f7f'],
-    [sendVoice, '8396e13554087324711d5fc8ca3854a1821ad6a16818c72c1c01a2ee46889eb3'],
+    [sendVoice, 'c94cf97a65429ce60798d506291cc654f46685aad419e8f9c19b1cbe8d9781ce'],
     [
       sendCurrentLocationMessage,
       'f160a0844999ab354cb68ff35f1a2de1d06f34c78edb39b197c423313e3b9985',

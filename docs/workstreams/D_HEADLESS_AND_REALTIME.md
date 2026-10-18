@@ -319,6 +319,13 @@ A 20-second FIFO window is an explicit ordering-degradation boundary, not cancel
 may start while the original remains tracked to settlement. Keep this window shorter than the
 outgoing-recovery grace so the recovery worker does not mistake a still-owned send for abandonment.
 
+Since review M089 (2026-10-18) every entry names its chat and ordering turns are per chat: sends to
+one chat always start in order, the window applies per chat, and the 32-job cap stays shared.
+`LOGICAL_SEND_MAX_ACTIVE_CHATS` bounds how many chats may send at once and is **1**, which is the
+single global FIFO described above. Raise it (to 3) only after the device step in
+`docs/DEVICE_VERIFICATION_CHECKLIST.md` shows the Mac's AppleScript and RCS paths accept
+simultaneous sends to different chats; if that check fails, leave it at 1.
+
 ### `SEND-01B` — bounded failure detail
 
 Only opted-in text, contact, reaction, and native attachment-upload paths may capture nested

@@ -5,6 +5,12 @@ import { subscribeRealtimeGenerationInvalidation } from '../realtime/deliveryCoo
 export const LOGICAL_SEND_ORDER_WINDOW_MS = 20_000;
 /** Bound retained private callbacks; the newest admission fails visibly when full. */
 export const LOGICAL_SEND_MAX_RETAINED = 32;
+/**
+ * Chats that may send at the same time (review M089). One keeps today's single global order.
+ * Raise it (to 3) only after a Mac + phone test shows Messages.app and the RCS bridge accept
+ * simultaneous sends to different chats.
+ */
+export const LOGICAL_SEND_MAX_ACTIVE_CHATS = 1;
 
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -21,6 +27,8 @@ export type LogicalSendInvalidationSubscriber = (
 export interface LogicalSendQueueOptions {
   readonly orderWindowMs?: number;
   readonly maxRetained?: number;
+  /** Chats that may hold an ordering turn at once; sends within one chat always stay in order. */
+  readonly maxActiveChats?: number;
   readonly subscribeInvalidation?: LogicalSendInvalidationSubscriber;
   readonly onOrderWindowElapsed?: () => void;
   readonly onCapacityExceeded?: () => void;
@@ -29,13 +37,14 @@ export interface LogicalSendQueueOptions {
 export interface LogicalSendQueue {
   /** Whether this same JavaScript turn can retain `additional` new logical jobs. */
   canRetain(additional?: number): boolean;
-  /** Reserve the next ordering turn. The caller must release it in `finally`. */
-  acquire(lease: LogicalSendLease): Promise<LogicalSendTurn>;
+  /** Reserve the next ordering turn for `chat`. The caller must release it in `finally`. */
+  acquire(lease: LogicalSendLease, chat: string): Promise<LogicalSendTurn>;
   /**
-   * Start tasks in admission order. Once started, a task keeps its own result/error promise; only
-   * its claim on ordering expires, so a stalled network request cannot wedge every later send.
+   * Start tasks in admission order, one at a time per chat. Once started, a task keeps its own
+   * result/error promise; only its claim on ordering expires, so a stalled network request cannot
+   * wedge every later send.
    */
-  run<T>(lease: LogicalSendLease, task: () => Promise<T>): Promise<T>;
+  run<T>(lease: LogicalSendLease, chat: string, task: () => Promise<T>): Promise<T>;
   /** Started or waiting tasks still retained by their callers. */
   readonly retained: number;
   /** Tasks that have not started yet. */
@@ -62,6 +71,7 @@ export class LogicalSendQueueCapacityError extends Error {
 }
 
 interface QueueEntry {
+  readonly chat: string;
   start(): void;
   cancelQueued(): void;
 }
@@ -84,12 +94,18 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
     options.maxRetained ?? LOGICAL_SEND_MAX_RETAINED,
     'maxRetained',
   );
+  const maxActiveChats = positiveInteger(
+    options.maxActiveChats ?? LOGICAL_SEND_MAX_ACTIVE_CHATS,
+    'maxActiveChats',
+  );
   const subscribeInvalidation =
     options.subscribeInvalidation ?? subscribeRealtimeGenerationInvalidation;
 
+  // One list in admission order; a chat in `activeChats` holds its ordering turn.
   const queued: QueueEntry[] = [];
+  const activeChats = new Set<string>();
   let retained = 0;
-  let orderingActive = false;
+  let pumping = false;
 
   const canRetain = (additional = 1): boolean => {
     positiveInteger(additional, 'additional');
@@ -101,15 +117,32 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
     if (index >= 0) queued.splice(index, 1);
   };
 
+  /** Start the oldest send whose chat is idle while fewer than `maxActiveChats` chats are busy. */
   const pump = (): void => {
-    while (!orderingActive) {
-      const next = queued.shift();
-      if (!next) return;
-      next.start();
+    // Starting a stale entry cancels it, which calls back here; the loop's rescan covers that.
+    if (pumping) return;
+    pumping = true;
+    try {
+      let index = 0;
+      while (index < queued.length && activeChats.size < maxActiveChats) {
+        const next = queued[index]!;
+        if (activeChats.has(next.chat)) {
+          index += 1;
+          continue;
+        }
+        queued.splice(index, 1);
+        next.start();
+        index = 0;
+      }
+    } finally {
+      pumping = false;
     }
   };
 
-  const acquire = (lease: LogicalSendLease): Promise<LogicalSendTurn> => {
+  const acquire = (lease: LogicalSendLease, chat: string): Promise<LogicalSendTurn> => {
+    if (typeof chat !== 'string' || chat.length === 0) {
+      return Promise.reject(new TypeError('a logical send needs its chat key'));
+    }
     if (!lease.isCurrent()) return Promise.reject(new LogicalSendQueueCancelledError());
 
     if (!canRetain()) {
@@ -137,9 +170,10 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
       };
 
       const releaseOrdering = (): void => {
+        // A turn that already expired and passed on must not free its successor's claim.
         if (!holdsOrdering) return;
         holdsOrdering = false;
-        orderingActive = false;
+        activeChats.delete(chat);
         if (orderingTimer !== undefined) {
           clearTimeout(orderingTimer);
           orderingTimer = undefined;
@@ -177,6 +211,7 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
       };
 
       entry = {
+        chat,
         start: () => {
           if (state !== 'queued') return;
           if (!lease.isCurrent()) {
@@ -186,7 +221,7 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
 
           state = 'running';
           holdsOrdering = true;
-          orderingActive = true;
+          activeChats.add(chat);
           orderingTimer = setTimeout(() => {
             if (state !== 'running' || !holdsOrdering) return;
             options.onOrderWindowElapsed?.();
@@ -210,8 +245,12 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
     });
   };
 
-  const run = async <T>(lease: LogicalSendLease, task: () => Promise<T>): Promise<T> => {
-    const turn = await acquire(lease);
+  const run = async <T>(
+    lease: LogicalSendLease,
+    chat: string,
+    task: () => Promise<T>,
+  ): Promise<T> => {
+    const turn = await acquire(lease, chat);
     try {
       // Invalidation can land after `acquire` resolves but before this continuation resumes.
       if (!lease.isCurrent()) throw new LogicalSendQueueCancelledError();
@@ -239,10 +278,10 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
 /**
  * One process-wide queue; account-generation invalidation retires its queued closures.
  *
- * Known trade-off (review M089): ordering is global, not per chat, so a send that is slow inside
- * its turn (an attachment upload, say) can delay a send to another chat by up to
- * LOGICAL_SEND_ORDER_WINDOW_MS. Per-chat turns wait until a device test shows the Mac's
- * AppleScript and RCS paths accept sends to different chats at the same time.
+ * Turns are per chat (review M089), but LOGICAL_SEND_MAX_ACTIVE_CHATS is 1 until a device test
+ * shows the Mac's AppleScript and RCS paths accept sends to different chats at the same time. Until
+ * then a send that is slow inside its turn (an attachment upload, say) can still delay a send to
+ * another chat by up to LOGICAL_SEND_ORDER_WINDOW_MS.
  */
 export const logicalSendQueue = createLogicalSendQueue({
   onOrderWindowElapsed: () => {
