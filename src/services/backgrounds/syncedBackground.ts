@@ -45,9 +45,7 @@ export const SYNCED_BACKGROUND_MAX_CONCURRENT = 1;
 /** Mirrored in the owned Android policy; JavaScript cannot raise either native hard limit. */
 export const SYNCED_BACKGROUND_CACHE_MAX_BYTES = 100 * 1024 * 1024; // 100 MiB
 export const SYNCED_BACKGROUND_CACHE_MAX_FILES = 256;
-export const SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS = 0;
-export const SYNCED_BACKGROUND_CACHE_REPAIR_DELAY_MS =
-  SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS + 1_000;
+export const SYNCED_BACKGROUND_CACHE_REPAIR_DELAY_MS = 1_000;
 const SYNCED_BACKGROUND_CACHE_REPAIR_MAX_ATTEMPTS = 2;
 
 interface SyncedBackgroundRequest {

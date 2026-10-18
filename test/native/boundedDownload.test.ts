@@ -453,7 +453,7 @@ it('validates one wallpaper through the fixed native ownership boundary', async 
   );
 });
 
-it('accepts a temporary recent-file overage but rejects malformed prune statistics', async () => {
+it('accepts an over-quota result but rejects malformed prune statistics', async () => {
   native.pruneSyncedBackgroundCache.mockResolvedValueOnce({
     ok: true,
     withinQuota: false,

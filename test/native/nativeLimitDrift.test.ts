@@ -136,14 +136,6 @@ const NUMBERS: [string, string, string, string, string, number][] = [
     0,
   ],
   [
-    'synced-background recent-file grace',
-    SYNCED,
-    'SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS',
-    SYNCED_SERVICE,
-    'SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS',
-    0,
-  ],
-  [
     'synced-background download bytes',
     SYNCED,
     'SYNCED_BACKGROUND_DOWNLOAD_MAX_BYTES',

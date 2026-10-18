@@ -13,9 +13,6 @@ internal const val SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_FILES =
   SYNCED_BACKGROUND_CACHE_MAX_FILES - 1
 internal const val SYNCED_BACKGROUND_CACHE_SCAN_MAX_FILES = 8_192
 internal const val SYNCED_BACKGROUND_CACHE_SCAN_MAX_NODES = 32_768
-// Synced-background work is serialized in JavaScript. With no peer promotion in flight, native
-// pruning can enforce the budget immediately instead of retaining a rolling minute of new files.
-internal const val SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS = 0L
 
 private const val MAX_MEDIA_FILE_NAME_CHARS = 190
 private const val MAX_LEGACY_MEDIA_FILE_NAME_CHARS = 255
@@ -79,21 +76,22 @@ private val oldestFirst = Comparator<CacheEntry> { left, right ->
  * Only a bounded set of survivor metadata is retained. This intentionally favors recent files
  * over perfect byte-bin packing: it may evict an extra small old image, but memory stays bounded
  * by [maxFiles] even when an old app version left a very large cache behind.
+ *
+ * There is no recent-file exemption: synced-background work is serialized in JavaScript, so no
+ * peer promotion is in flight and the budget applies immediately (review M163 removed the
+ * always-zero grace setting).
  */
 internal fun pruneSyncedBackgroundCache(
   root: File,
   fileSystem: AttachmentCacheFileSystem,
   keepFile: File? = null,
-  nowMs: Long = System.currentTimeMillis(),
   maxBytes: Long = SYNCED_BACKGROUND_CACHE_MAX_BYTES,
   maxFiles: Int = SYNCED_BACKGROUND_CACHE_MAX_FILES,
-  recentGraceMs: Long = SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS,
   scanLimits: SyncedBackgroundCacheScanLimits = SyncedBackgroundCacheScanLimits(),
   deleteFile: (File) -> Boolean = File::delete,
 ): SyncedBackgroundPruneResult {
   require(maxBytes > 0L)
   require(maxFiles > 0)
-  require(recentGraceMs >= 0L)
 
   val keep = keepFile?.let { candidate ->
     requireOwnedSyncedBackgroundRetirementPath(root, candidate)
@@ -108,8 +106,6 @@ internal fun pruneSyncedBackgroundCache(
       true
     }
   } ?: false
-  val recentCutoffMs = subtractSaturated(nowMs, recentGraceMs)
-
   var reservedFiles = 0L
   var reservedBytes = 0L
   val selectedOld = PriorityQueue(oldestFirst)
@@ -121,7 +117,7 @@ internal fun pruneSyncedBackgroundCache(
     keepPath = keepPath,
     limits = scanLimits,
   ) { entry ->
-    if (entry.path == keepPath || (recentGraceMs > 0L && entry.modifiedAtMs >= recentCutoffMs)) {
+    if (entry.path == keepPath) {
       reservedFiles = checkedAdd(reservedFiles, 1L, "reserved file count")
       reservedBytes = checkedAdd(reservedBytes, entry.bytes, "reserved byte count")
     } else {
@@ -150,9 +146,7 @@ internal fun pruneSyncedBackgroundCache(
     keepPath = keepPath,
     limits = scanLimits,
   ) { entry ->
-    val protected = entry.path == keepPath ||
-      (recentGraceMs > 0L && entry.modifiedAtMs >= recentCutoffMs) ||
-      retainedOldPaths.contains(entry.path)
+    val protected = entry.path == keepPath || retainedOldPaths.contains(entry.path)
     if (!protected) {
       requireUnchangedRegularFile(fileSystem, entry)
       val deleted = try {
@@ -195,17 +189,14 @@ internal fun prepareSyncedBackgroundCacheForDownload(
   root: File,
   fileSystem: AttachmentCacheFileSystem,
   keepFile: File? = null,
-  nowMs: Long = System.currentTimeMillis(),
   scanLimits: SyncedBackgroundCacheScanLimits = SyncedBackgroundCacheScanLimits(),
   deleteFile: (File) -> Boolean = File::delete,
 ): SyncedBackgroundPruneResult = pruneSyncedBackgroundCache(
   root = root,
   fileSystem = fileSystem,
   keepFile = keepFile,
-  nowMs = nowMs,
   maxBytes = SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_BYTES,
   maxFiles = SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_FILES,
-  recentGraceMs = 0L,
   scanLimits = scanLimits,
   deleteFile = deleteFile,
 )
@@ -542,6 +533,3 @@ private fun checkedAdd(left: Long, right: Long, label: String): Long {
   }
   return left + right
 }
-
-private fun subtractSaturated(left: Long, right: Long): Long =
-  if (right > 0L && left < Long.MIN_VALUE + right) Long.MIN_VALUE else left - right

@@ -17,7 +17,7 @@ class SyncedBackgroundCachePolicyTest {
   private val nioFileSystem = NioAttachmentCacheFileSystem()
 
   @Test
-  fun `production quota and concurrent-final grace stay pinned`() {
+  fun `production quota and scan limits stay pinned`() {
     assertEquals(100L * 1024 * 1024, SYNCED_BACKGROUND_CACHE_MAX_BYTES)
     assertEquals(256, SYNCED_BACKGROUND_CACHE_MAX_FILES)
     assertEquals(10L * 1024 * 1024, SYNCED_BACKGROUND_DOWNLOAD_MAX_BYTES)
@@ -25,7 +25,6 @@ class SyncedBackgroundCachePolicyTest {
     assertEquals(255, SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_FILES)
     assertEquals(8_192, SYNCED_BACKGROUND_CACHE_SCAN_MAX_FILES)
     assertEquals(32_768, SYNCED_BACKGROUND_CACHE_SCAN_MAX_NODES)
-    assertEquals(0L, SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS)
   }
 
   @Test
@@ -53,7 +52,6 @@ class SyncedBackgroundCachePolicyTest {
       root = root,
       fileSystem = nioFileSystem,
       keepFile = currentLegacy,
-      nowMs = 10_000L,
     )
 
     assertTrue(result.withinQuota)
@@ -80,10 +78,8 @@ class SyncedBackgroundCachePolicyTest {
       root = root,
       fileSystem = nioFileSystem,
       keepFile = committed,
-      nowMs = 10_000L,
       maxBytes = 10L,
       maxFiles = 2,
-      recentGraceMs = 1_000L,
     )
 
     assertTrue(result.withinQuota)
@@ -98,41 +94,6 @@ class SyncedBackgroundCachePolicyTest {
   }
 
   @Test
-  fun `recent concurrent final is deferred then removed by the next prune`() {
-    val root = temporary.newFolder(SYNCED_BACKGROUND_CACHE_DIRECTORY).canonicalFile
-    val committed = media(root, 1, "committed", 5, 100L)
-    val concurrentFinal = media(root, 2, "concurrent", 7, 9_999L)
-
-    val first = pruneSyncedBackgroundCache(
-      root = root,
-      fileSystem = nioFileSystem,
-      keepFile = committed,
-      nowMs = 10_000L,
-      maxBytes = 10L,
-      maxFiles = 2,
-      recentGraceMs = 1_000L,
-    )
-
-    assertFalse(first.withinQuota)
-    assertTrue(committed.exists())
-    assertTrue(concurrentFinal.exists())
-
-    val later = pruneSyncedBackgroundCache(
-      root = root,
-      fileSystem = nioFileSystem,
-      keepFile = committed,
-      nowMs = 20_000L,
-      maxBytes = 10L,
-      maxFiles = 2,
-      recentGraceMs = 1_000L,
-    )
-
-    assertTrue(later.withinQuota)
-    assertTrue(committed.exists())
-    assertFalse(concurrentFinal.exists())
-  }
-
-  @Test
   fun `startup prune needs no DB uri and repairs stale process-restart bytes`() {
     val root = temporary.newFolder(SYNCED_BACKGROUND_CACHE_DIRECTORY).canonicalFile
     val newest = media(root, 8, "newest", 4, 5_000L)
@@ -142,10 +103,8 @@ class SyncedBackgroundCachePolicyTest {
       root = root,
       fileSystem = nioFileSystem,
       keepFile = null,
-      nowMs = 10_000L,
       maxBytes = 4L,
       maxFiles = 1,
-      recentGraceMs = 1_000L,
     )
 
     assertTrue(result.withinQuota)
@@ -169,10 +128,8 @@ class SyncedBackgroundCachePolicyTest {
       root = aliasRoot,
       fileSystem = nioFileSystem,
       keepFile = validatedKeep,
-      nowMs = 10_000L,
       maxBytes = 4L,
       maxFiles = 1,
-      recentGraceMs = 0L,
     )
 
     assertTrue(result.withinQuota)
@@ -202,10 +159,8 @@ class SyncedBackgroundCachePolicyTest {
         pruneSyncedBackgroundCache(
           root = linkedRoot,
           fileSystem = nioFileSystem,
-          nowMs = 10_000L,
           maxBytes = 1L,
           maxFiles = 1,
-          recentGraceMs = 0L,
         )
       }.isFailure,
     )
@@ -222,10 +177,8 @@ class SyncedBackgroundCachePolicyTest {
       pruneSyncedBackgroundCache(
         root = root,
         fileSystem = nioFileSystem,
-        nowMs = 10_000L,
         maxBytes = 1L,
         maxFiles = 1,
-        recentGraceMs = 0L,
       )
     }
 
@@ -246,10 +199,8 @@ class SyncedBackgroundCachePolicyTest {
       pruneSyncedBackgroundCache(
         root = root,
         fileSystem = nioFileSystem,
-        nowMs = 10_000L,
         maxBytes = 1L,
         maxFiles = 1,
-        recentGraceMs = 0L,
       )
     }
 
@@ -270,10 +221,8 @@ class SyncedBackgroundCachePolicyTest {
     val result = pruneSyncedBackgroundCache(
       root = root,
       fileSystem = nioFileSystem,
-      nowMs = 10_000L,
       maxBytes = 4L,
       maxFiles = 1,
-      recentGraceMs = 500L,
     )
 
     assertTrue(result.withinQuota)
@@ -447,10 +396,8 @@ class SyncedBackgroundCachePolicyTest {
         root = root,
         fileSystem = nioFileSystem,
         keepFile = outside,
-        nowMs = 10_000L,
         maxBytes = 1L,
         maxFiles = 1,
-        recentGraceMs = 1_000L,
       )
     } catch (_: IllegalArgumentException) {
       rejected = true

@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.StatFs
 import android.os.SystemClock
@@ -164,7 +163,6 @@ class GatorBoundedDownloadModule : Module() {
     AsyncFunction("pruneSyncedBackgroundCache") { keepUri: String? ->
       val context = appContext.reactContext
         ?: throw IllegalStateException("Android context is unavailable")
-      requireBoundedDirectoryStreamSupport()
       // The root is fixed natively: JavaScript cannot redirect this deletion primitive to another
       // app-private directory. Construct API-26 NIO only after the explicit version gate.
       val root = File(context.filesDir, SYNCED_BACKGROUND_CACHE_DIRECTORY)
@@ -179,7 +177,6 @@ class GatorBoundedDownloadModule : Module() {
     AsyncFunction("prepareSyncedBackgroundCacheForDownload") { keepUri: String? ->
       val context = appContext.reactContext
         ?: throw IllegalStateException("Android context is unavailable")
-      requireBoundedDirectoryStreamSupport()
       // This separate fixed policy leaves room for one maximum-size incoming wallpaper. The
       // optional current URI may use either the generation layout or the released legacy layout.
       val root = File(context.filesDir, SYNCED_BACKGROUND_CACHE_DIRECTORY)
@@ -194,7 +191,6 @@ class GatorBoundedDownloadModule : Module() {
     AsyncFunction("inspectSyncedBackgroundCache") {
       val context = appContext.reactContext
         ?: throw IllegalStateException("Android context is unavailable")
-      requireBoundedDirectoryStreamSupport()
       val root = File(context.filesDir, SYNCED_BACKGROUND_CACHE_DIRECTORY)
       val result = synchronized(syncedBackgroundPruneLock) {
         val startedAt = SystemClock.elapsedRealtime()
@@ -208,7 +204,6 @@ class GatorBoundedDownloadModule : Module() {
     AsyncFunction("inspectBoundedDownloadPartials") {
       val context = appContext.reactContext
         ?: throw IllegalStateException("Android context is unavailable")
-      requireBoundedDirectoryStreamSupport()
       val root = File(context.cacheDir, BOUNDED_DOWNLOAD_PARTIAL_DIRECTORY)
       partialInspectionOutcome(
         inspectBoundedDownloadPartials(root, newBoundedDirectoryStreamFileSystem()),
@@ -443,7 +438,6 @@ class GatorBoundedDownloadModule : Module() {
     }.runOnQueue(appContext.backgroundCoroutineScope)
 
     AsyncFunction("beginAttachmentCacheScan") {
-      requireBoundedDirectoryStreamSupport()
       synchronized(attachmentCacheIoLock) {
         val scanId = getAttachmentCacheScanManager().begin()
         mapOf("ok" to true, "scanId" to scanId)
@@ -453,7 +447,6 @@ class GatorBoundedDownloadModule : Module() {
     // Storage → Repair Downloads (review item 888). Pages are read with the ordinary next/close
     // functions; the shared manager still allows only one scan of either kind at a time.
     AsyncFunction("beginAttachmentCacheRepairScan") {
-      requireBoundedDirectoryStreamSupport()
       synchronized(attachmentCacheIoLock) {
         val scanId = getAttachmentCacheScanManager().begin(AttachmentCacheScanMode.REPAIR)
         mapOf("ok" to true, "scanId" to scanId)
@@ -461,7 +454,6 @@ class GatorBoundedDownloadModule : Module() {
     }.runOnQueue(appContext.backgroundCoroutineScope)
 
     AsyncFunction("nextAttachmentCacheScanPage") { scanId: String ->
-      requireBoundedDirectoryStreamSupport()
       synchronized(attachmentCacheIoLock) {
         attachmentCacheScanPageOutcome(getAttachmentCacheScanManager().next(scanId))
       }
@@ -880,24 +872,9 @@ class GatorBoundedDownloadModule : Module() {
     if (error.errno == OsConstants.ENOENT) null else throw error
   }
 
-  /**
-   * Android's streaming `DirectoryStream` API begins at API 26. Falling back to `File.listFiles`
-   * on API 24/25 would allocate an attacker-amplifiable array before a native scan cap applies, so
-   * bounded persistent-cache scans fail closed instead.
-   */
-  private fun requireBoundedDirectoryStreamSupport() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-      throw UnsupportedOperationException(
-        "Bounded persistent-cache scanning requires Android 8.0 or newer",
-      )
-    }
-  }
-
-  @Suppress("NewApi")
   private fun newBoundedDirectoryStreamFileSystem(): AttachmentCacheFileSystem =
     NioAttachmentCacheFileSystem()
 
-  @Suppress("NewApi")
   private fun getAttachmentCacheScanManager(): AttachmentCacheScanManager {
     attachmentCacheScanManager?.let { return it }
     return AttachmentCacheScanManager(

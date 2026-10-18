@@ -39,7 +39,9 @@ describe('synced-background native cache contract', () => {
     expect(policySource).not.toMatch(/deleteRecursively|walkTopDown|walkBottomUp/);
   });
 
-  it('guards API-26 directory streaming before constructing it for prune and admission', () => {
+  // minSdk 36 always has the API-26 DirectoryStream, so there is no version check or fallback to
+  // an unbounded File.listFiles array (review M163).
+  it('streams directories for prune and admission with no Android-version fallback', () => {
     const pruneBridge = moduleSource.slice(
       moduleSource.indexOf('AsyncFunction("pruneSyncedBackgroundCache")'),
       moduleSource.indexOf('AsyncFunction("prepareSyncedBackgroundCacheForDownload")'),
@@ -49,19 +51,15 @@ describe('synced-background native cache contract', () => {
       moduleSource.indexOf('AsyncFunction("deleteSyncedBackgroundCacheFile")'),
     );
     for (const bridge of [pruneBridge, admissionBridge]) {
-      expect(bridge).toMatch(
-        /requireBoundedDirectoryStreamSupport\(\)[\s\S]*newBoundedDirectoryStreamFileSystem\(\)/,
-      );
-      expect(bridge.indexOf('requireBoundedDirectoryStreamSupport()')).toBeLessThan(
-        bridge.indexOf('newBoundedDirectoryStreamFileSystem()'),
-      );
+      expect(bridge).toContain('newBoundedDirectoryStreamFileSystem()');
+      expect(bridge).not.toMatch(/listFiles\(/);
     }
+    expect(moduleSource).not.toMatch(/Build\.VERSION/);
   });
 
   it('keeps survivor metadata bounded', () => {
     expect(policySource).toMatch(/PriorityQueue\(oldestFirst\)/);
     expect(policySource).toMatch(/HashSet<String>\(selectedOld\.size\)/);
-    expect(policySource).toMatch(/entry\.modifiedAtMs >= recentCutoffMs/);
     expect(policySource).not.toMatch(/\.toList\(\)|\.sorted(?:By)?\(/);
   });
 
