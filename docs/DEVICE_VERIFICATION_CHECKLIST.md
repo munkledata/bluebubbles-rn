@@ -1014,6 +1014,11 @@ those rows is a current remediation or candidate requirement.
       An approved server-address change made while that revocation is pending first revokes the old
       credential at the current address; if it cannot, the prompt asks to try again and the address
       stays unchanged.
+- [ ] **`EXACT PACKAGED CANDIDATE` — slow Disconnect reaches setup (M120, added 2026-10-18):**
+      On a synthetic account with a large history, ideally with the Mac unreachable so the wipe's
+      server steps wait out their deadlines, tap Disconnect. Gator shows its loading screen and then
+      the setup screen, never "Couldn't start Gator". Before the fix a wipe slower than 10 seconds
+      ended on that error and needed a Retry.
 
 ### 7. Claims and cleanup boundaries
 

@@ -750,6 +750,42 @@ describe('production foreground boot singleton', () => {
     expect(mockRegisterBackgroundSync).toHaveBeenCalledTimes(1);
   });
 
+  // Review M120: a boot that joins a Disconnect wipe extends its 10 s session deadline, so a wipe
+  // that takes longer reaches setup instead of "Couldn't start Gator".
+  it('reaches setup when a joined Disconnect wipe outlasts the session deadline', async () => {
+    jest.useFakeTimers();
+    try {
+      let finishWipe!: () => void;
+      mockInspectForegroundBootSession.mockImplementationOnce(
+        async (context: { extendStageDeadline(ms: number): void }) => {
+          context.extendStageDeadline(150_000);
+          await new Promise<void>((resolve) => {
+            finishWipe = resolve;
+          });
+          return { kind: 'setup' };
+        },
+      );
+      const { foreground } = loadForegroundBoot();
+
+      const run = foreground.startForegroundBoot();
+      await waitForBootState(
+        foreground.getForegroundBootSnapshot,
+        (state) => state.status === 'loading' && state.stage === 'session',
+      );
+      jest.advanceTimersByTime(30_000);
+      await flushMicrotasks(12);
+      expect(foreground.getForegroundBootSnapshot()).toMatchObject({
+        status: 'loading',
+        stage: 'session',
+      });
+
+      finishWipe();
+      await expect(run).resolves.toMatchObject({ status: 'ready', mode: 'setup', runId: 1 });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('restarts after an account transition and reaches setup instead of remaining idle', async () => {
     const { foreground, transition } = loadForegroundBoot();
     await expect(foreground.startForegroundBoot()).resolves.toMatchObject({

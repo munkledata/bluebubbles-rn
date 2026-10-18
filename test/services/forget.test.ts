@@ -435,6 +435,7 @@ function productionBootContext(): {
         disposers.push(disposer);
         return jest.fn();
       },
+      extendStageDeadline: jest.fn(),
     },
     reportIssue,
     disposers,
@@ -668,6 +669,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
     const invalidate = jest.fn();
     const uninstall = installForegroundBootInvalidator(invalidate);
     const controller = new AbortController();
+    const extendStageDeadline = jest.fn();
 
     try {
       await expect(
@@ -677,11 +679,18 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
           stageSignal: controller.signal,
           reportIssue: jest.fn(),
           registerDisposer: jest.fn(() => jest.fn()),
+          extendStageDeadline,
         }),
       ).resolves.toEqual({ kind: 'setup' });
 
       expect(invalidate).not.toHaveBeenCalled();
       expect(clearLocalCache).toHaveBeenCalledTimes(1);
+      // Review M120: the wipe bounds its own steps; outlast them, not the 10 s session deadline.
+      expect(extendStageDeadline).toHaveBeenCalledTimes(1);
+      expect(extendStageDeadline.mock.calls[0]?.[0]).toBeGreaterThan(10_000);
+      expect(extendStageDeadline.mock.invocationCallOrder[0]).toBeLessThan(
+        clearLocalCache.mock.invocationCallOrder[0]!,
+      );
       expect(useSessionStore.getState().status).toBe('unauthenticated');
     } finally {
       uninstall();
@@ -3725,6 +3734,7 @@ describe('forget() — foreground boot handoff', () => {
         }),
     );
     const controller = new AbortController();
+    const extendStageDeadline = jest.fn();
     let successor!: ReturnType<typeof inspectForegroundBootSession>;
     const restart = jest.fn(() => {
       successor = inspectForegroundBootSession({
@@ -3733,6 +3743,7 @@ describe('forget() — foreground boot handoff', () => {
         stageSignal: controller.signal,
         reportIssue: jest.fn(),
         registerDisposer: jest.fn(() => jest.fn()),
+        extendStageDeadline,
       });
     });
     const uninstall = installForegroundBootRestarter(restart);
@@ -3747,6 +3758,10 @@ describe('forget() — foreground boot handoff', () => {
       await waitForMicrotaskCondition(() => releaseWipe != null, 'releaseWipe', 100);
       expect(releaseWipe).toEqual(expect.any(Function));
       expect(successorSettled).toBe(false);
+      // Review M120: the successor waits on the wipe with an extended deadline, so a wipe slower
+      // than the 10 s session deadline no longer ends on "Couldn't start Gator".
+      expect(extendStageDeadline).toHaveBeenCalledTimes(1);
+      expect(extendStageDeadline.mock.calls[0]?.[0]).toBeGreaterThan(10_000);
 
       releaseWipe();
       await run;

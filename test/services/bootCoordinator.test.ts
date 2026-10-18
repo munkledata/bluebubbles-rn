@@ -168,6 +168,106 @@ describe('boot coordinator', () => {
     }
   });
 
+  // Review M120: a boot joining a Disconnect wipe must outlast its 10 s session deadline; the wipe
+  // bounds its own steps (about two minutes in total).
+  it('lets a stage extend its own deadline and ignores a late extension', async () => {
+    jest.useFakeTimers();
+    try {
+      const wipe = deferred<void>();
+      let lateExtend: ((ms: number) => void) | undefined;
+      const adapters = defaultAdapters();
+      adapters.session = async ({ extendStageDeadline }) => {
+        extendStageDeadline(100);
+        lateExtend = extendStageDeadline;
+        await wipe.promise;
+        return { kind: 'setup' };
+      };
+      const boot = createBootCoordinator({
+        adapters,
+        validateSession: isTestBootSession,
+        classifyFailure: retryable,
+        stageTimeoutMs: { session: 25 },
+      });
+
+      const run = boot.start();
+      await flushMicrotasks(20);
+      jest.advanceTimersByTime(60);
+      await flushMicrotasks(20);
+      expect(boot.getState()).toMatchObject({ status: 'loading', stage: 'session' });
+
+      wipe.resolve(undefined);
+      await expect(run).resolves.toMatchObject({ status: 'ready', mode: 'setup' });
+
+      const timersBefore = jest.getTimerCount();
+      lateExtend?.(1_000);
+      expect(jest.getTimerCount()).toBe(timersBefore);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('still times out a stage at its extended deadline', async () => {
+    jest.useFakeTimers();
+    try {
+      const adapters = defaultAdapters();
+      adapters.session = ({ extendStageDeadline }) => {
+        extendStageDeadline(100);
+        return new Promise(() => undefined);
+      };
+      const boot = createBootCoordinator({
+        adapters,
+        validateSession: isTestBootSession,
+        classifyFailure: (_stage, error) => ({
+          ...retryable(),
+          code: error instanceof BootStageTimeoutError ? 'boot-stage-timeout' : 'unexpected',
+        }),
+        stageTimeoutMs: { session: 25 },
+      });
+
+      const run = boot.start();
+      await flushMicrotasks(20);
+      jest.advanceTimersByTime(99);
+      await flushMicrotasks(20);
+      expect(boot.getState()).toMatchObject({ status: 'loading', stage: 'session' });
+
+      jest.advanceTimersByTime(1);
+      await expect(run).resolves.toMatchObject({
+        status: 'failed',
+        failure: { stage: 'session', code: 'boot-stage-timeout' },
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('never shortens a stage deadline', async () => {
+    jest.useFakeTimers();
+    try {
+      const adapters = defaultAdapters();
+      adapters.session = ({ extendStageDeadline }) => {
+        extendStageDeadline(10);
+        return new Promise(() => undefined);
+      };
+      const boot = createBootCoordinator({
+        adapters,
+        validateSession: isTestBootSession,
+        classifyFailure: retryable,
+        stageTimeoutMs: { session: 25 },
+      });
+
+      const run = boot.start();
+      await flushMicrotasks(20);
+      jest.advanceTimersByTime(20);
+      await flushMicrotasks(20);
+      expect(boot.getState()).toMatchObject({ status: 'loading', stage: 'session' });
+
+      jest.advanceTimersByTime(5);
+      await expect(run).resolves.toMatchObject({ status: 'failed' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('validates configured stage deadlines before a run can start', () => {
     expect(() =>
       createBootCoordinator({

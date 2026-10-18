@@ -357,6 +357,8 @@ export async function inspectForegroundBootSession(
   // before reading either revocation marker or SecureStore; account A stays quarantined throughout.
   const cleanupAlreadyRunning = forgetInFlight;
   if (cleanupAlreadyRunning) {
+    // The wipe bounds each of its own steps; outlast them rather than the session deadline (M120).
+    context.extendStageDeadline(ACCOUNT_CLEANUP_BOOT_JOIN_DEADLINE_MS);
     const outcome = await cleanupAlreadyRunning.outcome;
     if (context.stageSignal.aborted) throw new ForegroundBootSupersededError();
     if (!outcome.ok) {
@@ -404,6 +406,7 @@ export async function inspectForegroundBootSession(
     // The forget barrier has its own bounded drains and is single-flight. Do not abandon it merely
     // because the outer session stage deadline fired; a later retry must join the same cleanup.
     if (lastSuccessfulForgetEpoch === connectionAttemptEpoch) return { kind: 'setup' };
+    context.extendStageDeadline(ACCOUNT_CLEANUP_BOOT_JOIN_DEADLINE_MS);
     const outcome = await runOrAwaitForget();
     // This cleanup intentionally advances connectionAttemptEpoch. Whole-run invalidation still
     // aborts stageSignal, while the cleanup-owned epoch change is allowed to reach setup.
@@ -2053,6 +2056,13 @@ const ERROR_REPORT_DRAIN_DEADLINE_MS = 5_000;
 const NOTIFICATION_CLEAR_DEADLINE_MS = 5_000;
 /** Persistent logs are filesystem-backed; a wedged bridge must leave the account revoked. */
 const LOG_CLEAR_DEADLINE_MS = 5_000;
+/**
+ * How long a restarted foreground boot may wait for a Disconnect wipe it joins (review M120). The
+ * wipe's steps above run one after another, each bounded by its own deadline (about two minutes in
+ * the worst case). The boot's 10 s session deadline used to fire first and showed "Couldn't start
+ * Gator" for a Disconnect that was still finishing normally.
+ */
+const ACCOUNT_CLEANUP_BOOT_JOIN_DEADLINE_MS = 150_000;
 
 /** Await `p`, but give up after `ms` — returns false when the deadline won. */
 async function withDeadline(p: Promise<void>, ms: number): Promise<boolean> {

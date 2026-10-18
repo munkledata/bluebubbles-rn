@@ -24,6 +24,12 @@ export interface BootStageContext {
    * The returned function unregisters cleanup after an adapter safely releases the resource itself.
    */
   registerDisposer(disposer: BootRunDisposer): () => void;
+  /**
+   * Let this stage run until `ms` from now instead of its configured deadline, while it waits on
+   * work that bounds itself (review M120: a boot joining a Disconnect wipe). Never shortens the
+   * deadline; ignored for a stage without one, after invalidation, or once the stage has settled.
+   */
+  extendStageDeadline(ms: number): void;
 }
 
 export type BootRunDisposer = () => void | Promise<void>;
@@ -456,9 +462,12 @@ class BootCoordinatorImpl<TSession extends object> implements BootCoordinator {
     if (run.controller.signal.aborted) abortStage();
     else run.controller.signal.addEventListener('abort', abortStage, { once: true });
 
+    // Arm the deadline before invoking the stage, so the adapter may extend it right away.
+    const deadline = this.armStageDeadline(stage, stageController);
+
     // Attach both branches before racing stop so an adapter that ignores AbortSignal and rejects
     // much later is still consumed rather than becoming an unhandled rejection.
-    const operation = this.invokeStage(run, stage, stageController.signal).then<
+    const operation = this.invokeStage(run, stage, stageController.signal, deadline.extend).then<
       StageSettlement,
       StageSettlement
     >(
@@ -469,33 +478,68 @@ class BootCoordinatorImpl<TSession extends object> implements BootCoordinator {
       operation,
       run.stopped.then(() => ({ kind: 'stopped' as const })),
     ];
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const timeoutMs = this.stageTimeoutMs[stage];
-    if (timeoutMs !== undefined) {
-      settlements.push(
-        new Promise<StageSettlement>((resolve) => {
-          timeout = setTimeout(() => {
-            // Resolve the canonical timeout first. An adapter may reject synchronously from its
-            // abort listener; queueing this settlement first keeps classification deterministic.
-            resolve({ kind: 'error', error: new BootStageTimeoutError(stage, timeoutMs) });
-            stageController.abort();
-          }, timeoutMs);
-        }),
-      );
-    }
+    if (deadline.settlement) settlements.push(deadline.settlement);
 
     try {
       return await Promise.race(settlements);
     } finally {
-      if (timeout !== undefined) clearTimeout(timeout);
+      deadline.dispose();
       run.controller.signal.removeEventListener('abort', abortStage);
     }
+  }
+
+  /** The stage's configured deadline, which the stage itself may extend but never shorten. */
+  private armStageDeadline(
+    stage: CoreBootStage,
+    stageController: AbortController,
+  ): {
+    readonly settlement: Promise<StageSettlement> | undefined;
+    readonly extend: (ms: number) => void;
+    readonly dispose: () => void;
+  } {
+    const timeoutMs = this.stageTimeoutMs[stage];
+    if (timeoutMs === undefined) {
+      return { settlement: undefined, extend: () => undefined, dispose: () => undefined };
+    }
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let deadlineAtMs = Date.now() + timeoutMs;
+    let disposed = false;
+    let resolveTimeout!: (settlement: StageSettlement) => void;
+    const settlement = new Promise<StageSettlement>((resolve) => {
+      resolveTimeout = resolve;
+    });
+    const arm = (delayMs: number): void => {
+      timeout = setTimeout(() => {
+        // Resolve the canonical timeout first. An adapter may reject synchronously from its
+        // abort listener; queueing this settlement first keeps classification deterministic.
+        resolveTimeout({ kind: 'error', error: new BootStageTimeoutError(stage, timeoutMs) });
+        stageController.abort();
+      }, delayMs);
+    };
+    arm(timeoutMs);
+    return {
+      settlement,
+      extend: (ms) => {
+        if (disposed || stageController.signal.aborted) return;
+        if (!Number.isSafeInteger(ms) || ms <= 0) return;
+        const extendedAtMs = Date.now() + ms;
+        if (extendedAtMs <= deadlineAtMs) return;
+        if (timeout !== undefined) clearTimeout(timeout);
+        deadlineAtMs = extendedAtMs;
+        arm(ms);
+      },
+      dispose: () => {
+        disposed = true;
+        if (timeout !== undefined) clearTimeout(timeout);
+      },
+    };
   }
 
   private async invokeStage(
     run: ActiveBootRun<TSession>,
     stage: CoreBootStage,
     signal: AbortSignal,
+    extendDeadline: (ms: number) => void,
   ): Promise<NormalizedStageOutcome> {
     const context: BootStageContext = {
       runId: run.runId,
@@ -505,6 +549,9 @@ class BootCoordinatorImpl<TSession extends object> implements BootCoordinator {
         this.reportIssue(run.runId, issue);
       },
       registerDisposer: (disposer) => this.registerDisposer(run, disposer),
+      extendStageDeadline: (ms) => {
+        extendDeadline(ms);
+      },
     };
     switch (stage) {
       case 'lock': {
