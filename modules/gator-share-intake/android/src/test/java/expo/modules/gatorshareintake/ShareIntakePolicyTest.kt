@@ -96,14 +96,53 @@ class ShareIntakePolicyTest {
     assertEquals(0, output.size())
   }
 
+  // Review M173: this is the exact check production runs on every shared URI.
   @Test
-  fun `share input policy rejects unsupported schemes counts and text`() {
-    assertEquals(
-      ShareIntakeFailure.SCHEME,
-      assertThrows(ShareIntakeException::class.java) {
-        requireSupportedShareUriScheme("file")
-      }.reason,
+  fun `content uri check refuses everything but a bounded hierarchical content uri`() {
+    val good = "content://media/external/images/media/1"
+    requireSupportedShareContentUri(good, "content", true, "media")
+    requireSupportedShareContentUri(
+      "c".repeat(MAX_CONTENT_URI_CHARS),
+      "content",
+      true,
+      "a".repeat(MAX_CONTENT_AUTHORITY_CHARS),
     )
+    val refused: List<() -> Unit> = listOf(
+      { requireSupportedShareContentUri("file:///sdcard/a.jpg", "file", true, null) },
+      { requireSupportedShareContentUri("CONTENT://media/1", "CONTENT", true, "media") },
+      { requireSupportedShareContentUri(good, null, true, "media") },
+      { requireSupportedShareContentUri("content:opaque", "content", false, null) },
+      { requireSupportedShareContentUri("content:///a", "content", true, "") },
+      { requireSupportedShareContentUri("content://%20/a", "content", true, " ") },
+      { requireSupportedShareContentUri("", "content", true, "media") },
+      {
+        requireSupportedShareContentUri(
+          "c".repeat(MAX_CONTENT_URI_CHARS + 1),
+          "content",
+          true,
+          "media",
+        )
+      },
+      {
+        requireSupportedShareContentUri(
+          good,
+          "content",
+          true,
+          "a".repeat(MAX_CONTENT_AUTHORITY_CHARS + 1),
+        )
+      },
+    )
+    refused.forEachIndexed { index, refusal ->
+      assertEquals(
+        "case $index",
+        ShareIntakeFailure.SCHEME,
+        assertThrows(ShareIntakeException::class.java) { refusal() }.reason,
+      )
+    }
+  }
+
+  @Test
+  fun `share input policy rejects unsupported counts and text`() {
     assertEquals(
       ShareIntakeFailure.COUNT,
       assertThrows(ShareIntakeException::class.java) { requireValidShareCount(11) }.reason,

@@ -28,8 +28,6 @@ import java.util.concurrent.atomic.AtomicReference
 private const val MAX_QUEUED_SHARE_BATCHES = 1
 private const val MAX_ACTIVE_PROVIDER_WORKERS = 4
 private const val MAX_PROVIDER_NAME_CHARS = 512
-private const val MAX_CONTENT_URI_CHARS = 8_192
-private const val MAX_CONTENT_AUTHORITY_CHARS = 255
 
 internal interface ShareIntakeListener {
   fun onPending()
@@ -244,7 +242,12 @@ internal object GatorShareIntakeManager {
 
     fun add(uri: Uri?) {
       if (uri == null) return
-      requireSupportedContentUri(uri)
+      requireSupportedShareContentUri(
+        uri.toString(),
+        uri.scheme,
+        uri.isHierarchical,
+        uri.authority,
+      )
       requireForeignShareProvider(uri.authority.orEmpty(), context.packageName) { authority ->
         context.packageManager
           .resolveContentProvider(authority, PackageManager.ComponentInfoFlags.of(0))
@@ -561,16 +564,3 @@ internal object GatorShareIntakeManager {
     (error as? ShareIntakeException)?.reason ?: ShareIntakeFailure.PROVIDER
 }
 
-private fun requireSupportedContentUri(uri: Uri) {
-  val raw = uri.toString()
-  val authority = uri.authority
-  if (
-    raw.length !in 1..MAX_CONTENT_URI_CHARS ||
-    uri.scheme != ContentResolver.SCHEME_CONTENT ||
-    !uri.isHierarchical ||
-    authority.isNullOrBlank() ||
-    authority.length > MAX_CONTENT_AUTHORITY_CHARS
-  ) {
-    throw ShareIntakeException(ShareIntakeFailure.SCHEME)
-  }
-}

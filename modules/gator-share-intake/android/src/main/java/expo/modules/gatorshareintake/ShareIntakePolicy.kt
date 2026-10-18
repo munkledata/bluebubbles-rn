@@ -27,6 +27,8 @@ internal const val MAX_SHARED_MIME_BYTES = 240
 internal const val MAX_SHARED_MIME_TYPE_CHARS = 120
 internal const val MAX_SHARED_TARGET_BYTES = 240
 internal const val MAX_SHARE_MANIFEST_BYTES = 128 * 1024
+internal const val MAX_CONTENT_URI_CHARS = 8_192
+internal const val MAX_CONTENT_AUTHORITY_CHARS = 255
 
 internal const val SHARE_SHORTCUT_PREFIX = "gator-share-v2-"
 
@@ -138,8 +140,26 @@ internal fun requireValidShareCount(count: Int) {
   if (count !in 1..MAX_SHARED_FILES) throw ShareIntakeException(ShareIntakeFailure.COUNT)
 }
 
-internal fun requireSupportedShareUriScheme(scheme: String?) {
-  if (scheme != "content") throw ShareIntakeException(ShareIntakeFailure.SCHEME)
+/**
+ * Accept only a bounded, hierarchical `content://` URI with a non-blank authority. Production runs
+ * this exact check on every shared URI; it takes the parts of an android.net.Uri so it stays
+ * testable on the JVM (review M173).
+ */
+internal fun requireSupportedShareContentUri(
+  raw: String,
+  scheme: String?,
+  hierarchical: Boolean,
+  authority: String?,
+) {
+  if (
+    raw.length !in 1..MAX_CONTENT_URI_CHARS ||
+    scheme != "content" ||
+    !hierarchical ||
+    authority.isNullOrBlank() ||
+    authority.length > MAX_CONTENT_AUTHORITY_CHARS
+  ) {
+    throw ShareIntakeException(ShareIntakeFailure.SCHEME)
+  }
 }
 
 /**
