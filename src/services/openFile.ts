@@ -121,56 +121,21 @@ export async function openAttachmentFile(
     // Not a local file at all (null, or an http/content uri) — nothing to open from disk.
     if (!isLocalFileUri(localPath)) return { status: 'missing' };
 
-    // A wiped cache is the common case; reporting `missing` is what lets the chip re-download
-    // instead of showing an error the user can do nothing about.
-    try {
-      const { File } = await import('expo-file-system');
-      if (!isCurrent()) return { status: 'stale' };
-      if (!new File(localPath).exists) return { status: 'missing' };
-    } catch (e) {
-      if (!isCurrent()) return { status: 'stale' };
-      logger.warn('[openFile] could not stat the attachment, treating it as missing', e);
+    // Pin and check the exact file the way the share sheet does (M202): cache cleanup cannot
+    // retire it while another app is being handed a read grant, and the native ownership check
+    // refuses a symlink or a file outside the managed layout.
+    const media = await import('@/services/media');
+    if (!isCurrent()) return { status: 'stale' };
+    const protection = media.acquirePathProtection(localPath);
+    if (!protection) {
+      logger.warn('[openFile] attachment is being cleaned up, treating it as missing');
       return { status: 'missing' };
     }
-
-    const contentUri = await resolveContentUri(localPath, isCurrent);
-    if (!isCurrent()) return { status: 'stale' };
-
-    if (contentUri) {
-      const IntentLauncher = await import('expo-intent-launcher');
-      if (!isCurrent()) return { status: 'stale' };
-      const launch = IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: contentUri,
-        type: resolveViewType(mimeType),
-        flags: FLAG_GRANT_READ_URI_PERMISSION,
-      });
-      // Success is the ABSENCE of a fast rejection. `startActivityAsync` resolves only when the
-      // user comes BACK from the viewer, so awaiting it would hang for as long as the PDF is
-      // open (and hold the caller's in-flight guard). An ActivityNotFoundException, by contrast,
-      // rejects within one bridge hop. The `.then(ok, err)` form means a later rejection is
-      // still handled and never becomes an unhandled rejection.
-      const failure = await Promise.race([
-        launch.then(
-          () => null,
-          (e: unknown) => e ?? new Error('view rejected'),
-        ),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), opts?.settleMs ?? 600)),
-      ]);
-      if (!isCurrent()) return { status: 'stale' };
-      if (!failure) return { status: 'opened' };
-      logger.warn(
-        '[openFile] no viewer for this attachment, falling back to the share sheet',
-        failure,
-      );
+    try {
+      return await openPinnedAttachment(localPath, mimeType, isCurrent, opts, media);
+    } finally {
+      protection.release();
     }
-
-    // Share fallback. NOTE: the FILE path goes here, never the content uri — expo-sharing
-    // rejects anything whose scheme is not `file`.
-    const { shareAttachment } = await import('@/services/media');
-    if (!isCurrent()) return { status: 'stale' };
-    const res = await shareAttachment(localPath, mimeType, isCurrent);
-    if (!isCurrent() || (!res.ok && res.reason === 'stale')) return { status: 'stale' };
-    return { status: res.ok ? 'shared' : 'no_handler' };
   } catch (e) {
     if (!isCurrent()) return { status: 'stale' };
     // `error`, not `warn`: only error-level lines reach ErrorReportSink, and this failure is
@@ -178,4 +143,55 @@ export async function openAttachmentFile(
     logger.error('[openFile] failed to open attachment', 'sk4i8sxfdf', e);
     return { status: 'error' };
   }
+}
+
+async function openPinnedAttachment(
+  localPath: string,
+  mimeType: string | null | undefined,
+  isCurrent: () => boolean,
+  opts: OpenFileOptions | undefined,
+  media: typeof import('@/services/media'),
+): Promise<OpenFileResult> {
+  // A wiped cache is the common case; reporting `missing` is what lets the chip re-download
+  // instead of showing an error the user can do nothing about.
+  const exists = await media.attachmentPathExists(localPath);
+  if (!isCurrent()) return { status: 'stale' };
+  if (!exists) return { status: 'missing' };
+
+  const contentUri = await resolveContentUri(localPath, isCurrent);
+  if (!isCurrent()) return { status: 'stale' };
+
+  if (contentUri) {
+    const IntentLauncher = await import('expo-intent-launcher');
+    if (!isCurrent()) return { status: 'stale' };
+    const launch = IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+      data: contentUri,
+      type: resolveViewType(mimeType),
+      flags: FLAG_GRANT_READ_URI_PERMISSION,
+    });
+    // Success is the ABSENCE of a fast rejection. `startActivityAsync` resolves only when the
+    // user comes BACK from the viewer, so awaiting it would hang for as long as the PDF is
+    // open (and hold the caller's in-flight guard). An ActivityNotFoundException, by contrast,
+    // rejects within one bridge hop. The `.then(ok, err)` form means a later rejection is
+    // still handled and never becomes an unhandled rejection.
+    const failure = await Promise.race([
+      launch.then(
+        () => null,
+        (e: unknown) => e ?? new Error('view rejected'),
+      ),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), opts?.settleMs ?? 600)),
+    ]);
+    if (!isCurrent()) return { status: 'stale' };
+    if (!failure) return { status: 'opened' };
+    logger.warn(
+      '[openFile] no viewer for this attachment, falling back to the share sheet',
+      failure,
+    );
+  }
+
+  // Share fallback. NOTE: the FILE path goes here, never the content uri — expo-sharing
+  // rejects anything whose scheme is not `file`.
+  const res = await media.shareAttachment(localPath, mimeType, isCurrent);
+  if (!isCurrent() || (!res.ok && res.reason === 'stale')) return { status: 'stale' };
+  return { status: res.ok ? 'shared' : 'no_handler' };
 }

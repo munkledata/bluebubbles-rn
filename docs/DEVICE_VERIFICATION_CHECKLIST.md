@@ -643,6 +643,11 @@ only the product-owned bounded intake described in
       2026-10-18):** Direct Share one synthetic photo with a caption into a chat, send it, then press
       Back: no "Discard shared item?" prompt and no attachment returns to the tray. Then share two
       photos into New Message, remove both, and pick an existing chat: neither photo reappears.
+- [ ] **`EXACT PACKAGED CANDIDATE` — opening attachments in other apps (M202, added 2026-10-18):**
+      Open a received synthetic PDF from its chat bubble, a contact card from its bubble, and a
+      document from the chat's shared documents: each opens in its viewer. For a type with no viewer
+      installed, the share sheet still appears. Opening now pins the file and passes the same native
+      ownership check as sharing, so a file being cleaned up reports as missing and re-downloads.
 
 ### 7. Received stickers
 

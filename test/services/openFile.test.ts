@@ -28,8 +28,13 @@ jest.mock('expo-intent-launcher', () => ({
 }));
 
 const shareAttachment = jest.fn();
+const releasePin = jest.fn();
+const acquirePathProtection = jest.fn();
+const attachmentPathExists = jest.fn();
 jest.mock('@/services/media', () => ({
   shareAttachment: (...args: unknown[]) => shareAttachment(...args),
+  acquirePathProtection: (...args: unknown[]) => acquirePathProtection(...args),
+  attachmentPathExists: (...args: unknown[]) => attachmentPathExists(...args),
 }));
 
 const FILE = 'file:///data/user/0/com.gator/files/attachments/g/report.pdf';
@@ -61,6 +66,9 @@ describe('openAttachmentFile', () => {
     // jest config sets clearMocks:true (calls cleared, implementations kept), so set behaviour here.
     startActivityAsync.mockReturnValue(new Promise(() => {})); // resolves only on user return
     shareAttachment.mockResolvedValue({ ok: true });
+    acquirePathProtection.mockImplementation((path: string) => ({ path, release: releasePin }));
+    // The native ownership/stat check stands in for the old Expo exists check.
+    attachmentPathExists.mockImplementation(async () => fileExists);
     jest.spyOn(console, 'warn').mockImplementation(() => {});
     jest.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -166,6 +174,65 @@ describe('openAttachmentFile', () => {
     await expect(openAttachmentFile(FILE, 'application/pdf', OPTS)).resolves.toEqual({
       status: 'error',
     });
+  });
+
+  // M202: the viewer path now uses the same pin + native ownership check as the share sheet.
+  it('pins the file, checks it natively, then resolves and launches, releasing the pin', async () => {
+    const res = await openAttachmentFile(FILE, 'application/pdf', OPTS);
+
+    expect(res.status).toBe('opened');
+    expect(acquirePathProtection).toHaveBeenCalledWith(FILE);
+    expect(attachmentPathExists).toHaveBeenCalledWith(FILE);
+    expect(acquirePathProtection.mock.invocationCallOrder[0]).toBeLessThan(
+      attachmentPathExists.mock.invocationCallOrder[0]!,
+    );
+    expect(attachmentPathExists.mock.invocationCallOrder[0]).toBeLessThan(
+      startActivityAsync.mock.invocationCallOrder[0]!,
+    );
+    expect(releasePin).toHaveBeenCalledTimes(1);
+    expect(releasePin.mock.invocationCallOrder[0]).toBeGreaterThan(
+      startActivityAsync.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('reports missing without native calls when the file is being cleaned up and cannot be pinned', async () => {
+    acquirePathProtection.mockReturnValueOnce(null);
+
+    await expect(openAttachmentFile(FILE, 'application/pdf', OPTS)).resolves.toEqual({
+      status: 'missing',
+    });
+    expect(attachmentPathExists).not.toHaveBeenCalled();
+    expect(getContentUriAsync).not.toHaveBeenCalled();
+    expect(startActivityAsync).not.toHaveBeenCalled();
+    expect(shareAttachment).not.toHaveBeenCalled();
+  });
+
+  it('reports missing when the native ownership check refuses the file, and releases the pin', async () => {
+    attachmentPathExists.mockResolvedValueOnce(false);
+
+    await expect(openAttachmentFile(FILE, 'application/pdf', OPTS)).resolves.toEqual({
+      status: 'missing',
+    });
+    expect(startActivityAsync).not.toHaveBeenCalled();
+    expect(shareAttachment).not.toHaveBeenCalled();
+    expect(releasePin).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the pin after a share fallback and after an unexpected failure', async () => {
+    startActivityAsync.mockRejectedValue(new Error('ActivityNotFoundException'));
+    await expect(openAttachmentFile(FILE, 'application/pdf', OPTS)).resolves.toEqual({
+      status: 'shared',
+    });
+    expect(releasePin).toHaveBeenCalledTimes(1);
+
+    startActivityAsync.mockImplementation(() => {
+      throw new Error('bridge exploded');
+    });
+    shareAttachment.mockRejectedValue(new Error('also broken'));
+    await expect(openAttachmentFile(FILE, 'application/pdf', OPTS)).resolves.toEqual({
+      status: 'error',
+    });
+    expect(releasePin).toHaveBeenCalledTimes(2);
   });
 
   it('does not launch a viewer or share after ownership retires during URI resolution', async () => {

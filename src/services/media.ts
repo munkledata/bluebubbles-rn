@@ -31,7 +31,7 @@ export type ShareAttachmentResult =
 
 const alwaysCurrent = (): boolean => true;
 
-function acquirePathProtection(path: string): AttachmentCachePathProtection | null {
+export function acquirePathProtection(path: string): AttachmentCachePathProtection | null {
   try {
     return attachmentCacheCoordinator.protect(path);
   } catch {
@@ -42,7 +42,7 @@ function acquirePathProtection(path: string): AttachmentCachePathProtection | nu
 }
 
 /** Revalidate the exact source after pinning and before handing it to another native module. */
-async function attachmentPathExists(path: string): Promise<boolean> {
+export async function attachmentPathExists(path: string): Promise<boolean> {
   try {
     return (await statNativeAttachmentCacheFile(path)).exists;
   } catch {
