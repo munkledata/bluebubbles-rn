@@ -12,7 +12,7 @@ import {
   runPerf02DeviceInboxBenchmark,
   type Perf01ColdFixtureHandle,
   type Perf02RenderFixtureSource,
-} from '@db/database';
+} from '@db/devHarness/perfInboxFixtures';
 
 export type { Perf01ColdFixtureHandle, Perf02RenderFixtureSource };
 

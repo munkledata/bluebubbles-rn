@@ -34,7 +34,7 @@ import {
   openPerf01ColdFixture,
   preparePerf01ColdFixture,
   runPerf02DeviceInboxBenchmark,
-} from '@db/database';
+} from '@db/devHarness/perfInboxFixtures';
 
 const log: string[] = [];
 let fixtureRows = { chats: 1_000, messages: 4_000 };
@@ -50,7 +50,7 @@ function nativeHandle(label: string) {
       return { rows: [] };
     }),
     reactiveExecute: jest.fn(
-      (spec: { query: string; fireOn: Array<{ table: string }>; callback: () => void }) => {
+      (spec: { query: string; fireOn: { table: string }[]; callback: () => void }) => {
         log.push(
           `${label}.reactiveExecute ${spec.query} ${spec.fireOn.map((t) => t.table).join(',')}`,
         );

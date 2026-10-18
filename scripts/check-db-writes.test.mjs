@@ -4133,11 +4133,11 @@ test('certifies exactly the DEV-only disposable PERF-02 Android benchmark path',
       (finding.path === 'app/(app)/home.tsx' &&
         (finding.symbol === 'Home.onBenchmark' ||
           finding.target === 'app/(app)/home.tsx#Home.onBenchmark')) ||
-      (finding.path === 'src/db/database.ts' &&
+      (finding.path === 'src/db/devHarness/perfInboxFixtures.ts' &&
         ['deletePerf02BenchmarkDatabase', 'runPerf02DeviceInboxBenchmark'].includes(
           finding.symbol,
         )) ||
-      (finding.path === 'src/db/database.ts' &&
+      (finding.path === 'src/db/devHarness/perfInboxFixtures.ts' &&
         finding.symbol.startsWith('runPerf02DeviceInboxBenchmark.')) ||
       finding.path === 'src/db/performance/deviceInboxBenchmark.ts' ||
       (finding.path === 'src/services/index.ts' &&
@@ -4149,14 +4149,14 @@ test('certifies exactly the DEV-only disposable PERF-02 Android benchmark path',
     [
       'app/(app)/home.tsx#Home.onBenchmark:mutator-call:404657efb4ed',
       'app/(app)/home.tsx#Home:mutator-reference:2c3804b5d218',
-      'src/db/database.ts#deletePerf02BenchmarkDatabase:native-database-delete:625cf98f5fe0',
-      'src/db/database.ts#runPerf02DeviceInboxBenchmark.bump.<callback:b9bbd67d96>:mutator-call:8e9f67feff84',
-      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:261695433070',
-      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:40f3a5d86089',
-      'src/db/database.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d0b6d4d17bda',
-      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:f3670fbe6904',
-      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:35d19c00534b',
-      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:40f3a5d86089:2',
+      'src/db/devHarness/perfInboxFixtures.ts#deletePerf02BenchmarkDatabase:mutator-call:052bd7a90925',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark.bump.<callback:b9bbd67d96>:mutator-call:8bc00f7240ca',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:9126cd586d02',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:12f0875cd661',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d91ceb55b2b7',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:ed2045296265',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:e0303b85ed91',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:12f0875cd661:2',
       'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:mutator-call:2d9a4382f5e3',
       'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:mutator-call:a1193f95efba',
       'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:sql-insert:365869a94c0b',
@@ -4171,7 +4171,7 @@ test('certifies exactly the DEV-only disposable PERF-02 Android benchmark path',
       'src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture:sql-pragma:93bcca4be38e',
       'src/db/performance/deviceInboxBenchmark.ts#runDeviceInboxBenchmarkFixture:mutator-call:5cf65cbe9fcc',
       'src/db/performance/deviceInboxBenchmark.ts#runDeviceInboxBenchmarkFixture:mutator-call:d977bfc6d9a9',
-      'src/services/index.ts#runDevPerf02InboxBenchmark:mutator-call:bfd388c60341',
+      'src/services/index.ts#runDevPerf02InboxBenchmark:mutator-call:b2d669af8e3f',
       'src/ui/conversations/PerfInboxBenchmarkScreen.tsx#PerfInboxBenchmarkScreen.<callback:06033cb5f4>:mutator-call:ca3cce143976',
     ].sort(),
   );
@@ -4186,22 +4186,23 @@ test('certifies exactly the DEV-only disposable PERF-02 Android benchmark path',
 test('discovers exactly the fixed PERF-01 cold fixture write path', () => {
   const cold = scanProjectDbWrites().filter(
     (finding) =>
-      (finding.path === 'src/db/database.ts' && /Perf01Cold/.test(finding.symbol)) ||
+      (finding.path === 'src/db/devHarness/perfInboxFixtures.ts' &&
+        /Perf01Cold/.test(finding.symbol)) ||
       finding.path === 'src/ui/conversations/ColdInboxBenchmarkScreen.tsx',
   );
   assert.deepEqual(
     cold.map((finding) => finding.id).sort(),
     [
-      'src/db/database.ts#deletePerf01ColdFixture:native-database-delete:9a4d94084922',
-      'src/db/database.ts#preparePerf01ColdFixture:native-database-delete:8405deee85cd',
-      'src/db/database.ts#preparePerf01ColdFixture:sql-pragma:133307a5048f',
-      'src/db/database.ts#preparePerf01ColdFixture:mutator-call:ea7d253ae9ee',
-      'src/db/database.ts#preparePerf01ColdFixture:mutator-call:97f3f37435ea',
-      'src/db/database.ts#preparePerf01ColdFixture:sql-pragma:95a909b0e621',
-      'src/db/database.ts#preparePerf01ColdFixture:mutator-call:91dac4eef041',
-      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.prepare:mutator-call:7692d0d163bf',
+      'src/db/devHarness/perfInboxFixtures.ts#deletePerf01ColdFixture:mutator-call:4596a0cb9b66',
+      'src/db/devHarness/perfInboxFixtures.ts#preparePerf01ColdFixture:mutator-call:3ad098bd73ac',
+      'src/db/devHarness/perfInboxFixtures.ts#preparePerf01ColdFixture:sql-pragma:512156b2bbd6',
+      'src/db/devHarness/perfInboxFixtures.ts#preparePerf01ColdFixture:mutator-call:de9412f4bfba',
+      'src/db/devHarness/perfInboxFixtures.ts#preparePerf01ColdFixture:mutator-call:2f2b566ab1d2',
+      'src/db/devHarness/perfInboxFixtures.ts#preparePerf01ColdFixture:sql-pragma:7302a9e7ad18',
+      'src/db/devHarness/perfInboxFixtures.ts#preparePerf01ColdFixture:mutator-call:3d9e55264050',
+      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.prepare:mutator-call:a3d0ad4f2106',
       'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.cleanup:mutator-call:9a1e5600f44b',
-      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.cleanup.<callback:496ce4bb44>:mutator-call:87785f856887',
+      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.cleanup.<callback:496ce4bb44>:mutator-call:ef13486228df',
       'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.<callback:0690d89356>:mutator-call:fa09cf8e5aae',
       'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.<callback:2b65ff5cd8>:mutator-call:116bbe50271c',
       'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen:mutator-reference:d0e4f2f0744e',
@@ -4211,19 +4212,33 @@ test('discovers exactly the fixed PERF-01 cold fixture write path', () => {
   // source paths have been reconciled. This exact-set test does not imply write ownership.
 });
 
+// P6.5: the throwaway-database doorway's own writes are exactly its file delete and its migrate.
+test('certifies exactly the throwaway-database doorway writes', () => {
+  const doorway = scanProjectDbWrites().filter(
+    (finding) => finding.path === 'src/db/database.ts' && /Throwaway/.test(finding.symbol),
+  );
+  assert.deepEqual(doorway.map((finding) => [finding.id, finding.detectedContext]).sort(), [
+    [
+      'src/db/database.ts#deleteThrowawayDatabase:native-database-delete:66299dffa585',
+      'throwaway-database',
+    ],
+    ['src/db/database.ts#migrateThrowawayDatabase:mutator-call:f1e6db24e485', 'throwaway-database'],
+  ]);
+});
+
 fullOnlyTest(
   'PERF-02 disposable certificate fails closed on account and lifetime mutations',
   () => {
     const cases = [
       {
         label: 'fixed filename points at account DB',
-        path: 'src/db/database.ts',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
         before: "const PERF02_BENCHMARK_DB_NAME = 'perf02-inbox-benchmark.db';",
-        after: 'const PERF02_BENCHMARK_DB_NAME = DB_NAME;',
+        after: "const PERF02_BENCHMARK_DB_NAME = 'gator.db';",
       },
       {
         label: 'DEV-only gate is removed',
-        path: 'src/db/database.ts',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
         before: "  if (!__DEV__) throw new Error('PERF-02 benchmark is development-only.');",
         after: '  if (false) return [];',
       },
@@ -4235,21 +4250,21 @@ fullOnlyTest(
       },
       {
         label: 'final cleanup is removed',
-        path: 'src/db/database.ts',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
         before: '          deletePerf02BenchmarkDatabase();',
         after: '          void 0;',
       },
       {
-        label: 'production raw handle is passed into fixture',
-        path: 'src/db/database.ts',
-        before: 'runDeviceInboxBenchmarkFixture(database, chatCount, capturePlan)',
+        label: 'harness imports the production handle getter',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
+        before: "import type { InboxFilters } from '@core/models';",
         after:
-          'runDeviceInboxBenchmarkFixture(rawDb! as unknown as AppDatabase, chatCount, capturePlan)',
+          "import type { InboxFilters } from '@core/models';\nimport { getRawDatabase } from '../database';",
       },
       {
-        label: 'shared adapter row extraction bypasses the certified call path',
-        path: 'src/db/database.ts',
-        before: 'const explained = extractRows(',
+        label: 'row extraction bypasses the reviewed runner text',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
+        before: 'const explained = rowsOf(',
         after: 'const explained = String(',
       },
       {
@@ -4270,11 +4285,164 @@ fullOnlyTest(
           const findings = scanDbWrites({ root });
           const deletion = findings.find(
             (finding) =>
-              finding.path === 'src/db/database.ts' &&
+              finding.path === 'src/db/devHarness/perfInboxFixtures.ts' &&
               finding.symbol === 'deletePerf02BenchmarkDatabase' &&
-              finding.operation === 'native-database-delete',
+              finding.operation === 'mutator-call',
           );
           assert.notEqual(deletion?.detectedContext, 'throwaway-database', scenario.label);
+        } finally {
+          writeFileSync(file, original);
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+// P6.5: every weakening of the throwaway-database doorway, its name list, its handle check, its
+// callers or the harness boundary must strip the throwaway approvals instead of inheriting them.
+fullOnlyTest(
+  'throwaway-database doorway certificate fails closed on name, gate, handle and caller mutations',
+  () => {
+    const cases = [
+      {
+        label: 'account database joins the name list',
+        path: 'src/db/database.ts',
+        before: "  'perf02-inbox-benchmark.db',\n] as const;",
+        after: "  'perf02-inbox-benchmark.db',\n  'gator.db',\n] as const;",
+      },
+      {
+        label: 'unreviewed name joins the name list',
+        path: 'src/db/database.ts',
+        before: "  'perf02-inbox-benchmark.db',\n] as const;",
+        after: "  'perf02-inbox-benchmark.db',\n  'scratch.db',\n] as const;",
+      },
+      {
+        label: 'account database comparison is removed',
+        path: 'src/db/database.ts',
+        before: '  if ((name as string) === DB_NAME || !THROWAWAY_DATABASE_NAMES.includes(name)) {',
+        after: '  if (!THROWAWAY_DATABASE_NAMES.includes(name)) {',
+      },
+      {
+        label: 'DEV-only gate is removed',
+        path: 'src/db/database.ts',
+        before: "  if (!__DEV__) throw new Error('Throwaway databases are development-only.');",
+        after: '',
+      },
+      {
+        label: 'open-handle check is removed',
+        path: 'src/db/database.ts',
+        before:
+          "  if (!openThrowawayHandles.has(db)) throw new Error('Not an open throwaway database.');",
+        after: '',
+      },
+      {
+        label: 'native options gain a location',
+        path: 'src/db/database.ts',
+        before: '    : open({ name: approved, encryptionKey });',
+        after: "    : open({ name: approved, encryptionKey, location: '/data' });",
+      },
+      {
+        label: 'a doorway export escapes as a value',
+        path: 'src/db/database.ts',
+        before: 'export function closeThrowawayDatabase(',
+        after:
+          'export const escapedOpen = openThrowawayDatabase;\n\nexport function closeThrowawayDatabase(',
+      },
+      {
+        label: 'a doorway export escapes as a shorthand property',
+        path: 'src/db/database.ts',
+        before: 'export function closeThrowawayDatabase(',
+        after:
+          'export const escapedApi = { throwawayDrizzle };\n\nexport function closeThrowawayDatabase(',
+      },
+      {
+        label: 'a doorway export is re-exported under another name',
+        path: 'src/db/database.ts',
+        before: 'export function closeThrowawayDatabase(',
+        after:
+          'export { closeThrowawayDatabase as escapedClose };\n\nexport function closeThrowawayDatabase(',
+      },
+      {
+        label: 'a screen destructures a doorway export from a namespace import',
+        path: 'app/(app)/settings.tsx',
+        before: "import * as Application from 'expo-application';",
+        after:
+          "import * as Application from 'expo-application';\nimport * as gatorDb from '@db/database';\nconst { throwawayDrizzle: escapedDrizzle } = gatorDb;\nvoid escapedDrizzle;",
+      },
+      {
+        label: 'a screen reads a doorway export by string key',
+        path: 'app/(app)/settings.tsx',
+        before: "import * as Application from 'expo-application';",
+        after:
+          "import * as Application from 'expo-application';\nimport * as gatorDb from '@db/database';\nvoid gatorDb['openThrowawayDatabase'];",
+      },
+      {
+        label: 'the harness gains an unreviewed doorway call',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
+        before: "const PERF01_COLD_KEY = 'perf01-public-throwaway-key-v1';",
+        after:
+          "deleteThrowawayDatabase('perf02-inbox-benchmark.db');\nconst PERF01_COLD_KEY = 'perf01-public-throwaway-key-v1';",
+      },
+      {
+        label: 'the harness keeps a doorway function as a value',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
+        before: "const PERF01_COLD_KEY = 'perf01-public-throwaway-key-v1';",
+        after:
+          "export const escapedDelete = deleteThrowawayDatabase;\nconst PERF01_COLD_KEY = 'perf01-public-throwaway-key-v1';",
+      },
+      {
+        label: 'the harness imports the native driver',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
+        before: "import type { InboxFilters } from '@core/models';",
+        after:
+          "import { open } from '@op-engineering/op-sqlite';\nimport type { InboxFilters } from '@core/models';",
+      },
+      {
+        label: 'a screen imports the harness through an unnormalized alias',
+        path: 'app/(app)/settings.tsx',
+        before: "import * as Application from 'expo-application';",
+        after:
+          "import * as Application from 'expo-application';\nimport '@db/devHarness/../devHarness/perfInboxFixtures';",
+      },
+      {
+        label: 'a screen requires the harness through another alias',
+        path: 'app/(app)/settings.tsx',
+        before: "import * as Application from 'expo-application';",
+        after:
+          "import * as Application from 'expo-application';\nrequire('@core/../db/devHarness/perfInboxFixtures');",
+      },
+      {
+        label: 'a screen loads the harness dynamically',
+        path: 'app/(app)/settings.tsx',
+        before: "import * as Application from 'expo-application';",
+        after:
+          "import * as Application from 'expo-application';\nvoid import('@db/devHarness/perfInboxFixtures');",
+      },
+      {
+        label: 'the harness re-exports a doorway function',
+        path: 'src/db/devHarness/perfInboxFixtures.ts',
+        before: "const PERF01_COLD_KEY = 'perf01-public-throwaway-key-v1';",
+        after:
+          "export { openThrowawayDatabase } from '../database';\nconst PERF01_COLD_KEY = 'perf01-public-throwaway-key-v1';",
+      },
+    ];
+    const root = incomingIngressFixture();
+    try {
+      for (const scenario of cases) {
+        const file = resolve(root, scenario.path);
+        const original = readFileSync(file, 'utf8');
+        try {
+          replaceFixtureSource(root, scenario.path, scenario.before, scenario.after);
+          const deletion = scanDbWrites({ root }).find(
+            (finding) =>
+              finding.path === 'src/db/database.ts' &&
+              finding.symbol === 'deleteThrowawayDatabase' &&
+              finding.operation === 'native-database-delete',
+          );
+          assert.ok(deletion, scenario.label);
+          assert.notEqual(deletion.detectedContext, 'throwaway-database', scenario.label);
         } finally {
           writeFileSync(file, original);
         }

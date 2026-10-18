@@ -4746,6 +4746,414 @@ function driverHistorySelfTestCertificateCandidate({
   };
 }
 
+/**
+ * P6.5: the DEV-only PERF fixtures live in src/db/devHarness/perfInboxFixtures.ts and reach a
+ * database only through the throwaway-database doorway in database.ts. The harness may import only
+ * the doorway's five exports, the benchmark seeding module, the inbox queries and types; it has no
+ * dynamic import, require or re-export; and only the services barrel imports the harness.
+ */
+const PERF_HARNESS_PATH = 'src/db/devHarness/perfInboxFixtures.ts';
+const THROWAWAY_DOORWAY_EXPORTS = Object.freeze([
+  'openThrowawayDatabase',
+  'closeThrowawayDatabase',
+  'deleteThrowawayDatabase',
+  'migrateThrowawayDatabase',
+  'throwawayDrizzle',
+]);
+
+/**
+ * Every module load in a file: import/export declarations, `import x = require(...)`, and
+ * `import(...)`/`require(...)` calls. A load whose argument is not a string literal is `<dynamic>`.
+ */
+function projectModuleSpecifiers(file) {
+  const specifiers = [];
+  const visit = (node) => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      specifiers.push({ text: node.moduleSpecifier.text, node: node.moduleSpecifier });
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      ts.isExternalModuleReference(node.moduleReference)
+    ) {
+      const expression = node.moduleReference.expression;
+      specifiers.push(
+        ts.isStringLiteralLike(expression)
+          ? { text: expression.text, node: expression }
+          : { text: '<dynamic>' },
+      );
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+    ) {
+      const argument = node.arguments[0];
+      specifiers.push(
+        argument && ts.isStringLiteralLike(argument)
+          ? { text: argument.text, node: argument }
+          : { text: '<dynamic>' },
+      );
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return specifiers;
+}
+
+/**
+ * Whether a module load reaches the PERF harness. The type checker resolves every form TypeScript
+ * understands; the project's own alias rules are the fallback for loads it does not resolve, such
+ * as a `require` call in a TypeScript file.
+ */
+function resolvesToPerfHarness(fromPath, specifier, checker, harnessFile) {
+  const moduleSymbol = specifier.node
+    ? unaliasSymbol(checker.getSymbolAtLocation(specifier.node), checker)
+    : undefined;
+  if (
+    moduleSymbol?.declarations?.some((declaration) => declaration.getSourceFile() === harnessFile)
+  ) {
+    return true;
+  }
+  const base = projectModuleBasePath(fromPath, specifier.text);
+  return base?.replace(/\.(?:tsx?|jsx?|mjs|cjs)$/, '') === PERF_HARNESS_PATH.replace(/\.ts$/, '');
+}
+
+function perfHarnessBoundaryIsReviewed(filesByPath, checker) {
+  const harnessFile = filesByPath.get(PERF_HARNESS_PATH);
+  if (!harnessFile) return false;
+  const allowedModules = new Set([
+    '@core/models',
+    '../database',
+    '../performance/deviceInboxBenchmark',
+    '../repositories/chatQueries',
+    '../types',
+  ]);
+  const imports = harnessFile.statements.filter((statement) => ts.isImportDeclaration(statement));
+  const databaseImports = imports.filter(
+    (declaration) =>
+      ts.isStringLiteral(declaration.moduleSpecifier) &&
+      declaration.moduleSpecifier.text === '../database',
+  );
+  const databaseClause = databaseImports[0]?.importClause;
+  const databaseNames =
+    databaseClause?.namedBindings && ts.isNamedImports(databaseClause.namedBindings)
+      ? databaseClause.namedBindings.elements.map((element) =>
+          element.isTypeOnly
+            ? '<type-only>'
+            : (element.propertyName ?? element.name).text === element.name.text
+              ? element.name.text
+              : '<renamed>',
+        )
+      : [];
+  const specifiers = projectModuleSpecifiers(harnessFile);
+  if (
+    imports.some(
+      (declaration) =>
+        !ts.isStringLiteral(declaration.moduleSpecifier) ||
+        !allowedModules.has(declaration.moduleSpecifier.text),
+    ) ||
+    specifiers.length !== imports.length ||
+    harnessFile.statements.some(
+      (statement) => ts.isExportDeclaration(statement) || ts.isImportEqualsDeclaration(statement),
+    ) ||
+    databaseImports.length !== 1 ||
+    databaseClause.name ||
+    databaseClause.isTypeOnly ||
+    databaseNames.length !== THROWAWAY_DOORWAY_EXPORTS.length ||
+    THROWAWAY_DOORWAY_EXPORTS.some((name) => !databaseNames.includes(name))
+  ) {
+    return false;
+  }
+  const importers = [...filesByPath].filter(([path, file]) =>
+    projectModuleSpecifiers(file).some(
+      (specifier) =>
+        specifier.text === '<dynamic>' ||
+        resolvesToPerfHarness(path, specifier, checker, harnessFile),
+    ),
+  );
+  return (
+    importers.length === 1 &&
+    importers[0][0] === 'src/services/index.ts' &&
+    projectModuleSpecifiers(importers[0][1]).filter((specifier) =>
+      resolvesToPerfHarness('src/services/index.ts', specifier, checker, harnessFile),
+    ).length === 1
+  );
+}
+
+/**
+ * The throwaway-database doorway (P6.5). Pin its implementation, its module state (the exact name
+ * list and handle set, unexported and used only by the doorway), its real `__DEV__` check, its
+ * exact native calls, and its callers: every call into its five exports must be one of the reviewed
+ * PERF harness call sites, and no export may escape as a value.
+ */
+function throwawayDatabaseDoorwayCandidate({
+  filesByPath,
+  checker,
+  edges,
+  referenceEdges,
+  findings,
+  harnessCalls,
+}) {
+  const databasePath = 'src/db/database.ts';
+  const databaseFile = filesByPath.get(databasePath);
+  const helperNames = ['approvedThrowawayName', 'openThrowawayHandle'];
+  const callables = new Map(
+    [...helperNames, ...THROWAWAY_DOORWAY_EXPORTS].map((name) => [
+      name,
+      topLevelFunction(filesByPath, databasePath, name),
+    ]),
+  );
+  const opRunner = topLevelFunction(filesByPath, databasePath, 'opRunner');
+  const drizzleAdapter = topLevelFunction(filesByPath, databasePath, 'drizzleAdapter');
+  const runMigrations = topLevelFunction(filesByPath, 'src/db/migrate.ts', 'runMigrations');
+  const namesState = databaseFile
+    ? topLevelVariable(databaseFile, 'THROWAWAY_DATABASE_NAMES')
+    : undefined;
+  const handlesState = databaseFile
+    ? topLevelVariable(databaseFile, 'openThrowawayHandles')
+    : undefined;
+  const productionNameState = databaseFile ? topLevelVariable(databaseFile, 'DB_NAME') : undefined;
+  if (
+    !databaseFile ||
+    [...callables.values()].some((callable) => !callable?.body) ||
+    !opRunner?.body ||
+    !drizzleAdapter?.body ||
+    !runMigrations?.body ||
+    !namesState?.declaration.initializer ||
+    !handlesState?.declaration.initializer ||
+    !productionNameState?.declaration.initializer ||
+    !(harnessCalls instanceof Set)
+  ) {
+    return undefined;
+  }
+  const sha = (node) =>
+    createHash('sha256').update(normalizedSnippet(node, databaseFile)).digest('hex');
+  const expectedFingerprints = new Map([
+    ['approvedThrowawayName', '8347ee123e8f245803d87a5ac38cf146d0370012f96cfabca398548f134565dc'],
+    ['openThrowawayHandle', '2cc7b7c66834e9a2c64c84c810182a134869b5dbe3e5cd880dbcb575fafba923'],
+    ['openThrowawayDatabase', '6dd80a94369fbe1c2c80a04eb94e7da77d4deaaf3458443956a0f63babb6f617'],
+    ['closeThrowawayDatabase', 'a96360b1f85d4fdcaf355d93c4305be8ac27e86826fb48785de0c24fe5936511'],
+    ['deleteThrowawayDatabase', '219f787062f18ddf60456793f47a47421c4066c6fdc7888a42b97a75cbabfbf1'],
+    [
+      'migrateThrowawayDatabase',
+      'e070b9b2df62454aa77ccd80a9912ab146548d998c9db1c654d14fb65ba2e59e',
+    ],
+    ['throwawayDrizzle', '306ac57fc68302765410cd532d701ed020eea903558d79d7c1de4977dc9e96a9'],
+  ]);
+  const exported = (node) =>
+    Boolean(node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword));
+  if (
+    [...expectedFingerprints].some(([name, hash]) => sha(callables.get(name)) !== hash) ||
+    helperNames.some((name) => exported(callables.get(name))) ||
+    THROWAWAY_DOORWAY_EXPORTS.some((name) => !exported(callables.get(name))) ||
+    !(namesState.declarationList.flags & ts.NodeFlags.Const) ||
+    !(handlesState.declarationList.flags & ts.NodeFlags.Const) ||
+    exported(namesState.declarationList.parent) ||
+    exported(handlesState.declarationList.parent) ||
+    normalizedSnippet(namesState.declaration.initializer, databaseFile) !==
+      "[ 'perf01-cold-1000.db', 'perf01-cold-10000.db', 'perf02-inbox-benchmark.db', ] as const" ||
+    normalizedSnippet(handlesState.declaration.initializer, databaseFile) !==
+      'new WeakSet<object>()' ||
+    normalizedSnippet(productionNameState.declaration.initializer, databaseFile) !== "'gator.db'"
+  ) {
+    return undefined;
+  }
+  const doorwayCallables = [...callables.values()];
+  const insideDoorway = (node) => doorwayCallables.some((callable) => nodeIsInside(node, callable));
+  const nameListReferences = runtimeReferencesToBinding(
+    databaseFile,
+    namesState.declaration.name,
+    checker,
+  );
+  const handleSetReferences = runtimeReferencesToBinding(
+    databaseFile,
+    handlesState.declaration.name,
+    checker,
+  );
+  const devIdentifiers = [];
+  const visitDev = (node) => {
+    if (ts.isIdentifier(node) && node.text === '__DEV__') devIdentifiers.push(node);
+    ts.forEachChild(node, visitDev);
+  };
+  visitDev(callables.get('approvedThrowawayName'));
+  const devSymbol = devIdentifiers[0]
+    ? unaliasSymbol(checker.getSymbolAtLocation(devIdentifiers[0]), checker)
+    : undefined;
+  if (
+    nameListReferences.length !== 2 ||
+    !nodeIsInside(nameListReferences[1], callables.get('approvedThrowawayName')) ||
+    handleSetReferences.length !== 4 ||
+    handleSetReferences.slice(1).some((reference) => !insideDoorway(reference)) ||
+    devIdentifiers.length !== 1 ||
+    !devSymbol?.declarations?.length ||
+    devSymbol.declarations.some((declaration) => !declaration.getSourceFile().isDeclarationFile)
+  ) {
+    return undefined;
+  }
+  const openBinding = soleNamedImportBinding(databaseFile, '@op-engineering/op-sqlite', 'open');
+  const drizzleBinding = soleNamedImportBinding(databaseFile, 'drizzle-orm/op-sqlite', 'drizzle');
+  if (!openBinding || !drizzleBinding) return undefined;
+  const openCalls = directCallsToBinding(databaseFile, openBinding, checker).filter(insideDoorway);
+  const runnerFactoryCalls = directCallsToBinding(databaseFile, opRunner.name, checker).filter(
+    insideDoorway,
+  );
+  const adapterCalls = directCallsToBinding(databaseFile, drizzleAdapter.name, checker).filter(
+    insideDoorway,
+  );
+  const drizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker).filter(
+    insideDoorway,
+  );
+  const migrationEdges = edges.filter(
+    (edge) => edge.callee === runMigrations && insideDoorway(edge.node),
+  );
+  const exportedCallables = THROWAWAY_DOORWAY_EXPORTS.map((name) => callables.get(name));
+  const helperCallables = helperNames.map((name) => callables.get(name));
+  const exportEdges = edges.filter((edge) => exportedCallables.includes(edge.callee));
+  const helperEdges = edges.filter((edge) => helperCallables.includes(edge.callee));
+  if (
+    openCalls.length !== 3 ||
+    openCalls.filter((call) => nodeIsInside(call, callables.get('openThrowawayDatabase')))
+      .length !== 2 ||
+    openCalls.filter((call) => nodeIsInside(call, callables.get('deleteThrowawayDatabase')))
+      .length !== 1 ||
+    runnerFactoryCalls.length !== 1 ||
+    !nodeIsInside(runnerFactoryCalls[0], callables.get('migrateThrowawayDatabase')) ||
+    adapterCalls.length !== 1 ||
+    drizzleCalls.length !== 1 ||
+    !nodeIsInside(adapterCalls[0], callables.get('throwawayDrizzle')) ||
+    !nodeIsInside(drizzleCalls[0], callables.get('throwawayDrizzle')) ||
+    migrationEdges.length !== 1 ||
+    migrationEdges[0].node !== runnerFactoryCalls[0].parent ||
+    exportEdges.length !== harnessCalls.size ||
+    exportEdges.some((edge) => !harnessCalls.has(edge.node)) ||
+    helperEdges.some((edge) => !insideDoorway(edge.node)) ||
+    referenceEdges.some((reference) => doorwayCallables.includes(reference.target))
+  ) {
+    return undefined;
+  }
+  // Every runtime use of a doorway function anywhere in the project must be its own declaration
+  // name or the callee of a reviewed call: a harness call for the exports, a doorway call for the
+  // helpers. The reference edges above cover only writers, and three of the five exports do not
+  // write, so values passed around, shorthand properties and namespace destructuring are checked here.
+  const doorwayBySymbol = new Map(
+    doorwayCallables.map((callable) => [
+      unaliasSymbol(checker.getSymbolAtLocation(callable.name), checker),
+      callable,
+    ]),
+  );
+  const reviewedCallees = new Set([
+    ...[...harnessCalls].map((call) => unwrapExpression(call.expression)),
+    ...helperCallables.flatMap((helper) =>
+      directCallsToBinding(databaseFile, helper.name, checker)
+        .filter(insideDoorway)
+        .map((call) => unwrapExpression(call.expression)),
+    ),
+  ]);
+  const referencedDoorwayCallable = (node) => {
+    const parent = node.parent;
+    let symbol;
+    if (ts.isShorthandPropertyAssignment(parent) && parent.name === node) {
+      symbol = checker.getShorthandAssignmentValueSymbol(parent);
+    } else if (
+      ts.isBindingElement(parent) &&
+      ts.isObjectBindingPattern(parent.parent) &&
+      (parent.propertyName ?? parent.name) === node
+    ) {
+      symbol = checker.getTypeAtLocation(parent.parent).getProperty(node.text);
+    } else {
+      symbol = checker.getSymbolAtLocation(node);
+    }
+    return symbol ? doorwayBySymbol.get(unaliasSymbol(symbol, checker)) : undefined;
+  };
+  let unreviewedDoorwayReference = false;
+  const visitDoorwayReferences = (node) => {
+    if (
+      (ts.isIdentifier(node) ||
+        (ts.isStringLiteralLike(node) &&
+          ts.isElementAccessExpression(node.parent) &&
+          node.parent.argumentExpression === node)) &&
+      !isCompileTimeOnlyReference(node) &&
+      !ts.isImportSpecifier(node.parent)
+    ) {
+      const callable = referencedDoorwayCallable(node);
+      if (callable && node !== callable.name && !reviewedCallees.has(node)) {
+        unreviewedDoorwayReference = true;
+      }
+    }
+    ts.forEachChild(node, visitDoorwayReferences);
+  };
+  for (const file of filesByPath.values()) visitDoorwayReferences(file);
+  if (unreviewedDoorwayReference) return undefined;
+  const expectedFindingIds = new Set([
+    'src/db/database.ts#deleteThrowawayDatabase:native-database-delete:66299dffa585',
+  ]);
+  const doorwayFindings = findings.filter(
+    (finding) =>
+      finding.path === databasePath &&
+      doorwayCallables.some((callable) => finding.symbol === callable.name.text),
+  );
+  if (
+    doorwayFindings.length !== expectedFindingIds.size ||
+    doorwayFindings.some((finding) => !expectedFindingIds.has(finding.id))
+  ) {
+    return undefined;
+  }
+  return {
+    openCalls,
+    runnerFactoryCalls,
+    adapterCall: adapterCalls[0],
+    drizzleCall: drizzleCalls[0],
+    migrationCalls: migrationEdges.map((edge) => edge.node),
+    findingIds: expectedFindingIds,
+    callNodes: edges
+      .filter((edge) => edge.file === databaseFile && insideDoorway(edge.node))
+      .map((edge) => edge.node),
+  };
+}
+
+/** The harness functions the PERF proofs review; no other harness code may use the doorway. */
+const PERF_HARNESS_DOORWAY_OWNERS = [
+  'deletePerf02BenchmarkDatabase',
+  'runPerf02DeviceInboxBenchmark',
+  'deletePerf01ColdFixture',
+  'preparePerf01ColdFixture',
+  'openPerf01ColdFixture',
+];
+
+/**
+ * Exact calls from the given harness owners into each of the doorway's five exports. Refuses when
+ * any harness use of a doorway export is not a direct call inside one of the reviewed functions.
+ */
+function perfHarnessDoorwayCalls(filesByPath, owners, checker) {
+  const harnessFile = filesByPath.get(PERF_HARNESS_PATH);
+  const reviewedOwners = PERF_HARNESS_DOORWAY_OWNERS.map((name) =>
+    topLevelFunction(filesByPath, PERF_HARNESS_PATH, name),
+  );
+  if (!harnessFile || reviewedOwners.some((owner) => !owner?.body)) return undefined;
+  const calls = new Map();
+  for (const name of THROWAWAY_DOORWAY_EXPORTS) {
+    const binding = namedImportBinding(harnessFile, '../database', name);
+    if (!binding) return undefined;
+    const allCalls = directCallsToBinding(harnessFile, binding, checker);
+    const callees = new Set(allCalls.map((call) => unwrapExpression(call.expression)));
+    if (
+      allCalls.some((call) => !reviewedOwners.some((owner) => nodeIsInside(call, owner))) ||
+      runtimeReferencesToBinding(harnessFile, binding, checker).some(
+        (reference) => !callees.has(reference),
+      )
+    ) {
+      return undefined;
+    }
+    calls.set(
+      name,
+      allCalls.filter((call) => owners.some((owner) => nodeIsInside(call, owner))),
+    );
+  }
+  return calls;
+}
+
 /** Certify the retained, fixed-name PERF-01 files before sharing the PERF-02 seed helper. */
 function perf01ColdBenchmarkCertificateCandidate({
   filesByPath,
@@ -4759,24 +5167,21 @@ function perf01ColdBenchmarkCertificateCandidate({
   const routePath = 'app/(app)/perf-inbox-cold.tsx';
   const servicePath = 'src/services/index.ts';
   const databaseFile = filesByPath.get(databasePath);
+  const harnessFile = filesByPath.get(PERF_HARNESS_PATH);
   const screenFile = filesByPath.get(screenPath);
   const routeFile = filesByPath.get(routePath);
   const serviceFile = filesByPath.get(servicePath);
-  const name = topLevelFunction(filesByPath, databasePath, 'perf01ColdName');
-  const cleanup = topLevelFunction(filesByPath, databasePath, 'deletePerf01ColdFixture');
-  const prepare = topLevelFunction(filesByPath, databasePath, 'preparePerf01ColdFixture');
-  const measure = topLevelFunction(filesByPath, databasePath, 'openPerf01ColdFixture');
+  const name = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'perf01ColdName');
+  const cleanup = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'deletePerf01ColdFixture');
+  const prepare = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'preparePerf01ColdFixture');
+  const measure = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'openPerf01ColdFixture');
+  const rowsOf = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'rowsOf');
   const screen = topLevelFunction(filesByPath, screenPath, 'ColdInboxBenchmarkScreen');
-  const opRunner = topLevelFunction(filesByPath, databasePath, 'opRunner');
-  const drizzleAdapter = topLevelFunction(filesByPath, databasePath, 'drizzleAdapter');
-  const extractRows = topLevelFunction(filesByPath, databasePath, 'extractRows');
-  const runMigrations = topLevelFunction(filesByPath, 'src/db/migrate.ts', 'runMigrations');
   const nameState = databaseFile ? topLevelVariable(databaseFile, 'DB_NAME') : undefined;
-  const keyState = databaseFile ? topLevelVariable(databaseFile, 'PERF01_COLD_KEY') : undefined;
-  const rawState = databaseFile ? topLevelVariable(databaseFile, 'rawDb') : undefined;
-  const drizzleState = databaseFile ? topLevelVariable(databaseFile, 'dbInstance') : undefined;
+  const keyState = harnessFile ? topLevelVariable(harnessFile, 'PERF01_COLD_KEY') : undefined;
   if (
     !databaseFile ||
+    !harnessFile ||
     !screenFile ||
     !routeFile ||
     !serviceFile ||
@@ -4784,34 +5189,32 @@ function perf01ColdBenchmarkCertificateCandidate({
     !cleanup?.body ||
     !prepare?.body ||
     !measure?.body ||
+    !rowsOf?.body ||
     !screen?.body ||
-    !opRunner?.body ||
-    !drizzleAdapter?.body ||
-    !extractRows?.body ||
-    !runMigrations?.body ||
     !nameState?.declaration.initializer ||
     !keyState?.declaration.initializer ||
-    !rawState ||
-    !drizzleState
+    !perfHarnessBoundaryIsReviewed(filesByPath, checker)
   )
     return undefined;
   const sha = (node, file) =>
     createHash('sha256').update(normalizedSnippet(node, file)).digest('hex');
   if (
-    sha(name, databaseFile) !==
-      'e7df163369f21716684bc7c49bde4fc447f46ad0d1ad23c4219020074bdfb6d0' ||
-    sha(cleanup, databaseFile) !==
-      'e668fc798c8ad23a59a0bca68a74a2c6a12d013fc97a0c14d3240ff635090809' ||
-    sha(prepare, databaseFile) !==
-      'd197554f078bdf03bcf8b132387155b99be2d750447cf1504259a6184bb1541d' ||
-    sha(measure, databaseFile) !==
-      '6002e7bd8da54ec0b25ef5d1f3db310fdf31f6e6f6044d599fb505abc799b797' ||
+    sha(name, harnessFile) !== 'bb79996141158bc441c08a0970c2f58dba68b540ffdf1417dfbf1afcb347818a' ||
+    sha(cleanup, harnessFile) !==
+      'a00f3e953a008e24559ecbef0783de8edd4625bf596042818be0c6aff1c48695' ||
+    sha(prepare, harnessFile) !==
+      '0bd00b009baee41566bda4e7ed0622b17c2a47b16b9889b419c7ec4fa2311da7' ||
+    sha(measure, harnessFile) !==
+      '9f9fac77dd9d34f2b754e02eb9f47efb2ce0e393b75ad2a06fe41410dbb888a0' ||
+    sha(rowsOf, harnessFile) !==
+      '29efcb6ece48829d67813ad6961319796b71349be1bc4081f9703bece755b9aa' ||
     sha(screenFile, screenFile) !==
       '9ebdcb0ed61761d699b83742351b2fe7d0247dfb5a726a129de1c4a05befebd5' ||
     sha(routeFile, routeFile) !==
       'c32c1208a961f1f4f9b3867f95cc041e5f5c38adad0c89473642e717d7c9a20b' ||
     normalizedSnippet(nameState.declaration.initializer, databaseFile) !== "'gator.db'" ||
-    normalizedSnippet(keyState.declaration.initializer, databaseFile) !==
+    !(keyState.declarationList.flags & ts.NodeFlags.Const) ||
+    normalizedSnippet(keyState.declaration.initializer, harnessFile) !==
       "'perf01-public-throwaway-key-v1'"
   )
     return undefined;
@@ -4823,7 +5226,7 @@ function perf01ColdBenchmarkCertificateCandidate({
   if (
     serviceAliases.some(([alias, target]) => {
       const state = topLevelVariable(serviceFile, alias);
-      const imported = namedImportBinding(serviceFile, '@db/database', target);
+      const imported = namedImportBinding(serviceFile, '@db/devHarness/perfInboxFixtures', target);
       return (
         !state?.declaration.initializer ||
         !imported ||
@@ -4833,57 +5236,40 @@ function perf01ColdBenchmarkCertificateCandidate({
     })
   )
     return undefined;
-  const openBinding = soleNamedImportBinding(databaseFile, '@op-engineering/op-sqlite', 'open');
-  const drizzleBinding = soleNamedImportBinding(databaseFile, 'drizzle-orm/op-sqlite', 'drizzle');
-  if (!openBinding || !drizzleBinding) return undefined;
   const owners = [cleanup, prepare, measure];
   const insideOwner = (node) => owners.some((owner) => nodeIsInside(node, owner));
-  const openCalls = directCallsToBinding(databaseFile, openBinding, checker).filter(insideOwner);
-  const runnerFactoryCalls = directCallsToBinding(databaseFile, opRunner.name, checker).filter(
-    insideOwner,
-  );
-  const adapterCalls = directCallsToBinding(databaseFile, drizzleAdapter.name, checker).filter(
-    insideOwner,
-  );
-  const drizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker).filter(
-    insideOwner,
-  );
-  const extractCalls = directCallsToBinding(databaseFile, extractRows.name, checker).filter(
-    insideOwner,
-  );
-  const migrationCalls = edges.filter(
-    (edge) => edge.callee === runMigrations && nodeIsInside(edge.node, prepare),
-  );
+  const doorwayCalls = perfHarnessDoorwayCalls(filesByPath, owners, checker);
+  if (!doorwayCalls) return undefined;
+  const expectedDoorwayCalls = new Map([
+    ['deleteThrowawayDatabase', 2],
+    ['openThrowawayDatabase', 2],
+    ['migrateThrowawayDatabase', 1],
+    ['throwawayDrizzle', 2],
+    ['closeThrowawayDatabase', 3],
+  ]);
+  const rowsCalls = directCallsToBinding(harnessFile, rowsOf.name, checker).filter(insideOwner);
   const expectedFindingIds = new Set([
-    'src/db/database.ts#deletePerf01ColdFixture:native-database-delete:9a4d94084922',
-    'src/db/database.ts#preparePerf01ColdFixture:native-database-delete:8405deee85cd',
-    'src/db/database.ts#preparePerf01ColdFixture:sql-pragma:133307a5048f',
-    'src/db/database.ts#preparePerf01ColdFixture:sql-pragma:95a909b0e621',
+    'src/db/devHarness/perfInboxFixtures.ts#preparePerf01ColdFixture:sql-pragma:512156b2bbd6',
+    'src/db/devHarness/perfInboxFixtures.ts#preparePerf01ColdFixture:sql-pragma:7302a9e7ad18',
   ]);
   const protectedFindings = findings.filter(
     (finding) =>
-      finding.path === databasePath && owners.some((owner) => finding.symbol === owner.name.text),
+      finding.path === PERF_HARNESS_PATH &&
+      owners.some((owner) => finding.symbol === owner.name.text),
   );
   if (
-    openCalls.length !== 4 ||
-    runnerFactoryCalls.length !== 1 ||
-    adapterCalls.length !== 2 ||
-    drizzleCalls.length !== 2 ||
-    extractCalls.length !== 2 ||
-    extractCalls.some((call) => !nodeIsInside(call, prepare)) ||
-    migrationCalls.length !== 1 ||
+    [...expectedDoorwayCalls].some(
+      ([callee, count]) => doorwayCalls.get(callee).length !== count,
+    ) ||
+    rowsCalls.length !== 2 ||
+    rowsCalls.some((call) => !nodeIsInside(call, prepare)) ||
     protectedFindings.length !== expectedFindingIds.size ||
     protectedFindings.some((finding) => !expectedFindingIds.has(finding.id)) ||
-    [rawState, drizzleState, nameState].some((state) =>
-      runtimeReferencesToBinding(databaseFile, state.declaration.name, checker).some((reference) =>
-        insideOwner(reference),
-      ),
-    ) ||
     referenceEdges.some((reference) => owners.some((owner) => reference.target === owner))
   )
     return undefined;
   const allowedCaller = (edge) =>
-    edge.file === screenFile || (edge.file === databaseFile && nodeIsInside(edge.node, prepare));
+    edge.file === screenFile || (edge.file === harnessFile && nodeIsInside(edge.node, prepare));
   if (edges.some((edge) => owners.some((owner) => edge.callee === owner) && !allowedCaller(edge))) {
     return undefined;
   }
@@ -4893,17 +5279,11 @@ function perf01ColdBenchmarkCertificateCandidate({
   );
   if (screenMutationReferences.length !== 1) return undefined;
   return {
-    openCalls,
-    runnerFactoryCalls,
-    adapterCalls,
-    drizzleCalls,
-    extractCalls,
-    migrationCalls: migrationCalls.map((edge) => edge.node),
+    doorwayCalls: [...doorwayCalls.values()].flat(),
     findingIds: expectedFindingIds,
     callNodes: edges
       .filter(
-        (edge) =>
-          edge.file === screenFile || (edge.file === databaseFile && insideOwner(edge.node)),
+        (edge) => edge.file === screenFile || (edge.file === harnessFile && insideOwner(edge.node)),
       )
       .map((edge) => edge.node)
       .concat(screenMutationReferences.map((reference) => reference.node)),
@@ -4912,10 +5292,11 @@ function perf01ColdBenchmarkCertificateCandidate({
 
 /**
  * The PERF-02 native fixture is a second, fixed throwaway SQLCipher lifetime. Keep its reviewed
- * implementation and service-mediated DEV UI entry exact: the runner opens only its own file,
- * awaits migrations and fixture work, then closes and deletes the file in finally. Symbol checks
- * prevent another caller, adapter consumer, or production-handle reference from inheriting this
- * exception.
+ * implementation and service-mediated DEV UI entry exact: the runner opens only its own file through
+ * the doorway, awaits migrations and fixture work, then closes and deletes the file in finally.
+ * Symbol checks prevent another caller or production-handle reference from inheriting this
+ * exception. The native call nodes this certificate returns for the production proofs are the
+ * doorway's own (P6.5): the harness itself makes none.
  */
 function perf02InboxBenchmarkCertificateCandidate({
   filesByPath,
@@ -4932,6 +5313,7 @@ function perf02InboxBenchmarkCertificateCandidate({
   const screenPath = 'src/ui/conversations/PerfInboxBenchmarkScreen.tsx';
   const routePath = 'app/(app)/perf-inbox.tsx';
   const databaseFile = filesByPath.get(databasePath);
+  const harnessFile = filesByPath.get(PERF_HARNESS_PATH);
   const benchmarkFile = filesByPath.get(benchmarkPath);
   const serviceFile = filesByPath.get(servicePath);
   const homeFile = filesByPath.get(homePath);
@@ -4941,32 +5323,27 @@ function perf02InboxBenchmarkCertificateCandidate({
   const reactiveFile = filesByPath.get('src/db/useReactiveQuery.ts');
   const listFile = filesByPath.get('src/ui/conversations/ConversationListScreen.tsx');
   const tileFile = filesByPath.get('src/ui/conversations/ConversationTile.tsx');
-  const cleanup = topLevelFunction(filesByPath, databasePath, 'deletePerf02BenchmarkDatabase');
-  const runner = topLevelFunction(filesByPath, databasePath, 'runPerf02DeviceInboxBenchmark');
+  const cleanup = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'deletePerf02BenchmarkDatabase');
+  const runner = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'runPerf02DeviceInboxBenchmark');
+  const prepare = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'preparePerf01ColdFixture');
+  const rowsOf = topLevelFunction(filesByPath, PERF_HARNESS_PATH, 'rowsOf');
   const fixture = topLevelFunction(filesByPath, benchmarkPath, 'runDeviceInboxBenchmarkFixture');
   const seed = topLevelFunction(filesByPath, benchmarkPath, 'seedDeviceInboxBenchmarkFixture');
   const bump = topLevelFunction(filesByPath, benchmarkPath, 'bumpDeviceInboxBenchmarkFixture');
   const service = topLevelFunction(filesByPath, servicePath, 'runDevPerf02InboxBenchmark');
   const home = topLevelFunction(filesByPath, homePath, 'Home');
   const screen = topLevelFunction(filesByPath, screenPath, 'PerfInboxBenchmarkScreen');
-  const opRunner = topLevelFunction(filesByPath, databasePath, 'opRunner');
-  const drizzleAdapter = topLevelFunction(filesByPath, databasePath, 'drizzleAdapter');
-  const extractRows = topLevelFunction(filesByPath, databasePath, 'extractRows');
-  const runMigrations = topLevelFunction(filesByPath, 'src/db/migrate.ts', 'runMigrations');
-  const rawState = databaseFile ? topLevelVariable(databaseFile, 'rawDb') : undefined;
-  const drizzleState = databaseFile ? topLevelVariable(databaseFile, 'dbInstance') : undefined;
   const productionNameState = databaseFile ? topLevelVariable(databaseFile, 'DB_NAME') : undefined;
-  const nameState = databaseFile
-    ? topLevelVariable(databaseFile, 'PERF02_BENCHMARK_DB_NAME')
+  const nameState = harnessFile
+    ? topLevelVariable(harnessFile, 'PERF02_BENCHMARK_DB_NAME')
     : undefined;
-  const keyState = databaseFile
-    ? topLevelVariable(databaseFile, 'PERF02_BENCHMARK_KEY')
-    : undefined;
-  const runningState = databaseFile
-    ? topLevelVariable(databaseFile, 'perf02BenchmarkRunning')
+  const keyState = harnessFile ? topLevelVariable(harnessFile, 'PERF02_BENCHMARK_KEY') : undefined;
+  const runningState = harnessFile
+    ? topLevelVariable(harnessFile, 'perf02BenchmarkRunning')
     : undefined;
   if (
     !databaseFile ||
+    !harnessFile ||
     !benchmarkFile ||
     !serviceFile ||
     !homeFile ||
@@ -4978,18 +5355,14 @@ function perf02InboxBenchmarkCertificateCandidate({
     !tileFile ||
     !cleanup?.body ||
     !runner?.body ||
+    !prepare?.body ||
+    !rowsOf?.body ||
     !fixture?.body ||
     !seed?.body ||
     !bump?.body ||
     !service?.body ||
     !home?.body ||
     !screen?.body ||
-    !opRunner?.body ||
-    !drizzleAdapter?.body ||
-    !extractRows?.body ||
-    !runMigrations?.body ||
-    !rawState ||
-    !drizzleState ||
     !productionNameState?.declaration.initializer ||
     !nameState?.declaration.initializer ||
     !keyState?.declaration.initializer ||
@@ -5001,10 +5374,10 @@ function perf02InboxBenchmarkCertificateCandidate({
   const sha = (node, file) =>
     createHash('sha256').update(normalizedSnippet(node, file)).digest('hex');
   if (
-    sha(cleanup, databaseFile) !==
-      '82b69f0ad1ae12e39d4571c29509648085d319e01a89bbd7bf7e9aa23cc48c3c' ||
-    sha(runner, databaseFile) !==
-      '3680d44e5847212a22c97e1869c68b4d517b951152440c37578b22d6254e649a' ||
+    sha(cleanup, harnessFile) !==
+      '5370f53804cbd23afb4c22b7315ac03f49de66d0144294516a4f5677e30d4160' ||
+    sha(runner, harnessFile) !==
+      '9fb18aab84f583e316b7e82333ba02ffe2c268e3c99cf31a64b395cff26f8bf8' ||
     sha(benchmarkFile, benchmarkFile) !==
       'd3490c2697828a9406d9615b7eed5ccc9a8046107539bb365ba2c3106d7f7405' ||
     sha(service, serviceFile) !==
@@ -5023,38 +5396,36 @@ function perf02InboxBenchmarkCertificateCandidate({
     sha(tileFile, tileFile) !==
       'bfe8887f3c0a23ca1b01c5ab03f9f0e5057bec215be80f95e7bc122491c943e4' ||
     !(nameState.declarationList.flags & ts.NodeFlags.Const) ||
-    normalizedSnippet(nameState.declaration.initializer, databaseFile) !==
+    normalizedSnippet(nameState.declaration.initializer, harnessFile) !==
       "'perf02-inbox-benchmark.db'" ||
     !(keyState.declarationList.flags & ts.NodeFlags.Const) ||
-    normalizedSnippet(keyState.declaration.initializer, databaseFile) !==
+    normalizedSnippet(keyState.declaration.initializer, harnessFile) !==
       "'perf02-public-throwaway-key-v1'" ||
     normalizedSnippet(productionNameState.declaration.initializer, databaseFile) ===
-      normalizedSnippet(nameState.declaration.initializer, databaseFile) ||
-    normalizedSnippet(runningState.declaration.initializer, databaseFile) !== 'false'
+      normalizedSnippet(nameState.declaration.initializer, harnessFile) ||
+    normalizedSnippet(runningState.declaration.initializer, harnessFile) !== 'false'
   ) {
     return undefined;
   }
 
-  const openBinding = soleNamedImportBinding(databaseFile, '@op-engineering/op-sqlite', 'open');
-  const drizzleBinding = soleNamedImportBinding(databaseFile, 'drizzle-orm/op-sqlite', 'drizzle');
   const fixtureBinding = namedImportBinding(
-    databaseFile,
-    './performance/deviceInboxBenchmark',
+    harnessFile,
+    '../performance/deviceInboxBenchmark',
     'runDeviceInboxBenchmarkFixture',
   );
   const seedBinding = namedImportBinding(
-    databaseFile,
-    './performance/deviceInboxBenchmark',
+    harnessFile,
+    '../performance/deviceInboxBenchmark',
     'seedDeviceInboxBenchmarkFixture',
   );
   const bumpBinding = namedImportBinding(
-    databaseFile,
-    './performance/deviceInboxBenchmark',
+    harnessFile,
+    '../performance/deviceInboxBenchmark',
     'bumpDeviceInboxBenchmarkFixture',
   );
   const serviceRunnerBinding = namedImportBinding(
     serviceFile,
-    '@db/database',
+    '@db/devHarness/perfInboxFixtures',
     'runPerf02DeviceInboxBenchmark',
   );
   const homeRunnerBinding = namedImportBinding(
@@ -5068,8 +5439,6 @@ function perf02InboxBenchmarkCertificateCandidate({
     'runDevPerf02InboxBenchmark',
   );
   if (
-    !openBinding ||
-    !drizzleBinding ||
     !fixtureBinding ||
     !seedBinding ||
     !bumpBinding ||
@@ -5078,30 +5447,21 @@ function perf02InboxBenchmarkCertificateCandidate({
     !screenRunnerBinding
   )
     return undefined;
-  const openCalls = directCallsToBinding(databaseFile, openBinding, checker).filter(
-    (call) => nodeIsInside(call, cleanup) || nodeIsInside(call, runner),
-  );
-  const runnerFactoryCalls = directCallsToBinding(databaseFile, opRunner.name, checker).filter(
-    (call) => nodeIsInside(call, runner),
-  );
-  const adapterCalls = directCallsToBinding(databaseFile, drizzleAdapter.name, checker).filter(
-    (call) => nodeIsInside(call, runner),
-  );
-  const drizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker).filter((call) =>
+  const owners = [cleanup, runner];
+  const insideOwner = (node) => owners.some((owner) => nodeIsInside(node, owner));
+  const doorwayCalls = perfHarnessDoorwayCalls(filesByPath, owners, checker);
+  if (!doorwayCalls) return undefined;
+  const deleteCalls = doorwayCalls.get('deleteThrowawayDatabase');
+  const openCalls = doorwayCalls.get('openThrowawayDatabase');
+  const rowsCalls = directCallsToBinding(harnessFile, rowsOf.name, checker).filter((call) =>
     nodeIsInside(call, runner),
   );
-  const extractCalls = directCallsToBinding(databaseFile, extractRows.name, checker).filter(
-    (call) => nodeIsInside(call, runner),
-  );
-  const fixtureCalls = directCallsToBinding(databaseFile, fixtureBinding, checker);
-  const seedCalls = directCallsToBinding(databaseFile, seedBinding, checker);
-  const bumpCalls = directCallsToBinding(databaseFile, bumpBinding, checker);
+  const fixtureCalls = directCallsToBinding(harnessFile, fixtureBinding, checker);
+  const seedCalls = directCallsToBinding(harnessFile, seedBinding, checker);
+  const bumpCalls = directCallsToBinding(harnessFile, bumpBinding, checker);
   const serviceCalls = directCallsToBinding(serviceFile, serviceRunnerBinding, checker);
   const homeCalls = directCallsToBinding(homeFile, homeRunnerBinding, checker);
   const screenCalls = directCallsToBinding(screenFile, screenRunnerBinding, checker);
-  const migrationEdges = edges.filter(
-    (edge) => edge.callee === runMigrations && nodeIsInside(edge.node, runner),
-  );
   const runnerEdges = edges.filter((edge) => edge.callee === runner);
   const serviceEdges = edges.filter((edge) => edge.callee === service);
   const fixtureEdges = edges.filter((edge) => edge.callee === fixture);
@@ -5115,30 +5475,26 @@ function perf02InboxBenchmarkCertificateCandidate({
       reference.node.getText(homeFile) === 'onBenchmark',
   );
   const nameReferences = runtimeReferencesToBinding(
-    databaseFile,
+    harnessFile,
     nameState.declaration.name,
     checker,
   );
-  const keyReferences = runtimeReferencesToBinding(
-    databaseFile,
-    keyState.declaration.name,
-    checker,
-  );
+  const keyReferences = runtimeReferencesToBinding(harnessFile, keyState.declaration.name, checker);
   if (
-    openCalls.length !== 2 ||
-    !nodeIsInside(openCalls[0], cleanup) ||
-    !nodeIsInside(openCalls[1], runner) ||
-    runnerFactoryCalls.length !== 1 ||
-    adapterCalls.length !== 1 ||
-    drizzleCalls.length !== 1 ||
-    extractCalls.length !== 1 ||
+    deleteCalls.length !== 1 ||
+    !nodeIsInside(deleteCalls[0], cleanup) ||
+    openCalls.length !== 1 ||
+    !nodeIsInside(openCalls[0], runner) ||
+    doorwayCalls.get('migrateThrowawayDatabase').length !== 1 ||
+    doorwayCalls.get('throwawayDrizzle').length !== 1 ||
+    doorwayCalls.get('closeThrowawayDatabase').length !== 1 ||
+    rowsCalls.length !== 1 ||
     fixtureCalls.length !== 1 ||
     seedCalls.length !== 2 ||
     bumpCalls.length !== 1 ||
     serviceCalls.length !== 1 ||
     homeCalls.length !== 1 ||
     screenCalls.length !== 1 ||
-    migrationEdges.length !== 1 ||
     runnerEdges.length !== 1 ||
     runnerEdges[0].node !== serviceCalls[0] ||
     serviceEdges.length !== 2 ||
@@ -5148,14 +5504,7 @@ function perf02InboxBenchmarkCertificateCandidate({
     fixtureEdges[0].node !== fixtureCalls[0] ||
     seedEdges.length !== 3 ||
     !seedEdges.some((edge) => edge.node === seedCalls[0]) ||
-    !seedEdges.some(
-      (edge) =>
-        edge.node === seedCalls[1] &&
-        nodeIsInside(
-          edge.node,
-          topLevelFunction(filesByPath, databasePath, 'preparePerf01ColdFixture'),
-        ),
-    ) ||
+    !seedEdges.some((edge) => edge.node === seedCalls[1] && nodeIsInside(edge.node, prepare)) ||
     !seedEdges.some((edge) => nodeIsInside(edge.node, fixture)) ||
     bumpEdges.length !== 1 ||
     bumpEdges[0].node !== bumpCalls[0] ||
@@ -5164,12 +5513,11 @@ function perf02InboxBenchmarkCertificateCandidate({
     homeBenchmarkReferences.length !== 1 ||
     nameReferences.length !== 3 ||
     nameReferences[0] !== nameState.declaration.name ||
-    nameReferences
-      .slice(1)
-      .some((reference) => !openCalls.some((call) => nodeIsInside(reference, call))) ||
+    !nodeIsInside(nameReferences[1], deleteCalls[0]) ||
+    !nodeIsInside(nameReferences[2], openCalls[0]) ||
     keyReferences.length !== 2 ||
     keyReferences[0] !== keyState.declaration.name ||
-    !nodeIsInside(keyReferences[1], openCalls[1]) ||
+    !nodeIsInside(keyReferences[1], openCalls[0]) ||
     referenceEdges.some(
       (reference) =>
         reference.target === runner ||
@@ -5178,18 +5526,12 @@ function perf02InboxBenchmarkCertificateCandidate({
         reference.target === seed ||
         reference.target === bump ||
         reference.target === cleanup,
-    ) ||
-    [rawState, drizzleState, productionNameState].some((state) =>
-      runtimeReferencesToBinding(databaseFile, state.declaration.name, checker).some(
-        (reference) => nodeIsInside(reference, runner) || nodeIsInside(reference, cleanup),
-      ),
     )
   ) {
     return undefined;
   }
   const expectedFindingIds = new Set([
-    'src/db/database.ts#deletePerf02BenchmarkDatabase:native-database-delete:625cf98f5fe0',
-    'src/db/database.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d0b6d4d17bda',
+    'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d91ceb55b2b7',
     'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:6e5c9de934e3',
     'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:5745bda7cb08',
     'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:ae0c929d63d0',
@@ -5201,7 +5543,7 @@ function perf02InboxBenchmarkCertificateCandidate({
   const protectedFindings = findings.filter(
     (finding) =>
       expectedFindingIds.has(finding.id) ||
-      (finding.path === databasePath &&
+      (finding.path === PERF_HARNESS_PATH &&
         ['deletePerf02BenchmarkDatabase', 'runPerf02DeviceInboxBenchmark'].includes(
           finding.symbol,
         )) ||
@@ -5213,22 +5555,33 @@ function perf02InboxBenchmarkCertificateCandidate({
   ) {
     return undefined;
   }
+  const doorway = throwawayDatabaseDoorwayCandidate({
+    filesByPath,
+    checker,
+    edges,
+    referenceEdges,
+    findings,
+    harnessCalls: new Set([...[...doorwayCalls.values()].flat(), ...perf01Candidate.doorwayCalls]),
+  });
+  if (!doorway) return undefined;
   return {
-    openCalls: [...openCalls, ...perf01Candidate.openCalls],
-    runnerFactoryCalls: [...runnerFactoryCalls, ...perf01Candidate.runnerFactoryCalls],
-    adapterCall: adapterCalls[0],
-    drizzleCall: drizzleCalls[0],
-    coldAdapterCalls: perf01Candidate.adapterCalls,
-    coldDrizzleCalls: perf01Candidate.drizzleCalls,
-    extractCalls: [...extractCalls, ...perf01Candidate.extractCalls],
-    migrationCalls: [...migrationEdges.map((edge) => edge.node), ...perf01Candidate.migrationCalls],
-    findingIds: new Set([...expectedFindingIds, ...perf01Candidate.findingIds]),
+    openCalls: doorway.openCalls,
+    runnerFactoryCalls: doorway.runnerFactoryCalls,
+    adapterCall: doorway.adapterCall,
+    drizzleCall: doorway.drizzleCall,
+    extractCalls: [],
+    migrationCalls: doorway.migrationCalls,
+    findingIds: new Set([
+      ...expectedFindingIds,
+      ...perf01Candidate.findingIds,
+      ...doorway.findingIds,
+    ]),
     callNodes: [
       ...edges
         .filter(
           (edge) =>
             edge.file === benchmarkFile ||
-            (edge.file === databaseFile && nodeIsInside(edge.node, runner)) ||
+            (edge.file === harnessFile && insideOwner(edge.node)) ||
             edge.node === serviceCalls[0] ||
             edge.node === homeCalls[0] ||
             edge.node === screenCalls[0],
@@ -5236,6 +5589,7 @@ function perf02InboxBenchmarkCertificateCandidate({
         .map((edge) => edge.node),
       ...homeBenchmarkReferences.map((reference) => reference.node),
       ...perf01Candidate.callNodes,
+      ...doorway.callNodes,
     ],
   };
 }
@@ -5642,7 +5996,7 @@ function driverSelfTestCertificateCandidate({
   const historyOpenCallSet = new Set(historyCandidate.openCalls);
   const processOpenCallSet = new Set(processRelaunchCandidate.openCalls);
   if (
-    allOpenCalls.length !== 41 ||
+    allOpenCalls.length !== 38 ||
     productionOpenCalls.length !== 1 ||
     cleanupOpenCalls.length !== 1 ||
     selfTestOpenCalls.length !== 5 ||
@@ -5721,10 +6075,9 @@ function driverSelfTestCertificateCandidate({
   const allDrizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker);
   const selfTestDrizzleCalls = allDrizzleCalls.filter((call) => nodeIsInside(call, selfTest));
   if (
-    allDrizzleCalls.length !== 7 ||
+    allDrizzleCalls.length !== 5 ||
     selfTestDrizzleCalls.length !== 1 ||
-    !allDrizzleCalls.includes(perf02Candidate.drizzleCall) ||
-    perf02Candidate.coldDrizzleCalls.some((call) => !allDrizzleCalls.includes(call))
+    !allDrizzleCalls.includes(perf02Candidate.drizzleCall)
   )
     return undefined;
   const selfTestDrizzleCall = selfTestDrizzleCalls[0];
@@ -7011,9 +7364,6 @@ function startupSingleFlightDelegationTargets({
       unwrapExpression(candidate.expression),
     ),
     ...(perf02Candidate ? [unwrapExpression(perf02Candidate.drizzleCall.expression)] : []),
-    ...(perf02Candidate?.coldDrizzleCalls ?? []).map((candidate) =>
-      unwrapExpression(candidate.expression),
-    ),
   ]);
   if (
     openReferences.length !== expectedOpenReferences.size ||
@@ -7606,8 +7956,8 @@ function driverAdapterCertifiedCallables({
   if (
     !productionRunnerCall ||
     !productionMigrationCall ||
-    expectedRunnerCalls.size !== 18 ||
-    expectedMigrationCalls.size !== 18 ||
+    expectedRunnerCalls.size !== 17 ||
+    expectedMigrationCalls.size !== 17 ||
     nestedRunnerAdoptions.length !== 2 ||
     nestedRunnerAdoptionByFactoryCall.size !== 2 ||
     runnerFactoryCalls.length !== expectedRunnerCalls.size ||
@@ -7631,7 +7981,7 @@ function driverAdapterCertifiedCallables({
         !expectedMigrationCalls.has(migrationCall)
       );
     }) ||
-    runnerFactoryReferences.length !== 19 ||
+    runnerFactoryReferences.length !== 18 ||
     runnerFactoryReferences[0] !== opRunner.name ||
     runnerFactoryReferences.slice(1).some((reference) => {
       const runnerCall = reference.parent;
@@ -7887,7 +8237,6 @@ function driverAdapterCertifiedCallables({
       (call) =>
         call !== driverSelfTestCandidate.adapterCall &&
         call !== perf02Candidate.adapterCall &&
-        !perf02Candidate.coldAdapterCalls.includes(call) &&
         !processAdapterCallSet.has(call),
     ),
   );
@@ -7916,24 +8265,20 @@ function driverAdapterCertifiedCallables({
     retireFailedRollbackReferences[0] !== retireFailedRollbackDeclaration.name ||
     overridesReferences.length !== 3 ||
     overridesReferences[0] !== overridesDeclaration.name ||
-    adapterFactoryCalls.length !== 7 ||
+    adapterFactoryCalls.length !== 5 ||
     !adapterFactoryCalls.includes(driverSelfTestCandidate.adapterCall) ||
     !adapterFactoryCalls.includes(perf02Candidate.adapterCall) ||
-    perf02Candidate.coldAdapterCalls.some((call) => !adapterFactoryCalls.includes(call)) ||
     processAdapterCallSet.size !== 2 ||
     processRelaunchCandidate.adapterCalls.some((call) => !adapterFactoryCalls.includes(call)) ||
     !adapterFactoryCall ||
     adapterFactoryCall.arguments.length !== 1 ||
-    adapterFactoryReferences.length !== 8 ||
+    adapterFactoryReferences.length !== 6 ||
     adapterFactoryReferences[0] !== drizzleAdapter.name ||
     !adapterFactoryReferences.includes(unwrapExpression(adapterFactoryCall.expression)) ||
     !adapterFactoryReferences.includes(
       unwrapExpression(driverSelfTestCandidate.adapterCall.expression),
     ) ||
     !adapterFactoryReferences.includes(unwrapExpression(perf02Candidate.adapterCall.expression)) ||
-    perf02Candidate.coldAdapterCalls.some(
-      (call) => !adapterFactoryReferences.includes(unwrapExpression(call.expression)),
-    ) ||
     processRelaunchCandidate.adapterCalls.some(
       (call) => !adapterFactoryReferences.includes(unwrapExpression(call.expression)),
     )
