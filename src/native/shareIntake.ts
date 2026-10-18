@@ -188,6 +188,13 @@ export function subscribeNativeShareIntake(
   if (!native) return () => undefined;
   const pending = native.addListener('onPending', onPending);
   const rejected = native.addListener('onRejected', (event) => {
+    // Native also persists every rejection for a cold start that misses the event. This one was
+    // delivered live, so consume that receipt; otherwise the next launch reports it again.
+    try {
+      native.takeLastError();
+    } catch {
+      // The live report below still reaches the user.
+    }
     onRejected(typeof event.reason === 'string' ? event.reason : 'unavailable');
   });
   const initialFailure = native.takeLastError();

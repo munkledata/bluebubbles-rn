@@ -285,6 +285,36 @@ describe('native share completion and rejection notifications', () => {
     expect(listeners.size).toBe(0);
   });
 
+  it('consumes the persisted receipt of a live rejection so the next launch does not repeat it', () => {
+    const onRejected = jest.fn();
+    subscribeNativeShareIntake(jest.fn(), onRejected);
+    expect(native.takeLastError).toHaveBeenCalledTimes(1);
+
+    // Native records the same rejection in memory and on disk before emitting it.
+    native.takeLastError.mockReturnValueOnce('too-many-items');
+    listeners.get('onRejected')?.({ reason: 'too-many-items' });
+
+    expect(native.takeLastError).toHaveBeenCalledTimes(2);
+    expect(native.takeLastError.mock.invocationCallOrder[1]).toBeLessThan(
+      onRejected.mock.invocationCallOrder[0]!,
+    );
+    expect(onRejected).toHaveBeenCalledTimes(1);
+    expect(onRejected).toHaveBeenCalledWith('too-many-items');
+  });
+
+  it('still reports a live rejection when its receipt cannot be consumed', () => {
+    const onRejected = jest.fn();
+    subscribeNativeShareIntake(jest.fn(), onRejected);
+    native.takeLastError.mockImplementationOnce(() => {
+      throw new Error('native unavailable');
+    });
+
+    listeners.get('onRejected')?.({ reason: 'deadline' });
+
+    expect(onRejected).toHaveBeenCalledTimes(1);
+    expect(onRejected).toHaveBeenCalledWith('deadline');
+  });
+
   it('is a safe no-op when the optional native module is absent', () => {
     moduleRef.current = null;
     const onPending = jest.fn();

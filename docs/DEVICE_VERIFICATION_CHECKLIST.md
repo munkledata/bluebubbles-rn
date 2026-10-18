@@ -631,6 +631,10 @@ only the product-owned bounded intake described in
       entry points into `shared-in` or the copied attachment. Before the fix each successful copy
       left both descriptors open, keeping deleted files' space allocated. Host evidence is only a
       source-shape test.
+- [ ] **`EXACT PACKAGED CANDIDATE` — share rejection shown once (M168, added 2026-10-18):** With
+      Gator open, share 11 synthetic photos into it: one "too many items" message appears. Background
+      Gator, run `adb shell am kill com.bluegreengatorapps.messages`, and relaunch from the launcher:
+      the message does not appear again. Host evidence covers only the JS bridge.
 
 ### 7. Received stickers
 
