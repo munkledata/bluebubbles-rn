@@ -3089,7 +3089,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 13);
-  assert.equal(intentionalBoundaries.length, 47);
+  assert.equal(intentionalBoundaries.length, 46);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -3154,7 +3154,6 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:c05517b0fccc',
       'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
       'src/services/search/inboxSearchIndexRebuild.ts#runInboxSearchIndexRebuildPass.<callback:c1fe751ccd>:mutator-call:225fd9b8cc41',
-      'src/services/share/shareIntake.ts#consumeShareIntakeBatch.<callback:f66743b000>:mutator-call:620aadb85228',
       'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1',
       'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:faef10ff18f3',
       'src/services/share/shareIntake.ts#discardAccountBoundShareIntake:mutator-call:9abbc352b6da',
@@ -3353,11 +3352,6 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
         'src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:c840fba1e912',
         'src/db/transaction.ts#withDbTransaction',
         'transaction-coordinator',
-      ],
-      [
-        'src/services/share/shareIntake.ts#consumeShareIntakeBatch.<callback:f66743b000>:mutator-call:620aadb85228',
-        'src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt',
-        'coordinated-delegation',
       ],
       [
         'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1',

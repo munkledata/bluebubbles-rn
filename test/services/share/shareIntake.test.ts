@@ -58,7 +58,6 @@ import {
 } from '@db/repositories';
 // eslint-disable-next-line import/first
 import {
-  consumeShareIntakeBatch,
   consumeShareIntakeBatchIfComplete,
   discardAccountBoundShareIntake,
   discardShareIntakeBatch,
@@ -69,7 +68,11 @@ import {
 // eslint-disable-next-line import/first
 import { useShareIntentStore } from '@state/shareIntentStore';
 // eslint-disable-next-line import/first
-import { nextEventLoopTurn, waitForCondition } from '../../support/async';
+import {
+  nextEventLoopTurn,
+  waitForCondition,
+  waitForMicrotaskCondition,
+} from '../../support/async';
 // eslint-disable-next-line import/first
 import {
   captureRealtimeDeliveryLease,
@@ -363,7 +366,95 @@ describe('share intake startup and failure receipts', () => {
   });
 });
 
+function identityFor(batchId: string) {
+  return { batchId, nativeCreatedAtMs: 1_720_000_000_000, hasText: true, fileCount: 0 };
+}
+
+function receiptIsComplete(): void {
+  getReceipt.mockResolvedValueOnce({} as Awaited<ReturnType<typeof getShareIntakeReceipt>>);
+  isReceiptComplete.mockReturnValueOnce(true);
+}
+
 describe('share intake exact-batch settlement', () => {
+  it('keeps native acknowledgement and receipt cleanup inside the account teardown barrier', async () => {
+    stageFirstBatch();
+    receiptIsComplete();
+    const nativeGate = deferred<void>();
+    const receiptGate = deferred<void>();
+    acknowledge.mockReturnValueOnce(nativeGate.promise);
+    deleteReceipt.mockImplementationOnce(async (db) => {
+      expect(db).toBe(ACCOUNT_A_DB);
+      await receiptGate.promise;
+    });
+
+    const settlement = consumeShareIntakeBatchIfComplete(
+      identityFor(FIRST_BATCH),
+      settlementOptions(),
+    );
+    await waitForMicrotaskCondition(() => acknowledge.mock.calls.length === 1, 'acknowledgement');
+    expect(acknowledge).toHaveBeenCalledWith(FIRST_BATCH);
+
+    let teardownSettled = false;
+    const teardown = pauseRealtimeDeliveries().then(() => {
+      teardownSettled = true;
+    });
+    await Promise.resolve();
+    expect(teardownSettled).toBe(false);
+
+    nativeGate.resolve(undefined);
+    await waitForMicrotaskCondition(() => deleteReceipt.mock.calls.length === 1, 'receipt cleanup');
+    expect(deleteReceipt).toHaveBeenCalledWith(ACCOUNT_A_DB, FIRST_BATCH);
+    expect(teardownSettled).toBe(false);
+
+    receiptGate.resolve(undefined);
+    await expect(settlement).resolves.toBe(true);
+    await teardown;
+    expect(teardownSettled).toBe(true);
+    expect(takeNext).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a complete batch, clears it, then stages the next claim', async () => {
+    stageFirstBatch();
+    receiptIsComplete();
+    takeNext.mockResolvedValueOnce(batch(SECOND_BATCH, 'second'));
+
+    await expect(
+      consumeShareIntakeBatchIfComplete(identityFor(FIRST_BATCH), settlementOptions()),
+    ).resolves.toBe(true);
+
+    expect(acknowledge).toHaveBeenCalledWith(FIRST_BATCH);
+    expect(useShareIntentStore.getState()).toMatchObject({ batchId: SECOND_BATCH, text: 'second' });
+  });
+
+  it('acknowledges a complete different batch without touching the active claim', async () => {
+    stageFirstBatch();
+    receiptIsComplete();
+
+    // Success reflects native and receipt state, not which batch the composer happens to hold.
+    await expect(
+      consumeShareIntakeBatchIfComplete(identityFor(SECOND_BATCH), settlementOptions()),
+    ).resolves.toBe(true);
+
+    expect(acknowledge).toHaveBeenCalledWith(SECOND_BATCH);
+    expect(useShareIntentStore.getState()).toMatchObject({ batchId: FIRST_BATCH, text: 'first' });
+    expect(takeNext).not.toHaveBeenCalled();
+  });
+
+  it('keeps the JS claim and its receipt when native acknowledgement fails', async () => {
+    stageFirstBatch();
+    receiptIsComplete();
+    const error = new Error('native ownership was not settled');
+    acknowledge.mockRejectedValueOnce(error);
+
+    await expect(
+      consumeShareIntakeBatchIfComplete(identityFor(FIRST_BATCH), settlementOptions()),
+    ).rejects.toBe(error);
+
+    expect(deleteReceipt).not.toHaveBeenCalled();
+    expect(useShareIntentStore.getState()).toMatchObject({ batchId: FIRST_BATCH, text: 'first' });
+    expect(takeNext).not.toHaveBeenCalled();
+  });
+
   it('acknowledges only after the encrypted receipt is complete', async () => {
     const identity = {
       batchId: FIRST_BATCH,
@@ -386,10 +477,7 @@ describe('share intake exact-batch settlement', () => {
     expect(acknowledge).toHaveBeenCalledWith(FIRST_BATCH);
   });
 
-  it.each([
-    ['acknowledgement', consumeShareIntakeBatch, acknowledge],
-    ['discard', discardShareIntakeBatch, discard],
-  ])(
+  it.each([['discard', discardShareIntakeBatch, discard]])(
     'keeps native %s and captured-database receipt cleanup inside the account teardown barrier',
     async (_label, settle, nativeSettle) => {
       stageFirstBatch();
@@ -447,7 +535,6 @@ describe('share intake exact-batch settlement', () => {
   });
 
   it.each([
-    ['acknowledges', consumeShareIntakeBatch, acknowledge],
     ['releases', releaseShareIntakeBatch, release],
     ['discards', discardShareIntakeBatch, discard],
   ])(
@@ -467,7 +554,6 @@ describe('share intake exact-batch settlement', () => {
   );
 
   it.each([
-    ['acknowledge', consumeShareIntakeBatch, acknowledge],
     ['release', releaseShareIntakeBatch, release],
     ['discard', discardShareIntakeBatch, discard],
   ])(
@@ -487,7 +573,6 @@ describe('share intake exact-batch settlement', () => {
   );
 
   it.each([
-    ['acknowledgement', consumeShareIntakeBatch, acknowledge],
     ['release', releaseShareIntakeBatch, release],
     ['discard', discardShareIntakeBatch, discard],
   ])('keeps the JS claim when native %s fails', async (_label, settle, nativeSettle) => {

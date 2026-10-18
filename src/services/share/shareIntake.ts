@@ -215,28 +215,6 @@ export function startShareIntake(): () => void {
   return unsubscribe;
 }
 
-/** Finalize only the exact batch whose content now has durable outgoing ownership. */
-export async function consumeShareIntakeBatch(
-  batchId: string,
-  options: ShareIntakeSettlementOptions,
-): Promise<boolean> {
-  const db = settlementDatabase(options);
-  let cleared = false;
-  const outcome = await runTrackedRealtimeWork(options.lease, async () => {
-    await acknowledgeNativeShareBatch(batchId);
-    await deleteShareIntakeReceipt(db, batchId).catch((error: unknown) => {
-      logger.warn('[share] acknowledged receipt cleanup deferred', {
-        errorName: error instanceof Error ? error.name : 'UnknownError',
-      });
-    });
-    cleared = useShareIntentStore.getState().clearIf(batchId);
-    if (cleared && options.drainNext !== false && options.lease.isCurrent()) {
-      await drainShareIntake();
-    }
-  });
-  return outcome === 'delivered' && cleared;
-}
-
 /** Acknowledge native storage only after the encrypted receipt proves every manifest item owned. */
 export async function consumeShareIntakeBatchIfComplete(
   identity: ShareIntakeManifestIdentity,

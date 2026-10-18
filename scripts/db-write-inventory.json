@@ -24598,22 +24598,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/share/shareIntake.test.ts; test/db/shareIntakeReceipts.test.ts"
     },
     {
-      "id": "src/services/share/shareIntake.ts#consumeShareIntakeBatch.<callback:f66743b000>:mutator-call:620aadb85228",
-      "path": "src/services/share/shareIntake.ts",
-      "line": 227,
-      "symbol": "consumeShareIntakeBatch.<callback:f66743b000>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt",
-      "detectedContext": "coordinated-delegation",
-      "owner": "SHARE-02 native/share receipt settlement",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/share/shareIntake.test.ts; test/db/shareIntakeReceipts.test.ts"
-    },
-    {
       "id": "src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1",
       "path": "src/services/share/shareIntake.ts",
-      "line": 248,
+      "line": 226,
       "symbol": "consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#getShareIntakeReceipt",
@@ -24626,7 +24613,7 @@
     {
       "id": "src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:faef10ff18f3",
       "path": "src/services/share/shareIntake.ts",
-      "line": 251,
+      "line": 229,
       "symbol": "consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt",
@@ -24639,7 +24626,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardShareIntakeBatch.<callback:49cb1846bc>:mutator-call:9283adeb4a6d",
       "path": "src/services/share/shareIntake.ts",
-      "line": 293,
+      "line": 271,
       "symbol": "discardShareIntakeBatch.<callback:49cb1846bc>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt",
@@ -24652,7 +24639,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardAccountBoundShareIntake:mutator-call:9abbc352b6da",
       "path": "src/services/share/shareIntake.ts",
-      "line": 312,
+      "line": 290,
       "symbol": "discardAccountBoundShareIntake",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#listShareIntakeReceiptBatchIds",
