@@ -8,7 +8,6 @@ describe('lockStore', () => {
       hydrated: false,
       lastBackgrounded: null,
       timeoutMs: 30_000,
-      foregroundUnlockId: 0,
     }),
   );
 
@@ -38,15 +37,11 @@ describe('lockStore', () => {
     expect(useLockStore.getState()).toMatchObject({ enabled: false, locked: false });
   });
 
-  it('unlock clears the backgrounded marker and records a fresh foreground decision', () => {
+  it('unlock clears the backgrounded marker', () => {
     useLockStore.getState().noteBackgrounded(123);
     useLockStore.getState().lock();
     expect(useLockStore.getState().locked).toBe(true);
     useLockStore.getState().unlock();
-    expect(useLockStore.getState()).toMatchObject({
-      locked: false,
-      lastBackgrounded: null,
-      foregroundUnlockId: 1,
-    });
+    expect(useLockStore.getState()).toMatchObject({ locked: false, lastBackgrounded: null });
   });
 });

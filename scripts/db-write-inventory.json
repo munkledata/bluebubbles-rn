@@ -4,7 +4,7 @@
     {
       "id": "app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun:mutator-call:881f6096626a",
       "path": "app/_layout.tsx",
-      "line": 114,
+      "line": 113,
       "symbol": "RootLayout.<callback:945a20350c>.startOwnedRun",
       "operation": "mutator-call",
       "target": "src/services/boot/foregroundBoot.ts#startForegroundBoot",
@@ -17,7 +17,7 @@
     {
       "id": "app/_layout.tsx#RootLayout.<callback:945a20350c>.<callback:a6d63425a0>:mutator-call:35dfd7eeecaa",
       "path": "app/_layout.tsx",
-      "line": 123,
+      "line": 122,
       "symbol": "RootLayout.<callback:945a20350c>.<callback:a6d63425a0>",
       "operation": "mutator-call",
       "target": "app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun",
@@ -30,7 +30,7 @@
     {
       "id": "app/_layout.tsx#RootLayout.<callback:945a20350c>:mutator-call:c6d256da0aff",
       "path": "app/_layout.tsx",
-      "line": 126,
+      "line": 125,
       "symbol": "RootLayout.<callback:945a20350c>",
       "operation": "mutator-call",
       "target": "app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun",
@@ -43,7 +43,7 @@
     {
       "id": "app/_layout.tsx#RootLayout:mutator-reference:8e2aa31388d0",
       "path": "app/_layout.tsx",
-      "line": 202,
+      "line": 200,
       "symbol": "RootLayout",
       "operation": "mutator-reference",
       "target": "src/services/lock.ts#completeUnlock",
@@ -54,10 +54,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/foregroundBoot.test.ts; test/components/routes/rootLayout.test.tsx; test/services/lockService.test.ts; test/db/dbKeyRotation.test.ts"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:96e551b4af14",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:4a3eed343439",
       "path": "app/(app)/_layout.tsx",
-      "line": 147,
-      "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
+      "line": 146,
+      "symbol": "ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
       "detectedContext": "error-report-lifecycle-delegation",
@@ -67,10 +67,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:b2420ad62c5c",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:47ff0ef8b6dc",
       "path": "app/(app)/_layout.tsx",
-      "line": 167,
-      "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
+      "line": 163,
+      "symbol": "ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRealtime",
       "detectedContext": "coordinated-delegation",
@@ -80,10 +80,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:96e551b4af14:2",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:4a3eed343439:2",
       "path": "app/(app)/_layout.tsx",
-      "line": 170,
-      "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
+      "line": 166,
+      "symbol": "ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
       "detectedContext": "error-report-lifecycle-delegation",
@@ -93,10 +93,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:cc9500dd8a49",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:5864493d436d",
       "path": "app/(app)/_layout.tsx",
-      "line": 175,
-      "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
+      "line": 171,
+      "symbol": "ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>",
       "operation": "mutator-call",
       "target": "src/services/send/index.ts#recoverOutgoing",
       "detectedContext": "coordinated-delegation",
@@ -108,7 +108,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5bd646a3ed>:mutator-call:4ffa3931c74a",
       "path": "app/(app)/_layout.tsx",
-      "line": 194,
+      "line": 190,
       "symbol": "ConnectedAppLayout.<callback:5bd646a3ed>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",

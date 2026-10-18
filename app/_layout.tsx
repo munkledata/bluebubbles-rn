@@ -67,7 +67,6 @@ export default function RootLayout(): React.JSX.Element {
   const bootState = useForegroundBootState();
   const locked = useLockStore((s) => s.locked);
   const lockHydrated = useLockStore((s) => s.hydrated);
-  const foregroundUnlockId = useLockStore((s) => s.foregroundUnlockId);
   const shownBootIssues = useRef<{ runId: number; codes: Set<string> }>({
     runId: 0,
     codes: new Set(),
@@ -196,7 +195,6 @@ export default function RootLayout(): React.JSX.Element {
               bootState={bootState}
               lockHydrated={lockHydrated}
               locked={locked}
-              foregroundUnlockId={foregroundUnlockId}
               coldUnlockPendingRunId={coldUnlockPendingRunId}
               onColdUnlock={completeColdUnlock}
               onWarmUnlock={completeUnlock}

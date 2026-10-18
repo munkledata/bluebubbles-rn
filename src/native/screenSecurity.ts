@@ -2,7 +2,6 @@ import { requireOptionalNativeModule } from 'expo';
 
 interface GatorScreenSecurityNative {
   setAppLockEnabled: (enabled: boolean) => void;
-  completeForegroundTransition: () => boolean;
   getSecureScreenEnabled: () => boolean;
   setSecureScreenEnabled: (enabled: boolean) => void;
 }
@@ -26,11 +25,6 @@ export function setNativeAppLockEnabled(enabled: boolean): boolean {
   if (!native) return false;
   native.setAppLockEnabled(enabled);
   return true;
-}
-
-/** Release the legacy fallback only after JavaScript has completed the active lock decision. */
-export function completeNativeForegroundPrivacyTransition(): boolean {
-  return getNative()?.completeForegroundTransition() ?? false;
 }
 
 /** Read the independent native-persisted screenshot/recording preference. */

@@ -2,7 +2,6 @@ package expo.modules.gatorscreensecurity
 
 import android.app.Activity
 import android.content.Context
-import android.os.Build
 import android.os.Looper
 import android.view.Window
 import android.view.WindowManager
@@ -22,15 +21,12 @@ private const val SECURE_SCREEN_ENABLED = "secure_screen_enabled"
 /**
  * Owns Android window policy independently of React rendering.
  *
- * Android 13+ has a Recents-only API, so App Lock can prevent task snapshots without disabling
- * ordinary foreground screenshots. Older supported Android versions need a transient secure
- * window while backgrounded. That fallback stays in place through `onResume` until JavaScript has
- * synchronously completed its grace-period/lock decision and calls `completeForegroundTransition`.
- * The separate Secure Screen preference keeps FLAG_SECURE set in every lifecycle state.
+ * App Lock uses Android's Recents-only API (Android 13+, always present at minSdk 36), so it
+ * prevents task snapshots without disabling ordinary foreground screenshots. The separate Secure
+ * Screen preference keeps FLAG_SECURE set in every lifecycle state. Review M179 removed the
+ * pre-Android-13 transient secure-window fallback and its JavaScript hand-off.
  */
 internal object ScreenSecurityController {
-  private var activityInForeground = false
-  private var foregroundTransitionComplete = false
   private val extraWindows = Collections.newSetFromMap(WeakHashMap<Window, Boolean>())
 
   private fun preferences(activity: Activity) =
@@ -57,28 +53,13 @@ internal object ScreenSecurityController {
   }
 
   private fun apply(activity: Activity) {
-    val appLock = appLockEnabled(activity)
+    // This affects only Overview/Recents. Foreground screenshots remain controlled solely by
+    // Secure Screen, which keeps the two user-facing privacy controls independent.
+    activity.setRecentsScreenshotEnabled(!appLockEnabled(activity))
+
     val secureScreen = secureScreenEnabled(activity)
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      // This affects only Overview/Recents. Foreground screenshots remain controlled solely by
-      // Secure Screen, which keeps the two user-facing privacy controls independent.
-      activity.setRecentsScreenshotEnabled(!appLock)
-    }
-
-    val needsLegacyRecentsProtection =
-      Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
-        appLock &&
-        (!activityInForeground || !foregroundTransitionComplete)
-    val secureEveryWindow = secureScreen || needsLegacyRecentsProtection
-    setWindowSecure(activity.window, secureEveryWindow)
-    extraWindows.forEach { window -> setWindowSecure(window, secureEveryWindow) }
-  }
-
-  fun attach(activity: Activity) {
-    // Fail closed on the legacy fallback until the active React tree confirms it is safe to show.
-    foregroundTransitionComplete = false
-    apply(activity)
+    setWindowSecure(activity.window, secureScreen)
+    extraWindows.forEach { window -> setWindowSecure(window, secureScreen) }
   }
 
   fun refresh(activity: Activity) {
@@ -99,28 +80,8 @@ internal object ScreenSecurityController {
     extraWindows.remove(window)
   }
 
-  fun enterForeground(activity: Activity) {
-    activityInForeground = true
-    foregroundTransitionComplete = !appLockEnabled(activity)
-    apply(activity)
-  }
-
-  fun leaveForeground(activity: Activity) {
-    activityInForeground = false
-    foregroundTransitionComplete = false
-    apply(activity)
-  }
-
-  fun completeForegroundTransition(activity: Activity): Boolean {
-    if (!activityInForeground) return false
-    foregroundTransitionComplete = true
-    apply(activity)
-    return true
-  }
-
   fun setAppLockEnabled(activity: Activity, enabled: Boolean) {
     persist(activity, APP_LOCK_ENABLED, enabled)
-    foregroundTransitionComplete = !enabled
     apply(activity)
   }
 
@@ -173,11 +134,6 @@ class GatorScreenSecurityModule : Module() {
     Function("setAppLockEnabled") { enabled: Boolean ->
       runOnMainThread {
         ScreenSecurityController.setAppLockEnabled(currentActivity(), enabled)
-      }
-    }
-    Function("completeForegroundTransition") {
-      runOnMainThread {
-        ScreenSecurityController.completeForegroundTransition(currentActivity())
       }
     }
     Function("getSecureScreenEnabled") {

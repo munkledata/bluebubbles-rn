@@ -10,7 +10,8 @@ import expo.modules.core.interfaces.ReactActivityLifecycleListener
  * Eager Activity owner for persisted screen policy.
  *
  * Expo discovers `*Package.kt` implementations during native autolinking, so these callbacks run
- * before the JavaScript module is required and again for every Activity recreation.
+ * before the JavaScript module is required and again for every Activity recreation. Every resume
+ * re-applies the persisted policy as well; doing so is cheap and idempotent.
  */
 class GatorScreenSecurityPackage : BasePackage() {
   override fun createReactActivityLifecycleListeners(
@@ -18,19 +19,11 @@ class GatorScreenSecurityPackage : BasePackage() {
   ): List<ReactActivityLifecycleListener> = listOf(
     object : ReactActivityLifecycleListener {
       override fun onCreate(activity: Activity, savedInstanceState: Bundle?) {
-        ScreenSecurityController.attach(activity)
+        ScreenSecurityController.refresh(activity)
       }
 
       override fun onResume(activity: Activity) {
-        ScreenSecurityController.enterForeground(activity)
-      }
-
-      override fun onUserLeaveHint(activity: Activity) {
-        ScreenSecurityController.leaveForeground(activity)
-      }
-
-      override fun onPause(activity: Activity) {
-        ScreenSecurityController.leaveForeground(activity)
+        ScreenSecurityController.refresh(activity)
       }
     },
   )
