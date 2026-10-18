@@ -17,14 +17,16 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.InterruptedIOException
+import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import okhttp3.Call
 import okhttp3.Request
 
 private const val EVENT_PROGRESS = "onProgress"
-private const val COPY_BUFFER_BYTES = 64 * 1024
+internal const val COPY_BUFFER_BYTES = 64 * 1024
 private const val MAX_REQUEST_ID_CHARS = 120
 private const val MAX_HEADER_COUNT = 64
 private const val MAX_HEADER_CHARS = 16 * 1024
@@ -35,14 +37,14 @@ private const val MAX_IMAGE_PIXELS = 100L * 1024 * 1024
 private const val MAX_IMAGE_EDGE = 16_384
 private const val MAX_IMAGE_VALIDATION_DECODE_PIXELS = 1L * 1024 * 1024
 private const val SYNCED_BACKGROUND_IMAGE_MAX_PIXELS = 16L * 1024 * 1024
-private const val PROGRESS_INTERVAL_MS = 100L
+internal const val PROGRESS_INTERVAL_MS = 100L
 private const val DOWNLOAD_INTEGRITY_WALLPAPER_SCAN_MAX_MS = 2_000L
 
-private const val REASON_CANCELLED = "cancelled"
+internal const val REASON_CANCELLED = "cancelled"
 private const val REASON_MISSING = "missing"
 private const val REASON_NETWORK = "network"
-private const val REASON_SIZE = "size"
-private const val REASON_TIMEOUT = "timeout"
+internal const val REASON_SIZE = "size"
+internal const val REASON_TIMEOUT = "timeout"
 private const val REASON_UNAVAILABLE = "unavailable"
 
 private class RequestState {
@@ -50,7 +52,7 @@ private class RequestState {
   @Volatile var call: Call? = null
 }
 
-private class DownloadFailure(val reason: String) : Exception()
+internal class DownloadFailure(val reason: String) : Exception()
 
 internal fun isCompleteDownloadResponse(statusCode: Int): Boolean = statusCode == 200
 
@@ -75,6 +77,54 @@ internal fun <T> fillExclusivelyCreatedFile(
 
 internal fun matchesDeclaredDownloadLength(declaredBytes: Long, actualBytes: Long): Boolean =
   declaredBytes == -1L || declaredBytes == actualBytes
+
+/**
+ * Copy one response body into [output] without writing a byte beyond [maxBytes], and return the
+ * bytes written; the caller still checks them against the declared length. Kept free of Android
+ * and OkHttp types so the JVM tests can drive it (review M165).
+ *
+ * Cancellation and the [deadlineMs] clock are checked before every read. Each read asks for at
+ * most the remaining allowance plus one sentinel byte, so an oversized body is detected before that
+ * sentinel is written. [abort] runs before a timeout or oversize failure so the caller can cancel
+ * its network call.
+ */
+internal fun copyBoundedDownloadBody(
+  input: InputStream,
+  output: OutputStream,
+  maxBytes: Long,
+  deadlineMs: Long,
+  clock: () -> Long,
+  isCancelled: () -> Boolean,
+  abort: () -> Unit,
+  onProgress: (Long) -> Unit,
+): Long {
+  val buffer = ByteArray(COPY_BUFFER_BYTES)
+  var total = 0L
+  var lastProgressAt = 0L
+  while (true) {
+    if (isCancelled()) throw DownloadFailure(REASON_CANCELLED)
+    if (clock() >= deadlineMs) {
+      abort()
+      throw DownloadFailure(REASON_TIMEOUT)
+    }
+    val remaining = maxBytes - total
+    val readLimit = minOf(buffer.size.toLong(), remaining + 1L).toInt()
+    val read = input.read(buffer, 0, readLimit)
+    if (read < 0) return total
+    if (read == 0) continue
+    if (read.toLong() > remaining) {
+      abort()
+      throw DownloadFailure(REASON_SIZE)
+    }
+    output.write(buffer, 0, read)
+    total += read.toLong()
+    val now = clock()
+    if (now - lastProgressAt >= PROGRESS_INTERVAL_MS) {
+      onProgress(total)
+      lastProgressAt = now
+    }
+  }
+}
 
 internal fun imageValidationSampleSize(width: Int, height: Int, maxDecodedPixels: Long): Int {
   require(width > 0 && height > 0 && maxDecodedPixels > 0L)
@@ -543,38 +593,21 @@ class GatorBoundedDownloadModule : Module() {
         if (declaredBytes == 0L) throw DownloadFailure(REASON_MISSING)
 
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        var total = 0L
-        var lastProgressAt = 0L
-        BufferedInputStream(body.byteStream(), COPY_BUFFER_BYTES).use { input ->
+        val total = BufferedInputStream(body.byteStream(), COPY_BUFFER_BYTES).use { input ->
           FileOutputStream(target, false).use { output ->
-            val buffer = ByteArray(COPY_BUFFER_BYTES)
-            while (true) {
-              if (state.cancelled) throw DownloadFailure(REASON_CANCELLED)
-              if (SystemClock.elapsedRealtime() >= deadline) {
-                call.cancel()
-                throw DownloadFailure(REASON_TIMEOUT)
-              }
-              // Read at most the remaining allowance plus one sentinel byte. An oversized body is
-              // detected natively before that sentinel is ever written to disk.
-              val remaining = maxBytes - total
-              val readLimit = minOf(buffer.size.toLong(), remaining + 1L).toInt()
-              val read = input.read(buffer, 0, readLimit)
-              if (read < 0) break
-              if (read == 0) continue
-              if (read.toLong() > remaining) {
-                call.cancel()
-                throw DownloadFailure(REASON_SIZE)
-              }
-              output.write(buffer, 0, read)
-              total += read.toLong()
-              val now = SystemClock.elapsedRealtime()
-              if (now - lastProgressAt >= PROGRESS_INTERVAL_MS) {
-                emitProgress(requestId, total, declaredBytes)
-                lastProgressAt = now
-              }
+            copyBoundedDownloadBody(
+              input = input,
+              output = output,
+              maxBytes = maxBytes,
+              deadlineMs = deadline,
+              clock = SystemClock::elapsedRealtime,
+              isCancelled = { state.cancelled },
+              abort = { call.cancel() },
+              onProgress = { loaded -> emitProgress(requestId, loaded, declaredBytes) },
+            ).also {
+              output.flush()
+              output.fd.sync()
             }
-            output.flush()
-            output.fd.sync()
           }
         }
         if (state.cancelled) throw DownloadFailure(REASON_CANCELLED)
