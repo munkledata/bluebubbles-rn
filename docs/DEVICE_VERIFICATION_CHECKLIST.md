@@ -1015,10 +1015,13 @@ those rows is a current remediation or candidate requirement.
       credential at the current address; if it cannot, the prompt asks to try again and the address
       stays unchanged.
 - [ ] **`EXACT PACKAGED CANDIDATE` — slow Disconnect reaches setup (M120, added 2026-10-18):**
-      On a synthetic account with a large history, ideally with the Mac unreachable so the wipe's
-      server steps wait out their deadlines, tap Disconnect. Gator shows its loading screen and then
-      the setup screen, never "Couldn't start Gator". Before the fix a wipe slower than 10 seconds
-      ended on that error and needed a Retry.
+      On a synthetic account that uses the shared server password (not a paired device credential)
+      with a large history, ideally with the Mac unreachable so the wipe's server steps wait out
+      their deadlines, tap Disconnect. Gator shows its loading screen and then the setup screen,
+      never "Couldn't start Gator". Before the fix a wipe slower than 10 seconds ended on that error
+      and needed a Retry. Do not use a paired device credential with the Mac unreachable: Disconnect
+      then cannot confirm the credential's revocation and stops on "could not safely finish clearing"
+      on every retry (pre-existing dead end, open as of 2026-10-18).
 
 ### 7. Claims and cleanup boundaries
 

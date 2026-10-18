@@ -96,6 +96,13 @@ export const BOOT_CLASSIFIER_FAILURE_MESSAGE =
   'Gator could not finish starting safely. Restart the app and try again.';
 
 /** Private operational detail for classifiers; public state receives only their allow-listed copy. */
+/** A clock that wall-time changes cannot move; deadlines must not jump with the phone's time. */
+function monotonicNowMs(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
 export class BootStageTimeoutError extends Error {
   constructor(
     readonly stage: CoreBootStage,
@@ -502,7 +509,8 @@ class BootCoordinatorImpl<TSession extends object> implements BootCoordinator {
       return { settlement: undefined, extend: () => undefined, dispose: () => undefined };
     }
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    let deadlineAtMs = Date.now() + timeoutMs;
+    const startedAtMs = monotonicNowMs();
+    let deadlineAtMs = startedAtMs + timeoutMs;
     let disposed = false;
     let resolveTimeout!: (settlement: StageSettlement) => void;
     const settlement = new Promise<StageSettlement>((resolve) => {
@@ -512,7 +520,8 @@ class BootCoordinatorImpl<TSession extends object> implements BootCoordinator {
       timeout = setTimeout(() => {
         // Resolve the canonical timeout first. An adapter may reject synchronously from its
         // abort listener; queueing this settlement first keeps classification deterministic.
-        resolveTimeout({ kind: 'error', error: new BootStageTimeoutError(stage, timeoutMs) });
+        const allowedMs = Math.round(deadlineAtMs - startedAtMs);
+        resolveTimeout({ kind: 'error', error: new BootStageTimeoutError(stage, allowedMs) });
         stageController.abort();
       }, delayMs);
     };
@@ -522,7 +531,7 @@ class BootCoordinatorImpl<TSession extends object> implements BootCoordinator {
       extend: (ms) => {
         if (disposed || stageController.signal.aborted) return;
         if (!Number.isSafeInteger(ms) || ms <= 0) return;
-        const extendedAtMs = Date.now() + ms;
+        const extendedAtMs = monotonicNowMs() + ms;
         if (extendedAtMs <= deadlineAtMs) return;
         if (timeout !== undefined) clearTimeout(timeout);
         deadlineAtMs = extendedAtMs;

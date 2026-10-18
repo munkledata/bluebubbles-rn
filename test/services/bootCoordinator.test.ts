@@ -214,13 +214,17 @@ describe('boot coordinator', () => {
         extendStageDeadline(100);
         return new Promise(() => undefined);
       };
+      const classified: unknown[] = [];
       const boot = createBootCoordinator({
         adapters,
         validateSession: isTestBootSession,
-        classifyFailure: (_stage, error) => ({
-          ...retryable(),
-          code: error instanceof BootStageTimeoutError ? 'boot-stage-timeout' : 'unexpected',
-        }),
+        classifyFailure: (_stage, error) => {
+          classified.push(error);
+          return {
+            ...retryable(),
+            code: error instanceof BootStageTimeoutError ? 'boot-stage-timeout' : 'unexpected',
+          };
+        },
         stageTimeoutMs: { session: 25 },
       });
 
@@ -235,6 +239,88 @@ describe('boot coordinator', () => {
         status: 'failed',
         failure: { stage: 'session', code: 'boot-stage-timeout' },
       });
+      // The error reports the extended allowance, not the configured 25 ms.
+      expect(classified[0]).toMatchObject({ stage: 'session', timeoutMs: 100 });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('ignores an extension after the run is invalidated', async () => {
+    jest.useFakeTimers();
+    try {
+      let extend: ((ms: number) => void) | undefined;
+      const adapters = defaultAdapters();
+      adapters.session = ({ extendStageDeadline }) => {
+        extend = extendStageDeadline;
+        return new Promise(() => undefined);
+      };
+      const boot = createBootCoordinator({
+        adapters,
+        validateSession: isTestBootSession,
+        classifyFailure: retryable,
+        stageTimeoutMs: { session: 25 },
+      });
+
+      void boot.start();
+      await flushMicrotasks(20);
+      boot.invalidate(1);
+      await flushMicrotasks(20);
+
+      const timersBefore = jest.getTimerCount();
+      extend?.(1_000);
+      expect(jest.getTimerCount()).toBe(timersBefore);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('ignores a non-finite, zero or negative extension', async () => {
+    jest.useFakeTimers();
+    try {
+      const adapters = defaultAdapters();
+      adapters.session = ({ extendStageDeadline }) => {
+        for (const ms of [Number.NaN, Number.POSITIVE_INFINITY, 0, -5, 12.5]) {
+          extendStageDeadline(ms);
+        }
+        return new Promise(() => undefined);
+      };
+      const boot = createBootCoordinator({
+        adapters,
+        validateSession: isTestBootSession,
+        classifyFailure: retryable,
+        stageTimeoutMs: { session: 25 },
+      });
+
+      const run = boot.start();
+      await flushMicrotasks(20);
+      jest.advanceTimersByTime(25);
+      await expect(run).resolves.toMatchObject({ status: 'failed' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('treats an extension as a no-op for a stage without a deadline', async () => {
+    jest.useFakeTimers();
+    try {
+      let timersAfterExtend = -1;
+      let timersBeforeExtend = -1;
+      const adapters = defaultAdapters();
+      adapters.session = async ({ extendStageDeadline }) => {
+        timersBeforeExtend = jest.getTimerCount();
+        extendStageDeadline(1_000);
+        timersAfterExtend = jest.getTimerCount();
+        return { kind: 'setup' };
+      };
+      const boot = createBootCoordinator({
+        adapters,
+        validateSession: isTestBootSession,
+        classifyFailure: retryable,
+      });
+
+      await expect(boot.start()).resolves.toMatchObject({ status: 'ready', mode: 'setup' });
+      expect(timersAfterExtend).toBe(timersBeforeExtend);
     } finally {
       jest.useRealTimers();
     }

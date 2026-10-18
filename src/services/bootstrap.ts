@@ -2057,12 +2057,36 @@ const NOTIFICATION_CLEAR_DEADLINE_MS = 5_000;
 /** Persistent logs are filesystem-backed; a wedged bridge must leave the account revoked. */
 const LOG_CLEAR_DEADLINE_MS = 5_000;
 /**
- * How long a restarted foreground boot may wait for a Disconnect wipe it joins (review M120). The
- * wipe's steps above run one after another, each bounded by its own deadline (about two minutes in
- * the worst case). The boot's 10 s session deadline used to fire first and showed "Couldn't start
- * Gator" for a Disconnect that was still finishing normally.
+ * The wipe steps `forget()` awaits one after another, each bounded by its own deadline. Add a new
+ * sequential step here so the boot join below keeps covering the whole wipe. (The scoped server
+ * self-revocation runs alongside these steps and adds no time.)
  */
-const ACCOUNT_CLEANUP_BOOT_JOIN_DEADLINE_MS = 150_000;
+const SEQUENTIAL_WIPE_STEP_DEADLINES_MS = [
+  ACCOUNT_CLEANUP_JOIN_DEADLINE_MS,
+  FOREGROUND_DELIVERY_CLEANUP_DEADLINE_MS,
+  CREDENTIAL_CLEANUP_DEADLINE_MS,
+  FCM_TOKEN_RETIREMENT_DEADLINE_MS,
+  REALTIME_DRAIN_DEADLINE_MS,
+  SCOPED_CREDENTIAL_CAPTURE_DEADLINE_MS,
+  FCM_KEY_RETIREMENT_DEADLINE_MS,
+  UPLOAD_DRAIN_DEADLINE_MS,
+  SYNC_DRAIN_DEADLINE_MS,
+  DOWNLOAD_DRAIN_DEADLINE_MS,
+  ERROR_REPORT_DRAIN_DEADLINE_MS,
+  NOTIFICATION_CLEAR_DEADLINE_MS,
+  DATABASE_CLEANUP_DEADLINE_MS,
+  LOG_CLEAR_DEADLINE_MS,
+] as const;
+/** Room for the wipe's untimed work, such as deleting cached files and loading modules. */
+const WIPE_UNTIMED_WORK_MARGIN_MS = 40_000;
+/**
+ * How long a restarted foreground boot may wait for a Disconnect wipe it joins (review M120): the
+ * whole bounded wipe plus margin (150 s today). The boot's 10 s session deadline used to fire
+ * first and showed "Couldn't start Gator" for a Disconnect that was still finishing normally.
+ */
+const ACCOUNT_CLEANUP_BOOT_JOIN_DEADLINE_MS =
+  SEQUENTIAL_WIPE_STEP_DEADLINES_MS.reduce((total, ms) => total + ms, 0) +
+  WIPE_UNTIMED_WORK_MARGIN_MS;
 
 /** Await `p`, but give up after `ms` — returns false when the deadline won. */
 async function withDeadline(p: Promise<void>, ms: number): Promise<boolean> {
