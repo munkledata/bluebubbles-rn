@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.nio.file.Files
+import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
@@ -218,6 +219,23 @@ class ShareIntakePolicyTest {
     assertEquals("application/pdf", resolvedShareMimeType(null, "application/pdf"))
     assertEquals("application/octet-stream", resolvedShareMimeType(null, "image/*"))
     assertEquals("application/octet-stream", resolvedShareMimeType("bad", "*/*"))
+  }
+
+  // Android formats %d in the phone's own digits, so on a phone set to Arabic (Egypt), Persian,
+  // Bengali or Marathi every shared file name failed its own "00-" check and the share was refused.
+  @Test
+  fun `file names and manifests use ascii digits whatever the phone language`() {
+    val original = Locale.getDefault()
+    try {
+      for (tag in listOf("ar-EG", "fa-IR", "bn-BD", "mr-IN")) {
+        Locale.setDefault(Locale.forLanguageTag(tag))
+        assertEquals(tag, "03-a.pdf", sharedFileName(3, "a.pdf", "application/pdf"))
+        val manifest = manifest()
+        assertEquals(tag, manifest, decodeShareManifest(encodeShareManifest(manifest)))
+      }
+    } finally {
+      Locale.setDefault(original)
+    }
   }
 
   @Test

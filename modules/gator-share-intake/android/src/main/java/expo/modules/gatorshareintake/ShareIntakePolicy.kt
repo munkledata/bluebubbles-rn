@@ -8,6 +8,7 @@ import java.io.EOFException
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.CodingErrorAction
+import java.util.Locale
 
 internal const val SHARE_INPUT_CACHE_DIRECTORY = "shared-in"
 internal const val SHARE_QUEUE_DIRECTORY = "queue"
@@ -252,7 +253,8 @@ internal fun sharedFileName(index: Int, rawName: String?, mimeType: String): Str
       else -> "$cleaned$extension"
     }
   }
-  return "%02d-%s".format(index, leaf.take(100)).also { name ->
+  // Locale.ROOT: the phone's own language may write digits as e.g. "٠٣", which fails the check.
+  return "%02d-%s".format(Locale.ROOT, index, leaf.take(100)).also { name ->
     if (!SHARE_FILE_NAME.matches(name)) throw ShareIntakeException(ShareIntakeFailure.MALFORMED)
   }
 }
@@ -362,7 +364,8 @@ internal fun validateShareManifest(manifest: ShareManifest) {
   }
   var total = 0L
   manifest.files.forEachIndexed { index, file ->
-    if (!SHARE_FILE_NAME.matches(file.name) || !file.name.startsWith("%02d-".format(index))) {
+    val ordinal = "%02d-".format(Locale.ROOT, index)
+    if (!SHARE_FILE_NAME.matches(file.name) || !file.name.startsWith(ordinal)) {
       throw ShareIntakeException(ShareIntakeFailure.MALFORMED)
     }
     requireValidUtf8(file.name, MAX_SHARED_NAME_BYTES)
