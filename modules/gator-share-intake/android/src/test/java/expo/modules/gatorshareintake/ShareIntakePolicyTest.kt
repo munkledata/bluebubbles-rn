@@ -188,7 +188,28 @@ class ShareIntakePolicyTest {
   fun `generated file names remove traversal and remain distinct`() {
     assertEquals("00-secret.pdf", sharedFileName(0, "../../secret.pdf", "application/pdf"))
     assertEquals("01-attachment.jpg", sharedFileName(1, null, "image/jpeg"))
-    assertEquals("02-r_sum_.pdf", sharedFileName(2, "résumé.pdf", "application/pdf"))
+    assertEquals("02-r_sum.pdf", sharedFileName(2, "résumé.pdf", "application/pdf"))
+  }
+
+  // Review M170: a non-English name used to lose its extension ("Отчёт.docx" became "docx.bin").
+  @Test
+  fun `non english names keep their own ascii extension`() {
+    val docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assertEquals("00-attachment.docx", sharedFileName(0, "Отчёт.docx", docx))
+    assertEquals("01-attachment.pdf", sharedFileName(1, "报告.pdf", "application/pdf"))
+    assertEquals("02-2026.docx", sharedFileName(2, "Отчёт 2026.docx", docx))
+    assertEquals("03-photo.JPG", sharedFileName(3, "photo.JPG", "image/jpeg"))
+    assertEquals("04-report.tar.gz", sharedFileName(4, "report.tar.gz", "application/gzip"))
+    // A long name keeps its extension instead of being cut through it.
+    assertEquals(
+      "05-${"a".repeat(80)}.docx",
+      sharedFileName(5, "${"a".repeat(120)}.docx", "application/octet-stream"),
+    )
+    // No usable extension of its own: the type decides, as before.
+    assertEquals("06-notes.txt", sharedFileName(6, "notes.тест", "text/plain"))
+    assertEquals("07-bashrc.bin", sharedFileName(7, ".bashrc", "application/octet-stream"))
+    assertEquals("08-attachment.pdf", sharedFileName(8, "报告", "application/pdf"))
+    assertEquals("09-attachment.bin", sharedFileName(9, "Отчёт.", "application/octet-stream"))
   }
 
   @Test

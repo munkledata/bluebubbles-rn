@@ -36,6 +36,7 @@ private const val SHARE_MANIFEST_VERSION = 1
 private val SHARE_MANIFEST_MAGIC = "GATORSHARE".toByteArray(Charsets.US_ASCII)
 private val SHARE_BATCH_ID = Regex("^[0-9]{1,19}-[0-9]{1,19}-[a-f0-9]{16}$")
 private val SHARE_FILE_NAME = Regex("^[0-9]{2}-[A-Za-z0-9._-]{1,100}$")
+private val SHARED_FILE_EXTENSION = Regex("^[A-Za-z0-9]{1,16}$")
 private val SHARE_SHORTCUT_ID = Regex("^gator-share-v2-[A-Za-z0-9_-]{43}$")
 
 enum class ShareIntakeFailure {
@@ -221,35 +222,52 @@ internal fun requireValidShareBatchId(batchId: String): String {
 /**
  * Produce one display-safe, collision-free filename. The two-digit ordinal is part of the owned
  * on-disk shape and is independently checked while a manifest is read.
+ *
+ * The sender's own extension is kept when it is plain ASCII, so a non-English name such as
+ * "Отчёт.docx" becomes "attachment.docx" rather than "docx.bin" (review M170). Without one, the
+ * MIME type picks the extension as before.
  */
 internal fun sharedFileName(index: Int, rawName: String?, mimeType: String): String {
   if (index !in 0 until MAX_SHARED_FILES) throw ShareIntakeException(ShareIntakeFailure.COUNT)
-  val extension = extensionForMime(mimeType)
   val rawLeaf = rawName
     ?.substringAfterLast('/')
     ?.substringAfterLast('\\')
     ?.trim()
     .orEmpty()
-  val cleaned = rawLeaf
-    .map { character ->
-      when {
-        character.isLetterOrDigit() && character.code <= 0x7f -> character
-        character == '.' || character == '_' || character == '-' -> character
-        else -> '_'
-      }
+  val dot = rawLeaf.lastIndexOf('.')
+  val ownExtension = if (dot > 0) {
+    rawLeaf.substring(dot + 1).takeIf { SHARED_FILE_EXTENSION.matches(it) }
+  } else {
+    null
+  }
+  val leaf = if (ownExtension != null) {
+    val stem = cleanSharedFileName(rawLeaf.substring(0, dot)).take(80)
+    "${stem.ifEmpty { "attachment" }}.$ownExtension"
+  } else {
+    val extension = extensionForMime(mimeType)
+    val cleaned = cleanSharedFileName(rawLeaf).take(90)
+    when {
+      cleaned.isEmpty() -> "attachment$extension"
+      '.' in cleaned -> cleaned
+      else -> "$cleaned$extension"
     }
-    .joinToString("")
-    .trim('.', '_')
-    .take(90)
-  val leaf = when {
-    cleaned.isEmpty() -> "attachment$extension"
-    '.' in cleaned -> cleaned
-    else -> "$cleaned$extension"
   }
   return "%02d-%s".format(index, leaf.take(100)).also { name ->
     if (!SHARE_FILE_NAME.matches(name)) throw ShareIntakeException(ShareIntakeFailure.MALFORMED)
   }
 }
+
+/** Keep ASCII letters, digits, `.`, `_` and `-`; anything else becomes `_`; trim the edges. */
+private fun cleanSharedFileName(raw: String): String = raw
+  .map { character ->
+    when {
+      character.isLetterOrDigit() && character.code <= 0x7f -> character
+      character == '.' || character == '_' || character == '-' -> character
+      else -> '_'
+    }
+  }
+  .joinToString("")
+  .trim('.', '_')
 
 private fun extensionForMime(mimeType: String): String = when (mimeType.lowercase()) {
   "image/jpeg" -> ".jpg"
