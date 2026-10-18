@@ -112,7 +112,8 @@ class ShareIntakePolicyTest {
       { requireSupportedShareContentUri("file:///sdcard/a.jpg", "file", true, null) },
       { requireSupportedShareContentUri("CONTENT://media/1", "CONTENT", true, "media") },
       { requireSupportedShareContentUri(good, null, true, "media") },
-      { requireSupportedShareContentUri("content:opaque", "content", false, null) },
+      // Each refusal is isolated: this one differs from a good URI only by being opaque.
+      { requireSupportedShareContentUri(good, "content", false, "media") },
       { requireSupportedShareContentUri("content:///a", "content", true, "") },
       { requireSupportedShareContentUri("content://%20/a", "content", true, " ") },
       { requireSupportedShareContentUri("", "content", true, "media") },
