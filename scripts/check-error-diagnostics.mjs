@@ -89,7 +89,7 @@ const OWNED_NATIVE_LOG_FILE =
   'modules/gator-paste-input/android/src/main/java/expo/modules/gatorpasteinput/GatorPasteInputModule.kt';
 const OWNED_NATIVE_LOG_TAG = 'GatorPasteInput';
 const OWNED_NATIVE_LOG_SOURCE_CONTRACT =
-  '80d0b7bb7dcb8b5dfd45fca4fd66c7637679d0c84143e64b692b27b66b908c4c';
+  'ea81f6cc5418e3e2518dc6a56aae5848b3fbf68c4275031df3a67110720f13bc';
 const OWNED_NATIVE_RUNTIME_PRIVACY_FILE =
   'modules/gator-screen-security/android/src/main/java/expo/modules/gatorscreensecurity/GatorRuntimePrivacyPackage.kt';
 const OWNED_NATIVE_RUNTIME_PRIVACY_SOURCE_CONTRACT =

@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputContentInfo
+import android.webkit.MimeTypeMap
 import android.widget.EditText
 import androidx.annotation.RequiresApi
 import androidx.core.view.ContentInfoCompat
@@ -705,7 +706,9 @@ class GatorPasteInputModule : Module() {
   private fun mimeForExtension(name: String?): String? {
     val ext = extensionOf(name ?: "")
     if (ext.isEmpty()) return null
-    return MIME_TO_EXT.entries.firstOrNull { it.value == ext }?.key
+    MIME_TO_EXT.entries.firstOrNull { it.value == ext }?.key?.let { return it }
+    // Any other type Android knows (".jpeg", ".docx", ".mov"), still pattern-checked (review M177).
+    return safeMimeType(MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext))
   }
 
   private companion object {

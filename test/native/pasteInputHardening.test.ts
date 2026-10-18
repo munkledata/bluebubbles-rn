@@ -44,6 +44,26 @@ describe('owned rich-paste native boundary', () => {
     );
   });
 
+  // Review M177: a pasted ".jpeg" or ".docx" was labelled application/octet-stream because only
+  // Gator's 14-entry table was consulted. Android's MimeTypeMap is now the fallback; host tests
+  // cannot run it, so this pins the order and the pattern check.
+  it('asks Android about extensions outside its own table, still pattern-checked', () => {
+    const lookup = moduleSource.slice(
+      moduleSource.indexOf('private fun mimeForExtension('),
+      moduleSource.indexOf('private companion object'),
+    );
+    const table = lookup.indexOf('MIME_TO_EXT.entries');
+    expect(table).toBeGreaterThan(0);
+    expect(lookup.indexOf('MimeTypeMap.getSingleton()')).toBeGreaterThan(table);
+    expect(lookup).toMatch(
+      /safeMimeType\(MimeTypeMap\.getSingleton\(\)\.getMimeTypeFromExtension\(ext\)\)/,
+    );
+    // The file's extension still decides before the clipboard's hint and the generic default.
+    expect(moduleSource).toMatch(
+      /mimeForExtension\(displayName\)\s*\?: mimeForExtension\(uri\.lastPathSegment\)\s*\?: safeMimeType\(mimeHint\)\s*\?: DEFAULT_MIME/,
+    );
+  });
+
   it('accepts only content-provider schemes and rejects direct file/resource sources', () => {
     expect(policySource).toContain(
       'isSupportedPasteUriScheme(scheme: String?): Boolean = scheme == "content"',
