@@ -7073,7 +7073,6 @@ fullOnlyTest(
           '              bootState={bootState}\n' +
           '              lockHydrated={lockHydrated}\n' +
           '              locked={locked}\n' +
-          '              foregroundUnlockId={foregroundUnlockId}\n' +
           '              coldUnlockPendingRunId={coldUnlockPendingRunId}\n' +
           '              onColdUnlock={completeColdUnlock}\n' +
           '              onWarmUnlock={completeUnlock}',
@@ -7085,7 +7084,6 @@ fullOnlyTest(
           '              bootState={bootState}\n' +
           '              lockHydrated={lockHydrated}\n' +
           '              locked={locked}\n' +
-          '              foregroundUnlockId={foregroundUnlockId}\n' +
           '              coldUnlockPendingRunId={coldUnlockPendingRunId}\n' +
           '              onColdUnlock={completeColdUnlock}\n' +
           '              onWarmUnlock={async () => undefined}',
