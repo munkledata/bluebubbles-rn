@@ -26,19 +26,24 @@ function networkRecoveredWithSocketDown(
  * cancels the pending escalation timer and re-probes the server, and does nothing unless the
  * foreground realtime owner is live. This watcher lives outside realtimeControl.ts, whose source is
  * pinned by the DB-write guard. Returns the function that stops watching.
+ *
+ * Known limit: a socket that deliberately stopped retrying (a rejection the server did not mark
+ * retryable, or its rate-limit wait) also reads as `error`, so a network recovery overrides that
+ * decision at the cost of one extra handshake.
  */
 export function startNetworkRecoveryRetry(retry: () => boolean): () => void {
   let pending: ReturnType<typeof setTimeout> | null = null;
   const unsubscribe = useTransportHealthStore.subscribe((state, previous) => {
     if (pending !== null || !networkRecoveredWithSocketDown(state, previous)) return;
     const generation = state.generation;
-    // Defer one tick so the network publication and its own reachability probe finish first.
+    // Defer one tick so the network publication finishes first. The retry re-probes the server.
     pending = setTimeout(() => {
       pending = null;
       const current = useTransportHealthStore.getState();
       if (
         !current.active ||
         current.generation !== generation ||
+        current.network !== 'online' ||
         current.socket === 'connected' ||
         current.socket === 'auth-rejected'
       ) {

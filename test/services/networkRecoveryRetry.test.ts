@@ -101,6 +101,33 @@ describe('startNetworkRecoveryRetry', () => {
     stop();
   });
 
+  it('skips the retry when the network dropped again before the deferred tick', () => {
+    const retry = jest.fn(() => true);
+    const stop = startNetworkRecoveryRetry(retry);
+    const generation = brokenSocketWhileOffline();
+
+    store().setNetworkState(generation, 'online');
+    store().setNetworkState(generation, 'offline');
+    jest.runOnlyPendingTimers();
+
+    expect(retry).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('retries once for a network that flaps back online within the same tick', () => {
+    const retry = jest.fn(() => true);
+    const stop = startNetworkRecoveryRetry(retry);
+    const generation = brokenSocketWhileOffline();
+
+    store().setNetworkState(generation, 'online');
+    store().setNetworkState(generation, 'offline');
+    store().setNetworkState(generation, 'online');
+    jest.runOnlyPendingTimers();
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
   it('stops watching, and cancels a pending retry, when stopped', () => {
     const retry = jest.fn(() => true);
     const stop = startNetworkRecoveryRetry(retry);
