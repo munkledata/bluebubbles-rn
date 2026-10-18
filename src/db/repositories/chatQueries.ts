@@ -14,7 +14,11 @@ import {
 } from './chatVisibility';
 import { MAX_CUSTOM_FOLDER_MEMBERS, type CustomFolderRow } from './customFolders';
 import { foldInboxSearchText, uniqueInboxSearchBigrams } from './inboxSearchText';
-import { searchCustomFolderChatGuidsByMessage } from './messageQueries';
+import { toFtsQuery } from './_shared';
+import {
+  queryCustomFolderMessageMatchBatch,
+  type CustomFolderMessageMatchBatch,
+} from './messageQueries';
 
 export type { InboxArchiveFilter, InboxSenderFilter } from './chatVisibility';
 
@@ -915,6 +919,60 @@ export async function searchChatsForInboxPage(
   return { rows, hasMore: retained.length > limit };
 }
 
+/** One folder-search batch plus the folder's visible member count. */
+export type CustomFolderMessageMatchBatchResult = CustomFolderMessageMatchBatch & {
+  readonly folderChatCount: number;
+};
+
+/**
+ * One short folder-search batch (review M060), plus the folder's visible member count so the caller
+ * can stop once every member has matched. Null when the search text has no words to match.
+ */
+export function readCustomFolderMessageMatchBatchWithinTransaction(
+  context: DbTransactionContext,
+  folderId: number,
+  searchText: string,
+  beforeRowid: number | null,
+): Promise<CustomFolderMessageMatchBatchResult | null> {
+  return runInTransactionContext(context, async (db) => {
+    requireCustomFolderId(folderId);
+    const match = toFtsQuery(normalizeCustomFolderSearch(searchText));
+    if (!match) return null;
+    const members = await db.all<{ count: number }>(sql`
+      SELECT COUNT(*) AS count FROM chats c
+       WHERE ${chatVisible('c')} ${customFolderMembershipSql(folderId)}
+    `);
+    const batch = await queryCustomFolderMessageMatchBatch(db, folderId, match, beforeRowid);
+    return { ...batch, folderChatCount: members[0]?.count ?? 0 };
+  });
+}
+
+/**
+ * The message half of a folder search, read in short batches (review M060). `readBatch` runs one
+ * batch in its own short transaction (callers own transactions, as with every folder command); the
+ * shared transaction queue is first-in, first-out, so sends and sync that queued during a batch run
+ * before the next one. Stops once every visible folder chat has matched. Null when `isCurrent`
+ * reports that a newer search or another account replaced this one.
+ */
+export async function collectCustomFolderMessageMatches(
+  readBatch: (beforeRowid: number | null) => Promise<CustomFolderMessageMatchBatchResult | null>,
+  isCurrent: () => boolean = () => true,
+): Promise<ReadonlySet<string> | null> {
+  const matches = new Set<string>();
+  let beforeRowid: number | null = null;
+  for (;;) {
+    if (!isCurrent()) return null;
+    const batch: CustomFolderMessageMatchBatchResult | null = await readBatch(beforeRowid);
+    if (batch == null) return matches;
+    for (const guid of batch.chatGuids) matches.add(guid);
+    if (matches.size > MAX_CUSTOM_FOLDER_MEMBERS) {
+      throw new Error('Custom folder message matches exceed their safety bound.');
+    }
+    if (batch.nextBeforeRowid == null || matches.size >= batch.folderChatCount) return matches;
+    beforeRowid = batch.nextBeforeRowid;
+  }
+}
+
 /**
  * Transaction-only folder browse snapshot. Folder identity/counts and the decorated growing page
  * share the exact membership state, so add-before-prune replacement cannot leak its intermediate
@@ -925,6 +983,8 @@ export function listCustomFolderInboxPageWithinTransaction(
   folderId: number,
   requestedLimit = 50,
   searchText = '',
+  /** From collectCustomFolderMessageMatches, read in batches first; required when searching. */
+  messageMatches?: ReadonlySet<string>,
 ): Promise<CustomFolderInboxPage | null> {
   return runInTransactionContext(context, async (db) => {
     requireCustomFolderId(folderId);
@@ -991,10 +1051,11 @@ export function listCustomFolderInboxPageWithinTransaction(
       if (candidates.length !== availableCount) {
         throw new Error('Custom folder search candidates do not match availability.');
       }
+      if (messageMatches == null) {
+        throw new Error('A folder search needs its message matches read in batches first.');
+      }
       const foldedQuery = searchQuery.toLowerCase();
-      const messageMatchGuids = new Set(
-        await searchCustomFolderChatGuidsByMessage(db, folderId, searchQuery),
-      );
+      const messageMatchGuids = messageMatches;
       matchingChatGuids = candidates
         .filter(
           (candidate: CustomFolderSearchCandidate) =>

@@ -7,7 +7,6 @@ import { parseMessagePartTopology } from '@core/models';
 import { REACTION_BASE_TYPES, STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import type { AppDatabase } from '../types';
 import { toFtsQuery } from './_shared';
-import { MAX_CUSTOM_FOLDER_MEMBERS } from './customFolders';
 // The ONE definition of "this chat is not under a local deletion tombstone" — search is a reader
 // of it like the inbox is. Import the owning rule rather than restating it; chats.ts does not import
 // message queries, so this dependency stays acyclic.
@@ -748,74 +747,94 @@ export async function listMessagesAround(
 }
 
 /**
+ * The conditions a full-text hit must meet to count as a chat match: a visible, non-deleted, non-
+ * overlay message in a visible chat. The inbox search and the folder search batches share this one
+ * rule, so their scopes cannot drift apart. Aliases are `m` (messages) and `c` (chats).
+ */
+function visibleMessageMatchSql(): SQL {
+  return sql`${notAnOverlayMessage()}
+      AND ${messageHasVisibleContentSql('m')}
+      AND m.date_deleted IS NULL
+      AND ${chatVisible('c')}`;
+}
+
+/**
  * Distinct chat GUIDs that have at least one message matching the FTS query. Powers the inbox
  * top-bar so it filters chats by message CONTENT (incl. decoded edited/SMS text), keeping it
  * consistent with the dedicated search page instead of matching only chat names + the latest preview.
- *
- * Locally-deleted chats are excluded here too. The custom-folder wrapper below reuses this exact
- * query owner with a membership restriction, so its narrower scope cannot drift from these rules.
+ * Locally-deleted chats are excluded here too.
  */
-async function queryChatGuidsByMessage(
+export async function searchChatGuidsByMessage(
   db: AppDatabase,
   queryText: string,
-  limit: number,
-  customFolderId?: number,
+  limit = 300,
 ): Promise<string[]> {
   const match = toFtsQuery(queryText);
   if (!match) return [];
-  const folderRestriction =
-    customFolderId == null
-      ? sql``
-      : sql`AND EXISTS (
-          SELECT 1 FROM custom_folder_members cfm
-           WHERE cfm.folder_id = ${customFolderId} AND cfm.chat_guid = c.guid
-        )`;
   const rows = await db.all<{ guid: string }>(sql`
     SELECT DISTINCT c.guid AS guid
     FROM messages_fts f
     JOIN messages m ON m.id = f.rowid
     JOIN chats c ON c.id = m.chat_id
     WHERE messages_fts MATCH ${match}
-      AND ${notAnOverlayMessage()}
-      AND ${messageHasVisibleContentSql('m')}
-      AND m.date_deleted IS NULL
-      AND ${chatVisible('c')}
-      ${folderRestriction}
+      AND ${visibleMessageMatchSql()}
     LIMIT ${limit}
   `);
   return rows.map((r: { guid: string }) => r.guid);
 }
 
-export function searchChatGuidsByMessage(
-  db: AppDatabase,
-  queryText: string,
-  limit = 300,
-): Promise<string[]> {
-  return queryChatGuidsByMessage(db, queryText, limit);
+/** How many full-text matches one folder-search batch reads (review M060). */
+export const CUSTOM_FOLDER_MESSAGE_MATCH_BATCH = 2_000;
+
+export interface CustomFolderMessageMatchBatch {
+  /** Visible folder chats with a matching message among this batch's matches. */
+  readonly chatGuids: readonly string[];
+  /** Continue below this message rowid, or null once every match has been read. */
+  readonly nextBeforeRowid: number | null;
 }
 
 /**
- * Conversation-level message matches for one custom folder. Membership is applied in SQL before
- * DISTINCT/LIMIT, and the extra row detects a corrupted result above the durable folder bound.
+ * One bounded slice of a folder's message search (review M060). The first statement finds the
+ * newest CUSTOM_FOLDER_MESSAGE_MATCH_BATCH full-text matches below `beforeRowid` in every chat; the
+ * second keeps the visible ones in the folder among exactly those. Neither statement reads more
+ * than one batch of matches, so a broad search no longer holds the app's single database thread
+ * for the whole message history at once.
  */
-export async function searchCustomFolderChatGuidsByMessage(
+export async function queryCustomFolderMessageMatchBatch(
   db: AppDatabase,
   folderId: number,
-  queryText: string,
-): Promise<string[]> {
-  if (!Number.isSafeInteger(folderId) || folderId <= 0) {
-    throw new RangeError('Folder id must be a positive safe integer.');
-  }
-  const rows = await queryChatGuidsByMessage(
-    db,
-    queryText,
-    MAX_CUSTOM_FOLDER_MEMBERS + 1,
-    folderId,
-  );
-  if (rows.length > MAX_CUSTOM_FOLDER_MEMBERS) {
-    throw new Error('Custom folder message matches exceed their safety bound.');
-  }
-  return rows;
+  match: string,
+  beforeRowid: number | null,
+): Promise<CustomFolderMessageMatchBatch> {
+  const below = beforeRowid == null ? sql`` : sql`AND rowid < ${beforeRowid}`;
+  const window = await db.all<{ low: number | null; count: number }>(sql`
+    SELECT MIN(rowid) AS low, COUNT(*) AS count
+      FROM (SELECT rowid FROM messages_fts
+             WHERE messages_fts MATCH ${match} ${below}
+             ORDER BY rowid DESC
+             LIMIT ${CUSTOM_FOLDER_MESSAGE_MATCH_BATCH})
+  `);
+  const low = window[0]?.low ?? null;
+  const count = window[0]?.count ?? 0;
+  if (low == null || count === 0) return { chatGuids: [], nextBeforeRowid: null };
+  const upper = beforeRowid == null ? sql`` : sql`AND f.rowid < ${beforeRowid}`;
+  const rows = await db.all<{ guid: string }>(sql`
+    SELECT DISTINCT c.guid AS guid
+      FROM messages_fts f
+      JOIN messages m ON m.id = f.rowid
+      JOIN chats c ON c.id = m.chat_id
+     WHERE messages_fts MATCH ${match}
+       AND f.rowid >= ${low} ${upper}
+       AND ${visibleMessageMatchSql()}
+       AND EXISTS (
+         SELECT 1 FROM custom_folder_members cfm
+          WHERE cfm.folder_id = ${folderId} AND cfm.chat_guid = c.guid
+       )
+  `);
+  return {
+    chatGuids: rows.map((row: { guid: string }) => row.guid),
+    nextBeforeRowid: count < CUSTOM_FOLDER_MESSAGE_MATCH_BATCH ? null : low,
+  };
 }
 
 export interface MessagePreview {

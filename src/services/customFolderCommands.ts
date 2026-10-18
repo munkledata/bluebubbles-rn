@@ -1,10 +1,12 @@
 import {
   createCustomFolderWithinTransaction,
+  collectCustomFolderMessageMatches,
   deleteCustomFolderWithinTransaction,
   listCustomFolderChatGuidsWithinTransaction,
   listCustomFolderInboxPageWithinTransaction,
   listCustomFolderSummariesWithinTransaction,
   listCustomFoldersWithinTransaction,
+  readCustomFolderMessageMatchBatchWithinTransaction,
   renameCustomFolderWithinTransaction,
   reorderCustomFoldersWithinTransaction,
   replaceCustomFolderMembershipWithinTransaction,
@@ -88,22 +90,60 @@ export function loadCustomFolderMembership(
 /**
  * Read one exact folder identity/count snapshot and its growing conversation prefix. The shared
  * transaction queue keeps add-before-prune membership replacement invisible to this UI read.
+ *
+ * A search first reads its message matches in short batches (review M060), so a broad search never
+ * holds the database for the whole message history; the page itself is then one short snapshot.
+ * `isRequestCurrent` turns false once a newer search or page request replaced this one, which stops
+ * the batches early and reports `stale`.
  */
-export function loadCustomFolderInboxPage(
+export async function loadCustomFolderInboxPage(
   folderId: number,
   limit: number,
   searchText = '',
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  isRequestCurrent: () => boolean = () => true,
 ): Promise<CustomFolderCommandResult<CustomFolderInboxPage | null>> {
-  return runCustomFolderCommand(accountLease, async (activeLease) => {
+  let replaced = false;
+  const result = await runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
+    assertAccountOperationCurrent(activeLease);
+    const messageMatches =
+      searchText === ''
+        ? undefined
+        : await collectCustomFolderMessageMatches(
+            (beforeRowid) =>
+              withDbTransaction(
+                db,
+                (context) =>
+                  readCustomFolderMessageMatchBatchWithinTransaction(
+                    context,
+                    folderId,
+                    searchText,
+                    beforeRowid,
+                  ),
+                () => activeLease.isCurrent(),
+              ),
+            () => activeLease.isCurrent() && isRequestCurrent(),
+          );
+    if (messageMatches === null) {
+      replaced = true;
+      return null;
+    }
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => listCustomFolderInboxPageWithinTransaction(context, folderId, limit, searchText),
+      (context) =>
+        listCustomFolderInboxPageWithinTransaction(
+          context,
+          folderId,
+          limit,
+          searchText,
+          messageMatches,
+        ),
       () => activeLease.isCurrent(),
     );
   });
+  return replaced ? { status: 'stale' } : result;
 }
 
 export function createCustomFolder(

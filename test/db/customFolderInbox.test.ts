@@ -1,7 +1,9 @@
 import { Chat, Message } from '@core/models';
 import {
+  collectCustomFolderMessageMatches,
   listCustomFolderInboxPageWithinTransaction,
   MAX_CUSTOM_FOLDER_MEMBERS,
+  readCustomFolderMessageMatchBatchWithinTransaction,
   searchChatGuidsByMessage,
   upsertChats,
   upsertHandles,
@@ -76,9 +78,29 @@ async function seedChat(
   }
 }
 
-function loadFolderPage(t: TestDb, folderId: number, limit: number, searchText = '') {
+async function loadFolderPage(t: TestDb, folderId: number, limit: number, searchText = '') {
+  // Like the command: message matches are read in short batches before the page snapshot.
+  const messageMatches =
+    searchText === ''
+      ? undefined
+      : ((await collectCustomFolderMessageMatches((beforeRowid) =>
+          withDbTransaction(t.db, (context) =>
+            readCustomFolderMessageMatchBatchWithinTransaction(
+              context,
+              folderId,
+              searchText,
+              beforeRowid,
+            ),
+          ),
+        )) ?? undefined);
   return withDbTransaction(t.db, (context) =>
-    listCustomFolderInboxPageWithinTransaction(context, folderId, limit, searchText),
+    listCustomFolderInboxPageWithinTransaction(
+      context,
+      folderId,
+      limit,
+      searchText,
+      messageMatches,
+    ),
   );
 }
 

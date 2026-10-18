@@ -114,6 +114,11 @@ export function useCustomFolderChats(
           activePageRequest.limit,
           searchQuery,
           accountLease,
+          // A newer keystroke or page request replaces this one: stop its search between batches.
+          () =>
+            activeBaseKeyRef.current === baseKey &&
+            activeRequestKeyRef.current === requestKey &&
+            requestSequenceRef.current === requestSequence,
         );
         if (
           result.status === 'stale' ||

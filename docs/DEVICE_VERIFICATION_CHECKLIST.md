@@ -436,6 +436,12 @@ approved fixture.
       message and delete/unsend another. The replacement text becomes searchable, the old token
       stops matching, and the deleted message disappears from search. Record only result aliases,
       never the search text or message body.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Since review item M060, a search inside a
+      custom folder reads its message matches in short batches. On a phone with a large history,
+      search a very common word inside a small folder while the owner sends you a synthetic message:
+      the results appear, the new message arrives promptly, and the app never freezes for seconds.
+      Typing several letters quickly settles on the last search without a backlog. Record only
+      timings and result counts, never the search text.
 - [ ] **`EXACT PLAY CANDIDATE`:** Enter a synthetic chat draft and change one non-secret setting,
       then background Gator and run only
       `adb shell am kill com.bluegreengatorapps.messages`. Relaunch from the launcher and confirm
