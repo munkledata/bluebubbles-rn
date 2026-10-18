@@ -65,6 +65,12 @@ describe('StoragePrivacyScreen', () => {
     expect(screen.getByText(/push-payload encryption.*not always enabled/)).toBeTruthy();
     expect(screen.getByText(/new or unset installation.*starts off/)).toBeTruthy();
     expect(screen.getByText(/not the original error message or stack trace/)).toBeTruthy();
+    // Review M214: crashes carry a fingerprint; the promise about message text must stay explicit.
+    expect(
+      screen.getByText(
+        /short code for where in Gator’s code the error happened—never message text/,
+      ),
+    ).toBeTruthy();
     expect(screen.getByText(/automatically asks your connected Gator server/)).toBeTruthy();
     expect(screen.getByText(/phone does not contact the page or image host directly/)).toBeTruthy();
     expect(

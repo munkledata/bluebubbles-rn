@@ -1323,6 +1323,13 @@ production-file behavior, signed/store provenance, scheduled CI, or release/phys
       relaunch Gator and open Settings → App Logs: the newest entries include the `runtime.fatal`
       line. Before the fix that line was usually lost, because the app ended before the 1.5 s
       batched log write. The crash now waits at most 750 ms for that write and the error report.
+- [ ] **`EXACT PACKAGED CANDIDATE` — crash fingerprint (M214/M180, added 2026-10-18):** With Share
+      Error Reports on, after a runtime error has been captured in the packaged build, open Settings →
+      Share diagnostics (or the server's error-report list). Runtime events read like
+      `runtime.uncaught [TypeError|fp-…]` with `fp-` plus 12 letters g–v, the same error repeated
+      gives the same token, and no message text, file name or function name appears. If no runtime
+      event ever carries a token, record one raw release stack shape in a dev session (frames other
+      than `index.android.bundle` give none); host tests cannot prove the release Hermes format.
 
 ---
 

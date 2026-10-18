@@ -314,6 +314,8 @@ export interface SafeErrorDiagnosticMeta {
   waitedMs?: number;
   waiting?: number;
   releasedWhileWaiting?: number;
+  /** Message-free crash fingerprint, `fp-` plus 12 letters g–v (review M214). */
+  fingerprint?: string;
 }
 
 export interface PrivacySafeErrorDiagnostic {
@@ -528,6 +530,18 @@ function buildMeta(
 
   if (code === 'runtime.fatal') result.fatal = true;
 
+  // Computed from a raw crash stack; otherwise kept from an already-projected envelope (the error
+  // sink and the upload both re-project), but only in its exact generated shape.
+  if (FINGERPRINT_EVENT_CODES.has(code) && result.errorName !== undefined) {
+    const storedFingerprint = read(rawMeta, 'fingerprint');
+    const fingerprint =
+      crashFingerprint(result.errorName, error) ??
+      (typeof storedFingerprint === 'string' && FINGERPRINT.test(storedFingerprint)
+        ? storedFingerprint
+        : undefined);
+    if (fingerprint !== undefined) result.fingerprint = fingerprint;
+  }
+
   if (code === 'socket.event_handling_failed') {
     const eventName =
       safeSetValue(read(rawMeta, 'eventName'), SERVER_EVENT_NAMES) ??
@@ -546,6 +560,79 @@ function buildMeta(
   return result;
 }
 
+/** Crash events that carry a fingerprint. */
+const FINGERPRINT_EVENT_CODES = new Set([
+  'runtime.fatal',
+  'runtime.uncaught',
+  'runtime.unhandled_rejection',
+  'ui.render_crash',
+]);
+const FINGERPRINT = /^fp-[g-v]{12}$/;
+/** React Native's own Hermes frame grammar (Libraries/Core/Devtools/parseHermesStack.js). */
+const HERMES_FRAME = /^ {4}at (.+?)(?: \((native)\)?| \((address at )?(.*?):(\d+):(\d+)\))$/;
+const HERMES_SKIPPED_FRAMES = /^ {4}\.\.\. skipping \d+ frames$/;
+const GATOR_BUNDLE_FILE = /(?:^|\/)index\.android\.bundle$/;
+const MAX_FINGERPRINT_STACK_CHARS = 64 * 1024;
+const MAX_FINGERPRINT_FRAME_LINES = 200;
+const MAX_FINGERPRINT_FRAMES = 5;
+
+/** cyrb53, a small public-domain 53-bit string hash; only its low 48 bits are used. */
+function cyrb53(input: string): number {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input.charCodeAt(index);
+    h1 = Math.imul(h1 ^ char, 2654435761);
+    h2 = Math.imul(h2 ^ char, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
+/**
+ * A message-free crash fingerprint (review M214/M180): the approved error name plus the numeric
+ * positions of up to five top frames in Gator's own bundle. The header lines (the name and the
+ * whole message, however many lines it spans) are skipped, and every remaining line must be a
+ * genuine Hermes frame, so a frame-shaped line inside a message cannot contribute. Function names,
+ * file paths and message text never enter the hash; a frame outside the bundle counts only as a
+ * placeholder. Positions change with every build, so the value identifies a bug, not a person.
+ * Letters g–v contain no digits or hex, so the server's grouping keeps the token intact.
+ */
+function crashFingerprint(
+  errorName: string,
+  error: Record<string, unknown> | undefined,
+): string | undefined {
+  const stack = read(error, 'stack');
+  const message = read(error, 'message');
+  if (typeof stack !== 'string' || typeof message !== 'string') return undefined;
+  if (stack.length > MAX_FINGERPRINT_STACK_CHARS) return undefined;
+  // The header is `${name}: ${message}`: one line plus one per newline inside the message.
+  const headerLines = message.split('\n').length;
+  const frameLines = stack
+    .split('\n')
+    .slice(headerLines, headerLines + MAX_FINGERPRINT_FRAME_LINES);
+  const positions: string[] = [];
+  let bundleFrames = 0;
+  for (const line of frameLines) {
+    if (HERMES_SKIPPED_FRAMES.test(line)) continue;
+    const frame = HERMES_FRAME.exec(line);
+    if (!frame) return undefined;
+    if (positions.length === MAX_FINGERPRINT_FRAMES) continue;
+    const inBundle = frame[4] !== undefined && GATOR_BUNDLE_FILE.test(frame[4]);
+    positions.push(inBundle ? `${frame[5]}:${frame[6]}` : '-');
+    if (inBundle) bundleFrames += 1;
+  }
+  if (bundleFrames === 0) return undefined;
+  let value = cyrb53([errorName, ...positions].join('\n')) % 2 ** 48;
+  let letters = '';
+  for (let index = 0; index < 12; index += 1) {
+    letters = String.fromCharCode(0x67 + (value % 16)) + letters;
+    value = Math.floor(value / 16);
+  }
+  return `fp-${letters}`;
+}
+
 function statusClass(status: number | undefined): string | undefined {
   if (status === undefined) return undefined;
   if (status === 0) return 'status_0';
@@ -558,6 +645,7 @@ function canonicalMessage(code: string, meta: SafeErrorDiagnosticMeta): string {
     meta.errorName,
     meta.errorCode,
     statusClass(meta.status),
+    meta.fingerprint,
   ].filter((value): value is string => value !== undefined);
   return qualifiers.length === 0 ? code : `${code} [${qualifiers.join('|')}]`;
 }

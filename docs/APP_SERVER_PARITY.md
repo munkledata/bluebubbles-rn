@@ -502,7 +502,14 @@ error, batch-uploads them, and the server fingerprints (categorizes) + writes th
   the React `ErrorBoundary`, and every `logger.error`) into the `error_reports` table (migration `0025`) —
   a lease/backoff/attempt-cap queue cloned from `outgoing_queue`. Before any sink, ERROR input is rebuilt as
   one of 19 finite events with event-owned typed fields and an opaque `at gator.site.<token>` grouping frame;
-  raw Error messages, filenames, function names, and stacks do not persist or upload. The chained RN handler
+  raw Error messages, filenames, function names, and stacks do not persist or upload. Crash events
+  (`runtime.fatal`, `runtime.uncaught`, `runtime.unhandled_rejection`, `ui.render_crash`) may also carry
+  `fingerprint` (review M214, 2026-10-18): `fp-` plus 12 letters g–v, a hash of the approved error name and
+  the numeric bundle positions of up to five top Hermes frames. The header and every message line are
+  skipped and every remaining line must be a genuine frame, so function names, paths and message text are
+  never hashed. It is the last message qualifier (for example `runtime.fatal [TypeError|fp-…]`), so the
+  server's existing grouping separates different crashes; letters g–v survive its normalizer, so the server
+  needed no change. The chained RN handler
   receives the same safe shape rather than the
   original Error. `runErrorReportQueue` batch-`POST`s to `/api/v1/error-reports` (`retry:false`), deletes only
   after a full acknowledgement, and retries the whole batch on partial/failure. `flushErrorReports` runs on

@@ -140,9 +140,10 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
           <Text style={textStyle}>
             On a new or unset installation, Share Error Reports starts off. If you turn it on and
             your server supports report uploads, Gator sends only bounded technical fields to your
-            connected server—not the original error message or stack trace. Turning it off stops new
-            report capture and upload and deletes queued reports. Disconnecting also clears the
-            local report queue.
+            connected server—not the original error message or stack trace. For a crash it also
+            sends a short code for where in Gator’s code the error happened—never message text.
+            Turning it off stops new report capture and upload and deletes queued reports.
+            Disconnecting also clears the local report queue.
           </Text>
         </SettingsSection>
 
@@ -279,8 +280,9 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             or the Gator album; remove those in your Photos app. Temporary cache files may remain
             until Gator or Android removes them. Clear App Logs deletes the saved log and tells you
             if Android cannot confirm removal. Release builds retain structured error diagnostics,
-            including an opaque crash-site code without a filename, function name, or original
-            stack, plus a small push-receipt record containing a minute-rounded receipt time, the
+            including an opaque crash-site code without a filename, function name, or original stack
+            and, for a crash, a short code for where in Gator’s code it happened (never message
+            text), plus a small push-receipt record containing a minute-rounded receipt time, the
             server event category, and whether delivery was foreground or background. Development
             builds may keep extra local diagnostics, but Share diagnostics exports only the
             structured errors and finite receipt events. Clearing app data or uninstalling removes

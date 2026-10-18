@@ -288,6 +288,104 @@ describe('error-report structured privacy envelope', () => {
     expect(JSON.stringify(report)).not.toContain('private.example');
   });
 
+  // Review M214/M180: a message-free fingerprint so different crashes can be told apart.
+  describe('crash fingerprint', () => {
+    const BUNDLE = 'index.android.bundle';
+    const FRAMES = [
+      `useChatMessages (address at ${BUNDLE}:1:123456)`,
+      `renderWithHooks (address at ${BUNDLE}:1:654321)`,
+      'anonymous (native)',
+    ];
+    const hermesError = (
+      message: string,
+      frames: readonly string[] = FRAMES,
+      name = 'TypeError',
+    ): Record<string, unknown> => ({
+      name,
+      message,
+      stack: `${name}: ${message}\n${frames.map((frame) => `    at ${frame}`).join('\n')}`,
+    });
+    const fatal = (error: unknown) =>
+      projectCapturedErrorReport(
+        '[fatal] runtime error',
+        error,
+        ERROR_DIAGNOSTIC_SITES.runtimeFatal,
+      );
+    const fingerprintOf = (error: unknown): unknown => parsedMeta(fatal(error)).fingerprint;
+
+    it('fingerprints a runtime crash from its bundle positions only', () => {
+      const report = fatal(hermesError('alice@example.com said private words'));
+      const fingerprint = parsedMeta(report).fingerprint;
+
+      expect(fingerprint).toMatch(/^fp-[g-v]{12}$/);
+      expect(report.message).toBe(`runtime.fatal [TypeError|${String(fingerprint)}]`);
+      const json = JSON.stringify(report);
+      for (const secret of ['alice', 'private', 'useChatMessages', '123456', '654321', BUNDLE]) {
+        expect(json).not.toContain(secret);
+      }
+    });
+
+    it('keeps the fingerprint when only the message or function names differ', () => {
+      const renamed = FRAMES.map((frame) => frame.replace(/^\w+/, 'otherName'));
+      expect(fingerprintOf(hermesError('second\nmulti-line private message', renamed))).toBe(
+        fingerprintOf(hermesError('first private message')),
+      );
+    });
+
+    it('changes the fingerprint for a different position or error name', () => {
+      const moved = [`useChatMessages (address at ${BUNDLE}:1:123457)`, ...FRAMES.slice(1)];
+      const fingerprints = new Set([
+        fingerprintOf(hermesError('m')),
+        fingerprintOf(hermesError('m', moved)),
+        fingerprintOf(hermesError('m', FRAMES, 'RangeError')),
+      ]);
+      expect(fingerprints.size).toBe(3);
+    });
+
+    it('ignores a frame-shaped line inside the message', () => {
+      const injected = `phone\n    at x (address at ${BUNDLE}:3035550:199)`;
+      expect(fingerprintOf(hermesError(injected))).toBe(fingerprintOf(hermesError('phone')));
+    });
+
+    it('adds none without a bundle frame, for a mutated stack, or for other events', () => {
+      expect(fingerprintOf(hermesError('m', ['fn (/Users/alice/app.ts:1:2)']))).toBeUndefined();
+      expect(
+        fingerprintOf({
+          name: 'TypeError',
+          message: 'm',
+          stack: `TypeError: m\nnot a frame\n    at f (address at ${BUNDLE}:1:2)`,
+        }),
+      ).toBeUndefined();
+      expect(fingerprintOf({ name: 'TypeError', stack: `TypeError\n    at ${FRAMES[0]}` })).toBe(
+        undefined,
+      );
+      const media = projectCapturedErrorReport(
+        '[media] share failed',
+        hermesError('m'),
+        ERROR_DIAGNOSTIC_SITES.mediaShare,
+      );
+      expect(parsedMeta(media).fingerprint).toBeUndefined();
+    });
+
+    it('survives the sink and upload re-projections, and drops a forged value', () => {
+      const first = fatal(hermesError('m'));
+      // ErrorReportSink re-projects the logger's projected value; uploads re-project stored rows.
+      expect(
+        projectCapturedErrorReport(first.message, { ...parsedMeta(first), stack: first.stack }),
+      ).toEqual(first);
+      expect(projectStoredErrorReport({ ...first })).toEqual(first);
+
+      for (const forged of ['fp-0123456789ab', 'fp-ghij', 'alice@example.com', 7]) {
+        const stored = projectStoredErrorReport({
+          ...first,
+          meta: JSON.stringify({ ...parsedMeta(first), fingerprint: forged }),
+        });
+        expect(parsedMeta(stored).fingerprint).toBeUndefined();
+        expect(stored.message).toBe('runtime.fatal [TypeError]');
+      }
+    });
+  });
+
   it('is idempotent when a current envelope crosses the legacy upload boundary', () => {
     const first = projectCapturedErrorReport(
       '[media] share failed',
