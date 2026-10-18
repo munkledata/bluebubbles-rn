@@ -708,7 +708,9 @@ class GatorPasteInputModule : Module() {
     if (ext.isEmpty()) return null
     MIME_TO_EXT.entries.firstOrNull { it.value == ext }?.key?.let { return it }
     // Any other type Android knows (".jpeg", ".docx", ".mov"), still pattern-checked (review M177).
+    // Its generic answer (".bin") is no better than the clipboard's hint, so it does not count.
     return safeMimeType(MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext))
+      ?.takeIf { it != DEFAULT_MIME }
   }
 
   private companion object {

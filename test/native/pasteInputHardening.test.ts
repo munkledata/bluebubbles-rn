@@ -58,6 +58,10 @@ describe('owned rich-paste native boundary', () => {
     expect(lookup).toMatch(
       /safeMimeType\(MimeTypeMap\.getSingleton\(\)\.getMimeTypeFromExtension\(ext\)\)/,
     );
+    // Android's generic answer (e.g. for ".bin") must not beat a specific clipboard hint.
+    expect(lookup).toMatch(
+      /getMimeTypeFromExtension\(ext\)\)\s*\?\.takeIf \{ it != DEFAULT_MIME \}/,
+    );
     // The file's extension still decides before the clipboard's hint and the generic default.
     expect(moduleSource).toMatch(
       /mimeForExtension\(displayName\)\s*\?: mimeForExtension\(uri\.lastPathSegment\)\s*\?: safeMimeType\(mimeHint\)\s*\?: DEFAULT_MIME/,
