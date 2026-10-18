@@ -6,6 +6,7 @@ import {
   releaseNativeShareBatch,
   subscribeNativeShareIntake,
   takeNextNativeShareBatch,
+  UnreadableNativeShareBatchError,
 } from '@native/shareIntake';
 import {
   admitShareIntakeTextDraftWithinTransaction,
@@ -133,6 +134,29 @@ function noteWake(): void {
   wakeGeneration += 1;
 }
 
+let lastDiscardedUnreadableBatchId: string | null = null;
+
+/**
+ * A claimed batch this build cannot read stays first in line and would block every later share
+ * (M169). Tell the user, discard it by its exact id, and pull again. No database work: the drain
+ * runs before login and above App Lock. Neither a failed discard nor the same id coming back after
+ * a reported discard pulls again, so this cannot loop.
+ */
+async function settleUnreadableNativeBatch(batchId: string | null): Promise<void> {
+  useShareIntentStore.getState().setFailureReason('malformed');
+  if (batchId === null || batchId === lastDiscardedUnreadableBatchId) return;
+  try {
+    await discardNativeShareBatch(batchId);
+  } catch (error: unknown) {
+    logger.warn('[share] unreadable native batch could not be discarded', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return;
+  }
+  lastDiscardedUnreadableBatchId = batchId;
+  noteWake();
+}
+
 function startDrainIfIdle(): Promise<void> {
   if (drainPromise) return drainPromise;
   const currentDrain = (async () => {
@@ -148,11 +172,14 @@ function startDrainIfIdle(): Promise<void> {
       if (observedWake === wakeGeneration) return;
     }
   })()
-    .catch((error: unknown) => {
+    .catch(async (error: unknown) => {
       handledWakeGeneration = Math.max(handledWakeGeneration, attemptedWakeGeneration);
       logger.warn('[share] completed native batch could not be staged', {
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
+      if (error instanceof UnreadableNativeShareBatchError) {
+        await settleUnreadableNativeBatch(error.batchId);
+      }
     })
     .finally(() => {
       drainPromise = null;
@@ -251,7 +278,10 @@ export async function releaseShareIntakeBatch(
   return outcome === 'delivered' && cleared;
 }
 
-/** Explicit user discard is the only pre-send path allowed to delete a complete batch. */
+/**
+ * Explicit user discard is the only pre-send path allowed to delete a complete batch. The one
+ * exception is a claim this build cannot read at all (settleUnreadableNativeBatch, M169).
+ */
 export async function discardShareIntakeBatch(
   batchId: string,
   options: ShareIntakeSettlementOptions,

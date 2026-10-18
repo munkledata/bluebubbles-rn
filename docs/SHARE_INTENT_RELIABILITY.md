@@ -27,6 +27,13 @@ streams into a pending app-private directory; and publishes only a complete, re-
 manifest. Exact native acknowledge/release/discard operations make a claimed batch replayable after
 process or React-context restart without exposing a partial copy.
 
+Only an explicit user discard may delete a complete batch before it is sent, with one exception
+(M169, 2026-10-18): a claimed batch whose manifest this build cannot read would otherwise stay first
+in line and block every later share. The drain shows "Gator could not import that shared item",
+discards that exact batch by id, and pulls the next one; if the discard fails it stops instead of
+retrying. A claim whose own id is invalid cannot be discarded and still blocks, but the user sees
+the message on each attempt.
+
 The companion `gator-share-shortcuts` module publishes at most ten current-account rows with opaque
 HMAC identifiers. Publication and resolution use the same bounded canonical active-chat universe;
 generation fencing rejects stale account work, and operational key/token failures surface as a

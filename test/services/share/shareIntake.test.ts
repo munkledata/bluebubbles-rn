@@ -1,11 +1,21 @@
-jest.mock('@native/shareIntake', () => ({
-  takeNextNativeShareBatch: jest.fn(),
-  acknowledgeNativeShareBatch: jest.fn(),
-  releaseNativeShareBatch: jest.fn(),
-  discardNativeShareBatch: jest.fn(),
-  discardNativeShareBatchForAccountReset: jest.fn(),
-  subscribeNativeShareIntake: jest.fn(),
-}));
+jest.mock('@native/shareIntake', () => {
+  // Mirrors the real bridge error, whose own contract is tested in test/native/shareIntake.test.ts.
+  class UnreadableNativeShareBatchError extends Error {
+    constructor(readonly batchId: string | null) {
+      super('claimed share batch is unreadable');
+      this.name = 'UnreadableNativeShareBatchError';
+    }
+  }
+  return {
+    takeNextNativeShareBatch: jest.fn(),
+    acknowledgeNativeShareBatch: jest.fn(),
+    releaseNativeShareBatch: jest.fn(),
+    discardNativeShareBatch: jest.fn(),
+    discardNativeShareBatchForAccountReset: jest.fn(),
+    subscribeNativeShareIntake: jest.fn(),
+    UnreadableNativeShareBatchError,
+  };
+});
 
 jest.mock('@db/database', () => ({
   getDatabase: jest.fn(() => ({ kind: 'service-owned-test-db' })),
@@ -37,6 +47,7 @@ import {
   releaseNativeShareBatch,
   subscribeNativeShareIntake,
   takeNextNativeShareBatch,
+  UnreadableNativeShareBatchError,
 } from '@native/shareIntake';
 // eslint-disable-next-line import/first
 import {
@@ -57,6 +68,8 @@ import {
 } from '@/services/share/shareIntake';
 // eslint-disable-next-line import/first
 import { useShareIntentStore } from '@state/shareIntentStore';
+// eslint-disable-next-line import/first
+import { nextEventLoopTurn, waitForCondition } from '../../support/async';
 // eslint-disable-next-line import/first
 import {
   captureRealtimeDeliveryLease,
@@ -238,6 +251,80 @@ describe('share intake draining', () => {
       errorName: 'TypeError',
     });
     expect(useShareIntentStore.getState().batchId).toBeNull();
+  });
+
+  // M169: a claim this build cannot read would otherwise stay first in line and block every share.
+  it('discards an unreadable claim by its exact id, reports it, and stages the next batch', async () => {
+    takeNext
+      .mockRejectedValueOnce(new UnreadableNativeShareBatchError(FIRST_BATCH))
+      .mockResolvedValueOnce(batch(SECOND_BATCH, 'next share'));
+    const failures: string[] = [];
+    const unsubscribe = useShareIntentStore.subscribe((state, previous) => {
+      if (state.failureReason && state.failureReason !== previous.failureReason) {
+        failures.push(state.failureReason);
+      }
+    });
+
+    await drainShareIntake();
+    await waitForCondition(
+      () => useShareIntentStore.getState().batchId === SECOND_BATCH,
+      'the next batch staged',
+    );
+    unsubscribe();
+
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(discard).toHaveBeenCalledWith(FIRST_BATCH);
+    expect(failures).toEqual(['malformed']);
+    expect(takeNext).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith('[share] completed native batch could not be staged', {
+      errorName: 'UnreadableNativeShareBatchError',
+    });
+  });
+
+  it('reports an unreadable claim once and stops when its discard fails', async () => {
+    // Each unreadable-claim test uses its own id: a reported discard is remembered per process.
+    const STUCK_BATCH = '1720000000003-4-0f1e2d3c4b5a6978';
+    takeNext.mockRejectedValueOnce(new UnreadableNativeShareBatchError(STUCK_BATCH));
+    discard.mockRejectedValueOnce(new Error('share batch discard failed'));
+
+    await drainShareIntake();
+    await waitForCondition(() => warn.mock.calls.length >= 2, 'the discard failure logged');
+    await nextEventLoopTurn();
+
+    expect(takeNext).toHaveBeenCalledTimes(1);
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(useShareIntentStore.getState().failureReason).toBe('malformed');
+    expect(warn).toHaveBeenCalledWith('[share] unreadable native batch could not be discarded', {
+      errorName: 'Error',
+    });
+  });
+
+  it('stops when the same unreadable claim comes back after a reported discard', async () => {
+    const SAME_BATCH = '1720000000002-3-00112233aabbccdd';
+    takeNext
+      .mockRejectedValueOnce(new UnreadableNativeShareBatchError(SAME_BATCH))
+      .mockRejectedValueOnce(new UnreadableNativeShareBatchError(SAME_BATCH))
+      .mockResolvedValueOnce(batch(SECOND_BATCH, 'must not be reached'));
+
+    await drainShareIntake();
+    await waitForCondition(() => takeNext.mock.calls.length >= 2, 'the second pull');
+    await nextEventLoopTurn();
+
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(discard).toHaveBeenCalledWith(SAME_BATCH);
+    expect(takeNext).toHaveBeenCalledTimes(2);
+    expect(useShareIntentStore.getState().batchId).toBeNull();
+  });
+
+  it('reports an unreadable claim without a valid id but cannot discard it', async () => {
+    takeNext.mockRejectedValueOnce(new UnreadableNativeShareBatchError(null));
+
+    await drainShareIntake();
+    await nextEventLoopTurn();
+
+    expect(discard).not.toHaveBeenCalled();
+    expect(takeNext).toHaveBeenCalledTimes(1);
+    expect(useShareIntentStore.getState().failureReason).toBe('malformed');
   });
 });
 

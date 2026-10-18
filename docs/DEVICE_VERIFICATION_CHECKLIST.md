@@ -635,6 +635,10 @@ only the product-owned bounded intake described in
       Gator open, share 11 synthetic photos into it: one "too many items" message appears. Background
       Gator, run `adb shell am kill com.bluegreengatorapps.messages`, and relaunch from the launcher:
       the message does not appear again. Host evidence covers only the JS bridge.
+- [ ] **`EXACT PACKAGED CANDIDATE` — unreadable share does not block sharing (M169, added
+      2026-10-18):** Smoke only: share one synthetic photo and one PDF into Gator and send them; both
+      still route and send. The unreadable-claim path itself (discard, message, next share staged) is
+      host-tested only, because a real device cannot produce an unreadable claim on demand.
 
 ### 7. Received stickers
 

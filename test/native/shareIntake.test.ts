@@ -30,6 +30,7 @@ import {
   releaseNativeShareBatch,
   subscribeNativeShareIntake,
   takeNextNativeShareBatch,
+  UnreadableNativeShareBatchError,
 } from '../../src/native/shareIntake';
 
 const BATCH_ID = '1720000000000-1-0123456789abcdef';
@@ -198,6 +199,32 @@ describe('native share exact-claim bridge', () => {
       text: 'hello',
     });
     expect(native.takeNext).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports an unreadable claim with its exact batch id so it can be discarded', async () => {
+    native.takeNext.mockResolvedValueOnce(
+      manifest({ files: [sharedFile(0, '../escape.jpg', 42)] }),
+    );
+
+    const error = await takeNextNativeShareBatch().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(UnreadableNativeShareBatchError);
+    expect(error).toMatchObject({
+      name: 'UnreadableNativeShareBatchError',
+      batchId: BATCH_ID,
+    });
+  });
+
+  it.each([
+    ['an invalid id', manifest({ batchId: '../not-a-batch', createdAtMs: 'soon' })],
+    ['no object at all', 42],
+  ])('reports an unreadable claim with %s without a batch id', async (_label, value) => {
+    native.takeNext.mockResolvedValueOnce(value);
+
+    const error = await takeNextNativeShareBatch().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(UnreadableNativeShareBatchError);
+    expect(error).toMatchObject({ batchId: null });
   });
 
   it('returns null when no native batch or optional module exists', async () => {

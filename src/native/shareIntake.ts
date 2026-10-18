@@ -140,11 +140,30 @@ export function parseNativeShareBatch(value: unknown): NativeShareBatch {
   };
 }
 
+/**
+ * A claimed native batch this build cannot read (M169). `batchId` is the claim's id only when that
+ * id is itself valid, so the drain can discard the claim instead of staying blocked behind it.
+ */
+export class UnreadableNativeShareBatchError extends Error {
+  constructor(readonly batchId: string | null) {
+    super('claimed share batch is unreadable');
+    this.name = 'UnreadableNativeShareBatchError';
+  }
+}
+
 export async function takeNextNativeShareBatch(): Promise<NativeShareBatch | null> {
   const native = getNative();
   if (!native) return null;
   const value = await native.takeNext();
-  return value === null ? null : parseNativeShareBatch(value);
+  if (value === null) return null;
+  try {
+    return parseNativeShareBatch(value);
+  } catch {
+    const batchId: unknown = typeof value === 'object' ? value.batchId : undefined;
+    throw new UnreadableNativeShareBatchError(
+      typeof batchId === 'string' && BATCH_ID.test(batchId) ? batchId : null,
+    );
+  }
 }
 
 export async function acknowledgeNativeShareBatch(batchId: string): Promise<void> {
