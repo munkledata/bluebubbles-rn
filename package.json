@@ -1,6 +1,6 @@
 {
   "name": "gator-rn",
-  "version": "0.1.60",
+  "version": "0.1.61",
   "main": "index.js",
   "private": true,
   "packageManager": "npm@11.17.0",
