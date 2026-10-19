@@ -1228,6 +1228,15 @@ async function retireDurableCredentials(
   return null;
 }
 
+/** The vault durably reads `forgotten`; a failed or slow read counts as not confirmed. */
+async function sessionTombstoneConfirmed(): Promise<boolean> {
+  const read = await settleWithinDeadline(
+    vault.get('serverSessionState'),
+    SESSION_TOMBSTONE_CHECK_DEADLINE_MS,
+  );
+  return read.kind === 'value' && read.value === SERVER_SESSION_STATE.forgotten;
+}
+
 /** Erase retry custody only after every scoped bearer is confirmed revoked, then leave a marker. */
 async function finishScopedCredentialRetirement(
   snapshot: ScopedCredentialRevocationSnapshot,
@@ -1837,12 +1846,14 @@ async function runForget(
         ? {}
         : { logError: logClearError instanceof Error ? logClearError.name : 'UnknownError' }),
     });
-    // Startup may show setup only when the server's revocation is the one unfinished step.
+    // Startup may show setup only when the server's revocation is the one unfinished step and the
+    // vault itself reads `forgotten` (a failed tombstone write leaves only the marker file).
     const onlyServerRevocationPending =
       onlyServerStepUnconfirmed &&
       cleanupFailures.every(
         (failure) => !(failure instanceof Error) || failure === credentialUpgradeRetirementFailure,
-      );
+      ) &&
+      (await sessionTombstoneConfirmed());
     throw onlyServerRevocationPending ? new ServerRevocationPendingError() : cleanupFailure;
   }
   // Only a user-triggered invalidation needs an out-of-band proof for the successor coordinator.
@@ -2103,6 +2114,8 @@ const ERROR_REPORT_DRAIN_DEADLINE_MS = 5_000;
 const NOTIFICATION_CLEAR_DEADLINE_MS = 5_000;
 /** Persistent logs are filesystem-backed; a wedged bridge must leave the account revoked. */
 const LOG_CLEAR_DEADLINE_MS = 5_000;
+/** Re-read of the vault's `forgotten` tombstone before startup may show setup (Disconnect fix). */
+const SESSION_TOMBSTONE_CHECK_DEADLINE_MS = 5_000;
 /**
  * The wipe steps `forget()` awaits one after another, each bounded by its own deadline. Add a new
  * sequential step here so the boot join below keeps covering the whole wipe. (The scoped server
@@ -2123,12 +2136,13 @@ const SEQUENTIAL_WIPE_STEP_DEADLINES_MS = [
   NOTIFICATION_CLEAR_DEADLINE_MS,
   DATABASE_CLEANUP_DEADLINE_MS,
   LOG_CLEAR_DEADLINE_MS,
+  SESSION_TOMBSTONE_CHECK_DEADLINE_MS,
 ] as const;
 /** Room for the wipe's untimed work, such as deleting cached files and loading modules. */
 const WIPE_UNTIMED_WORK_MARGIN_MS = 40_000;
 /**
  * How long a restarted foreground boot may wait for a Disconnect wipe it joins (review M120): the
- * whole bounded wipe plus margin (150 s today). The boot's 10 s session deadline used to fire
+ * whole bounded wipe plus margin (155 s today). The boot's 10 s session deadline used to fire
  * first and showed "Couldn't start Gator" for a Disconnect that was still finishing normally.
  */
 const ACCOUNT_CLEANUP_BOOT_JOIN_DEADLINE_MS =

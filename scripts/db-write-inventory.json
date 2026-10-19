@@ -15786,7 +15786,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:bd0a1be3afa9",
       "path": "src/services/bootstrap.ts",
-      "line": 1274,
+      "line": 1283,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -15799,7 +15799,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:9c87d79ec275",
       "path": "src/services/bootstrap.ts",
-      "line": 1315,
+      "line": 1324,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#wipeLocalCache",
@@ -15812,7 +15812,7 @@
     {
       "id": "src/services/bootstrap.ts#runForget:mutator-call:8d5a9e357850",
       "path": "src/services/bootstrap.ts",
-      "line": 1730,
+      "line": 1739,
       "symbol": "runForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#cleanupAccountDatabase",
@@ -15825,7 +15825,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829",
       "path": "src/services/bootstrap.ts",
-      "line": 1875,
+      "line": 1886,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#clearLocalCache",
@@ -15838,7 +15838,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e",
       "path": "src/services/bootstrap.ts",
-      "line": 1879,
+      "line": 1890,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#localCacheDirty",
@@ -15851,7 +15851,7 @@
     {
       "id": "src/services/bootstrap.ts#startForget:mutator-call:56e44cd9d18f",
       "path": "src/services/bootstrap.ts",
-      "line": 1974,
+      "line": 1985,
       "symbol": "startForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runForget",
@@ -15864,7 +15864,7 @@
     {
       "id": "src/services/bootstrap.ts#forget:mutator-call:fde5b98b6a5c",
       "path": "src/services/bootstrap.ts",
-      "line": 1984,
+      "line": 1995,
       "symbol": "forget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -15877,7 +15877,7 @@
     {
       "id": "src/services/bootstrap.ts#forgetOnThisPhoneOnly:mutator-call:aa633e0b631a",
       "path": "src/services/bootstrap.ts",
-      "line": 1997,
+      "line": 2008,
       "symbol": "forgetOnThisPhoneOnly",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -15890,7 +15890,7 @@
     {
       "id": "src/services/bootstrap.ts#runOrAwaitForget:mutator-call:a0e09cd34906",
       "path": "src/services/bootstrap.ts",
-      "line": 2020,
+      "line": 2031,
       "symbol": "runOrAwaitForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",

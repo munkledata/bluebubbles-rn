@@ -2454,11 +2454,22 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
     expect(useSessionStore.getState().status).toBe('unauthenticated');
 
-    // Setup's "Forget on this phone only" then retires local custody without the server.
+    // From that setup screen, connecting anywhere stays refused while the bearer is unrevoked.
+    connectToServer.mockResolvedValue({ ok: false, kind: 'unknown', message: 'test stop' });
+    await connect('https://new.example', 'new-secret');
+    expect(connectToServer).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().error).toBe(PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE);
+    expect(revokeSelf).toHaveBeenCalledTimes(3);
+
+    // Setup's "Forget on this phone only" then retires local custody without the server...
     await expect(forgetOnThisPhoneOnly()).resolves.toBeUndefined();
-    expect(revokeSelf).toHaveBeenCalledTimes(2);
+    expect(revokeSelf).toHaveBeenCalledTimes(3);
     expect(vaultValues.has('serverPassword')).toBe(false);
     expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+
+    // ...and only then may a new connection reach a server.
+    await connect('https://new.example', 'new-secret');
+    expect(connectToServer).toHaveBeenCalledTimes(1);
   });
 
   it('reaches setup when startup joins a Disconnect whose server is unreachable', async () => {
@@ -2473,6 +2484,94 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     await expect(boot).resolves.toEqual({ kind: 'setup' });
     expect(revokeSelf).toHaveBeenCalledTimes(1);
     expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+  });
+
+  // Review follow-up: setup needs the vault itself to read `forgotten`, not only the marker file.
+  it('fails closed when the forgotten session tombstone could not be written', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const scopedCredential = `bbd_device_v1_${'T'.repeat(43)}`;
+    seedScopedSession(scopedCredential);
+    revokeSelf.mockRejectedValue(new ApiError('no_connection', 'Network request failed'));
+    vaultSet.mockImplementation(async (key: string, value: string) => {
+      if (key === 'serverSessionState' && value === SERVER_SESSION_STATE.forgotten) {
+        throw new Error('Keystore write unavailable');
+      }
+      vaultValues.set(key, value);
+    });
+
+    await expect(forget()).rejects.toThrow(
+      'Scoped credential retirement for the previous connection could not be confirmed.',
+    );
+    await flushMicrotasks(30);
+    expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.active);
+
+    await expect(bootSavedSession()).resolves.toMatchObject({
+      kind: 'failed',
+      error: { name: 'ForegroundBootOperationalError', code: 'residual-account-cleanup-failed' },
+    });
+  });
+
+  it('treats a server that never answers as the server step once its own 5 s limit passes', async () => {
+    jest.useFakeTimers();
+    try {
+      seedScopedSession(`bbd_device_v1_${'H'.repeat(43)}`);
+      revokeSelf.mockImplementation(
+        (...args: unknown[]) =>
+          new Promise<never>((_resolve, reject) => {
+            const signal = args[1] as AbortSignal;
+            signal.addEventListener(
+              'abort',
+              () => reject(new ApiError('no_connection', 'Network request failed')),
+              { once: true },
+            );
+          }),
+      );
+
+      const disconnect = forget().catch((error: unknown) => error);
+      const boot = bootSavedSession();
+      await jest.advanceTimersByTimeAsync(5_000);
+
+      expect(disconnectFailureMessage(await disconnect)).toBe(
+        PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
+      );
+      await expect(boot).resolves.toEqual({ kind: 'setup' });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('fails closed when a local retirement step outlasts the retirement deadline', async () => {
+    jest.useFakeTimers();
+    let releaseTombstone: (() => void) | undefined;
+    try {
+      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      seedScopedSession(`bbd_device_v1_${'W'.repeat(43)}`);
+      // The server confirms, then the local revoked-tombstone write hangs past the 10 s deadline.
+      vaultSet.mockImplementation(async (key: string, value: string) => {
+        if (key === 'serverCredentialUpgrade') {
+          return new Promise<void>((resolve) => {
+            releaseTombstone = resolve;
+          });
+        }
+        vaultValues.set(key, value);
+      });
+
+      const disconnect = forget().catch((error: unknown) => error);
+      const boot = bootSavedSession();
+      await jest.advanceTimersByTimeAsync(10_000);
+
+      expect(disconnectFailureMessage(await disconnect)).toBe(
+        PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
+      );
+      await expect(boot).resolves.toMatchObject({
+        kind: 'failed',
+        error: { name: 'ForegroundBootOperationalError', code: 'residual-account-cleanup-failed' },
+      });
+    } finally {
+      releaseTombstone?.();
+      await flushMicrotasks(30);
+      jest.useRealTimers();
+    }
   });
 
   it('still fails closed when a local step also failed beside the unreachable server', async () => {
