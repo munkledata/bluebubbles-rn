@@ -278,6 +278,28 @@ export class ForegroundBootSupersededError extends Error {
   }
 }
 
+/** The server step of a scoped-credential retirement failed; none of its local steps ran yet. */
+class ScopedCredentialServerRevocationError extends Error {
+  constructor(readonly serverError: unknown) {
+    super('scoped credential server revocation was not confirmed');
+    this.name = 'ScopedCredentialServerRevocationError';
+  }
+}
+
+/**
+ * Disconnect finished every local step; only the previous server's confirmation that it revoked
+ * this phone's scoped credential is missing, and the exact bearer stays encrypted under `forgotten`
+ * for the next retry. Startup shows setup for this case alone, because setup's connect() keeps
+ * refusing until that bearer is revoked or forgotten on this phone only. It carries the shared
+ * message, so the Disconnect and connect wording is unchanged.
+ */
+class ServerRevocationPendingError extends Error {
+  constructor() {
+    super(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
+    this.name = 'ServerRevocationPendingError';
+  }
+}
+
 export function isForegroundBootAttempt(value: unknown): value is ForegroundBootAttempt {
   if (!value || typeof value !== 'object' || !Object.isFrozen(value)) return false;
   const candidate = value as Partial<ForegroundBootAttempt>;
@@ -361,7 +383,8 @@ export async function inspectForegroundBootSession(
     context.extendStageDeadline(ACCOUNT_CLEANUP_BOOT_JOIN_DEADLINE_MS);
     const outcome = await cleanupAlreadyRunning.outcome;
     if (context.stageSignal.aborted) throw new ForegroundBootSupersededError();
-    if (!outcome.ok) {
+    // Only the previous server's revocation is unfinished: setup keeps the next connection blocked.
+    if (!outcome.ok && !(outcome.error instanceof ServerRevocationPendingError)) {
       throw new ForegroundBootOperationalError(
         'residual-account-cleanup-failed',
         RESIDUAL_CLEANUP_FAILURE_MESSAGE,
@@ -411,7 +434,8 @@ export async function inspectForegroundBootSession(
     // This cleanup intentionally advances connectionAttemptEpoch. Whole-run invalidation still
     // aborts stageSignal, while the cleanup-owned epoch change is allowed to reach setup.
     if (context.stageSignal.aborted) throw new ForegroundBootSupersededError();
-    if (!outcome.ok) {
+    // Only the previous server's revocation is unfinished: setup keeps the next connection blocked.
+    if (!outcome.ok && !(outcome.error instanceof ServerRevocationPendingError)) {
       throw new ForegroundBootOperationalError(
         'residual-account-cleanup-failed',
         RESIDUAL_CLEANUP_FAILURE_MESSAGE,
@@ -1216,7 +1240,12 @@ async function finishScopedCredentialRetirement(
       // The user chose "Forget on this phone only": erase local custody without the server step.
       logger.warn('[forget] scoped credential forgotten on this device without server revocation');
     } else {
-      await revokeAllScopedCredentials(snapshot.targets);
+      try {
+        await revokeAllScopedCredentials(snapshot.targets);
+      } catch (error) {
+        // Nothing below has run, so the exact bearer stays as retry custody.
+        throw new ScopedCredentialServerRevocationError(error);
+      }
     }
   }
   await writeCredentialUpgradeRevokedTombstone();
@@ -1736,15 +1765,25 @@ async function runForget(
   // The local credential/database/media wipe above ran independently of server availability.
   // Consume only the bounded retirement result now. A failure leaves the exact bearer encrypted
   // under `forgotten`, so the next cleanup can retry instead of orphaning live server authority.
+  let onlyServerStepUnconfirmed = false;
   if (scopedCredentialRetirement) {
     const result = await scopedCredentialRetirement;
     if (result.kind !== 'value') {
       credentialUpgradeRetirementFailure = new Error(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
+      // Its own error type means the server step failed before any local custody step ran.
+      onlyServerStepUnconfirmed =
+        result.kind === 'error' && result.error instanceof ScopedCredentialServerRevocationError;
+      const error =
+        result.kind !== 'error'
+          ? undefined
+          : result.error instanceof ScopedCredentialServerRevocationError
+            ? result.error.serverError
+            : result.error;
       logger.warn('[forget] scoped credential self-revocation was not confirmed', {
         reason: result.kind,
         ...(result.kind === 'error'
           ? {
-              errorName: result.error instanceof Error ? result.error.name : 'UnknownError',
+              errorName: error instanceof Error ? error.name : 'UnknownError',
             }
           : {}),
       });
@@ -1773,22 +1812,24 @@ async function runForget(
   // The caller must not mistake a completed local wipe for a fully retired account. Marker and
   // tombstone stay closed; connect() sees this rejection, reports it, and retries the whole
   // idempotent cleanup before validating B. Any development log happens only AFTER A's buffers reset.
-  const cleanupFailure =
-    durableCredentialFailure ??
-    credentialUpgradeRetirementFailure ??
-    candidateDrainFailure ??
-    inMemoryCleanupFailure ??
-    fcmTokenRetirementFailure ??
-    realtimeDrainFailure ??
-    fcmKeyRetirementFailure ??
-    uploadDrainFailure ??
-    syncDrainFailure ??
-    downloadDrainFailure ??
-    notificationCleanupFailure ??
-    databaseCleanupFailure ??
-    mediaCleanupFailure ??
-    shortcutCleanupFailure ??
-    logCleanupFailure;
+  const cleanupFailures = [
+    durableCredentialFailure,
+    credentialUpgradeRetirementFailure,
+    candidateDrainFailure,
+    inMemoryCleanupFailure,
+    fcmTokenRetirementFailure,
+    realtimeDrainFailure,
+    fcmKeyRetirementFailure,
+    uploadDrainFailure,
+    syncDrainFailure,
+    downloadDrainFailure,
+    notificationCleanupFailure,
+    databaseCleanupFailure,
+    mediaCleanupFailure,
+    shortcutCleanupFailure,
+    logCleanupFailure,
+  ];
+  const cleanupFailure = cleanupFailures.find((failure) => failure instanceof Error);
   if (cleanupFailure) {
     logger.warn('[forget] account cleanup remains incomplete; next connection will retry', {
       reason: cleanupFailure.message,
@@ -1796,7 +1837,13 @@ async function runForget(
         ? {}
         : { logError: logClearError instanceof Error ? logClearError.name : 'UnknownError' }),
     });
-    throw cleanupFailure;
+    // Startup may show setup only when the server's revocation is the one unfinished step.
+    const onlyServerRevocationPending =
+      onlyServerStepUnconfirmed &&
+      cleanupFailures.every(
+        (failure) => !(failure instanceof Error) || failure === credentialUpgradeRetirementFailure,
+      );
+    throw onlyServerRevocationPending ? new ServerRevocationPendingError() : cleanupFailure;
   }
   // Only a user-triggered invalidation needs an out-of-band proof for the successor coordinator.
   // An internal caller is already awaiting this exact outcome and must not leave a reusable hint.

@@ -2425,6 +2425,74 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
   });
 
+  // Before this fix an unreachable server left every launch on "Couldn't start Gator", and that
+  // boot failure covered the setup screen's "Forget on this phone only".
+  function seedScopedSession(scopedCredential: string): void {
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+    vaultValues.set('serverAddress', 'https://gone.example');
+    vaultValues.set('serverPassword', scopedCredential);
+    useSessionStore.setState({
+      status: 'connected',
+      origin: 'https://gone.example',
+      password: scopedCredential,
+    });
+  }
+
+  it('sends startup to setup when only the server could not confirm the revocation', async () => {
+    const scopedCredential = `bbd_device_v1_${'S'.repeat(43)}`;
+    seedScopedSession(scopedCredential);
+    revokeSelf.mockRejectedValue(new ApiError('no_connection', 'Network request failed'));
+
+    const failure = await forget().catch((error: unknown) => error);
+    expect(disconnectFailureMessage(failure)).toBe(PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE);
+    await flushMicrotasks(30);
+
+    // The next launch retries the revocation, then shows setup with the bearer still retained.
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'setup' });
+    expect(revokeSelf).toHaveBeenCalledTimes(2);
+    expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.forgotten);
+    expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+    expect(useSessionStore.getState().status).toBe('unauthenticated');
+
+    // Setup's "Forget on this phone only" then retires local custody without the server.
+    await expect(forgetOnThisPhoneOnly()).resolves.toBeUndefined();
+    expect(revokeSelf).toHaveBeenCalledTimes(2);
+    expect(vaultValues.has('serverPassword')).toBe(false);
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+  });
+
+  it('reaches setup when startup joins a Disconnect whose server is unreachable', async () => {
+    const scopedCredential = `bbd_device_v1_${'J'.repeat(43)}`;
+    seedScopedSession(scopedCredential);
+    revokeSelf.mockRejectedValue(new ApiError('no_connection', 'Network request failed'));
+
+    const disconnect = forget().catch((error: unknown) => error);
+    const boot = bootSavedSession();
+
+    expect(disconnectFailureMessage(await disconnect)).toBe(PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE);
+    await expect(boot).resolves.toEqual({ kind: 'setup' });
+    expect(revokeSelf).toHaveBeenCalledTimes(1);
+    expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+  });
+
+  it('still fails closed when a local step also failed beside the unreachable server', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const scopedCredential = `bbd_device_v1_${'M'.repeat(43)}`;
+    seedScopedSession(scopedCredential);
+    revokeSelf.mockRejectedValue(new ApiError('no_connection', 'Network request failed'));
+    localCacheDirty.mockResolvedValue(true);
+
+    await expect(forget()).rejects.toThrow(
+      'Scoped credential retirement for the previous connection could not be confirmed.',
+    );
+    await flushMicrotasks(30);
+
+    await expect(bootSavedSession()).resolves.toMatchObject({
+      kind: 'failed',
+      error: { name: 'ForegroundBootOperationalError', code: 'residual-account-cleanup-failed' },
+    });
+  });
+
   it('forgets an unreachable server bearer on this phone only, without the server step', async () => {
     const scopedCredential = `bbd_device_v1_${'G'.repeat(43)}`;
     vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);

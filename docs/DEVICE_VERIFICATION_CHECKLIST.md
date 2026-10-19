@@ -1034,9 +1034,14 @@ those rows is a current remediation or candidate requirement.
       with a large history, ideally with the Mac unreachable so the wipe's server steps wait out
       their deadlines, tap Disconnect. Gator shows its loading screen and then the setup screen,
       never "Couldn't start Gator". Before the fix a wipe slower than 10 seconds ended on that error
-      and needed a Retry. Do not use a paired device credential with the Mac unreachable: Disconnect
-      then cannot confirm the credential's revocation and stops on "could not safely finish clearing"
-      on every retry (pre-existing dead end, open as of 2026-10-18).
+      and needed a Retry.
+- [ ] **`EXACT PACKAGED CANDIDATE` — Disconnect with a paired credential and the Mac unreachable
+      (added 2026-10-19):** On a synthetic account paired with a device credential, block the Mac
+      (Wi-Fi off on the Mac, or stop the server), then tap Disconnect. Settings says the previous
+      server could not remove this phone's access. Relaunch Gator: it shows the setup screen, not
+      "Couldn't start Gator" (before the fix every launch ended there). Try to connect: the same
+      message and "Forget on this phone only" appear; confirm it, and connecting works. The Mac's
+      device list may still show this phone until it is removed there.
 - [ ] **LOCAL DEV, before raising `LOGICAL_SEND_MAX_ACTIVE_CHATS` above 1 (M089, added
       2026-10-18):** Build with the constant set to 3 against the real Mac. (1) With a slow uplink,
       send a 10 MiB image in chat A, then text chat B at once: B sends promptly. (2) Send texts to
