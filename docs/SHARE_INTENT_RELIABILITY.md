@@ -40,6 +40,13 @@ generation fencing rejects stale account work, and operational key/token failure
 redacted failure rather than an ordinary no-match. App Lock clears personalized rows and keeps
 capture above the protected tree while routing remains below it.
 
+The same rows also appear in the launcher icon's long-press menu, where a tap opens Gator's inbox.
+That is deliberate (owner decision on review M175, 2026-10-19): do not add
+`setExcludedFromSurfaces(SURFACE_LAUNCHER)`. androidx core's `ShortcutManagerCompat` drops launcher-
+excluded shortcuts before calling Android, and Android keeps them only when AppSearch shortcut
+integration is on (off by default), so the rows would vanish from the share sheet too. The names
+shown are the ones the share sheet already shows, and App Lock publishes none.
+
 ## Summary
 
 Two independent problems, and the second is why the first stayed invisible for so long.
