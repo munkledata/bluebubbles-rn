@@ -18,6 +18,15 @@ jest.mock('@features/conversations/devFixtureSession', () => ({
   startDevFixtureSession: jest.fn(),
 }));
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
+const mockRevocationPending = jest.fn<Promise<boolean>, []>();
+const mockForgetOnThisPhoneOnly = jest.fn<Promise<void>, []>();
+jest.mock('@/services', () => ({
+  PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE: 'Previous server has not removed this phone yet.',
+  previousServerRevocationPending: () => mockRevocationPending(),
+  previousUnrevokedServerOrigin: jest.fn(async () => 'https://gone.example'),
+  forgetOnThisPhoneOnly: () => mockForgetOnThisPhoneOnly(),
+  disconnectFailureMessage: jest.fn(() => 'Could not finish.'),
+}));
 
 // eslint-disable-next-line import/first
 import WelcomeScreen from '../../../app/(setup)/welcome';
@@ -34,6 +43,8 @@ const mockShowDialog = showDialog as jest.Mock;
 beforeEach(() => {
   jest.clearAllMocks();
   mockStartDevFixtureSession.mockResolvedValue(undefined);
+  mockRevocationPending.mockResolvedValue(false);
+  mockForgetOnThisPhoneOnly.mockResolvedValue(undefined);
 });
 
 describe('WelcomeScreen', () => {
@@ -69,5 +80,41 @@ describe('WelcomeScreen', () => {
       ),
     );
     expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  // An unreachable previous server used to surface only after the user scanned a new code.
+  it('offers Forget on this phone only up front while a previous server revocation is pending', async () => {
+    mockRevocationPending.mockResolvedValue(true);
+    await renderWithTheme(<WelcomeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByText('Previous server has not removed this phone yet.')).toBeTruthy(),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Forget on this phone only' }));
+    });
+    expect(mockShowDialog).toHaveBeenCalledWith(
+      'Forget on this phone only?',
+      expect.stringContaining('https://gone.example'),
+      expect.any(Array),
+    );
+
+    const actions = mockShowDialog.mock.calls[0]![2] as { text: string; onPress?: () => void }[];
+    await act(async () => {
+      actions.find((action) => action.text === 'Forget on this phone')!.onPress!();
+    });
+    expect(mockForgetOnThisPhoneOnly).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.queryByText('Previous server has not removed this phone yet.')).toBeNull(),
+    );
+  });
+
+  it('shows no previous-server notice when nothing is pending', async () => {
+    await renderWithTheme(<WelcomeScreen />);
+    await act(async () => undefined);
+
+    expect(mockRevocationPending).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Previous server has not removed this phone yet.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Forget on this phone only' })).toBeNull();
   });
 });

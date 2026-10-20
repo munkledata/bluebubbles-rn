@@ -561,9 +561,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/forget.test.ts; test/components/routes/scanScreen.test.tsx; test/components/connection/forgetPreviousServer.test.tsx"
     },
     {
+      "id": "app/(setup)/welcome.tsx#Welcome.forgetPreviousServer:mutator-call:c5730024f2eb",
+      "path": "app/(setup)/welcome.tsx",
+      "line": 44,
+      "symbol": "Welcome.forgetPreviousServer",
+      "operation": "mutator-call",
+      "target": "src/services/bootstrap.ts#forgetOnThisPhoneOnly",
+      "detectedContext": "coordinated-delegation",
+      "owner": "Welcome forget on this phone only",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/forget.test.ts; test/components/routes/welcomeScreen.test.tsx; test/components/connection/forgetPreviousServer.test.tsx"
+    },
+    {
       "id": "app/(setup)/welcome.tsx#Welcome.devSeedAndOpen:mutator-call:da967f4afb4d",
       "path": "app/(setup)/welcome.tsx",
-      "line": 32,
+      "line": 54,
       "symbol": "Welcome.devSeedAndOpen",
       "operation": "mutator-call",
       "target": "src/features/conversations/devFixtureSession.ts#startDevFixtureSession",
@@ -574,9 +587,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
+      "id": "app/(setup)/welcome.tsx#Welcome:mutator-reference:6ea3637a501e",
+      "path": "app/(setup)/welcome.tsx",
+      "line": 93,
+      "symbol": "Welcome",
+      "operation": "mutator-reference",
+      "target": "app/(setup)/welcome.tsx#Welcome.forgetPreviousServer",
+      "detectedContext": "coordinated-delegation",
+      "owner": "Welcome forget on this phone only",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/forget.test.ts; test/components/routes/welcomeScreen.test.tsx; test/components/connection/forgetPreviousServer.test.tsx"
+    },
+    {
       "id": "app/(setup)/welcome.tsx#Welcome.<callback:b1fa990a01>:mutator-call:7469e4d131fc",
       "path": "app/(setup)/welcome.tsx",
-      "line": 74,
+      "line": 108,
       "symbol": "Welcome.<callback:b1fa990a01>",
       "operation": "mutator-call",
       "target": "app/(setup)/welcome.tsx#Welcome.devSeedAndOpen",
@@ -15890,7 +15916,7 @@
     {
       "id": "src/services/bootstrap.ts#runOrAwaitForget:mutator-call:a0e09cd34906",
       "path": "src/services/bootstrap.ts",
-      "line": 2031,
+      "line": 2054,
       "symbol": "runOrAwaitForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",

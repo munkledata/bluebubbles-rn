@@ -2,9 +2,17 @@ import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  disconnectFailureMessage,
+  forgetOnThisPhoneOnly,
+  PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
+  previousServerRevocationPending,
+  previousUnrevokedServerOrigin,
+} from '@/services';
 import { startDevFixtureSession } from '@features/conversations/devFixtureSession';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { Button, Screen, useTheme } from '@ui';
+import { ForgetPreviousServerAction } from '@ui/connection';
 import { createI18n } from '@utils/i18n';
 
 export default function Welcome(): React.JSX.Element {
@@ -15,6 +23,7 @@ export default function Welcome(): React.JSX.Element {
   const mountedRef = useRef(true);
   const devStartedRef = useRef(false);
   const [devBusy, setDevBusy] = useState(false);
+  const [revocationPending, setRevocationPending] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -22,6 +31,19 @@ export default function Welcome(): React.JSX.Element {
       mountedRef.current = false;
     };
   }, []);
+
+  // A previous server that never confirmed removing this phone keeps new connections blocked. Say
+  // so here, with the way out, instead of only after the user scans a new code.
+  useEffect(() => {
+    void previousServerRevocationPending().then((pending) => {
+      if (mountedRef.current) setRevocationPending(pending);
+    });
+  }, []);
+
+  const forgetPreviousServer = async (): Promise<void> => {
+    await forgetOnThisPhoneOnly();
+    if (mountedRef.current) setRevocationPending(false);
+  };
 
   // DEV: seed fixtures and jump straight to the inbox without a live server.
   const devSeedAndOpen = async (): Promise<void> => {
@@ -61,6 +83,18 @@ export default function Welcome(): React.JSX.Element {
             {i18n.text('welcome.subtitle')}
           </Text>
         </View>
+        {revocationPending ? (
+          <View style={styles.notice}>
+            <Text style={[styles.noticeText, { color: theme.color.secondaryLabel }]}>
+              {PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE}
+            </Text>
+            <ForgetPreviousServerAction
+              previousServerOrigin={previousUnrevokedServerOrigin}
+              forgetOnThisPhoneOnly={forgetPreviousServer}
+              failureMessage={disconnectFailureMessage}
+            />
+          </View>
+        ) : null}
         <Button
           title={i18n.text('welcome.action.start')}
           disabled={devBusy}
@@ -87,4 +121,6 @@ const styles = StyleSheet.create({
   title: { fontSize: 36, fontWeight: '700' },
   subtitle: { fontSize: 17, marginTop: 8, textAlign: 'center' },
   devBtn: { marginTop: 8 },
+  notice: { marginBottom: 16 },
+  noticeText: { fontSize: 15, textAlign: 'center' },
 });

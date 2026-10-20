@@ -97,6 +97,7 @@ export {
   disconnectFailureMessage,
   isUnconfirmedCredentialRetirement,
   PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
+  previousServerRevocationPending,
   previousUnrevokedServerOrigin,
 } from './bootstrap';
 export {

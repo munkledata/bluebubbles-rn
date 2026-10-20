@@ -4039,6 +4039,8 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'app/(setup)/scan.tsx#Scan:mutator-reference:2e00f574c549',
       'app/(setup)/welcome.tsx#Welcome.<callback:b1fa990a01>:mutator-call:7469e4d131fc',
       'app/(setup)/welcome.tsx#Welcome.devSeedAndOpen:mutator-call:da967f4afb4d',
+      'app/(setup)/welcome.tsx#Welcome.forgetPreviousServer:mutator-call:c5730024f2eb',
+      'app/(setup)/welcome.tsx#Welcome:mutator-reference:6ea3637a501e',
       'src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:da7ab6f8ed>:mutator-call:05b010927a61',
       'src/features/conversations/devFixtureSession.ts#startDevFixtureSession:mutator-call:952c7fc86f4b',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ace67f713c95',
@@ -4071,7 +4073,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376',
     ].sort(),
   );
-  assert.equal(delegated.length, 41);
+  assert.equal(delegated.length, 43);
 
   for (const suffix of [
     '8c40f7e0add0',

@@ -316,6 +316,7 @@ import {
   hydrateForegroundBootSettings,
   PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
   inspectForegroundBootSession,
+  previousServerRevocationPending,
   openForegroundBootDatabase,
   type ForegroundBootAttempt,
 } from '@/services/bootstrap';
@@ -2470,6 +2471,31 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     // ...and only then may a new connection reach a server.
     await connect('https://new.example', 'new-secret');
     expect(connectToServer).toHaveBeenCalledTimes(1);
+  });
+
+  // Setup's Welcome screen offers "Forget on this phone only" up front in exactly this state.
+  it('reports a pending server revocation only while the scoped bearer is retained', async () => {
+    const scopedCredential = `bbd_device_v1_${'P'.repeat(43)}`;
+    await expect(previousServerRevocationPending()).resolves.toBe(false);
+    seedScopedSession(scopedCredential);
+    await expect(previousServerRevocationPending()).resolves.toBe(false);
+
+    revokeSelf.mockRejectedValue(new ApiError('no_connection', 'Network request failed'));
+    await forget().catch(() => undefined);
+    await flushMicrotasks(30);
+    await expect(previousServerRevocationPending()).resolves.toBe(true);
+
+    await expect(forgetOnThisPhoneOnly()).resolves.toBeUndefined();
+    await expect(previousServerRevocationPending()).resolves.toBe(false);
+  });
+
+  it('never reports a pending revocation for a shared-password account', async () => {
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.forgotten);
+    vaultValues.set('serverAddress', 'https://old.example');
+    vaultValues.set('serverPassword', 'shared-secret');
+    await expect(previousServerRevocationPending()).resolves.toBe(false);
+    vaultGet.mockRejectedValue(new Error('Keystore unavailable'));
+    await expect(previousServerRevocationPending()).resolves.toBe(false);
   });
 
   it('reaches setup when startup joins a Disconnect whose server is unreachable', async () => {

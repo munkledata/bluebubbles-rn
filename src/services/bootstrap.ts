@@ -2008,6 +2008,29 @@ export async function forgetOnThisPhoneOnly(): Promise<void> {
   return startForget(true, true);
 }
 
+/**
+ * True while a previous server still has to confirm revoking this phone's access: Disconnect left
+ * the vault `forgotten` with the exact scoped bearer kept as retry custody. Setup's Welcome screen
+ * offers "Forget on this phone only" up front instead of after a refused connection. Any read
+ * failure reports false; connect() still refuses with the same message in that state.
+ */
+export async function previousServerRevocationPending(): Promise<boolean> {
+  try {
+    const [sessionState, origin, credential] = await Promise.all([
+      vault.get('serverSessionState'),
+      vault.get('serverAddress'),
+      vault.get('serverPassword'),
+    ]);
+    return (
+      sessionState === SERVER_SESSION_STATE.forgotten &&
+      strictServerOrigin(origin) !== null &&
+      isScopedDeviceCredential(credential)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** The server a retained, unrevoked scoped credential belongs to, for confirmation text only. */
 export async function previousUnrevokedServerOrigin(): Promise<string | null> {
   try {
