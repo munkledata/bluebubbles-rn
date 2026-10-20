@@ -511,6 +511,32 @@ describe('foreground boot production adapters', () => {
     expect(vaultValues.has('serverPassword')).toBe(false);
   });
 
+  it('revokes both bearers of a replacement journal left behind by a Disconnect', async () => {
+    const previous = `bbd_device_v1_${'B'.repeat(43)}`;
+    const candidate = `bbd_device_v1_${'A'.repeat(43)}`;
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.forgotten);
+    vaultValues.set('serverAddress', 'https://old.example');
+    vaultValues.set('serverPassword', previous);
+    vaultValues.set(
+      'serverCredentialUpgrade',
+      JSON.stringify({
+        version: 2,
+        origin: 'https://old.example',
+        previousCredential: previous,
+        candidateCredential: candidate,
+        phase: 'candidate',
+      }),
+    );
+
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'setup' });
+
+    expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', candidate);
+    expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', previous);
+    expect(revokeSelf).toHaveBeenCalledTimes(2);
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+    expect(vaultValues.has('serverPassword')).toBe(false);
+  });
+
   it('fails a quarantined credential upgrade closed without opening or wiping account data', async () => {
     seedQuarantinedCredentialUpgradeSession();
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
@@ -2522,6 +2548,78 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     await expect(previousServerRevocationPending()).resolves.toBe(false);
     vaultGet.mockRejectedValue(new Error('Keystore unavailable'));
     await expect(previousServerRevocationPending()).resolves.toBe(false);
+  });
+
+  // Review of d89db12: the unrevoked bearer can sit in an unfinished upgrade journal (a shared-password
+  // account mid-upgrade) or a replaced-bearer record instead of the saved password.
+  function seedDisconnectLeftoverJournal(candidate: string): string {
+    const journal = JSON.stringify({
+      version: 1,
+      origin: 'https://gone.example',
+      previousCredential: 'shared-secret',
+      candidateCredential: candidate,
+      phase: 'candidate',
+    });
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.forgotten);
+    vaultValues.set('serverAddress', 'https://gone.example');
+    vaultValues.set('serverPassword', 'shared-secret');
+    vaultValues.set('serverCredentialUpgrade', journal);
+    useSessionStore.getState().reset();
+    return journal;
+  }
+
+  it('reports a pending revocation for a bearer kept only in a journal or replaced record', async () => {
+    seedDisconnectLeftoverJournal(`bbd_device_v1_${'W'.repeat(43)}`);
+    await expect(previousServerRevocationPending()).resolves.toBe(true);
+
+    vaultValues.set('serverCredentialUpgrade', '{"version":1,"phase":"revoked"}');
+    await expect(previousServerRevocationPending()).resolves.toBe(false);
+
+    vaultValues.set(
+      'replacedServerCredential',
+      serializeReplacedCredentialRecord(
+        createReplacedCredentialRecord('https://gone.example', `bbd_device_v1_${'R'.repeat(43)}`),
+      ),
+    );
+    await expect(previousServerRevocationPending()).resolves.toBe(true);
+
+    // Without the Disconnect tombstone the same custody belongs to a live session, not a pending one.
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+    await expect(previousServerRevocationPending()).resolves.toBe(false);
+  });
+
+  it('reaches setup with retry custody when the server of a leftover journal is unreachable', async () => {
+    const candidate = `bbd_device_v1_${'U'.repeat(43)}`;
+    const journal = seedDisconnectLeftoverJournal(candidate);
+    revokeSelf.mockRejectedValue(new ApiError('no_connection', 'Network request failed'));
+
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'setup' });
+    expect(fixedCredentialClient).toHaveBeenCalledWith('https://gone.example', candidate);
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe(journal);
+    expect(vaultValues.get('serverPassword')).toBe('shared-secret');
+    await expect(previousServerRevocationPending()).resolves.toBe(true);
+
+    // Welcome's "Forget on this phone only" then unblocks new connections.
+    await expect(forgetOnThisPhoneOnly()).resolves.toBeUndefined();
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+    await expect(previousServerRevocationPending()).resolves.toBe(false);
+    connectToServer.mockResolvedValue({ ok: false, kind: 'unknown', message: 'test stop' });
+    await connect('https://new.example', 'new-secret');
+    expect(connectToServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to connect with the previous-server message while a leftover journal is unrevoked', async () => {
+    const candidate = `bbd_device_v1_${'K'.repeat(43)}`;
+    const journal = seedDisconnectLeftoverJournal(candidate);
+    revokeSelf.mockRejectedValue(new ApiError('no_connection', 'Network request failed'));
+    connectToServer.mockResolvedValue({ ok: false, kind: 'unknown', message: 'test stop' });
+
+    await connect('https://new.example', 'new-secret');
+
+    expect(connectToServer).not.toHaveBeenCalled();
+    expect(fixedCredentialClient).toHaveBeenCalledWith('https://gone.example', candidate);
+    expect(useSessionStore.getState().error).toBe(PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE);
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe(journal);
   });
 
   it('reaches setup when startup joins a Disconnect whose server is unreachable', async () => {

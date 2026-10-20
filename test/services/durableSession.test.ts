@@ -119,15 +119,19 @@ describe('durable foreground session inspection', () => {
     });
   });
 
-  it('keeps a session-missing journal quarantined without the Disconnect tombstone', async () => {
-    const vault = new InMemoryVault();
-    await vault.set('serverCredentialUpgrade', candidateJournal);
+  it.each([null, SERVER_SESSION_STATE.writing, 'unknown'] as const)(
+    'keeps a session-missing journal quarantined without the Disconnect tombstone (state %s)',
+    async (sessionState) => {
+      const vault = new InMemoryVault();
+      if (sessionState !== null) await vault.set('serverSessionState', sessionState);
+      await vault.set('serverCredentialUpgrade', candidateJournal);
 
-    await expect(inspectDurableServerSession(vault, clearMarker())).resolves.toEqual({
-      kind: 'upgrade-quarantined',
-      reason: 'session-missing',
-    });
-  });
+      await expect(inspectDurableServerSession(vault, clearMarker())).resolves.toEqual({
+        kind: 'upgrade-quarantined',
+        reason: 'session-missing',
+      });
+    },
+  );
 
   it('blocks before reading the vault when the independent marker is revoked or unreadable', async () => {
     const vault = { get: jest.fn(async () => 'must-not-be-read') };
