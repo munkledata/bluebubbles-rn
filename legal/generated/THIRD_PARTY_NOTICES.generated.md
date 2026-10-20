@@ -2,7 +2,7 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Package-lock SHA-256: `348f9cec2e477472bc9c9eeef854f02cee34a0a93cf9a4250f46a13557df7a8a`
+- Package-lock SHA-256: `b2d40f24a2574f2c7006f7b30dffe000b2e2ee90f669aed2f5d6a3e4119a7b2d`
 - Production package records: 1013
 - Unique package versions: 921
 - Source assets: 14
