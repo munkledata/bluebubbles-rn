@@ -77,6 +77,16 @@ export async function inspectDurableServerSession(
   );
   if (upgrade.kind === 'revoked') return { kind: 'revoked' };
   if (upgrade.kind === 'quarantined') {
+    // After a Disconnect the vault reads `forgotten`, so an unfinished upgrade journal can no longer
+    // match a session ('session-missing'). Retry the idempotent forget barrier, which revokes or
+    // keeps its bearers as retry custody, instead of blocking every launch. Every other reason, or
+    // a journal without the Disconnect tombstone, stays quarantined.
+    if (
+      session.sessionState === SERVER_SESSION_STATE.forgotten &&
+      upgrade.reason === 'session-missing'
+    ) {
+      return { kind: 'cleanup-required' };
+    }
     return { kind: 'upgrade-quarantined', reason: upgrade.reason };
   }
   if (session.sessionState === null && !hasOrigin && !hasPassword && upgrade.kind === 'none') {

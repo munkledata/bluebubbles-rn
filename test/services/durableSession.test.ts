@@ -87,6 +87,48 @@ describe('durable foreground session inspection', () => {
     },
   );
 
+  // A Disconnect whose marker write failed left `forgotten` plus an unfinished upgrade journal. That
+  // journal can no longer match a session, and quarantining it blocked every launch for good.
+  const candidateJournal = JSON.stringify({
+    version: 1,
+    origin: 'https://gator.example',
+    previousCredential: 'private-password',
+    candidateCredential: `bbd_device_v1_${'A'.repeat(43)}`,
+    phase: 'candidate',
+  });
+
+  it('retries cleanup for an unfinished upgrade journal left behind by a Disconnect', async () => {
+    const vault = await readyVault();
+    await vault.set('serverSessionState', SERVER_SESSION_STATE.forgotten);
+    await vault.set('serverCredentialUpgrade', candidateJournal);
+
+    await expect(inspectDurableServerSession(vault, clearMarker())).resolves.toEqual({
+      kind: 'cleanup-required',
+    });
+    await expect(vault.get('serverCredentialUpgrade')).resolves.toBe(candidateJournal);
+  });
+
+  it('keeps an unreadable journal quarantined even after a Disconnect', async () => {
+    const vault = await readyVault();
+    await vault.set('serverSessionState', SERVER_SESSION_STATE.forgotten);
+    await vault.set('serverCredentialUpgrade', 'not-json');
+
+    await expect(inspectDurableServerSession(vault, clearMarker())).resolves.toEqual({
+      kind: 'upgrade-quarantined',
+      reason: 'invalid-journal',
+    });
+  });
+
+  it('keeps a session-missing journal quarantined without the Disconnect tombstone', async () => {
+    const vault = new InMemoryVault();
+    await vault.set('serverCredentialUpgrade', candidateJournal);
+
+    await expect(inspectDurableServerSession(vault, clearMarker())).resolves.toEqual({
+      kind: 'upgrade-quarantined',
+      reason: 'session-missing',
+    });
+  });
+
   it('blocks before reading the vault when the independent marker is revoked or unreadable', async () => {
     const vault = { get: jest.fn(async () => 'must-not-be-read') };
 

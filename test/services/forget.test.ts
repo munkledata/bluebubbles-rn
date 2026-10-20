@@ -485,6 +485,32 @@ function seedQuarantinedCredentialUpgradeSession(): void {
 }
 
 describe('foreground boot production adapters', () => {
+  // Review follow-up: Disconnect's marker write failed and an unfinished upgrade journal survived.
+  // Every launch used to stop on "could not safely verify the saved connection" without retrying.
+  it('retries the cleanup instead of quarantining a journal left behind by a Disconnect', async () => {
+    const candidate = `bbd_device_v1_${'C'.repeat(43)}`;
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.forgotten);
+    vaultValues.set('serverAddress', 'https://old.example');
+    vaultValues.set('serverPassword', 'hunter2');
+    vaultValues.set(
+      'serverCredentialUpgrade',
+      JSON.stringify({
+        version: 1,
+        origin: 'https://old.example',
+        previousCredential: 'hunter2',
+        candidateCredential: candidate,
+        phase: 'candidate',
+      }),
+    );
+
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'setup' });
+
+    expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', candidate);
+    expect(revokeSelf).toHaveBeenCalledTimes(1);
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+    expect(vaultValues.has('serverPassword')).toBe(false);
+  });
+
   it('fails a quarantined credential upgrade closed without opening or wiping account data', async () => {
     seedQuarantinedCredentialUpgradeSession();
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
