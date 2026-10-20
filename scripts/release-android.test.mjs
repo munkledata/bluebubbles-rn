@@ -36,6 +36,7 @@ import {
   removeManagedEasDirectory,
   removeRetainedSigningCredentials,
   requireExpectedUploadCertificate,
+  resolveSubmissionConfirmation,
   retainedWorkspaceNotice,
   runCapture,
   stageGoogleServicesFile,
@@ -1087,6 +1088,31 @@ test('scripts CI runs before npm ci import only Node built-ins and local files a
   }
   assert.ok(seen.size > 3, 'expected to follow the release script import chain');
   assert.deepEqual(npmImports, []);
+});
+
+test('approves a Play submission only with the exact candidate phrase, by option or terminal', () => {
+  const phrase = 'SUBMIT 0.1.62 v84 0123456789ab TO PLAY INTERNAL';
+  // --confirm works without a terminal, so an owner-requested release needs no manual step...
+  assert.equal(resolveSubmissionConfirmation(phrase, phrase, false), 'confirmed');
+  // ...but only for this exact candidate: another version, artifact or a bare flag is refused.
+  for (const wrong of [
+    'SUBMIT 0.1.62 v83 0123456789ab TO PLAY INTERNAL',
+    'SUBMIT 0.1.62 v84 ba9876543210 TO PLAY INTERNAL',
+    `${phrase} `,
+    'yes',
+    true,
+  ]) {
+    assert.throws(
+      () => resolveSubmissionConfirmation(wrong, phrase, true),
+      /submission confirmation did not match; no submission made/,
+    );
+  }
+  // Without the option a person types the phrase, which needs an interactive terminal.
+  assert.equal(resolveSubmissionConfirmation(undefined, phrase, true), 'prompt');
+  assert.throws(
+    () => resolveSubmissionConfirmation(undefined, phrase, false),
+    /requires --confirm "<phrase>" or an interactive terminal/,
+  );
 });
 
 test('refuses to release source that is unpushed or has no passing CI run', () => {

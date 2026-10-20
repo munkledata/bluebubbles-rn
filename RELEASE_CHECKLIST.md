@@ -187,8 +187,10 @@ completion do not block this internal test; they are not waived and become gates
 Open, or Production promotion, or earlier if Play flags the internal app.
 
 - [x] `eas.json` still declares `track: "internal"` as the only explicit submission track. The local
-      build phase cannot submit; the separate submit phase previews by default and requires `--execute`,
-      an interactive candidate-specific phrase, and reviewed operator approval.
+      build phase cannot submit; the separate submit phase previews by default and requires `--execute`
+      plus the exact candidate-specific phrase, typed in a terminal or passed as `--confirm`. Owner
+      decision 2026-10-20: asking the agent for a release approves its Internal upload, so the agent
+      passes the phrase itself; the phrase still pins the exact version and artifact.
 - [ ] Play Console confirms no Closed, Open, or Production release is active before submission.
 - [x] The replacement version/build, source and release commits, AAB SHA-256, upload certificate,
       and build provenance are recorded above. The superseded v59 record does not satisfy this gate.

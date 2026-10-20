@@ -2022,6 +2022,26 @@ function submissionPhrase(state) {
   return `SUBMIT ${state.target.version} v${state.artifact.versionCode} ${state.artifact.sha256.slice(0, 12)} TO PLAY INTERNAL`;
 }
 
+/**
+ * How `submit --execute` is approved. `--confirm` must carry this candidate's exact phrase, so the
+ * owner (or an agent the owner asked to release) can submit without a terminal but never a different
+ * version or artifact. Without it, a person types the phrase into an interactive terminal.
+ */
+export function resolveSubmissionConfirmation(confirm, phrase, interactive) {
+  if (confirm !== undefined) {
+    if (confirm !== phrase) {
+      throw new Error('submission confirmation did not match; no submission made');
+    }
+    return 'confirmed';
+  }
+  if (!interactive) {
+    throw new Error(
+      'executing Play submission requires --confirm "<phrase>" or an interactive terminal',
+    );
+  }
+  return 'prompt';
+}
+
 function promotedArtifactPath(state) {
   const filename = state.promotion?.artifactFilename;
   if (
@@ -2035,7 +2055,7 @@ function promotedArtifactPath(state) {
 }
 
 async function submit(options) {
-  assertOnlyOptions(options, ['run', 'execute']);
+  assertOnlyOptions(options, ['run', 'execute', 'confirm']);
   const runId = validateRunId(requiredStringOption(options, 'run'));
   const state = readState(runId);
   requirePhase(state, 'promoted');
@@ -2047,23 +2067,27 @@ async function submit(options) {
   const commandPreview = `eas submit -p android --profile production --path ${state.promotion.artifactFilename} --non-interactive --wait`;
   if (options.get('execute') !== true) {
     process.stdout.write(
-      `${commandPreview}\nNo submission was made. Re-run with --execute and type:\n${phrase}\n`,
+      `${commandPreview}\nNo submission was made. Re-run with --execute and type this phrase, or pass it as --confirm "<phrase>":\n${phrase}\n`,
     );
     return;
   }
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error('executing Play submission requires an interactive terminal');
-  }
+  const approval = resolveSubmissionConfirmation(
+    options.get('confirm'),
+    phrase,
+    Boolean(process.stdin.isTTY && process.stdout.isTTY),
+  );
   requireConfiguredSubmitCredential();
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  let answer;
-  try {
-    answer = await prompt.question('Type the candidate-specific submission phrase exactly:\n> ');
-  } finally {
-    prompt.close();
+  if (approval === 'prompt') {
+    const prompt = createInterface({ input: process.stdin, output: process.stdout });
+    let answer;
+    try {
+      answer = await prompt.question('Type the candidate-specific submission phrase exactly:\n> ');
+    } finally {
+      prompt.close();
+    }
+    if (answer !== phrase)
+      throw new Error('submission confirmation did not match; no submission made');
   }
-  if (answer !== phrase)
-    throw new Error('submission confirmation did not match; no submission made');
 
   await withReleaseLock(runId, 'submit', async () => {
     let current = readState(runId);
@@ -2488,14 +2512,15 @@ function usage() {
   build --run <run-id> --execute --confirm-remote-version-increment
   validate --run <run-id>
   promote --run <run-id>
-  submit --run <run-id> [--execute]
+  submit --run <run-id> [--execute [--confirm <phrase>]]
   status [--run <run-id>]
   reconcile --run <run-id>
   cleanup [--run <run-id>]
 
 Preflight requires the source commit to be on GitHub with a passing CI run.
 Build is local but contacts EAS and may consume a remote versionCode. Submit defaults to a dry
-command preview and requires an interactive candidate-specific confirmation when --execute is used.
+command preview. With --execute it needs the candidate-specific phrase: passed as --confirm, or
+typed into an interactive terminal.
 `;
 }
 
