@@ -124,8 +124,7 @@ export async function shareAttachment(
  *
  * Saving needs none of that. On Android 13+ the native save requires NO runtime permission
  * (`MediaLibraryModule.hasWritePermissions()` returns "nothing missing" on TIRAMISU+), and
- * `writeOnly: true` resolves to an EMPTY permission list there — granted, with zero dialogs. On
- * Android 12 and below it asks for WRITE_EXTERNAL_STORAGE, which is what is genuinely required.
+ * `writeOnly: true` resolves to an EMPTY permission list there — granted, with zero dialogs.
  *
  * READING the gallery (the attachment tray) separately asks only for photo/video access; it must
  * not use the SDK's no-argument default because that also requests music/audio access.

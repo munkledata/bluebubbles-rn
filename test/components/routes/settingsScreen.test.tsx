@@ -293,7 +293,8 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
     expect(screen.getByText(/remembers a queued Photos or Gator Album copy/)).toBeTruthy();
     expect(screen.getByText(/turning off auto-download cancels queued copies/)).toBeTruthy();
     expect(screen.getByText(/Tap Photos gallery or Gator album to grant/)).toBeTruthy();
-    expect(screen.getByText(/on Android 12 and earlier, tap the choice/)).toBeTruthy();
+    // Gator needs Android 16, so advice for Android 12 and earlier can never apply.
+    expect(screen.queryByText(/Android 12/)).toBeNull();
     await act(async () => {
       fireEvent.press(screen.getByLabelText('More parallel downloads'));
     });

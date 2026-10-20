@@ -771,7 +771,7 @@ export default function SettingsScreen(): React.JSX.Element {
                   dimmed={!autoDownload}
                 />
               ))}
-              <NoteRow text="Images always appear in chats. Tap Photos gallery or Gator album to grant the required Photos access; on Android 12 and earlier, tap the choice even if it is already selected. Gator remembers a queued Photos or Gator Album copy and retries it on a later eligible foreground activation. Changing this choice or turning off auto-download cancels queued copies that have not started; a copy Android is already saving may still finish." />
+              <NoteRow text="Images always appear in chats. Tap Photos gallery or Gator album to grant the required Photos access. Gator remembers a queued Photos or Gator Album copy and retries it on a later eligible foreground activation. Changing this choice or turning off auto-download cancels queued copies that have not started; a copy Android is already saving may still finish." />
             </SettingsSection>
           </>
         )}
