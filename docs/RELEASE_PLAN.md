@@ -49,12 +49,30 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.61` / version code `82` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.62` / version code `84` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-10-19 — not a checklist rebind:** **`0.1.61` / code `82`** was built
+**Latest live artifact, 2026-10-20 — not a checklist rebind:** **`0.1.62` / code `84`** was built
+from source `6bec8553861de0b14e0fdca48d2bbbb81936cef6` (the Disconnect fixes, the Welcome
+pending-revocation warning, the legal-fingerprint fix and the `--confirm` submission option, all
+CI-green) and promoted as release commit `f55e9a9587da3f00a271d168def186bef392b1e4` on local branch
+`release/android-0.1.62`. Run `android-0.1.62-6bec855-20261020191431` produced
+`gator-release-0.1.62-v84-f55e9a9.aab`, **58,308,477 bytes**, SHA-256
+`01ffacece33b1e7b577aa1f81d4af7695a5c1f3013fe2851324a0a3384068885`. The clean local production
+build, native path proof and expected upload certificate (`6E:18:F9:…:2F:43`) pass. Under owner
+decision 2026-10-20 the agent submitted it with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.62 v84 01ffacece33b TO PLAY INTERNAL`; the Maps key came from the login Keychain.
+Android Publisher readback after the 2026-10-20T19:57:38Z submission confirms Internal release
+`0.1.62`, code `84`, `completed`. `check:legal-inventory` passes on the release commit without
+regeneration, so this build's in-app notices are current. Code `83` was consumed by an earlier
+`0.1.62` build from `e02ed25` (run `android-0.1.62-e02ed25-20261020083117`), validated and promoted
+but never submitted; its local release branch was deleted. The device update and the pending rows in
+`docs/DEVICE_VERIFICATION_CHECKLIST.md` remain open. No task status or frozen v77 checklist row is
+changed by this Internal release.
+
+**Historical v82 artifact, 2026-10-19:** **`0.1.61` / code `82`** was built
 from source `03582e26d86ccb1eb089d5002a2eb92c9dba2751` (the CI-green batch 8 minor-note fixes) and
 promoted as release commit `c62d822d6f4cb41bc2b0f305765ea4be7f1e6281` on local branch
 `release/android-0.1.61`. Run `android-0.1.61-03582e2-20261019204805` produced
