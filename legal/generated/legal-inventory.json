@@ -5,7 +5,7 @@
     "exactAab": false
   },
   "inputs": {
-    "packageLockSha256": "b2d40f24a2574f2c7006f7b30dffe000b2e2ee90f669aed2f5d6a3e4119a7b2d",
+    "dependencyLockSha256": "fb38806e828443a884e1d08090b9fb9ab2705f9cbce315aeeb788dd6f946ee2f",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "9faa6b47f887c55528bc18f511a4c99aad5c66150aa22542fa4a7ce096fb5134"
@@ -16,7 +16,7 @@
     "assetFiles": 14,
     "pendingAssetProvenance": 14,
     "localComponents": 14,
-    "packageLockSha256": "b2d40f24a2574f2c7006f7b30dffe000b2e2ee90f669aed2f5d6a3e4119a7b2d",
+    "dependencyLockSha256": "fb38806e828443a884e1d08090b9fb9ab2705f9cbce315aeeb788dd6f946ee2f",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },

@@ -2,7 +2,7 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Package-lock SHA-256: `b2d40f24a2574f2c7006f7b30dffe000b2e2ee90f669aed2f5d6a3e4119a7b2d`
+- Dependency lock SHA-256 (package-lock.json without the app's own version): `fb38806e828443a884e1d08090b9fb9ab2705f9cbce315aeeb788dd6f946ee2f`
 - Production package records: 1013
 - Unique package versions: 921
 - Source assets: 14

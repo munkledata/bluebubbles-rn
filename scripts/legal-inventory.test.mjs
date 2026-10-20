@@ -10,6 +10,7 @@ import {
   buildInventory,
   collectAssetsAndComponents,
   collectProductionPackages,
+  dependencyLockSha256,
   markdownToPlainText,
   releaseCheckErrors,
 } from './legal-inventory.mjs';
@@ -182,6 +183,31 @@ test('asset and local-component reconciliation is bidirectional and never follow
     () => collectAssetsAndComponents(root, { assets: [{ path: '../escape.png' }] }, tracked),
     /escapes root/,
   );
+});
+
+// A release bumps only the app's own version in package-lock.json, which used to leave the
+// generated notices (and the in-app copy) one digest behind after every release.
+test("the dependency lock digest ignores the app's own version but not dependency changes", () => {
+  const lock = (ownVersion, dependencyVersion) =>
+    JSON.stringify(
+      {
+        name: 'gator-rn',
+        version: ownVersion,
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          '': { name: 'gator-rn', version: ownVersion, dependencies: { dep: '^1.0.0' } },
+          'node_modules/dep': { version: dependencyVersion, license: 'MIT' },
+        },
+      },
+      null,
+      2,
+    );
+  const digest = (source) => dependencyLockSha256(source);
+
+  assert.equal(digest(lock('0.1.60', '1.0.0')), digest(lock('0.1.61', '1.0.0')));
+  assert.notEqual(digest(lock('0.1.60', '1.0.0')), digest(lock('0.1.60', '1.0.1')));
+  assert.match(digest(lock('0.1.60', '1.0.0')), /^[0-9a-f]{64}$/);
 });
 
 test('runtime notice conversion is plain text and release checking preserves open gates', () => {

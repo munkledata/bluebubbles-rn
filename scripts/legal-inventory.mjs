@@ -94,6 +94,18 @@ function scanLegalFiles(packageRoot) {
   return { documents, issues };
 }
 
+/**
+ * Fingerprint of the locked dependency set: package-lock.json without the app's own version (the
+ * top-level and root-package `version` fields). A release version bump changes only those, so it
+ * must not make the generated notices, or their in-app copy, stale.
+ */
+export function dependencyLockSha256(packageLockSource) {
+  const lock = JSON.parse(packageLockSource);
+  delete lock.version;
+  if (lock.packages?.['']) delete lock.packages[''].version;
+  return sha256(JSON.stringify(lock));
+}
+
 export function collectProductionPackages(root, packageLock) {
   if (packageLock?.lockfileVersion !== 3 || !packageLock.packages)
     throw new Error('package-lock.json must use lockfileVersion 3');
@@ -251,7 +263,7 @@ function renderMarkdown(inventory) {
     '',
     '> Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.',
     '',
-    `- Package-lock SHA-256: \`${inventory.inputs.packageLockSha256}\``,
+    `- Dependency lock SHA-256 (package-lock.json without the app's own version): \`${inventory.inputs.dependencyLockSha256}\``,
     `- Production package records: ${inventory.summary.productionPackageRecords}`,
     `- Unique package versions: ${inventory.summary.uniquePackageVersions}`,
     `- Source assets: ${inventory.summary.assetFiles}`,
@@ -346,7 +358,7 @@ export function buildInventory(root = ROOT, sourcePaths = sourceFiles(root)) {
     pendingAssetProvenance: files.assets.filter((item) => item.provenanceStatus !== 'approved')
       .length,
     localComponents: files.localComponents.length,
-    packageLockSha256: sha256(packageLockSource),
+    dependencyLockSha256: dependencyLockSha256(packageLockSource),
     unresolvedPackageRecords: packages.records.filter((item) => item.issues.length > 0).length,
     exactAabCoverage: false,
   };
@@ -355,7 +367,7 @@ export function buildInventory(root = ROOT, sourcePaths = sourceFiles(root)) {
       schemaVersion: 1,
       coverage: { npm: 'conservative-production-closure', exactAab: false },
       inputs: {
-        packageLockSha256: summary.packageLockSha256,
+        dependencyLockSha256: summary.dependencyLockSha256,
         projectNoticeSha256: sha256(projectNotice),
         thirdPartyNoticesSha256: sha256(thirdPartyNotices),
         assetProvenanceSha256: sha256(readFileSync(resolve(root, 'legal/asset-provenance.json'))),
