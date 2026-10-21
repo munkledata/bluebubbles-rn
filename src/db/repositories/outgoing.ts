@@ -44,7 +44,7 @@ import {
 // Imported from the module that owns it rather than restated here, so the two can't drift;
 // messages.ts imports nothing from this file, so there is no cycle.
 import { markMessageDeletedWithinTransaction } from './messages';
-import { deletionRecordAppliesSql } from './chatVisibility';
+import { deletionRecordAppliesSql, messageVisibleInChatSql } from './chatVisibility';
 
 export {
   MESSAGE_GUID_ALIAS_LIMIT,
@@ -1894,11 +1894,167 @@ export interface EchoMatchFields {
   associatedMessageEmoji?: string | null;
   threadOriginatorGuid?: string | null;
   threadOriginatorPart?: number | null;
+  /** The copy's files as the server lists them; absent when the event did not say. */
+  attachments?: readonly { readonly totalBytes?: number | null }[] | null;
 }
 
 /** Only match a temp row sent within this window of the echo's own timestamp, so a
  *  coincidentally-identical message from ANOTHER device can't hijack an unrelated stale row. */
 const ECHO_MATCH_WINDOW_MS = 5 * 60_000;
+
+/** A modern optimistic send whose current attempt the server acknowledged, with its own ids. */
+interface AcknowledgedModernOwner {
+  readonly id: number;
+  readonly guid: string;
+  readonly attemptGuid: string;
+  readonly generation: number;
+}
+
+/** Most look-alike unsent rows the fallback compares; with more than this it does nothing. */
+const UNMARKED_COPY_CANDIDATE_LIMIT = 100;
+/** Most files it reads for those rows; with more than this it does nothing. */
+const UNMARKED_COPY_FILE_LIMIT = 400;
+/** Phone and Google clocks may disagree this much; a copy is never older than its send beyond it. */
+const UNMARKED_COPY_CLOCK_SKEW_MS = 60_000;
+
+const sizeSignature = (sizes: readonly number[]): string =>
+  [...sizes].sort((a, b) => a - b).join(',');
+
+/**
+ * Owner phone session 2026-10-21. The server's copy of a MODERN RCS send can arrive with no attempt
+ * ids at all (Google did not echo the server's temp id), and modern rows never content-match, so the
+ * copy was stored as a second bubble. Find the one optimistic row it belongs to, so the caller
+ * reconciles it exactly with that row's own ids. When in doubt return null and the copy is stored
+ * on its own as before: an extra bubble can be deleted, a message merged into the wrong one is lost.
+ *
+ * Only a plain copy that lists files, all with known sizes, is matched: file sizes tell sends apart,
+ * while identical short texts are common. Among ALL unsent rows in this chat (any state, deleted or
+ * not) with the same text, created within ECHO_MATCH_WINDOW_MS of the copy's date, none may have a
+ * file of unknown size, and exactly one may have files of the same sizes. That one must be a visible
+ * modern send whose current attempt the server already acknowledged, created no later than the copy
+ * (allowing for clock skew), and the copy must not be dated inside its chat's deleted history or the
+ * window right after it. A same-text send without files counts as unknown and blocks the merge. The
+ * copy's guid may have no history (no stored row, so an existing duplicate is left alone; no
+ * deletion record, server state or alias) and the send no deletion record, which a merge would carry
+ * over.
+ */
+async function findAcknowledgedModernOwnerWithinTransaction(
+  context: DbTransactionContext,
+  m: EchoMatchFields,
+  chatId: number,
+): Promise<AcknowledgedModernOwner | null> {
+  return runInTransactionContext(context, async (db) => {
+    const copyDate = m.dateCreated;
+    if (copyDate == null || !Array.isArray(m.attachments) || m.attachments.length === 0) {
+      return null;
+    }
+    if (m.associatedMessageType != null || m.threadOriginatorGuid != null) return null;
+    // An unknown copy size (0) can only equal an unknown send size, which blocks the merge below.
+    const sizes = m.attachments.map((file) => file.totalBytes ?? 0);
+    const rows: {
+      id: number;
+      guid: string;
+      attemptGuid: string | null;
+      generation: number;
+      pending: number;
+      sendState: string | null;
+      visible: number;
+      dateCreated: number | null;
+      chatDeletedAt: number;
+    }[] = await db.all(sql`
+      SELECT mm.id, mm.guid, mm.active_send_attempt_guid AS attemptGuid,
+             mm.attempt_owner_generation AS generation, mm.attempt_owner_pending AS pending,
+             mm.send_state AS sendState, ${messageVisibleInChatSql('mm', 'c')} AS visible,
+             mm.date_created AS dateCreated,
+             MAX(COALESCE(c.history_deleted_at, 0), COALESCE(c.deleted_at, 0)) AS chatDeletedAt
+        FROM messages mm
+        JOIN chats c ON c.id = mm.chat_id
+       WHERE mm.chat_id = ${chatId} AND mm.is_from_me = 1 AND mm.guid LIKE 'temp-%'
+         AND mm.associated_message_type IS NULL AND mm.thread_originator_guid IS NULL
+         AND mm.text IS ${m.text ?? null}
+         AND mm.date_created >= ${copyDate - ECHO_MATCH_WINDOW_MS}
+         AND mm.date_created <= ${copyDate + ECHO_MATCH_WINDOW_MS}
+       LIMIT ${UNMARKED_COPY_CANDIDATE_LIMIT + 1}`);
+    if (rows.length === 0 || rows.length > UNMARKED_COPY_CANDIDATE_LIMIT) return null;
+    const files: { messageId: number; bytes: number | null }[] = await db.all(sql`
+      SELECT message_id AS messageId, total_bytes AS bytes
+        FROM attachments
+       WHERE message_id IN (${sql.join(
+         rows.map((row) => sql`${row.id}`),
+         sql`, `,
+       )})
+       LIMIT ${UNMARKED_COPY_FILE_LIMIT + 1}`);
+    if (files.length > UNMARKED_COPY_FILE_LIMIT) return null;
+    // A file of unknown size could be this very copy's file, so nothing can be told apart. A send
+    // with the same text but no files is unknown too: its files may have been purged.
+    if (files.some((file) => !(file.bytes != null && file.bytes > 0))) return null;
+    const filesOf = (id: number) => files.filter((file) => file.messageId === id);
+    if (rows.some((row) => filesOf(row.id).length === 0)) return null;
+    const wanted = sizeSignature(sizes);
+    const same = rows.filter(
+      (row) => sizeSignature(filesOf(row.id).map((file) => file.bytes ?? 0)) === wanted,
+    );
+    if (same.length !== 1) return null;
+    const owner = same[0]!;
+    if (
+      owner.generation <= 0 ||
+      owner.pending !== 0 ||
+      owner.attemptGuid == null ||
+      owner.sendState !== 'sent' ||
+      owner.visible !== 1
+    ) {
+      return null;
+    }
+    if (owner.dateCreated == null || owner.dateCreated > copyDate + UNMARKED_COPY_CLOCK_SKEW_MS) {
+      return null;
+    }
+    // Merging dates the send by the copy; inside a deleted chat's history it would be hidden, or
+    // hidden and purged. Just after the delete, the copy may belong to a send the delete purged,
+    // which can no longer block a look-alike (chatDeletedAt is 0 when it was never deleted).
+    if (owner.chatDeletedAt > 0 && copyDate <= owner.chatDeletedAt + ECHO_MATCH_WINDOW_MS) {
+      return null;
+    }
+    const history = await db.all(sql`
+      SELECT 1 AS found FROM messages WHERE guid = ${m.guid}
+      UNION ALL
+      SELECT 1 FROM message_deletion_ledger WHERE guid IN (${m.guid}, ${owner.guid})
+      UNION ALL
+      SELECT 1 FROM message_server_states WHERE guid = ${m.guid}
+      UNION ALL
+      SELECT 1 FROM message_guid_aliases WHERE canonical_guid = ${m.guid}
+      LIMIT 1`);
+    if (history.length > 0) return null;
+    return {
+      id: owner.id,
+      guid: owner.guid,
+      attemptGuid: owner.attemptGuid,
+      generation: owner.generation,
+    };
+  });
+}
+
+/** Reconcile a modern copy through its one acknowledged owner; anything but success changes nothing. */
+async function reconcileModernCopyThroughOwnerWithinTransaction(
+  context: DbTransactionContext,
+  m: EchoMatchFields,
+  chatId: number,
+  owner: AcknowledgedModernOwner,
+): Promise<ExactOutgoingAttemptSuccessDisposition | null> {
+  return runInTransactionContext(context, async () => {
+    const disposition = await reconcileExactOutgoingAttemptSuccessWithinTransaction(context, {
+      tempGuid: owner.guid,
+      attemptGuid: owner.attemptGuid,
+      clientAttemptGeneration: owner.generation,
+      guid: m.guid,
+      claimedChatId: chatId,
+      dateCreated: m.dateCreated ?? null,
+      dateDelivered: m.dateDelivered ?? null,
+    });
+    return disposition === 'reconciled' || disposition === 'already-reconciled'
+      ? disposition
+      : null;
+  });
+}
 
 /**
  * Reconcile the LIVE echo of one of OUR sent messages against its optimistic temp row.
@@ -1941,6 +2097,17 @@ export async function reconcileEchoByContent(
         dateCreated: m.dateCreated ?? null,
         dateDelivered: m.dateDelivered ?? null,
       });
+    }
+    // A modern send's copy that carries no attempt ids: reconcile it through its one owner.
+    const modernOwner = await findAcknowledgedModernOwnerWithinTransaction(context, m, chatId);
+    if (modernOwner) {
+      const merged = await reconcileModernCopyThroughOwnerWithinTransaction(
+        context,
+        m,
+        chatId,
+        modernOwner,
+      );
+      if (merged) return merged;
     }
     // Already reconciled (the HTTP ack promoted the temp row first) → leave it to the upsert.
     const already = await db.all<{ id: number }>(
@@ -2083,6 +2250,17 @@ export async function reconcileOutgoingAttachmentByContent(
           dateCreated: m.dateCreated ?? null,
           dateDelivered: m.dateDelivered ?? null,
         });
+      }
+      // A modern send's copy that carries no attempt ids: reconcile it through its one owner.
+      const modernOwner = await findAcknowledgedModernOwnerWithinTransaction(context, m, chatId);
+      if (modernOwner) {
+        const merged = await reconcileModernCopyThroughOwnerWithinTransaction(
+          context,
+          m,
+          chatId,
+          modernOwner,
+        );
+        if (merged) return merged;
       }
       // Already materialized (a prior sync/echo created it) → leave it to the upsert.
       const already = await db.all<{ id: number }>(

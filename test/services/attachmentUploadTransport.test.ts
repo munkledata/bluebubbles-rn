@@ -41,7 +41,7 @@ import { logger } from '@core/secure';
 // eslint-disable-next-line import/first
 import { DbCommitGuardRejectedError } from '@db/transaction';
 // eslint-disable-next-line import/first
-import { expoAttachmentUploader } from '@/services/send/attachmentUpload';
+import { expoAttachmentUploader, expoFileSize } from '@/services/send/attachmentUpload';
 // eslint-disable-next-line import/first
 import { uploadGate, uploadRegistry } from '@/services/send/uploadControl';
 import { flushMicrotasks } from '../support/async';
@@ -733,5 +733,30 @@ describe('native attachment upload account scope', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('expoFileSize', () => {
+  it('returns the size of a readable file', async () => {
+    mockGetInfoAsync.mockResolvedValueOnce({ exists: true, size: 4321 });
+    await expect(expoFileSize('file:///photo.jpg')).resolves.toBe(4321);
+    expect(mockGetInfoAsync).toHaveBeenLastCalledWith('file:///photo.jpg');
+  });
+
+  it('returns null for a missing, empty, odd or unreadable file', async () => {
+    mockGetInfoAsync.mockResolvedValueOnce({ exists: false });
+    await expect(expoFileSize('file:///gone.jpg')).resolves.toBeNull();
+    mockGetInfoAsync.mockResolvedValueOnce({ exists: true, size: 0 });
+    await expect(expoFileSize('file:///empty.jpg')).resolves.toBeNull();
+    mockGetInfoAsync.mockResolvedValueOnce({ exists: true, size: 1.5 });
+    await expect(expoFileSize('file:///odd.jpg')).resolves.toBeNull();
+    mockGetInfoAsync.mockRejectedValueOnce(new Error('no access'));
+    await expect(expoFileSize('file:///locked.jpg')).resolves.toBeNull();
+  });
+
+  it('never measures a content uri, whose reported size is only an estimate', async () => {
+    mockGetInfoAsync.mockClear();
+    await expect(expoFileSize('content://media/external/images/1')).resolves.toBeNull();
+    expect(mockGetInfoAsync).not.toHaveBeenCalled();
   });
 });

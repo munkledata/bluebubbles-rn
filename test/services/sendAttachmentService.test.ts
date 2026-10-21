@@ -6,6 +6,7 @@ import { Chat, Message, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import {
   claimFailedOutgoingForRetry,
+  markMessageDeleted,
   OUTGOING_MAX_ATTEMPTS,
   reconcileEchoByContent,
   reconcileOutgoingAttachmentByContent,
@@ -1432,6 +1433,353 @@ describe('sendImageMessage', () => {
       `[send-attachment] failed for chat ${RCS_CHAT_GUID} (code 10002, HTTP 502): bad gateway`,
     );
     warn.mockRestore();
+  });
+
+  // Step 2 (owner phone session 2026-10-21): with attempt ownership on, every RCS send is a modern
+  // row that only ever merged on the exact attempt ids. Google often does not echo the server's temp
+  // id, so the server's copy arrived WITHOUT them and was stored as a second bubble.
+  describe('RCS modern sends whose server copy carries no attempt ids', () => {
+    let modernHttp!: HttpClient;
+    modernHttp = {
+      get: async () => ({
+        ...RCS_CAPABILITY_FIELDS,
+        supports_rcs_text_with_attachment: true,
+        supports_rcs_send_attempt_ownership: true,
+      }),
+      pinTransport: () => modernHttp,
+      isTransportCurrent: () => true,
+      assertTransportCurrent: () => undefined,
+    } as unknown as HttpClient;
+
+    /** The server acknowledges a modern attempt: our own temp guid plus its attempt ids. */
+    const modernUploader = () =>
+      fakeUploader(
+        async (args) =>
+          ({
+            guid: args.tempGuid,
+            attemptGuid: `server-attempt-${args.tempGuid}`,
+            clientAttemptGeneration: args.clientAttemptGeneration,
+            viaPrivateApi: false,
+          }) as SendAck,
+      );
+
+    const serverCopy = (guid: string, totalBytes = IMG.size, text?: string) =>
+      Message.parse({
+        guid,
+        isFromMe: true,
+        dateCreated: 1000,
+        hasAttachments: true,
+        ...(text === undefined ? {} : { text }),
+        attachments: [{ guid: `${guid}-media`, mimeType: 'image/jpeg', totalBytes }],
+      });
+
+    async function sendModernPicture(
+      db: AppDatabase,
+      now = 1000,
+      image = IMG,
+      text?: string,
+    ): Promise<string> {
+      const up = modernUploader();
+      await sendImageMessage(
+        db,
+        modernHttp,
+        {
+          chatGuid: RCS_CHAT_GUID,
+          image,
+          ...(text === undefined ? {} : { text, service: 'RCS' as const }),
+        },
+        up.upload,
+        now,
+      );
+      expect(up.captured?.clientAttemptGeneration).toBeGreaterThan(0);
+      return up.captured!.tempGuid;
+    }
+
+    /** A modern send whose upload failed, so the server never acknowledged it. */
+    async function sendFailedModernPicture(db: AppDatabase, now: number, image = IMG) {
+      const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      const up = fakeUploader(async () => {
+        throw new ApiError('server_error', 'boom', 500);
+      });
+      await sendImageMessage(db, modernHttp, { chatGuid: RCS_CHAT_GUID, image }, up.upload, now);
+      warn.mockRestore();
+      return up.captured!.tempGuid;
+    }
+
+    async function liveCopy(db: AppDatabase, chatId: number, copy: Message): Promise<void> {
+      await withDbTransaction(db, (context) => reconcileEchoByContent(context, copy, chatId));
+      const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+      await upsertMessages(db, [copy], () => chatId, handles);
+    }
+
+    async function syncedCopy(db: AppDatabase, chatId: number, copy: Message): Promise<void> {
+      await reconcileOutgoingAttachmentByContent(db, copy, chatId);
+      const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+      await upsertMessages(db, [copy], () => chatId, handles);
+    }
+
+    const chatIdOf = (raw: Database.Database): number =>
+      (raw.prepare('SELECT id FROM chats WHERE guid=?').get(RCS_CHAT_GUID) as { id: number }).id;
+    const count = (raw: Database.Database, sqlText: string): number =>
+      (one(raw, sqlText) as { c: number }).c;
+
+    const messageCount = (raw: Database.Database, guid: string): number =>
+      count(raw, `SELECT COUNT(*) c FROM messages WHERE guid = '${guid}'`);
+    const fileOf = (raw: Database.Database, guid: string): string =>
+      (
+        one(
+          raw,
+          `SELECT a.local_path lp FROM attachments a JOIN messages m ON m.id = a.message_id
+            WHERE m.guid = '${guid}'`,
+        ) as { lp: string }
+      ).lp;
+
+    it('merges a live copy into the acknowledged picture instead of adding a second bubble', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      await sendModernPicture(db);
+      const chatId = chatIdOf(raw);
+
+      await liveCopy(db, chatId, serverCopy('rcs-99'));
+
+      expect(count(raw, 'SELECT COUNT(*) c FROM messages')).toBe(1);
+      expect(messageCount(raw, 'rcs-99')).toBe(1);
+      expect(count(raw, 'SELECT COUNT(*) c FROM attachments')).toBe(1);
+      expect(fileOf(raw, 'rcs-99')).toBe('file:///photo.jpg');
+    });
+
+    it('merges a synced copy into the acknowledged picture instead of adding a second bubble', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      await sendModernPicture(db);
+      const chatId = chatIdOf(raw);
+
+      await syncedCopy(db, chatId, serverCopy('rcs-99'));
+
+      expect(count(raw, 'SELECT COUNT(*) c FROM messages')).toBe(1);
+      expect(fileOf(raw, 'rcs-99')).toBe('file:///photo.jpg');
+    });
+
+    it('merges each copy of a multi-picture send into its own picture, by file size', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      for (const [i, size] of [1000, 2000, 3000].entries()) {
+        await sendModernPicture(db, 1000 + i, { ...IMG, uri: `file:///p${size}.jpg`, size });
+      }
+      const chatId = chatIdOf(raw);
+
+      for (const size of [3000, 1000, 2000]) {
+        await liveCopy(db, chatId, serverCopy(`rcs-${size}`, size));
+      }
+
+      expect(count(raw, 'SELECT COUNT(*) c FROM messages')).toBe(3);
+      for (const size of [1000, 2000, 3000]) {
+        expect(fileOf(raw, `rcs-${size}`)).toBe(`file:///p${size}.jpg`);
+        expect(
+          count(
+            raw,
+            `SELECT COUNT(*) c FROM attachments a JOIN messages m ON m.id = a.message_id
+              WHERE m.guid = 'rcs-${size}'`,
+          ),
+        ).toBe(1);
+      }
+    });
+
+    it('never merges while a picture of unknown size was sent in the same window', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const sized = await sendModernPicture(db, 1000);
+      // A pick whose size could not be read is recorded as 0; it may be this very picture.
+      const unsized = await sendModernPicture(db, 1001, {
+        ...IMG,
+        uri: 'file:///tray.jpg',
+        size: 0,
+      });
+      const chatId = chatIdOf(raw);
+
+      await liveCopy(db, chatId, serverCopy('rcs-99'));
+
+      expect(messageCount(raw, sized)).toBe(1);
+      expect(messageCount(raw, unsized)).toBe(1);
+      expect(messageCount(raw, 'rcs-99')).toBe(1);
+    });
+
+    it('never merges a copy whose file size differs', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const tempGuid = await sendModernPicture(db);
+      const chatId = chatIdOf(raw);
+
+      await liveCopy(db, chatId, serverCopy('rcs-live', IMG.size + 1));
+      await syncedCopy(db, chatId, serverCopy('rcs-synced', IMG.size + 1));
+
+      expect(messageCount(raw, tempGuid)).toBe(1);
+      expect(messageCount(raw, 'rcs-live')).toBe(1);
+      expect(messageCount(raw, 'rcs-synced')).toBe(1);
+    });
+
+    it('never merges a copy into another picture when its own send is not acknowledged', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const acknowledged = await sendModernPicture(db, 1000);
+      const failed = await sendFailedModernPicture(db, 1001, {
+        ...IMG,
+        uri: 'file:///other.jpg',
+        size: 2000,
+      });
+      const chatId = chatIdOf(raw);
+
+      await liveCopy(db, chatId, serverCopy('rcs-other', 2000));
+
+      expect(messageCount(raw, acknowledged)).toBe(1);
+      expect(messageCount(raw, failed)).toBe(1);
+      expect(messageCount(raw, 'rcs-other')).toBe(1);
+      expect(fileOf(raw, acknowledged)).toBe('file:///photo.jpg');
+    });
+
+    it('never guesses when a send that is not acknowledged has the same picture', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const acknowledged = await sendModernPicture(db, 1000);
+      const failed = await sendFailedModernPicture(db, 1001);
+      const chatId = chatIdOf(raw);
+
+      await liveCopy(db, chatId, serverCopy('rcs-99'));
+
+      expect(messageCount(raw, acknowledged)).toBe(1);
+      expect(messageCount(raw, failed)).toBe(1);
+      expect(messageCount(raw, 'rcs-99')).toBe(1);
+    });
+
+    it('never merges a copy from outside the time window', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const tempGuid = await sendModernPicture(db, 10_000_000);
+      const chatId = chatIdOf(raw);
+      const older = (guid: string) =>
+        Message.parse({ ...serverCopy(guid), dateCreated: 10_000_000 - 6 * 60_000 });
+
+      await liveCopy(db, chatId, older('rcs-early-live'));
+      await syncedCopy(db, chatId, older('rcs-early-synced'));
+
+      expect(messageCount(raw, tempGuid)).toBe(1);
+      expect(messageCount(raw, 'rcs-early-live')).toBe(1);
+      expect(messageCount(raw, 'rcs-early-synced')).toBe(1);
+    });
+
+    it('never merges when the file sizes are unknown', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const tempGuid = await sendModernPicture(db, 1000, { ...IMG, size: 0 });
+      const chatId = chatIdOf(raw);
+      const unsized = Message.parse({
+        guid: 'rcs-unsized',
+        isFromMe: true,
+        dateCreated: 1000,
+        attachments: [{ guid: 'rcs-unsized-media', mimeType: 'image/jpeg' }],
+      });
+
+      await liveCopy(db, chatId, unsized);
+
+      expect(messageCount(raw, tempGuid)).toBe(1);
+      expect(messageCount(raw, 'rcs-unsized')).toBe(1);
+    });
+
+    it('never merges a copy whose caption differs', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const tempGuid = await sendModernPicture(db, 1000, IMG, 'first caption');
+      const chatId = chatIdOf(raw);
+
+      await liveCopy(db, chatId, serverCopy('rcs-other-caption', IMG.size, 'second caption'));
+
+      expect(messageCount(raw, tempGuid)).toBe(1);
+      expect(messageCount(raw, 'rcs-other-caption')).toBe(1);
+    });
+
+    it('never guesses between two acknowledged sends that look the same', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      await sendModernPicture(db, 1000);
+      await sendModernPicture(db, 1001);
+      const chatId = chatIdOf(raw);
+
+      await syncedCopy(db, chatId, serverCopy('rcs-99'));
+
+      // Both sends stay as they were; the copy is stored on its own (the old behaviour).
+      expect(count(raw, "SELECT COUNT(*) c FROM messages WHERE guid LIKE 'temp-%'")).toBe(2);
+      expect(messageCount(raw, 'rcs-99')).toBe(1);
+    });
+
+    it('never merges a text-only copy into a captioned picture', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const tempGuid = await sendModernPicture(db, 1000, IMG, 'look at this');
+      const chatId = chatIdOf(raw);
+
+      await liveCopy(
+        db,
+        chatId,
+        Message.parse({
+          guid: 'rcs-caption',
+          isFromMe: true,
+          dateCreated: 1000,
+          text: 'look at this',
+          attachments: [],
+        }),
+      );
+
+      expect(messageCount(raw, tempGuid)).toBe(1);
+      expect(fileOf(raw, tempGuid)).toBe('file:///photo.jpg');
+      expect(messageCount(raw, 'rcs-caption')).toBe(1);
+    });
+
+    it('never merges into a send the user deleted', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const tempGuid = await sendModernPicture(db);
+      const chatId = chatIdOf(raw);
+      await markMessageDeleted(db, tempGuid, 5000);
+
+      await liveCopy(db, chatId, serverCopy('rcs-99'));
+
+      expect(one(raw, `SELECT date_deleted d FROM messages WHERE guid = '${tempGuid}'`)).toEqual({
+        d: 5000,
+      });
+      expect(messageCount(raw, 'rcs-99')).toBe(1);
+    });
+
+    it('never merges a copy that is already recorded as deleted', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const tempGuid = await sendModernPicture(db);
+      const chatId = chatIdOf(raw);
+      await markMessageDeleted(db, 'rcs-99', 5000, undefined, RCS_CHAT_GUID);
+
+      await liveCopy(db, chatId, serverCopy('rcs-99'));
+
+      expect(
+        one(raw, `SELECT date_deleted d, send_state s FROM messages WHERE guid = '${tempGuid}'`),
+      ).toEqual({ d: null, s: 'sent' });
+      expect(fileOf(raw, tempGuid)).toBe('file:///photo.jpg');
+    });
+
+    it('leaves a copy that is already stored alone', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db, RCS_CHAT_GUID);
+      const tempGuid = await sendModernPicture(db);
+      const chatId = chatIdOf(raw);
+      const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+      // An earlier version stored the copy beside the send; later syncs keep both as they are.
+      await upsertMessages(db, [serverCopy('rcs-99')], () => chatId, handles);
+
+      await syncedCopy(db, chatId, serverCopy('rcs-99'));
+      await liveCopy(db, chatId, serverCopy('rcs-99'));
+
+      expect(messageCount(raw, tempGuid)).toBe(1);
+      expect(messageCount(raw, 'rcs-99')).toBe(1);
+      expect(fileOf(raw, tempGuid)).toBe('file:///photo.jpg');
+    });
   });
 
   it('sync reconcile does NOT hijack a fresh optimistic send with an OLD identical re-synced picture', async () => {

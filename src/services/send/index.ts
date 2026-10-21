@@ -95,7 +95,7 @@ import {
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
 import { runAccountOperation } from '../realtime/accountOperation';
-import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
+import { expoAttachmentUploader, expoFileExists, expoFileSize } from './attachmentUpload';
 import { createRcsPacedUploader, createRcsShareUploader } from './rcsUploadPacing';
 import { uploadRegistry } from './uploadControl';
 import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
@@ -347,6 +347,25 @@ export {
 } from './sendEffectService';
 export { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
 
+/**
+ * Some pickers report no size: gallery-tray picks in an RCS chat, RCS voice notes, and now and then
+ * a camera or document pick. Measure such a file before sending. The RCS duplicate merge matches
+ * the server's copy by byte size, and upload pacing and cache accounting use it too. A file that
+ * cannot be read keeps size 0, as before. Pasted and shared files are sized by their own ownership
+ * step, so they are left alone.
+ */
+async function withMeasuredSize(
+  image: PickedImage,
+  lease: RealtimeDeliveryLease,
+): Promise<PickedImage> {
+  if (image.origin === 'paste' || image.origin === 'share') return image;
+  if (Number.isSafeInteger(image.size) && image.size > 0) return image;
+  const size = await expoFileSize(image.uri);
+  // The account may have changed while the file was measured; send nothing for an old account.
+  if (!lease.isCurrent()) throw new DbCommitGuardRejectedError();
+  return size === null ? image : { ...image, size };
+}
+
 /** UI-facing image send: bound to the composition-root DB + HttpClient. */
 export function sendImage(
   args: {
@@ -371,12 +390,13 @@ export function sendImage(
   );
   return runUiAccountOperation(
     accountLease,
-    () => {
+    async () => {
+      const image = await withMeasuredSize(snapshot.image, accountLease);
       const db = getDatabase();
       return sendImageMessage(
         db,
         accountHttp(accountLease),
-        snapshot,
+        { ...snapshot, image },
         rcsPacedAttachmentUploader,
         Date.now(),
         () => accountLease.isCurrent(),
@@ -466,11 +486,11 @@ export function sendTextAttachment(
   );
   return runUiAccountOperation(
     accountLease,
-    () =>
+    async () =>
       sendImageMessage(
         getDatabase(),
         accountHttp(accountLease),
-        snapshot,
+        { ...snapshot, image: await withMeasuredSize(snapshot.image, accountLease) },
         rcsPacedAttachmentUploader,
         Date.now(),
         () => accountLease.isCurrent(),
@@ -520,9 +540,12 @@ export function sendImages(
   return runUiAccountOperation(
     accountLease,
     async () => {
+      const images = await Promise.all(
+        snapshot.images.map((image) => withMeasuredSize(image, accountLease)),
+      );
       const db = getDatabase();
       const settled = await Promise.allSettled(
-        snapshot.images.map(async (image) => {
+        images.map(async (image) => {
           let queued = false;
           try {
             return await sendImageMessage(

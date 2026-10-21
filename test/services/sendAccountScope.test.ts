@@ -76,6 +76,7 @@ jest.mock('@/services/contacts/contactsService', () => ({ pickContact: jest.fn()
 jest.mock('@/services/send/attachmentUpload', () => ({
   expoAttachmentUploader: jest.fn(),
   expoFileExists: jest.fn(async () => true),
+  expoFileSize: jest.fn(async () => null),
 }));
 jest.mock('@/services/send/uploadControl', () => ({
   // The real gate helpers (pure); send/index.ts builds the paced RCS uploader at module load.
@@ -98,6 +99,7 @@ import {
   sendContactCard,
   sendImage,
   sendImages,
+  sendTextAttachment,
   unsend,
 } from '@/services/send';
 // eslint-disable-next-line import/first
@@ -112,6 +114,8 @@ import { acquireCurrentLocation } from '@/services/location/currentLocation';
 import { sendTextMessage } from '@/services/send/sendService';
 // eslint-disable-next-line import/first
 import { sendImageMessage } from '@/services/send/sendAttachmentService';
+// eslint-disable-next-line import/first
+import { expoFileSize } from '@/services/send/attachmentUpload';
 // eslint-disable-next-line import/first
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 // eslint-disable-next-line import/first
@@ -200,6 +204,7 @@ const mockSendContact = sendContactMessage as jest.Mock;
 const mockSendLocation = sendCurrentLocationMessage as jest.Mock;
 const mockAcquireLocation = acquireCurrentLocation as jest.Mock;
 const mockSendImage = sendImageMessage as jest.Mock;
+const mockFileSize = expoFileSize as jest.Mock;
 const mockSendReaction = sendReactionMessage as jest.Mock;
 const mockSendEdit = sendEdit as jest.Mock;
 const mockSendUnsend = sendUnsend as jest.Mock;
@@ -1240,5 +1245,97 @@ describe('recoverOutgoing', () => {
     const [, client, , , lease] = mockRunOutgoingQueue.mock.calls[0] ?? [];
     expect(client).toEqual({ account: 'A' });
     expect(mockAccountHttpLeases).toEqual([lease]);
+  });
+});
+
+describe('picked files whose size the picker did not report', () => {
+  // clearAllMocks keeps queued one-time values; a value one test left unused must not leak.
+  beforeEach(() => {
+    mockFileSize.mockReset();
+    mockFileSize.mockResolvedValue(null);
+  });
+
+  const picked = (name: string, size: number, origin?: 'paste' | 'share') => ({
+    uri: `file:///${name}`,
+    name,
+    mimeType: 'image/jpeg',
+    size,
+    ...(origin ? { origin } : {}),
+  });
+  const sentImage = (call: number) =>
+    (mockSendImage.mock.calls[call]?.[2] as { image: { uri: string; size: number } }).image;
+
+  it('measures the file before sending, so the server copy can be matched by size', async () => {
+    mockFileSize.mockResolvedValueOnce(4321);
+    await expect(
+      sendImage({ chatGuid: rcsChatGuid('tray-chat'), image: picked('tray.jpg', 0) }),
+    ).resolves.toEqual({ tempGuid: 'temp-image' });
+
+    expect(mockFileSize).toHaveBeenCalledWith('file:///tray.jpg');
+    expect(sentImage(0)).toMatchObject({ uri: 'file:///tray.jpg', size: 4321 });
+  });
+
+  it('keeps a reported size, and an unreadable file keeps size 0 as before', async () => {
+    await sendImage({ chatGuid: rcsChatGuid('sized-chat'), image: picked('sized.jpg', 10) });
+    expect(mockFileSize).not.toHaveBeenCalled();
+    expect(sentImage(0).size).toBe(10);
+
+    mockFileSize.mockResolvedValueOnce(null);
+    await sendImage({ chatGuid: rcsChatGuid('unreadable-chat'), image: picked('gone.jpg', 0) });
+    expect(sentImage(1).size).toBe(0);
+  });
+
+  it('measures captioned pictures and every unsized file of a multi-file send, in order', async () => {
+    mockFileSize.mockImplementation(async (uri: string) => (uri.endsWith('a.jpg') ? 11 : 22));
+    try {
+      await sendTextAttachment({
+        chatGuid: rcsChatGuid('caption-chat'),
+        image: picked('a.jpg', 0),
+        text: 'look',
+        service: 'RCS',
+      });
+      await sendImages({
+        chatGuid: rcsChatGuid('batch-chat'),
+        images: [picked('a.jpg', 0), picked('b.jpg', 0), picked('c.jpg', 33)],
+      });
+    } finally {
+      mockFileSize.mockResolvedValue(null);
+    }
+
+    expect(sentImage(0)).toMatchObject({ uri: 'file:///a.jpg', size: 11 });
+    expect([1, 2, 3].map((call) => [sentImage(call).uri, sentImage(call).size])).toEqual([
+      ['file:///a.jpg', 11],
+      ['file:///b.jpg', 22],
+      ['file:///c.jpg', 33],
+    ]);
+  });
+
+  it('sends nothing when the account changes while the file is measured', async () => {
+    let current = true;
+    const lease = {
+      generation: captureRealtimeDeliveryLease().generation,
+      isCurrent: () => current,
+    };
+    mockFileSize.mockImplementationOnce(async () => {
+      current = false;
+      return 4321;
+    });
+
+    await expect(
+      sendImage({ chatGuid: rcsChatGuid('switch-chat'), image: picked('switch.jpg', 0) }, lease),
+    ).resolves.toBeNull();
+    expect(mockSendImage).not.toHaveBeenCalled();
+  });
+
+  it('never measures a pasted or shared file, which its own ownership step sizes', async () => {
+    await sendImage({
+      chatGuid: rcsChatGuid('paste-chat'),
+      image: picked('pasted.jpg', 0, 'paste'),
+    });
+    await sendImages({
+      chatGuid: rcsChatGuid('share-chat'),
+      images: [picked('shared.jpg', 0, 'share')],
+    });
+    expect(mockFileSize).not.toHaveBeenCalled();
   });
 });

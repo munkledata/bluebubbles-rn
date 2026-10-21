@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { HttpClient } from '@core/api/http';
-import { Chat } from '@core/models';
+import { Chat, Message } from '@core/models';
 import type { EventDeliveryContext } from '@core/realtime';
 import {
   applyServerSendErrorWithinTransaction,
@@ -12,6 +12,7 @@ import {
   insertOutgoingText,
   MESSAGE_GUID_ALIAS_LIMIT,
   OUTGOING_MAX_ATTEMPTS,
+  reconcileEchoByContent,
   reconcileOutgoingAttachmentByContent,
   reconcileOutgoingError,
   recordMessageGuidAliasWithinTransaction,
@@ -1396,6 +1397,476 @@ describe('RCS active send-attempt ownership', () => {
           ownerGeneration: 3,
         }),
       });
+    } finally {
+      raw.close();
+    }
+  });
+
+  // Owner phone session 2026-10-21: a modern send whose server copy carries no attempt ids (Google
+  // did not echo the server's temp id) was stored as a second bubble. Only copies with files merge.
+  async function sendAcknowledgedPicture(
+    db: AppDatabase,
+    tempGuid: string,
+    now: number,
+    totalBytes = 1_000,
+  ): Promise<number> {
+    const inserted = await insertOutgoingAttachment(db, {
+      tempGuid,
+      attachmentGuid: `${tempGuid}-att`,
+      chatGuid: CHAT_GUID,
+      localPath: `file:///${tempGuid}.jpg`,
+      mimeType: 'image/jpeg',
+      transferName: `${tempGuid}.jpg`,
+      totalBytes,
+      now,
+      attemptAware: true,
+    });
+    const generation = inserted.attemptOwnerToken!.generation;
+    await reconcileSendOutcome(
+      db,
+      tempGuid,
+      { guid: tempGuid, attemptGuid: `attempt-${tempGuid}`, clientAttemptGeneration: generation },
+      now + 100,
+      undefined,
+      {
+        attemptOwnerToken: inserted.attemptOwnerToken!,
+        expectedChatGuid: CHAT_GUID,
+        failureNoticeMode: 'suppressed',
+      },
+    );
+    return generation;
+  }
+
+  type CopyFields = Parameters<typeof reconcileEchoByContent>[1];
+  const pictureCopy = (guid: string, dateCreated: number | null, totalBytes = 1_000) => ({
+    guid,
+    isFromMe: true,
+    text: null,
+    dateCreated,
+    attachments: [{ totalBytes }],
+  });
+  const liveMerge = (db: AppDatabase, copy: CopyFields, chatId: number) =>
+    withDbTransaction(db, (context) => reconcileEchoByContent(context, copy, chatId));
+
+  it('merges an acknowledged modern picture with its live copy that carries no ids', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-modern-picture';
+      const generation = await sendAcknowledgedPicture(db, tempGuid, 50_000);
+      expect(ownerState(raw, tempGuid)).toMatchObject({ pending: 0, sendState: 'sent' });
+
+      await expect(liveMerge(db, pictureCopy('rcs-picture-copy', 50_200), chatId)).resolves.toBe(
+        'reconciled',
+      );
+      expect(ownerState(raw, tempGuid)).toBeUndefined();
+      expect(ownerState(raw, 'rcs-picture-copy')).toMatchObject({
+        pending: 0,
+        activeAttemptGuid: `attempt-${tempGuid}`,
+      });
+
+      // A later frame that does carry the attempt ids finds the merged message.
+      await expect(
+        liveMerge(
+          db,
+          {
+            ...pictureCopy('rcs-picture-copy', 50_200),
+            tempGuid,
+            attemptGuid: `attempt-${tempGuid}`,
+            clientAttemptGeneration: generation,
+          },
+          chatId,
+        ),
+      ).resolves.toBe('already-reconciled');
+      expect(ownerState(raw, 'rcs-picture-copy')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('merges a live copy through the durable event path and marks the event applied', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-modern-durable';
+      await sendAcknowledgedPicture(db, tempGuid, 70_000);
+      const copyGuid = `rcs-g1.${RCS_PROVIDER_EPOCH}.Yg`;
+      const markDbAppliedWithinTransaction = jest.fn(async () => undefined);
+      const context: EventDeliveryContext = {
+        generation: 1,
+        isCurrent: () => true,
+        durableEvent: { dbAppliedAt: null, markDbAppliedWithinTransaction },
+      };
+      const sink = new DbEventSink(db, undefined, undefined, undefined, () => RCS_PROVIDER_INFO);
+
+      await expect(
+        sink.onEvent(
+          {
+            type: 'new-message',
+            message: Message.parse({
+              guid: copyGuid,
+              providerEpoch: RCS_PROVIDER_EPOCH,
+              chatGuid: CHAT_GUID,
+              isFromMe: true,
+              text: null,
+              dateCreated: 70_200,
+              attachments: [
+                {
+                  guid: `rcs-media-g1.${RCS_PROVIDER_EPOCH}.Yg.Yw`,
+                  providerEpoch: RCS_PROVIDER_EPOCH,
+                  mimeType: 'image/jpeg',
+                  totalBytes: 1_000,
+                },
+              ],
+              chats: [{ guid: CHAT_GUID, providerEpoch: RCS_PROVIDER_EPOCH }],
+            }),
+          },
+          'socket',
+          context,
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(markDbAppliedWithinTransaction).toHaveBeenCalledTimes(1);
+      expect(ownerState(raw, tempGuid)).toBeUndefined();
+      expect(ownerState(raw, copyGuid)).toMatchObject({
+        sendState: 'sent',
+        activeAttemptGuid: `attempt-${tempGuid}`,
+      });
+      expect(
+        raw.prepare('SELECT COUNT(*) AS c FROM messages WHERE chat_id = ?').get(chatId),
+      ).toEqual({ c: 1 });
+      expect(
+        raw
+          .prepare(
+            `SELECT a.local_path AS localPath FROM attachments a JOIN messages m ON m.id = a.message_id
+              WHERE m.guid = ?`,
+          )
+          .all(copyGuid),
+      ).toEqual([{ localPath: `file:///${tempGuid}.jpg` }]);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges a copy without files, on either path, since identical texts are common', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const inserted = await insertOutgoingText(db, {
+        tempGuid: 'temp-modern-text',
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'ok',
+        now: 60_000,
+        attemptAware: true,
+      });
+      await reconcileSendOutcome(
+        db,
+        'temp-modern-text',
+        {
+          guid: 'temp-modern-text',
+          attemptGuid: 'attempt-text',
+          clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+        },
+        60_100,
+        undefined,
+        {
+          attemptOwnerToken: inserted.attemptOwnerToken!,
+          expectedChatGuid: CHAT_GUID,
+          failureNoticeMode: 'suppressed',
+        },
+      );
+      const copy = {
+        guid: 'rcs-text',
+        isFromMe: true,
+        text: 'ok',
+        dateCreated: 60_200,
+        attachments: [],
+      };
+
+      await expect(liveMerge(db, copy, chatId)).resolves.toBeNull();
+      await expect(reconcileOutgoingAttachmentByContent(db, copy, chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-text')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges a modern picture its server has not acknowledged yet', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await insertOutgoingAttachment(db, {
+        tempGuid: 'temp-modern-pending',
+        attachmentGuid: 'temp-modern-pending-att',
+        chatGuid: CHAT_GUID,
+        localPath: 'file:///pending.jpg',
+        mimeType: 'image/jpeg',
+        transferName: 'pending.jpg',
+        totalBytes: 1_000,
+        now: 60_000,
+        attemptAware: true,
+      });
+
+      await expect(liveMerge(db, pictureCopy('rcs-lookalike', 60_100), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-pending')).toMatchObject({ pending: 1 });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges when a send that is not acknowledged yet has the same picture', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-acked', 80_000);
+      await insertOutgoingAttachment(db, {
+        tempGuid: 'temp-modern-unacked',
+        attachmentGuid: 'temp-modern-unacked-att',
+        chatGuid: CHAT_GUID,
+        localPath: 'file:///unacked.jpg',
+        mimeType: 'image/jpeg',
+        transferName: 'unacked.jpg',
+        totalBytes: 1_000,
+        now: 80_050,
+        attemptAware: true,
+      });
+
+      await expect(
+        liveMerge(db, pictureCopy('rcs-same-picture', 80_200), chatId),
+      ).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-acked')).toMatchObject({ sendState: 'sent' });
+      expect(ownerState(raw, 'temp-modern-unacked')).toMatchObject({ pending: 1 });
+      expect(ownerState(raw, 'rcs-same-picture')).toBeUndefined();
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges when another send in the window has a file of unknown size', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-sized', 85_000);
+      await sendAcknowledgedPicture(db, 'temp-modern-unsized', 85_010, 0);
+
+      await expect(liveMerge(db, pictureCopy('rcs-sized', 85_200), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-sized')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges a copy whose list of files is unknown or that has no date', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-unknown', 90_000);
+
+      await expect(
+        liveMerge(
+          db,
+          { guid: 'rcs-no-file-list', isFromMe: true, text: null, dateCreated: 90_200 },
+          chatId,
+        ),
+      ).resolves.toBeNull();
+      await expect(liveMerge(db, pictureCopy('rcs-no-date', null), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-unknown')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges a copy dated well before the send or more than five minutes after it', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-timed', 1_000_000);
+
+      // Within the look-alike window, but a copy cannot come from a send made two minutes later.
+      await expect(
+        liveMerge(db, pictureCopy('rcs-too-early', 1_000_000 - 2 * 60_000), chatId),
+      ).resolves.toBeNull();
+      await expect(
+        liveMerge(db, pictureCopy('rcs-too-late', 1_000_000 + 6 * 60_000), chatId),
+      ).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-timed')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it("never merges a copy dated inside a deleted chat's history", async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await deleteChatLocal(db, CHAT_GUID, 300_000);
+      // Sent after the delete, so it shows; Google's clock puts its copy just before the delete.
+      await sendAcknowledgedPicture(db, 'temp-after-delete', 300_010);
+      expect(ownerState(raw, 'temp-after-delete')).toMatchObject({ sendState: 'sent' });
+
+      await expect(liveMerge(db, pictureCopy('rcs-skewed', 299_990), chatId)).resolves.toBeNull();
+      expect(
+        raw
+          .prepare('SELECT date_deleted AS d FROM messages WHERE guid = ?')
+          .get('temp-after-delete'),
+      ).toEqual({ d: null });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges while a send with the same text has no files left', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-with-file', 200_000);
+      // A send whose files were purged (a late ack can recreate one) may be this copy's own send.
+      await insertOutgoingText(db, {
+        tempGuid: 'temp-fileless',
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'placeholder',
+        now: 200_050,
+        attemptAware: true,
+      });
+      raw.prepare('UPDATE messages SET text = NULL WHERE guid = ?').run('temp-fileless');
+
+      await expect(liveMerge(db, pictureCopy('rcs-fileless', 200_200), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-with-file')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges a copy dated just after a chat delete, but does long after it', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await deleteChatLocal(db, CHAT_GUID, 400_000);
+      // Its copy may belong to a send the delete purged, which can no longer block a look-alike.
+      await sendAcknowledgedPicture(db, 'temp-just-after', 400_100);
+      await expect(
+        liveMerge(db, pictureCopy('rcs-just-after', 400_200), chatId),
+      ).resolves.toBeNull();
+
+      const later = 400_000 + 20 * 60_000;
+      await sendAcknowledgedPicture(db, 'temp-long-after', later, 2_000);
+      await expect(
+        liveMerge(db, pictureCopy('rcs-long-after', later + 200, 2_000), chatId),
+      ).resolves.toBe('reconciled');
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges into a send the server reported as failed', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-failed', 100_000);
+      // The server acknowledged the attempt, then reported it failed.
+      raw
+        .prepare("UPDATE messages SET send_state = 'error', error = 502 WHERE guid = ?")
+        .run('temp-modern-failed');
+
+      await expect(liveMerge(db, pictureCopy('rcs-failed', 100_200), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-failed')).toMatchObject({ sendState: 'error' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges into a hidden send, even one without a deletion record', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-hidden', 110_000);
+      // A chat-wide delete hides messages this way, with no per-message record.
+      raw
+        .prepare('UPDATE messages SET date_deleted = 110150 WHERE guid = ?')
+        .run('temp-modern-hidden');
+
+      await expect(liveMerge(db, pictureCopy('rcs-hidden', 110_200), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-hidden')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges into a send that has a deletion record', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-recorded', 115_000);
+      // A deletion record the row itself does not show yet; merging would carry it to the copy.
+      raw
+        .prepare(
+          'INSERT INTO message_deletion_ledger (guid, date_deleted, chat_guid) VALUES (?, ?, ?)',
+        )
+        .run('temp-modern-recorded', 115100, CHAT_GUID);
+
+      await expect(liveMerge(db, pictureCopy('rcs-recorded', 115_200), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-recorded')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges a copy that another send already claimed', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-mine', 120_000);
+      await withDbTransaction(db, (context) =>
+        recordMessageGuidAliasWithinTransaction(
+          context,
+          'temp-other-send',
+          'rcs-claimed',
+          CHAT_GUID,
+        ),
+      );
+
+      await expect(liveMerge(db, pictureCopy('rcs-claimed', 120_200), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-mine')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges a copy the server already reported a change for', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-stated', 130_000);
+      raw
+        .prepare(
+          `INSERT INTO message_server_states
+             (guid, chat_guid, provider_epoch, ledger_epoch, sequence, kind, date_deleted)
+           VALUES (?, ?, 'provider', 'ledger', '1', 'deleted', 130100)`,
+        )
+        .run('rcs-stated', CHAT_GUID);
+
+      await expect(liveMerge(db, pictureCopy('rcs-stated', 130_200), chatId)).resolves.toBeNull();
+      expect(ownerState(raw, 'temp-modern-stated')).toMatchObject({ sendState: 'sent' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never merges a reaction or reply copy into a plain send', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      await sendAcknowledgedPicture(db, 'temp-modern-plain', 140_000);
+
+      for (const copy of [
+        { ...pictureCopy('rcs-reaction', 140_200), associatedMessageType: 'love' },
+        { ...pictureCopy('rcs-reply', 140_200), threadOriginatorGuid: 'rcs-parent' },
+      ]) {
+        await expect(liveMerge(db, copy, chatId)).resolves.toBeNull();
+      }
+      expect(ownerState(raw, 'temp-modern-plain')).toMatchObject({ sendState: 'sent' });
     } finally {
       raw.close();
     }

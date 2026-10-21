@@ -58,6 +58,21 @@ export const expoFileExists = async (uri: string): Promise<boolean> => {
 };
 
 /**
+ * The file's size on disk, or null when it cannot be read. Fills in a size the picker did not
+ * report before a send (see `withMeasuredSize` in send/index.ts). Only file:// paths: for a
+ * content:// uri the reported size is an estimate.
+ */
+export const expoFileSize = async (uri: string): Promise<number | null> => {
+  if (!uri.startsWith('file://')) return null;
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists && Number.isSafeInteger(info.size) && info.size > 0 ? info.size : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Detach the task's native progress listener.
  *
  * `UploadTask.uploadAsync()` calls `removeSubscription()` only on its SUCCESS path, so a rejected

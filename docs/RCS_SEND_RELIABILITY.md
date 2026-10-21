@@ -102,6 +102,26 @@ failure needs its own path back into the ladder:
   identifies exactly one active owner; ambiguity fails closed. Partial/malformed tuples are marked
   invalid, never content-matched, and receive a distinct durable intake identity so they do not
   suppress a later corrected tuple.
+- **A copy with no ids at all** (owner phone session 2026-10-21, Play 0.1.62). Google often does not
+  echo the server's `tmpID`, so the server's copy of a modern send arrives without the tuple and was
+  stored as a second bubble. `reconcileEchoByContent` (live) and
+  `reconcileOutgoingAttachmentByContent` (sync) now reconcile such a copy exactly with the ids of
+  its one optimistic row, and otherwise store it on its own as before. Only a plain copy that lists
+  files is matched, since file sizes tell sends apart and identical short texts are common. Among
+  all unsent rows in the chat (any state, deleted or not) with the same text, created within 5
+  minutes of the copy, none may have a file of unknown size or no files at all, and exactly one may
+  have files of the same sizes. That one must be a visible send the server already acknowledged,
+  made no later than the copy (1 minute clock allowance), and the copy must not be dated inside the
+  chat's deleted history or the 5 minutes after it. Nothing may be recorded about the copy's guid
+  (stored row, deletion record, server state, alias), and the send may have no deletion record.
+  Pickers that report no size (gallery-tray picks in an RCS chat, RCS voice notes) are measured
+  before sending (`withMeasuredSize` in `src/services/send/index.ts`, `file://` paths only).
+  Duplicates stored before this change are left alone. Known gaps, all stored as a second bubble
+  rather than merged: a copy that arrives before the HTTP acknowledgement or more than 5 minutes
+  after the send (a slow upload of a large video, a queue retry); a captioned picture that Google
+  returns as two messages, if it does. The same file sent from the phone itself within those
+  minutes could be taken for Gator's send, which shows one of the two bubbles. The server-side
+  `tmpID` fix addresses these.
 - **Cycle cap:** each attachment ack deletes the queue row, so a permanently failing send could loop
   ack → async-fail → rebuild forever. An in-memory bounded counter caps safe attachment
   re-enqueues at **2 cycles per tempGuid per app session**; after that the bubble remains errored.
@@ -184,20 +204,21 @@ retryable: true }` (pre-flight `rcsReady` on every RCS send path) — the app's 
 
 ## Failure-mode matrix (what the user sees)
 
-| Failure                                            | Before                                                  | After                                                                                                |
-| -------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Transport 5xx on a picture upload                  | Error bubble forever (queue skipped attachments)        | Auto-retried ≤5× with backoff; converges to sent or rests as error + manual retry                    |
-| Expired Google token during media upload           | 502, never retried (sidecar blind to media 401s)        | Sidecar refreshes token + retries in-place; send succeeds                                            |
-| Bridge long-poll dead, token valid                 | 30s hang → 502, not retried                             | Pre-flight reconnect; fast self-heal                                                                 |
-| Sidecar process restarting                         | Opaque ECONNREFUSED 500                                 | Fast 503 `bridge_unavailable` (retryable)                                                            |
-| Failed client-side but actually delivered          | Duplicate bubble + retry ladder kept firing (dup sends) | Echo promotes the errored bubble; ladder stops                                                       |
-| Queue retry succeeded (RCS ack)                    | **Swallowed** → duplicate re-sends every drain          | Reconciles to sent, queue cleared                                                                    |
-| Async failure after the immediate ack              | Manual retry only                                       | Retained attachment auto-rebuilt when `retryable:true` (≤2 cycles); text/contact stay visibly failed |
-| Media > 100 MB                                     | Buffered, then opaque 400/500 deep in the chain         | Immediate 413, no retry burn                                                                         |
-| Ack lost but server delivered, app retries         | Potential duplicate picture                             | Durable reservation replays the same attempt; ambiguous records do not expire                        |
-| Failure A arrives after retry B owns the bubble    | Delayed A could relabel B                               | Durable generation + active attempt reject A as stale, even on its first arrival                     |
-| Partial/malformed modern correlation arrives first | Could fall through to heuristic matching or hide repair | Fails closed under its own durable identity; a corrected exact tuple can still run                   |
-| RCS send starts before server info is cached       | Unknown capability became a permanent legacy send       | Capability resolves before optimistic insert; known old servers alone use generation zero            |
+| Failure                                            | Before                                                  | After                                                                                                                              |
+| -------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Transport 5xx on a picture upload                  | Error bubble forever (queue skipped attachments)        | Auto-retried ≤5× with backoff; converges to sent or rests as error + manual retry                                                  |
+| Expired Google token during media upload           | 502, never retried (sidecar blind to media 401s)        | Sidecar refreshes token + retries in-place; send succeeds                                                                          |
+| Bridge long-poll dead, token valid                 | 30s hang → 502, not retried                             | Pre-flight reconnect; fast self-heal                                                                                               |
+| Sidecar process restarting                         | Opaque ECONNREFUSED 500                                 | Fast 503 `bridge_unavailable` (retryable)                                                                                          |
+| Failed client-side but actually delivered          | Duplicate bubble + retry ladder kept firing (dup sends) | Echo promotes the errored bubble; ladder stops                                                                                     |
+| Queue retry succeeded (RCS ack)                    | **Swallowed** → duplicate re-sends every drain          | Reconciles to sent, queue cleared                                                                                                  |
+| Async failure after the immediate ack              | Manual retry only                                       | Retained attachment auto-rebuilt when `retryable:true` (≤2 cycles); text/contact stay visibly failed                               |
+| Media > 100 MB                                     | Buffered, then opaque 400/500 deep in the chain         | Immediate 413, no retry burn                                                                                                       |
+| Ack lost but server delivered, app retries         | Potential duplicate picture                             | Durable reservation replays the same attempt; ambiguous records do not expire                                                      |
+| Failure A arrives after retry B owns the bubble    | Delayed A could relabel B                               | Durable generation + active attempt reject A as stale, even on its first arrival                                                   |
+| Partial/malformed modern correlation arrives first | Could fall through to heuristic matching or hide repair | Fails closed under its own durable identity; a corrected exact tuple can still run                                                 |
+| Server copy of a modern send arrives without ids   | Stored as a second bubble                               | A copy with files merges into its one acknowledged send when text, sizes and time match uniquely; otherwise stored alone as before |
+| RCS send starts before server info is cached       | Unknown capability became a permanent legacy send       | Capability resolves before optimistic insert; known old servers alone use generation zero                                          |
 
 ## Tests that lock this
 
@@ -208,12 +229,14 @@ retryable: true }` (pre-flight `rcsReady` on every RCS send path) — the app's 
   behavior
 - `test/db/rcsAttemptOwnership.test.ts` — retry compare-and-swap ownership, delayed A versus B,
   durable older-attempt replay under the current local token, partial modern ack rejection,
-  generation-zero legacy behavior, and alias-prune recovery by one exact active owner
+  generation-zero legacy behavior, alias-prune recovery by one exact active owner, and every
+  refusal rule of the no-ids fallback (including the durable event path)
 - `test/contract/wireContract.test.ts` and incoming-event codec/sink suites — complete tuple parsing,
   invalid-correlation marking, distinct durable identity, exact success/error reconciliation, and
   process-death-safe replay behavior
 - `test/services/echoReconcile.test.ts`, `test/services/sendAttachmentService.test.ts` —
-  errored-row promotion on the live + sync reconcile paths
+  errored-row promotion on the live + sync reconcile paths; the no-ids fallback for pictures
+  (multi-picture shares by size, deleted sends, look-alikes, stored duplicates left alone)
 - `test/services/dbEventSink.test.ts` — the `retryable` wire flag re-arms the queue
 - `test/services/sendRetryGuard.test.ts` — queue-less manual retry refuses without changing the bubble
 - Server: `packages/bbd/test/{attachmentUploadRoutes,rcsSender,idempotencyCache,rcsAttemptCorrelation,rcsCacheStore,rcsListener,rcsOutbound,execute}.test.ts`
@@ -252,6 +275,12 @@ the deterministic ownership transitions, not Google delivery or Android process 
    Then repeat with A's first-ever event held until after B settles; it must also be rejected as
    stale. Do not substitute a delivery-phase failure here: only a certified pre-dispatch retryable
    attachment failure retains enough evidence for safe automatic reconstruction.
+7. In an RCS chat, send a picture from the gallery tray without a caption, a camera photo, a tray
+   video, a HEIC photo, an RCS voice note and a three-picture share. Each must show exactly once after
+   the server's copies arrive, with no second bubble on reopening the chat. This also proves Google
+   reports the uploaded file sizes, which the no-ids fallback relies on; if the phone re-encodes a
+   HEIC photo or a video, that file just keeps its second bubble. Captioned pictures and plain texts
+   may still show twice until the server-side `tmpID` fix ships.
 
 ## Compatibility / rollout
 
