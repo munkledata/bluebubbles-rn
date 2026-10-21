@@ -108,7 +108,7 @@ const CLIENT_ERROR_TITLES: Record<number, string> = {
 
 /**
  * Map a caught send failure to the numeric error code stored on the failed message (rendered
- * via {@link errorTitleForCode} in the bubble). A server HTTP status is kept (→ "iMessage Error
+ * via {@link errorTitleForCode} in the bubble). A server HTTP status is kept (→ "<service> Error
  * (Code N)") EXCEPT the gateway / not-found cases, which map to their specific client titles; a
  * failure with NO HTTP response (fetch threw / aborted / DNS) is a connection error. Pass the
  * ApiError's `status` (or null for a non-HTTP throw). Previously every non-HTTP send failure
@@ -119,7 +119,7 @@ export function sendErrorCode(status: number | null): number {
     if (status === 502) return ClientErrorCode.badGateway;
     if (status === 504) return ClientErrorCode.gatewayTimeout;
     if (status === 404) return ClientErrorCode.notFound;
-    return status; // any other server status → "iMessage Error (Code N)"
+    return status; // any other server status → "<service> Error (Code N)"
   }
   return ClientErrorCode.connectionRefused; // no HTTP response = a network/connection failure
 }
@@ -127,14 +127,21 @@ export function sendErrorCode(status: number | null): number {
 /**
  * Map a numeric send-error code to a user-friendly title (Flutter
  * ErrorHelper.getErrorTitle). Client-side codes (≥10000) get their specific
- * label; positive server codes fall back to "iMessage Error (Code N)"; zero or
+ * label; positive server codes fall back to "<service> Error (Code N)", naming the
+ * chat's service ("RCS Error", "SMS Error"; iMessage when unknown); zero or
  * an unrecognised/negative code uses the generic "Message Failed to Send".
  */
-export function errorTitleForCode(code: number | null | undefined): string {
+export function errorTitleForCode(
+  code: number | null | undefined,
+  service?: 'iMessage' | 'SMS' | 'RCS' | null,
+): string {
   if (code == null) return 'Message Failed to Send';
   const client = CLIENT_ERROR_TITLES[code];
   if (client) return client;
-  if (code > 0) return `iMessage Error (Code ${code})`;
+  if (code > 0) {
+    const serviceName = service === 'RCS' || service === 'SMS' ? service : 'iMessage';
+    return `${serviceName} Error (Code ${code})`;
+  }
   return 'Message Failed to Send';
 }
 

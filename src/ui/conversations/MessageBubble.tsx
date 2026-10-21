@@ -616,7 +616,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           {bubble}
         </View>
         <Text style={[styles.errorTitle, { color: theme.color.destructive }]}>
-          {errorTitleForCode(msg.error)}
+          {errorTitleForCode(msg.error, chatService)}
         </Text>
       </View>
     );

@@ -113,6 +113,15 @@ describe('errorTitleForCode (2.4)', () => {
     expect(errorTitleForCode(404)).toBe('iMessage Error (Code 404)');
   });
 
+  // Owner phone session 2026-10-21: an RCS chat's failed upload read "iMessage Error (Code 503)".
+  it('names the chat service for server codes in RCS and SMS chats', () => {
+    expect(errorTitleForCode(503, 'RCS')).toBe('RCS Error (Code 503)');
+    expect(errorTitleForCode(503, 'SMS')).toBe('SMS Error (Code 503)');
+    expect(errorTitleForCode(503, 'iMessage')).toBe('iMessage Error (Code 503)');
+    expect(errorTitleForCode(503, null)).toBe('iMessage Error (Code 503)');
+    expect(errorTitleForCode(10008, 'RCS')).toBe('Manually Canceled');
+  });
+
   it('uses the generic title for zero / negative / null codes', () => {
     expect(errorTitleForCode(0)).toBe('Message Failed to Send');
     expect(errorTitleForCode(-1)).toBe('Message Failed to Send');

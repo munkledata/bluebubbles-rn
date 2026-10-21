@@ -96,6 +96,7 @@ import {
 } from '../realtime/deliveryCoordinator';
 import { runAccountOperation } from '../realtime/accountOperation';
 import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
+import { createRcsPacedUploader } from './rcsUploadPacing';
 import { uploadRegistry } from './uploadControl';
 import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
 import { createAttachmentCacheAccountScope } from '../download/attachmentCacheAccountScope';
@@ -302,9 +303,16 @@ async function runUiAccountOperation<T>(
   }
 }
 
-/** The production attachment I/O for the outgoing queue (expo uploader + on-disk check). */
+/**
+ * The production uploader for foreground sends and queue retries: RCS files take turns and ride out
+ * the server's one-at-a-time busy refusals ({@link createRcsPacedUploader}). `sendVoice` keeps the
+ * plain uploader: its body is a reviewed, fingerprinted function.
+ */
+const rcsPacedAttachmentUploader = createRcsPacedUploader(expoAttachmentUploader);
+
+/** The production attachment I/O for the outgoing queue (paced uploader + on-disk check). */
 export const outgoingQueueIO: OutgoingQueueIO = {
-  upload: expoAttachmentUploader,
+  upload: rcsPacedAttachmentUploader,
   fileExists: expoFileExists,
 };
 
@@ -369,7 +377,7 @@ export function sendImage(
         db,
         accountHttp(accountLease),
         snapshot,
-        expoAttachmentUploader,
+        rcsPacedAttachmentUploader,
         Date.now(),
         () => accountLease.isCurrent(),
         undefined,
@@ -463,7 +471,7 @@ export function sendTextAttachment(
         getDatabase(),
         accountHttp(accountLease),
         snapshot,
-        expoAttachmentUploader,
+        rcsPacedAttachmentUploader,
         Date.now(),
         () => accountLease.isCurrent(),
         undefined,
@@ -524,7 +532,7 @@ export function sendImages(
                 service: snapshot.service,
                 shareIntake: image.origin === 'share' ? snapshot.shareIntake : undefined,
               },
-              expoAttachmentUploader,
+              rcsPacedAttachmentUploader,
               Date.now(),
               () => accountLease.isCurrent(),
               undefined,

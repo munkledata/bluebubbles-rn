@@ -1137,6 +1137,19 @@ describe('MessageBubble send-error state', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
+  it('names RCS, not iMessage, in a failed bubble of an RCS chat', async () => {
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({ isFromMe: 1, error: 503, sendState: 'error' })}
+        chatService="RCS"
+        showTail
+      />,
+    );
+
+    expect(screen.getByText('RCS Error (Code 503)')).toBeTruthy();
+    expect(screen.queryByText(/iMessage Error/)).toBeNull();
+  });
+
   it('exposes a non-actionable delivery failure by name instead of punctuation', async () => {
     await renderWithTheme(
       <MessageBubble msg={makeMsg({ isFromMe: 1, error: 22, sendState: 'error' })} showTail />,

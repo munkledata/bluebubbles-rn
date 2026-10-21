@@ -78,6 +78,10 @@ jest.mock('@/services/send/attachmentUpload', () => ({
   expoFileExists: jest.fn(async () => true),
 }));
 jest.mock('@/services/send/uploadControl', () => ({
+  // The real gate helpers (pure); send/index.ts builds the paced RCS uploader at module load.
+  ...jest.requireActual<typeof import('@/services/send/uploadControl')>(
+    '@/services/send/uploadControl',
+  ),
   uploadRegistry: { cancel: jest.fn() },
 }));
 // eslint-disable-next-line import/first
