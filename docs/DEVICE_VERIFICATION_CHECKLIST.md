@@ -128,14 +128,29 @@ reviewed in-session and deleted; nothing private is recorded here.
 | M179 Recents and Secure Screen                 | Partial: dialog and screen-recording variants not tried                 |
 | Disconnect, paired credential, Mac unreachable | Partial: all but scanning a code while the message shows                |
 
-Found during the session, not fixed yet:
+Found during the session:
 
 - RCS sends sometimes show the sent picture or caption twice: the local copy is not merged with the
   server's copy, and the extra bubble stayed after leaving and reopening the chat. The recipient
-  received one copy.
+  received one copy. Fixed in source for pictures and files (a copy without attempt ids now merges
+  into its one acknowledged send; see `docs/RCS_SEND_RELIABILITY.md`); captions and plain texts
+  need the server's short `tmpID` change.
 - Sharing four documents at once into an RCS chat failed three of them with code 503 (server busy);
   Try Again delivered all four. The failure label read "iMessage Error (Code 503)" in an RCS chat.
-- Every cold start logs one `diagnostic.unclassified` warning.
+  Fixed in source: a share's files take turns and ride out busy refusals, and the label names the
+  chat's service. The server-side wait for the media slot is a separate server change.
+- Every cold start logs one `diagnostic.unclassified` warning. Not fixed yet.
+
+To check on a phone once a build with these fixes is installed:
+
+- [ ] Share four documents at once into an RCS chat: all send without a 503, in share order.
+- [ ] A failed RCS send reads "RCS Error (Code N)", not "iMessage Error".
+- [ ] The `docs/RCS_SEND_RELIABILITY.md` device check 7: a gallery-tray picture, a camera photo, a tray
+      video, a HEIC photo, an RCS voice note and a three-picture share each show exactly once.
+- [ ] Killed-app background retry of an RCS attachment: send a picture with the server unreachable,
+      `adb shell am kill` the app, restore the server, and confirm the background retry delivers it
+      once. Background retries of attachments failed every time before the whole-millisecond time
+      limit fix.
 
 ## (a) Exact-candidate and session preflight — do not rebuild
 
