@@ -515,7 +515,7 @@ export function sendImages(
     createAttachmentCacheAccountScope(accountLease),
     () => isAttachmentCacheRecoveryReady(accountLease),
   );
-  // One multi-file share: its RCS files take turns so they do not refuse each other at the server.
+  // One multi-file share: its RCS files take turns instead of uploading at once.
   const shareUploader = createRcsShareUploader(expoAttachmentUploader);
   return runUiAccountOperation(
     accountLease,

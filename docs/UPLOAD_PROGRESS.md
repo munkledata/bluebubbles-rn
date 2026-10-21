@@ -144,13 +144,17 @@ chat showed three "Code 503" failures. For RCS uploads (every upload without `se
 
 - The files of one multi-file share take turns (`createRcsShareUploader`, one per `sendImages`
   call), normally in share order (each file's own preflight can reorder a burst slightly), so they
-  do not refuse each other. Separate sends never wait for each other: a slow upload in one chat
-  cannot hold a photo in another, and the retry below absorbs their collisions.
+  are not uploaded at once. The server answers each file as soon as it is staged but stays busy until
+  it has relayed that file to Google, so the next file usually still meets one busy refusal, which the
+  retry below absorbs. Separate sends do not wait for each other at this layer (the app-wide upload
+  gate and the logical send queue may still order them), so a slow upload in one chat cannot hold
+  another.
 - A busy refusal is retried after 2, 4, 8 and 15 seconds (±20% jitter), counted from the file's
   turn. The server reads the whole file before it says busy, so each retry re-sends it: a file is
   not retried in place once the re-sent data would pass 20 MB. After that, after the fourth retry,
   or at the caller's `timeoutMs`, the busy error is reported as before and the ordinary retry path
-  takes over. Mid-size files in a share can therefore still show an occasional 503; the planned
+  takes over. Files over about 7 MB get too few retries to cover a long relay, so a share of
+  mid-size files can still show 503 failures that the ordinary retry then delivers; the planned
   server-side queue removes that. The server drops a refused upload's idempotency entry, so retrying
   under the same temp guid cannot duplicate it.
 - The temp guid stays registered in the upload registry while the file waits, so the retry drain

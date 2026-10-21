@@ -23,8 +23,11 @@ import {
  *   over. The server drops a refused upload's idempotency entry, so re-sending under the same temp
  *   guid cannot duplicate the message.
  * - The files of one multi-file share ({@link createRcsShareUploader}) take turns, normally in the
- *   order they reach it, so they do not refuse each other. Separate sends never wait for each other:
- *   a slow upload in one chat cannot hold a photo in another; the retry absorbs their collisions.
+ *   order they reach it, so they are not uploaded at once. The next file usually still meets one busy
+ *   refusal while the server relays the previous one to Google, which the retry absorbs; files over
+ *   about 7 MB get too few retries to cover a long relay and may still fall back to the ordinary
+ *   retry. Separate sends do not wait for each other at this layer (the app-wide upload gate and the
+ *   logical send queue may still order them), so a slow upload in one chat cannot hold another.
  * - The temp guid stays registered in the upload registry from the start of any wait until the
  *   last attempt settles, like the uploader's own handle: the retry drain skips a registered temp
  *   guid, so it cannot start a second attempt of a file that is only waiting here, and
@@ -173,7 +176,7 @@ export function createRcsPacedUploader(
 
 /**
  * A paced uploader for ONE multi-file share: its RCS files take turns, normally in share order,
- * so they do not refuse each other at the server. Create one per share; never share it.
+ * so they are not uploaded at once. Create one per share; never share it.
  */
 export function createRcsShareUploader(
   upload: AttachmentUploader,
