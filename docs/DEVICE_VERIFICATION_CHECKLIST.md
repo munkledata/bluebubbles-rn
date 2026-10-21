@@ -107,6 +107,36 @@ not repeat this label. None satisfies `DEVICE-01` or the version-code-56 release
 
 ---
 
+## Owner device session — 2026-10-21 (Play `0.1.62` / code `84`)
+
+An owner-approved session on the owner's test phone (Galaxy S25 Ultra, Android 16 / API 36), with
+the build installed as a Play update from `0.1.61` / code `82`. It is supporting evidence, not credit
+for the frozen candidate boundary above. Checks that need no server ran on the October synthetic
+test account, whose server was offline. Sending checks ran on the owner's own-number chat on the
+production account, with the owner's permission, not on the isolated synthetic server. Captures were
+reviewed in-session and deleted; nothing private is recorded here.
+
+| Row                                            | Result                                                                  |
+| ---------------------------------------------- | ----------------------------------------------------------------------- |
+| M168 share rejection shown once                | Passed                                                                  |
+| M169 photo and PDF still route and send        | Passed                                                                  |
+| M224 shared files stay gone                    | Passed                                                                  |
+| M116 banner clears when the network returns    | Passed (about 7 s, including the Wi-Fi rejoin)                          |
+| M170 + share digit fix                         | Partial: Arabic share accepted, names right when sent, RCS renames them |
+| M202 opening attachments                       | Partial: PDFs open; contact card and shared documents not tried         |
+| M163/M165 download smoke                       | Partial: small received PDF only                                        |
+| M179 Recents and Secure Screen                 | Partial: dialog and screen-recording variants not tried                 |
+| Disconnect, paired credential, Mac unreachable | Partial: all but scanning a code while the message shows                |
+
+Found during the session, not fixed yet:
+
+- RCS sends sometimes show the sent picture or caption twice: the local copy is not merged with the
+  server's copy, and the extra bubble stayed after leaving and reopening the chat. The recipient
+  received one copy.
+- Sharing four documents at once into an RCS chat failed three of them with code 503 (server busy);
+  Try Again delivered all four. The failure label read "iMessage Error (Code 503)" in an RCS chat.
+- Every cold start logs one `diagnostic.unclassified` warning.
+
 ## (a) Exact-candidate and session preflight — do not rebuild
 
 These boxes remain open until the release owner separately approves the Play/device session.
@@ -280,6 +310,10 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
       no chat content. Back in Gator a screenshot works. Turn Secure Screen on: screenshots and
       screen recordings are black on every screen, including an open dialog. Resume inside the grace
       period: content appears at once. M179 removed only the pre-Android-13 fallback.
+      **Partial result 2026-10-21 (Play `0.1.62` / code `84`):** Recents showed Gator's card with no
+      chat content; returning inside the grace period showed the chat at once, and a screenshot
+      worked. With Secure Screen on, captures of Settings and the chat list were black. The
+      open-dialog and screen-recording variants were not tried.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Separate the push axes: App Lock disabled permits
       detailed background and killed-process presentation; App Lock enabled keeps notices generic
       in a still-live process, including after unlock and within its unexpired UI grace period.
@@ -636,29 +670,46 @@ only the product-owned bounded intake described in
       entry points into `shared-in` or the copied attachment. Before the fix each successful copy
       left both descriptors open, keeping deleted files' space allocated. Host evidence is only a
       source-shape test.
-- [ ] **`EXACT PACKAGED CANDIDATE` — share rejection shown once (M168, added 2026-10-18):** With
+- [x] **`EXACT PACKAGED CANDIDATE` — share rejection shown once (M168, added 2026-10-18):** With
       Gator open, share 11 synthetic photos into it: one "too many items" message appears. Background
       Gator, run `adb shell am kill com.bluegreengatorapps.messages`, and relaunch from the launcher:
       the message does not appear again. Host evidence covers only the JS bridge.
-- [ ] **`EXACT PACKAGED CANDIDATE` — unreadable share does not block sharing (M169, added
+      **Passed 2026-10-21 (Play `0.1.62` / code `84`):** sharing 11 synthetic photos from My Files
+      showed "Too many items were shared at once." once. After Home, `am kill` and a launcher
+      relaunch, 12 seconds of captures (JavaScript running from 0.3 s) never showed it again.
+- [x] **`EXACT PACKAGED CANDIDATE` — unreadable share does not block sharing (M169, added
       2026-10-18):** Smoke only: share one synthetic photo and one PDF into Gator and send them; both
       still route and send. The unreadable-claim path itself (discard, message, next share staged) is
       host-tested only, because a real device cannot produce an unreadable claim on demand.
-- [ ] **`EXACT PACKAGED CANDIDATE` — sent or removed shared files stay gone (M224, added
+      **Passed 2026-10-21 (Play `0.1.62` / code `84`, owner's own-number chat):** a shared synthetic
+      photo and a shared synthetic PDF both routed and sent.
+- [x] **`EXACT PACKAGED CANDIDATE` — sent or removed shared files stay gone (M224, added
       2026-10-18):** Direct Share one synthetic photo with a caption into a chat, send it, then press
       Back: no "Discard shared item?" prompt and no attachment returns to the tray. Then share two
       photos into New Message, remove both, and pick an existing chat: neither photo reappears.
+      **Passed 2026-10-21 (Play `0.1.62` / code `84`):** after a Direct Share photo with a caption
+      was sent, Back showed no prompt and reopening the chat showed an empty tray. Two photos shared
+      into New Message and removed did not reappear in an existing chat opened from the chat list
+      (synthetic account).
 - [ ] **`EXACT PACKAGED CANDIDATE` — opening attachments in other apps (M202, added 2026-10-18):**
       Open a received synthetic PDF from its chat bubble, a contact card from its bubble, and a
       document from the chat's shared documents: each opens in its viewer. For a type with no viewer
       installed, the share sheet still appears. Opening now pins the file and passes the same native
       ownership check as sharing, so a file being cleaned up reports as missing and re-downloads.
+      **Partial result 2026-10-21 (Play `0.1.62` / code `84`):** a received (downloaded) PDF and a
+      sent PDF each opened through the Android chooser in a PDF viewer. A contact card and the
+      shared-documents entry were not tried.
 - [ ] **`EXACT PACKAGED CANDIDATE` — non-English file names and phone language (M170 + share digit
       fix, added 2026-10-18):** Share synthetic files named `Отчёт.docx` and `报告.pdf` into a chat
       and send them: they arrive as `attachment.docx` and `attachment.pdf` (before: `docx.bin` and
       `pdf.pdf`). Then set the phone language to Arabic (Egypt), share one synthetic photo into
       Gator and send it: it is accepted (before: every share was refused as malformed, because the
       `00-` file prefix was written in Arabic digits). Switch the language back.
+      **Partial result 2026-10-21 (Play `0.1.62` / code `84`):** with only Gator set to Arabic
+      (Egypt) through Android's per-app language (its dates showed Arabic digits), a shared photo
+      was accepted with no refusal. `Отчёт.docx` and `报告.pdf` were staged and sent as
+      `attachment.docx` and `attachment.pdf`. The chat was RCS, which renames files on the receiving
+      side, so the received names were not checked.
 - [ ] **`EXACT PACKAGED CANDIDATE` — pasted file types (M177, added 2026-10-18):** From an app that
       can copy a file to the clipboard, paste a synthetic `.jpeg` photo and a `.docx` file into the
       composer and send them: the photo shows as a photo and the document keeps its Word type
@@ -1043,6 +1094,11 @@ those rows is a current remediation or candidate requirement.
       start Gator", and the message only appeared after scanning a code). Scanning a code is still
       refused with that message. Confirm "Forget on this phone only": the message disappears and
       connecting works. The Mac's device list may still show this phone until it is removed there.
+      **Partial result 2026-10-21 (Play `0.1.62` / code `84`, synthetic account, server offline):**
+      Disconnect said it could not remove this phone's access. After `am kill` and a relaunch,
+      Welcome showed the message with "Forget on this phone only"; confirming it (the dialog named
+      the offline server) cleared the message, and pairing with a working server then connected. Not
+      tried: scanning a code while the message was showing.
 - [ ] **LOCAL DEV, before raising `LOGICAL_SEND_MAX_ACTIVE_CHATS` above 1 (M089, added
       2026-10-18):** Build with the constant set to 3 against the real Mac. (1) With a slow uplink,
       send a 10 MiB image in chat A, then text chat B at once: B sends promptly. (2) Send texts to
@@ -1423,10 +1479,13 @@ authoritative candidate procedure.
       `[fcm] device token registration failed` in the log; a clean connect should not log
       that. _(2026-07-23 adb, v0.1.28: cold start + 20s observation — no failure line logged.
       Release build has no positive success line, so this is verified by absence, as written.)_
-- [ ] **`EXACT PACKAGED CANDIDATE` — banner clears when the network returns (M116, added
+- [x] **`EXACT PACKAGED CANDIDATE` — banner clears when the network returns (M116, added
       2026-10-18):** With Gator open and connected, turn on airplane mode for at least 4 minutes (long
       enough for the socket's reconnect backoff to reach about a minute), then turn it off. The
       "Connection problem" banner clears within a few seconds instead of staying for up to a minute.
+      **Passed 2026-10-21 (Play `0.1.62` / code `84`):** after 4.5 minutes in airplane mode the
+      offline banner ("Offline" / "Retry") was showing. It was gone 7 seconds after airplane mode
+      was turned off, including the Wi-Fi rejoin, and stayed gone.
 
 ---
 
@@ -1494,6 +1553,9 @@ process-death, low-storage, and upgrade behavior.
       a received synthetic photo and a large video (progress moves; both open), set a synced chat
       background, and cancel one large download midway (it stops and can be retried). The read loop
       moved into a JVM-tested helper; the Android 8 check it dropped could never run on Android 16.
+      **Partial result 2026-10-21 (Play `0.1.62` / code `84`):** a received 12 KB PDF downloaded in
+      under 2 seconds and opened intact. The large video, the synced chat background and cancelling
+      a large download midway were not tried.
 
 ## (k) Reaction / action menu placement
 
