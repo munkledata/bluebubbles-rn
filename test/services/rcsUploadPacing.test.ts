@@ -3,7 +3,7 @@ import type { HttpClient } from '@core/api/http';
 import {
   createRcsPacedUploader,
   isRcsDispatchBusy,
-  RCS_BUSY_RETRY_BUDGET_MS,
+  RCS_BUSY_MAX_RESENT_BYTES,
 } from '@/services/send/rcsUploadPacing';
 import type { AttachmentUploader } from '@/services/send/sendAttachmentService';
 import { createConcurrencyGate, createUploadRegistry } from '@/services/send/uploadControl';
@@ -279,20 +279,121 @@ describe('RCS upload pacing', () => {
     expect(clock.sleep.mock.calls.map(([ms]) => ms)).toEqual([2_000, 4_000]);
   });
 
-  it('gives up after its retry budget and reports the busy failure as before', async () => {
+  it('gives up after four busy retries and reports the failure as before', async () => {
     const clock = fakeClock();
+    // Busy for ten attempts: a missing limit would resolve on the eleventh instead of failing.
     const upload = jest.fn<ReturnType<AttachmentUploader>, [UploadArgs]>(async () => {
+      if (upload.mock.calls.length > 10) return ack;
       throw busy();
     });
     const paced = createRcsPacedUploader(upload, { ...clock, random: () => 0.5 });
 
     await expect(paced(argsFor('temp-1'))).rejects.toMatchObject({ status: 503 });
 
-    const waited = clock.sleep.mock.calls.reduce((sum, [ms]) => sum + ms, 0);
-    expect(waited).toBeLessThan(RCS_BUSY_RETRY_BUDGET_MS);
-    expect(clock.sleep.mock.calls.slice(0, 5).map(([ms]) => ms)).toEqual([
-      2_000, 4_000, 8_000, 15_000, 15_000,
-    ]);
-    expect(upload).toHaveBeenCalledTimes(clock.sleep.mock.calls.length + 1);
+    expect(clock.sleep.mock.calls.map(([ms]) => ms)).toEqual([2_000, 4_000, 8_000, 15_000]);
+    expect(upload).toHaveBeenCalledTimes(5);
+  });
+
+  // Step 1 review: a file that waited its turn behind a long share must still get its retries.
+  it('counts retries from when the file gets its turn, not from when it was queued', async () => {
+    const clock = fakeClock();
+    let finishFirst!: () => void;
+    let calls = 0;
+    const upload = jest.fn<ReturnType<AttachmentUploader>, [UploadArgs]>(async (args) => {
+      calls += 1;
+      if (args.tempGuid === 'first') {
+        await new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        });
+        return ack;
+      }
+      if (calls < 4) throw busy();
+      return ack;
+    });
+    const paced = createRcsPacedUploader(upload, { ...clock, random: () => 0.5 });
+
+    const first = paced(argsFor('first'));
+    const second = paced(argsFor('second'));
+    await settle();
+    // Ten minutes pass while the second file waits for its turn.
+    await clock.sleep(600_000);
+    finishFirst();
+    await first;
+
+    await expect(second).resolves.toBe(ack);
+    expect(upload.mock.calls.filter(([args]) => args.tempGuid === 'second')).toHaveLength(3);
+  });
+
+  // Step 1 review: the server reads the whole file before it says busy, so every retry re-sends it.
+  it('does not re-send a large file in place when the server is busy', async () => {
+    const clock = fakeClock();
+    const upload = jest.fn<ReturnType<AttachmentUploader>, [UploadArgs]>(async () => {
+      throw busy();
+    });
+    const paced = createRcsPacedUploader(upload, { ...clock, random: () => 0.5 });
+
+    await expect(
+      paced(argsFor('video', { totalBytes: RCS_BUSY_MAX_RESENT_BYTES + 1 })),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(clock.sleep).not.toHaveBeenCalled();
+  });
+
+  it('re-sends a mid-size file only while the extra data stays under the cap', async () => {
+    const clock = fakeClock();
+    const upload = jest.fn<ReturnType<AttachmentUploader>, [UploadArgs]>(async () => {
+      throw busy();
+    });
+    const paced = createRcsPacedUploader(upload, { ...clock, random: () => 0.5 });
+    const size = Math.floor(RCS_BUSY_MAX_RESENT_BYTES / 2.5);
+
+    await expect(paced(argsFor('clip', { totalBytes: size }))).rejects.toMatchObject({
+      status: 503,
+    });
+    // Two re-sends fit under the cap (2 x size), a third would not (3 x size).
+    expect(upload).toHaveBeenCalledTimes(3);
+  });
+
+  // Step 1 review: one slow upload must not hold every other RCS file indefinitely.
+  it('stops waiting for the RCS slot after the cap and uploads anyway', async () => {
+    const clock = fakeClock();
+    const started: string[] = [];
+    let finishSlow!: () => void;
+    const upload = jest.fn<ReturnType<AttachmentUploader>, [UploadArgs]>(async (args) => {
+      started.push(args.tempGuid);
+      if (args.tempGuid === 'slow') {
+        await new Promise<void>((resolve) => {
+          finishSlow = resolve;
+        });
+      }
+      return ack;
+    });
+    const paced = createRcsPacedUploader(upload, {
+      ...clock,
+      random: () => 0.5,
+      slotWaitCapMs: 20,
+    });
+
+    const slow = paced(argsFor('slow'));
+    const quick = paced(argsFor('quick'));
+    await expect(quick).resolves.toBe(ack);
+    expect(started).toEqual(['slow', 'quick']);
+
+    finishSlow();
+    await expect(slow).resolves.toBe(ack);
+  });
+
+  it('hands the uploader whole-millisecond limits even with a fractional clock', async () => {
+    // React Native's clock is fractional and moves between readings.
+    let time = 1_000.25;
+    const now = (): number => {
+      time += 0.5;
+      return time;
+    };
+    const upload = jest.fn<ReturnType<AttachmentUploader>, [UploadArgs]>(async () => ack);
+    const paced = createRcsPacedUploader(upload, { now, random: () => 0.5 });
+
+    await expect(paced(argsFor('temp-1', { timeoutMs: 10_000 }))).resolves.toBe(ack);
+    expect(Number.isSafeInteger(upload.mock.calls[0]![0].timeoutMs)).toBe(true);
   });
 });

@@ -299,7 +299,9 @@ function attachmentTimeoutError(): ApiError {
 
 function remainingAttachmentTime(deadlineAt?: number): number | undefined {
   if (deadlineAt === undefined) return undefined;
-  const remaining = deadlineAt - monotonicNow();
+  // Whole milliseconds: the uploader rejects a fractional timeoutMs, and React Native's monotonic
+  // clock (performance.now) is fractional, which failed every bounded background retry.
+  const remaining = Math.floor(deadlineAt - monotonicNow());
   if (remaining <= 0) throw attachmentTimeoutError();
   return remaining;
 }

@@ -305,8 +305,8 @@ async function runUiAccountOperation<T>(
 
 /**
  * The production uploader for foreground sends and queue retries: RCS files take turns and ride out
- * the server's one-at-a-time busy refusals ({@link createRcsPacedUploader}). `sendVoice` keeps the
- * plain uploader: its body is a reviewed, fingerprinted function.
+ * the server's one-at-a-time busy refusals ({@link createRcsPacedUploader}). `sendVoice` is
+ * iMessage-only (the paced uploader would pass it straight through) and keeps the plain uploader.
  */
 const rcsPacedAttachmentUploader = createRcsPacedUploader(expoAttachmentUploader);
 

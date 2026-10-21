@@ -1872,6 +1872,46 @@ describe('runOutgoingQueue — attachment resend', () => {
     );
   });
 
+  // Step 1 review 2026-10-21: React Native's performance.now() is fractional and the uploader
+  // rejects a non-integer timeoutMs, so every bounded (background) attachment retry failed before
+  // it uploaded anything.
+  it('hands the uploader a whole-millisecond limit when the monotonic clock is fractional', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedFailedAttachment(db, raw, 'temp-fractional');
+    let clock = 5_000.25;
+    const now = jest.spyOn(globalThis.performance, 'now').mockImplementation(() => {
+      clock += 0.5;
+      return clock;
+    });
+    try {
+      const up = fakeIo({
+        upload: async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }),
+      });
+
+      await expect(
+        runOutgoingQueue(
+          db,
+          noRequestHttp,
+          up.io,
+          2_000_000,
+          undefined,
+          1,
+          60_000,
+          undefined,
+          rcsAvailable,
+          undefined,
+          undefined,
+          RCS_PROVIDER_EPOCH,
+        ),
+      ).resolves.toEqual({ eligible: 1, sent: 1 });
+      expect(Number.isSafeInteger(up.captured?.timeoutMs)).toBe(true);
+      expect(up.captured?.timeoutMs).toBeGreaterThan(59_000);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('passes the remainder of one shared attachment deadline through to the uploader', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
