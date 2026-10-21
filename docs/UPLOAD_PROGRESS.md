@@ -137,28 +137,30 @@ wedges every later upload silently.
 `sendImages` deliberately still fires all N sends concurrently — the optimistic rows insert
 immediately so every bubble appears at once, and only the network transfers queue.
 
-**RCS uploads go one at a time** (`rcsUploadPacing.ts`, from the 2026-10-21 owner phone session).
-The server hands one RCS media file to Google at a time and refuses any other upload in that window
-with a retryable 503 `rcs_dispatch_busy`, so a four-file share into an RCS chat showed three
-"Code 503" failures. For RCS uploads (every upload without `service: 'iMessage'`):
+**RCS uploads ride out the server's busy refusals** (`rcsUploadPacing.ts`, from the 2026-10-21
+owner phone session). The server hands one RCS media file to Google at a time and refuses any other
+upload in that window with a retryable 503 `rcs_dispatch_busy`, so a four-file share into an RCS
+chat showed three "Code 503" failures. For RCS uploads (every upload without `service: 'iMessage'`):
 
-- Files take turns through one app-wide slot, ahead of the gate above, normally in the order the
-  sends reach it (each file's own preflight can reorder a burst slightly). A file that has waited
-  60 seconds for the slot uploads anyway, so one slow upload cannot hold every other RCS file.
+- The files of one multi-file share take turns (`createRcsShareUploader`, one per `sendImages`
+  call), normally in share order (each file's own preflight can reorder a burst slightly), so they
+  do not refuse each other. Separate sends never wait for each other: a slow upload in one chat
+  cannot hold a photo in another, and the retry below absorbs their collisions.
 - A busy refusal is retried after 2, 4, 8 and 15 seconds (±20% jitter), counted from the file's
   turn. The server reads the whole file before it says busy, so each retry re-sends it: a file is
   not retried in place once the re-sent data would pass 20 MB. After that, after the fourth retry,
   or at the caller's `timeoutMs`, the busy error is reported as before and the ordinary retry path
-  takes over. The server drops a refused upload's idempotency entry, so retrying under the same temp
-  guid cannot duplicate it.
-- The temp guid stays registered in the upload registry while the file is queued or waiting, so the
-  retry drain cannot start a second attempt of it, and Cancel Sending or an account teardown stops it
-  without opening a new socket. The upload store's progress entry only exists during an attempt, so
-  the status bar can disappear while a file waits and the ring restarts on each retry.
+  takes over. Mid-size files in a share can therefore still show an occasional 503; the planned
+  server-side queue removes that. The server drops a refused upload's idempotency entry, so retrying
+  under the same temp guid cannot duplicate it.
+- The temp guid stays registered in the upload registry while the file waits, so the retry drain
+  cannot start a second attempt of it, and Cancel Sending or an account teardown stops it without
+  opening a new socket. The upload store's progress entry only exists during an attempt, so the
+  status bar can disappear while a file waits and the ring restarts on each retry.
 
-Foreground sends (`sendImage`, `sendImages`, `sendTextAttachment`) and queue retries use the paced
-uploader; `sendVoice` is iMessage-only. Headless background retries keep the plain uploader. A
-server-side early busy check is part of the planned server fix. iMessage uploads are unchanged.
+Single foreground sends (`sendImage`, `sendTextAttachment`) and queue retries use the shared paced
+uploader; `sendVoice` is iMessage-only. Headless background retries keep the plain uploader.
+iMessage uploads are unchanged.
 
 **The cancel registry is keyed by TEMP GUID**, because that is what "Cancel Sending"
 (`discardMessage`) knows. Two non-obvious rules:

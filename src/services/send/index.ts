@@ -96,7 +96,7 @@ import {
 } from '../realtime/deliveryCoordinator';
 import { runAccountOperation } from '../realtime/accountOperation';
 import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
-import { createRcsPacedUploader } from './rcsUploadPacing';
+import { createRcsPacedUploader, createRcsShareUploader } from './rcsUploadPacing';
 import { uploadRegistry } from './uploadControl';
 import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
 import { createAttachmentCacheAccountScope } from '../download/attachmentCacheAccountScope';
@@ -304,9 +304,9 @@ async function runUiAccountOperation<T>(
 }
 
 /**
- * The production uploader for foreground sends and queue retries: RCS files take turns and ride out
- * the server's one-at-a-time busy refusals ({@link createRcsPacedUploader}). `sendVoice` is
- * iMessage-only (the paced uploader would pass it straight through) and keeps the plain uploader.
+ * The production uploader for single foreground sends and queue retries: RCS files ride out the
+ * server's one-at-a-time busy refusals ({@link createRcsPacedUploader}). `sendImages` gives each
+ * share its own turn order instead. `sendVoice` is iMessage-only and keeps the plain uploader.
  */
 const rcsPacedAttachmentUploader = createRcsPacedUploader(expoAttachmentUploader);
 
@@ -515,6 +515,8 @@ export function sendImages(
     createAttachmentCacheAccountScope(accountLease),
     () => isAttachmentCacheRecoveryReady(accountLease),
   );
+  // One multi-file share: its RCS files take turns so they do not refuse each other at the server.
+  const shareUploader = createRcsShareUploader(expoAttachmentUploader);
   return runUiAccountOperation(
     accountLease,
     async () => {
@@ -532,7 +534,7 @@ export function sendImages(
                 service: snapshot.service,
                 shareIntake: image.origin === 'share' ? snapshot.shareIntake : undefined,
               },
-              rcsPacedAttachmentUploader,
+              shareUploader,
               Date.now(),
               () => accountLease.isCurrent(),
               undefined,

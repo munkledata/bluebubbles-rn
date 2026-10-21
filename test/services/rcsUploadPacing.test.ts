@@ -2,6 +2,7 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import {
   createRcsPacedUploader,
+  createRcsShareUploader,
   isRcsDispatchBusy,
   RCS_BUSY_MAX_RESENT_BYTES,
 } from '@/services/send/rcsUploadPacing';
@@ -96,7 +97,11 @@ describe('RCS upload pacing', () => {
       });
       return ack;
     });
-    const paced = createRcsPacedUploader(upload, { ...clock, random: () => 0.5 });
+    const paced = createRcsPacedUploader(upload, {
+      ...clock,
+      gate: createConcurrencyGate(1),
+      random: () => 0.5,
+    });
 
     const rcs = paced(argsFor('rcs-1'));
     await Promise.resolve();
@@ -120,7 +125,11 @@ describe('RCS upload pacing', () => {
       await new Promise<void>((resolve) => finishers.set(args.tempGuid, resolve));
       return ack;
     });
-    const paced = createRcsPacedUploader(upload, { ...clock, random: () => 0.5 });
+    const paced = createRcsPacedUploader(upload, {
+      ...clock,
+      gate: createConcurrencyGate(1),
+      random: () => 0.5,
+    });
 
     const first = paced(argsFor('a'));
     const second = paced(argsFor('b'));
@@ -210,6 +219,7 @@ describe('RCS upload pacing', () => {
       return ack;
     });
     const paced = createRcsPacedUploader(upload, {
+      gate: createConcurrencyGate(1),
       registry,
       sleep,
       now: () => 0,
@@ -310,7 +320,11 @@ describe('RCS upload pacing', () => {
       if (calls < 4) throw busy();
       return ack;
     });
-    const paced = createRcsPacedUploader(upload, { ...clock, random: () => 0.5 });
+    const paced = createRcsPacedUploader(upload, {
+      ...clock,
+      gate: createConcurrencyGate(1),
+      random: () => 0.5,
+    });
 
     const first = paced(argsFor('first'));
     const second = paced(argsFor('second'));
@@ -355,7 +369,7 @@ describe('RCS upload pacing', () => {
   });
 
   // Step 1 review: one slow upload must not hold every other RCS file indefinitely.
-  it('stops waiting for the RCS slot after the cap and uploads anyway', async () => {
+  it('lets separate sends go at once instead of waiting for each other', async () => {
     const clock = fakeClock();
     const started: string[] = [];
     let finishSlow!: () => void;
@@ -368,19 +382,41 @@ describe('RCS upload pacing', () => {
       }
       return ack;
     });
-    const paced = createRcsPacedUploader(upload, {
-      ...clock,
-      random: () => 0.5,
-      slotWaitCapMs: 20,
-    });
+    const paced = createRcsPacedUploader(upload, { ...clock, random: () => 0.5 });
 
     const slow = paced(argsFor('slow'));
-    const quick = paced(argsFor('quick'));
-    await expect(quick).resolves.toBe(ack);
+    // A slow upload in one chat must not hold a photo in another.
+    await expect(paced(argsFor('quick'))).resolves.toBe(ack);
     expect(started).toEqual(['slow', 'quick']);
 
     finishSlow();
     await expect(slow).resolves.toBe(ack);
+  });
+
+  it('gives each share its own turns: one share waits for itself, not for another', async () => {
+    const started: string[] = [];
+    const finishers = new Map<string, () => void>();
+    const upload = jest.fn<ReturnType<AttachmentUploader>, [UploadArgs]>(async (args) => {
+      started.push(args.tempGuid);
+      await new Promise<void>((resolve) => finishers.set(args.tempGuid, resolve));
+      return ack;
+    });
+    const shareA = createRcsShareUploader(upload);
+    const shareB = createRcsShareUploader(upload);
+
+    const a1 = shareA(argsFor('a1'));
+    const a2 = shareA(argsFor('a2'));
+    const b1 = shareB(argsFor('b1'));
+    await settle();
+    expect(started).toEqual(['a1', 'b1']);
+
+    finishers.get('a1')!();
+    await a1;
+    await settle();
+    expect(started).toEqual(['a1', 'b1', 'a2']);
+    finishers.get('a2')!();
+    finishers.get('b1')!();
+    await Promise.all([a2, b1]);
   });
 
   it('hands the uploader whole-millisecond limits even with a fractional clock', async () => {
