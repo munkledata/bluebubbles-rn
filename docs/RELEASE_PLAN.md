@@ -49,12 +49,29 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.62` / version code `84` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.63` / version code `85` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-10-20 — not a checklist rebind:** **`0.1.62` / code `84`** was built
+**Latest live artifact, 2026-10-22 — not a checklist rebind:** **`0.1.63` / code `85`** was built
+from source `7055f65215ccf49f5fcc4f621ddb8e2e5460ba04` (the Expo SDK 57 patch releases, the RCS
+multi-file send fixes with the "RCS Error" label, and the merge of a modern RCS send's server copy
+that arrives without attempt ids, all CI-green) and promoted as release commit
+`1470213a01a02c6570a55fb92f5f3fd83b77f8b3` on local branch `release/android-0.1.63`. Run
+`android-0.1.63-7055f65-20261022010349` produced `gator-release-0.1.63-v85-1470213.aab`,
+**58,314,612 bytes**, SHA-256 `ebb80b5c4bdf5abab647b280caa143ca98c32aad889dd54e9703e29ad9b4a0a8`.
+The clean local production build, native path proof and expected upload certificate
+(`6E:18:F9:…:2F:43`) pass. Under owner decision 2026-10-20 (and the owner's request for this
+release on 2026-10-22) the agent submitted it with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.63 v85 ebb80b5c4bdf TO PLAY INTERNAL`; the Maps key came from the login Keychain.
+Android Publisher readback after the 2026-10-22T01:17Z submission confirms Internal release
+`0.1.63`, code `85`, `completed`. `check:legal-inventory` passes on the release commit without
+regeneration. The device update and the pending rows in `docs/DEVICE_VERIFICATION_CHECKLIST.md`
+(including the RCS send checks) remain open. No task status or frozen v77 checklist row is changed
+by this Internal release.
+
+**Historical v84 artifact, 2026-10-20:** **`0.1.62` / code `84`** was built
 from source `6bec8553861de0b14e0fdca48d2bbbb81936cef6` (the Disconnect fixes, the Welcome
 pending-revocation warning, the legal-fingerprint fix and the `--confirm` submission option, all
 CI-green) and promoted as release commit `f55e9a9587da3f00a271d168def186bef392b1e4` on local branch
