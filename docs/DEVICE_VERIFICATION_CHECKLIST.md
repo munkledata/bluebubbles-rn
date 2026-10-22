@@ -141,16 +141,29 @@ Found during the session:
   chat's service. The server-side wait for the media slot is a separate server change.
 - Every cold start logs one `diagnostic.unclassified` warning. Not fixed yet.
 
-To check on a phone once a build with these fixes is installed:
+To check on a phone once a build with these fixes is installed. Run 2026-10-22 on the test phone with
+Play 0.1.63 / v85 against server 2.0.30, in the owner's own RCS chat; the recipient phone received each
+message once:
 
-- [ ] Share four documents at once into an RCS chat: all send without a 503, in share order.
-- [ ] A failed RCS send reads "RCS Error (Code N)", not "iMessage Error".
-- [ ] The `docs/RCS_SEND_RELIABILITY.md` device check 7: a gallery-tray picture, a camera photo, a tray
-      video, a HEIC photo, an RCS voice note and a three-picture share each show exactly once.
-- [ ] Killed-app background retry of an RCS attachment: send a picture with the server unreachable,
-      `adb shell am kill` the app, restore the server, and confirm the background retry delivers it
-      once. Background retries of attachments failed every time before the whole-millisecond time
-      limit fix.
+- [x] Share four documents at once into an RCS chat: all send without a 503, in share order. Passed:
+      two shares of four PDFs from the Files app sent in order and were delivered.
+- [x] A failed RCS send does not read "iMessage Error". Passed for a send without network: it reads
+      "Connection Refused" and "Not Delivered". A server-code failure ("RCS Error (Code N)") was not
+      produced.
+- [ ] The `docs/RCS_SEND_RELIABILITY.md` device check 7: each send shows exactly once. Not passed:
+      pictures picked with Attach a file, a HEIC photo, a three-picture share and the four-document
+      shares all sent in order and were delivered, but each shows twice (the send and the server's
+      copy). A picture's copy sometimes shows as a two-photo grid: the server stored two media for one
+      picture (the uploaded file and a re-encoded copy). There is no gallery tray (the app has
+      selected-photos access only); a camera photo, a tray video and a voice note were not tried.
+- [x] Killed-app background retry of an RCS attachment. Passed: a picture sent without network was
+      delivered once by the background job after the network returned, without the app being
+      opened; the server logged one upload.
+
+The duplicates need the server: copies carry the attempt only when Google's echo of the short `tmpID`
+resolves (server 2.0.31), and pictures need one attachment per part (the attachment-by-part change).
+With server 2.0.31 a plain RCS text still showed twice (2026-10-22 06:02 UTC): the server minted the
+short id but stored no attempt for its copy. Under investigation.
 
 ## (a) Exact-candidate and session preflight — do not rebuild
 
