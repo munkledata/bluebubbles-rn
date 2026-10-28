@@ -183,12 +183,34 @@ All four settled reports had zero active transfers, owned destinations, temporar
 
 `BB/gator-v81-feature-replay-20261004/media/dl01-cleanup.json` records normal Disconnect/Get Started (277), fixture exit 0, closed state, no failure, private receipt removal, process absence, zero active download connections and owned reverse 43132 removal; no reverse mappings remained. The phone returned Home. This episode does not close all DL01 cases: unbounded streaming, cancellation, download process death, redirects, HTML and broader malformed/resource cases remain outside it. The fixture's unavailable realtime banner is not a production-server or media-transfer defect.
 
+**Results after the 16:13:35 UTC checkpoint (recorded 2026-10-28 from the private files)**
+
+- **Cold reminder delivery — scoped pass (delivery only).**
+  `BB/gator-v81-feature-replay-20261004/notif/reminder-watch-dvbi_djk/result.json`:
+  - The observer ran 16:59:44–17:06:20 UTC: **39 samples over 396.185 s**, with no phone mutations,
+    after an ordinary kill and observed process absence.
+  - Its outcome is `reminder_observed`: one new exact fixed generic reminder.
+
+  This does not prove that tapping it gates private content, routes to the right message, or uses up the
+  reminder row, alarm and notice.
+
+- **Selected media continuity cases — scoped pass.**
+  `BB/gator-v81-feature-replay-20261004/media/feat07-phone-review.json` (status
+  `SELECTED_MEDIA_CASES_PASS_EPISODE_CLOSED_BROADER_ACCEPTANCE_OPEN`) covers:
+  - inline and fullscreen video pause/resume;
+  - valid and retry PDF rendering;
+  - owned PNG/MP4 exports, followed by deletion of only those two items;
+  - image share staging and discard across an ordinary kill and cold launch.
+
+  Still not proven: Gallery-app display of the exports, private cache, share-temp and Firefox erasure,
+  audio, continuous frame rate, other codecs and document formats, and broader media/share acceptance.
+
 **Remaining acceptance and current limits**
 
 These scoped v81 results supersede corresponding pending wording; historical v80 failures and the unexplained live-sync failure remain recorded.
 
-- **Still open:** cold-reminder delivery/tap/consumption and independently timed fresh-post privacy during grace. The post-unlock observation above does not prove a new notice was repainted.
-- **Remaining media/continuity cases:** PDF/video/export/share-discard cold continuity is prepared but unrun on v81. The four finite download cases above do not close the broader hostile-download matrix. Completed socket, cache, rekey, backup and ordinary account-switch cases retain their stated limits; controlled edit/delete updating local search remains open.
+- **Still open:** cold-reminder tap/consumption (delivery was observed later; see above) and independently timed fresh-post privacy during grace. The post-unlock observation above does not prove a new notice was repainted.
+- **Remaining media/continuity cases:** selected PDF/video/export/share-discard cold-continuity cases passed later on v81 (see above); their listed gaps remain open. The four finite download cases above do not close the broader hostile-download matrix. Completed socket, cache, rekey, backup and ordinary account-switch cases retain their stated limits; controlled edit/delete updating local search remains open.
 - **Background/native gaps:** the native 60-second deadline did not fire on the phone; an uncooperative old continuation was not retained across replacement. Screen-off/Doze and arbitrary scheduling/network conditions remain outside the observed background cases. Unit tests support narrower implementation properties.
 - **Messaging/media limits:** no synthetic fixture successfully sent to a real recipient. Native ASCII/Unicode multipart names and exact uploaded bytes are proven, but canonical server echo after successful delivery remains separate. Real scheduled/inline delivery, recipient reading, provider transitions, blocked-body upload interruption and arbitrary media/handler behavior need their own evidence.
 - **Privacy/account gaps:** denied-consent traffic/DB inspection, push enrollment/rotation/replay/downgrade/isolation/HTTPS, exception/log/network canaries, complete file/account erasure, and server-slot/interrupted/two-device restore.
