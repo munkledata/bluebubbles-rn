@@ -38,7 +38,7 @@ const RAW_DB_DRIVER_HANDLE_TYPES = new Set([
 const REVIEWED_UI_DB_REPOSITORY_VALUES = new Set([
   'DRAFT_KV_PREFIX',
   'MAX_CUSTOM_FOLDER_MEMBERS',
-  'findChatByParticipantAddresses',
+  'findChatsByParticipantAddresses',
   'getChatParticipants',
   'getChatTheme',
   'getScheduledById',
