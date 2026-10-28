@@ -1,3 +1,18 @@
+diff --git a/node_modules/react-native/ReactAndroid/hermes-engine/build.gradle.kts b/node_modules/react-native/ReactAndroid/hermes-engine/build.gradle.kts
+index faf4e4f..faf6e8a 100644
+--- a/node_modules/react-native/ReactAndroid/hermes-engine/build.gradle.kts
++++ b/node_modules/react-native/ReactAndroid/hermes-engine/build.gradle.kts
+@@ -125,7 +125,9 @@ val unzipHermes by
+         eachFile {
+           // We flatten the unzip as the tarball contains a `facebook-hermes-<SHA>`
+           // folder at the top level.
+-          if (this.path.startsWith("facebook-hermes-")) {
++          // Gator: GitHub moved facebook/hermes to meta/hermes on 2026-10-28, so the same
++          // tarball now unpacks as `meta-hermes-<SHA>`. Strip either top folder.
++          if (this.path.startsWith("facebook-hermes-") || this.path.startsWith("meta-hermes-")) {
+             this.path = this.path.substringAfter("/")
+           }
+         }
 diff --git a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/textinput/ReactEditText.kt b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/textinput/ReactEditText.kt
 index b8c3b7e..1edb503 100644
 --- a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/textinput/ReactEditText.kt
