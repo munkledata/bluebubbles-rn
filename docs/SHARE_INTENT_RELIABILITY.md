@@ -95,6 +95,20 @@ navigator that failed is remounted the next time the app comes to the foreground
 (`boundary-reset`), instead of staying blank until a restart. A remounted navigator leaves a share
 that a screen still shows on that screen, rather than opening it twice.
 
+### Dead ends that say what to do (from app 0.1.64)
+
+- A one-to-one iMessage chat sends one JPEG or PNG (or PDF, when the server offers it) of at most
+  10 MiB. The composer now names the reason a share cannot go there: several files, a HEIC photo
+  ("can’t send HEIC photos yet"), another file type, or the size (`imessageAttachmentRefusal`).
+- RCS media is limited to 100 MiB per file (Google's limit; the server's `RCS_MEDIA_MAX_BYTES`
+  refused a larger file only after receiving all of it). The send now refuses such a file before
+  any bubble, queue row or upload (`RcsAttachmentTooLargeError`, admission reason `too-large`), and
+  New Message keeps Start off and names the file until it is removed.
+- A file shared from Gator back into Gator is still refused, because Gator must not read its own
+  provider's files on another app's behalf, but native now reports it as `own_file` instead of
+  `permission`. The app says "Gator can’t share a file to itself. Long-press the message and use
+  Forward or Save instead." Forward is offered in RCS chats; Save works in every chat.
+
 ## Summary
 
 Two independent problems, and the second is why the first stayed invisible for so long.

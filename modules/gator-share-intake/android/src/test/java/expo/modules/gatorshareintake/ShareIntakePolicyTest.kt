@@ -152,9 +152,10 @@ class ShareIntakePolicyTest {
     val own = "com.bluegreengatorapps.messages"
     val files = "com.bluegreengatorapps.messages.FileSystemFileProvider"
     val owner = mapOf(files to own, "media" to "com.android.providers.media.module")::get
+    // Gator's own file, shared back into Gator, gets its own reason so the app can say so.
     for (authority in listOf(files, "0@$files", "10@$files")) {
       assertEquals(
-        ShareIntakeFailure.PERMISSION,
+        ShareIntakeFailure.OWN_FILE,
         assertThrows(ShareIntakeException::class.java) {
           requireForeignShareProvider(authority, own, owner)
         }.reason,

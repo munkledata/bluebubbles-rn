@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { ApiError } from '@core/api/errors';
+import { MAX_RCS_ATTACHMENT_UPLOAD_BYTES } from '@core/models/serverInfo';
 import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';
 import { canonicalRecipientAddress } from '@core/recipientAddress';
 import { formatChatDate } from '@utils/date';
@@ -591,6 +592,14 @@ export default function NewChatScreen(): React.JSX.Element {
   // This slice creates only 1:1 chats. Group creation is a later helper capability.
   const tooManyRecipients = effectiveRecipients.length > 1 && !groupUsesOpenIt;
 
+  // The server refuses RCS media over this limit, and Start creates the thread with its text before
+  // it sends files, so a send-time refusal would leave the new chat without its file. Name the
+  // first such file and refuse to start until it is removed.
+  const rcsFileTooLarge =
+    selectedService === 'RCS'
+      ? (staged.find((file) => file.size > MAX_RCS_ATTACHMENT_UPLOAD_BYTES) ?? null)
+      : null;
+
   // The server creates the thread by sending its required initial text. iMessage attachments are
   // not restored yet, so keep staged files visible but refuse to start until they are removed.
   const canStart =
@@ -606,6 +615,7 @@ export default function NewChatScreen(): React.JSX.Element {
       rcsAttemptOwnershipSupported) &&
     (sendsToExisting || effectiveRecipients.length === 1) &&
     message.trim().length > 0 &&
+    rcsFileTooLarge === null &&
     (selectedService !== 'iMessage' ||
       (staged.length === 0 && (sendsToExisting || imessageAddressValid) && !imessageTextTooLong));
 
@@ -1099,6 +1109,13 @@ export default function NewChatScreen(): React.JSX.Element {
           {selectedService === 'iMessage' && staged.length > 0 ? (
             <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
               iMessage attachments are not available yet. Remove them or choose RCS to start.
+            </Text>
+          ) : null}
+
+          {rcsFileTooLarge ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              “{rcsFileTooLarge.name}” is larger than RCS allows (100 MiB). Remove it from your
+              message to start.
             </Text>
           ) : null}
 

@@ -382,6 +382,7 @@ export const SHARE_INTAKE_EVENT_OUTCOMES = [
   'empty',
   'scheme',
   'permission',
+  'own_file',
   'provider',
   'cache_quota',
   'busy',

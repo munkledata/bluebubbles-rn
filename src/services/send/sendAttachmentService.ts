@@ -4,6 +4,7 @@ import type { HttpClient } from '@core/api/http';
 import {
   MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
   MAX_IMESSAGE_VOICE_UPLOAD_BYTES,
+  MAX_RCS_ATTACHMENT_UPLOAD_BYTES,
   MAX_SEND_ATTACHMENT_TEXT_BYTES,
   isSupportedImessageAttachmentType,
   isSupportedImessageVoiceType,
@@ -129,6 +130,14 @@ export class UnsendableAttachmentNameError extends Error {
   }
 }
 
+/** The file is over the RCS media limit; nothing was written or sent. */
+export class RcsAttachmentTooLargeError extends Error {
+  constructor() {
+    super('Choose a file no larger than 100 MiB for RCS.');
+    this.name = 'RcsAttachmentTooLargeError';
+  }
+}
+
 export function isSupportedImessageAttachmentFile(image: PickedImage): boolean {
   if (typeof image.mimeType !== 'string' || typeof image.name !== 'string') return false;
   return (
@@ -226,6 +235,14 @@ export async function sendImageMessage(
     }
     if (args.text !== undefined && args.service !== 'RCS') {
       throw new Error('Attachment text must use the RCS transport.');
+    }
+    // The server refuses RCS media over the limit only after the whole upload. Refuse it here,
+    // before any bubble or queue row, so the person can remove the file.
+    if (
+      Number.isSafeInteger(args.image.size) &&
+      args.image.size > MAX_RCS_ATTACHMENT_UPLOAD_BYTES
+    ) {
+      throw new RcsAttachmentTooLargeError();
     }
   }
   // Pin before pasted-file ownership preparation: that native/cache await belongs to the same

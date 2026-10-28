@@ -83,6 +83,9 @@ function rejectionMessage(reason: string): string {
     return 'Gator could not finish importing that share. Try again.';
   }
   if (reason === 'permission') return 'The sending app did not grant access to the shared file.';
+  if (reason === 'own_file') {
+    return 'Gator can’t share a file to itself. Long-press the message and use Forward or Save instead.';
+  }
   if (reason === 'pickup') {
     return 'Gator could not open a shared item. It will try again the next time you open Gator.';
   }

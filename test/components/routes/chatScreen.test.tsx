@@ -1141,7 +1141,9 @@ describe('ChatScreen — send routing', () => {
       await mockCaptured.composer!.onSendAttachments([image, { ...image, uri: 'file:///two.jpg' }]);
     });
     expect(sendImages).toHaveBeenCalledTimes(1);
-    expect(showToast).toHaveBeenCalledWith('Choose one JPEG or PNG image no larger than 10 MiB');
+    expect(showToast).toHaveBeenCalledWith(
+      'This iMessage chat sends one file at a time. Remove the others, then send.',
+    );
   });
 
   it('offers PDF only when the separate PDF helper capability is advertised', async () => {
@@ -1224,6 +1226,42 @@ describe('ChatScreen — send routing', () => {
     expect(sendImages).not.toHaveBeenCalled();
   });
 
+  it('names why an iMessage chat cannot send a captioned file', async () => {
+    mockGuid = 'any;-;+15551234567';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        supports_imessage_attachment_upload: true,
+        supports_imessage_pdf_attachment_upload: true,
+        supports_imessage_attachment_caption_upload: true,
+        supports_imessage_text_with_attachment: false,
+      } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 2,
+        guid: mockGuid,
+        style: 45,
+        participantCount: 1,
+        handleServices: 'iMessage',
+      },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+    const heic = {
+      uri: 'file:///IMG_1.HEIC',
+      name: 'IMG_1.HEIC',
+      mimeType: 'image/heic',
+      size: 42,
+    };
+
+    expect(mockCaptured.composer!.onSendTextAttachment!('caption', heic)).toBe(false);
+    expect(showToast).toHaveBeenCalledWith(
+      'This iMessage chat can’t send HEIC photos yet. Send a JPEG or PNG instead.',
+    );
+    expect(sendTextAttachment).not.toHaveBeenCalled();
+  });
+
   it('does not expose caption send for image-only support or an unproven chat', async () => {
     mockGuid = 'any;-;+15551234567';
     useSessionStore.setState({
@@ -1299,6 +1337,36 @@ describe('ChatScreen — send routing', () => {
     });
     await act(async () => view.rerender(<ChatScreen />));
     expect(mockCaptured.composer!.onSendAttachments).toBeUndefined();
+  });
+
+  it('says a captioned RCS file is over the size limit instead of asking to try again', async () => {
+    configureRcsChat({ supports_rcs_text_with_attachment: true });
+    const loggerWarn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      (sendTextAttachment as jest.Mock).mockRejectedValueOnce(
+        Object.assign(new Error('Choose a file no larger than 100 MiB for RCS.'), {
+          name: 'RcsAttachmentTooLargeError',
+        }),
+      );
+      await renderWithTheme(<ChatScreen />);
+      const item = {
+        uri: 'file:///movie.mp4',
+        name: 'movie.mp4',
+        mimeType: 'video/mp4',
+        size: 110 * 1024 * 1024,
+      };
+
+      await act(async () => {
+        await mockCaptured.composer!.onSendTextAttachment!('caption', item);
+      });
+
+      expect(showToast).toHaveBeenCalledWith(
+        'A file is larger than RCS allows (100 MiB), so it wasn’t sent. Remove it from your message.',
+      );
+      expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining('try again'));
+    } finally {
+      loggerWarn.mockRestore();
+    }
   });
 
   it('offers and routes one RCS attachment-plus-text send only when the server advertises it', async () => {
@@ -2885,6 +2953,46 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
       );
       expect(loggerWarn).toHaveBeenCalledTimes(1);
       expect(loggerWarn).toHaveBeenCalledWith('[chat] attachment queue admission failed', failure);
+    } finally {
+      loggerWarn.mockRestore();
+    }
+  });
+
+  it('says when a file is over the RCS size limit, and nothing else', async () => {
+    configureRcsChat();
+    const loggerWarn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const uri = 'file:///cache/DocumentPicker/movie.mp4';
+    try {
+      (sendImages as jest.Mock).mockImplementationOnce(
+        async (
+          _args: unknown,
+          _lease: unknown,
+          _reportIssue: unknown,
+          onAdmission?: (admission: {
+            uri: string;
+            queued: boolean;
+            reason?: 'file-name' | 'too-large';
+          }) => void,
+        ) => {
+          onAdmission?.({ uri, queued: false, reason: 'too-large' });
+          throw new Error('Choose a file no larger than 100 MiB for RCS.');
+        },
+      );
+      await renderWithTheme(<ChatScreen />);
+
+      await act(async () => {
+        mockCaptured.composer!.onSendAttachments([
+          { uri, name: 'movie.mp4', mimeType: 'video/mp4', size: 110 * 1024 * 1024 },
+        ]);
+        await Promise.resolve();
+      });
+
+      expect(showToast).toHaveBeenCalledWith(
+        'A file is larger than RCS allows (100 MiB), so it wasn’t sent. Remove it from your message.',
+      );
+      expect(showToast).not.toHaveBeenCalledWith(
+        expect.stringContaining('try again when connected'),
+      );
     } finally {
       loggerWarn.mockRestore();
     }

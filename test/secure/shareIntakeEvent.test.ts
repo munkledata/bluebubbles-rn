@@ -150,6 +150,7 @@ describe('share.intake diagnostic event', () => {
       'empty',
       'scheme',
       'permission',
+      'own_file',
       'provider',
       'cache_quota',
       'busy',

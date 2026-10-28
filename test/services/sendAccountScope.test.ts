@@ -43,7 +43,11 @@ jest.mock('@/services/send/sendService', () => ({
   generateTempGuid: jest.fn(() => 'temp-test'),
   sendTextMessage: jest.fn(),
 }));
-jest.mock('@/services/send/sendAttachmentService', () => ({ sendImageMessage: jest.fn() }));
+jest.mock('@/services/send/sendAttachmentService', () => {
+  class UnsendableAttachmentNameError extends Error {}
+  class RcsAttachmentTooLargeError extends Error {}
+  return { sendImageMessage: jest.fn(), UnsendableAttachmentNameError, RcsAttachmentTooLargeError };
+});
 jest.mock('@/services/send/outgoingPasteOwnership', () => ({
   createOutgoingPasteOwnershipPreparer: jest.fn(() => jest.fn()),
 }));
@@ -113,7 +117,11 @@ import { acquireCurrentLocation } from '@/services/location/currentLocation';
 // eslint-disable-next-line import/first
 import { sendTextMessage } from '@/services/send/sendService';
 // eslint-disable-next-line import/first
-import { sendImageMessage } from '@/services/send/sendAttachmentService';
+import {
+  RcsAttachmentTooLargeError,
+  sendImageMessage,
+  UnsendableAttachmentNameError,
+} from '@/services/send/sendAttachmentService';
 // eslint-disable-next-line import/first
 import { expoFileSize } from '@/services/send/attachmentUpload';
 // eslint-disable-next-line import/first
@@ -1337,5 +1345,35 @@ describe('picked files whose size the picker did not report', () => {
       images: [picked('shared.jpg', 0, 'share')],
     });
     expect(mockFileSize).not.toHaveBeenCalled();
+  });
+});
+
+describe('why sendImages did not queue a file', () => {
+  const file = (name: string) => ({
+    uri: `file:///${name}`,
+    name,
+    mimeType: 'image/jpeg',
+    size: 10,
+  });
+
+  it('tells the screen apart a name that cannot be sent and a file too large for RCS', async () => {
+    mockSendImage
+      .mockRejectedValueOnce(new UnsendableAttachmentNameError())
+      .mockRejectedValueOnce(new RcsAttachmentTooLargeError());
+    const admissions: unknown[] = [];
+
+    await expect(
+      sendImages(
+        { chatGuid: rcsChatGuid('limits-chat'), images: [file('quoted.jpg'), file('huge.jpg')] },
+        undefined,
+        undefined,
+        (admission) => admissions.push(admission),
+      ),
+    ).rejects.toBeInstanceOf(UnsendableAttachmentNameError);
+
+    expect(admissions).toEqual([
+      { uri: 'file:///quoted.jpg', queued: false, reason: 'file-name' },
+      { uri: 'file:///huge.jpg', queued: false, reason: 'too-large' },
+    ]);
   });
 });

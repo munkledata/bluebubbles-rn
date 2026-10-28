@@ -166,7 +166,7 @@ import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
-import { ServerInfo } from '@core/models';
+import { MAX_RCS_ATTACHMENT_UPLOAD_BYTES, ServerInfo } from '@core/models';
 // eslint-disable-next-line import/first
 import { useShareIntentStore } from '@state/shareIntentStore';
 // eslint-disable-next-line import/first
@@ -2180,5 +2180,75 @@ describe('NewChatScreen — a pasted comma-terminated address (F21)', () => {
     });
 
     expect(await screen.findByText('+15551234567 ✕')).toBeTruthy();
+  });
+});
+
+describe('NewChatScreen — RCS file size limit', () => {
+  const OVER_LIMIT = MAX_RCS_ATTACHMENT_UPLOAD_BYTES + 1;
+  const TOO_LARGE_NOTE = `“${PRIVATE_FILENAME}” is larger than RCS allows (100 MiB). Remove it from your message to start.`;
+
+  async function renderRcsShareWith(size: number): Promise<void> {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: 'test',
+        rcs: true,
+        supports_imessage_new_chat: true,
+        supports_rcs_send_attempt_ownership: true,
+        ...RCS_SERVER_IDENTITY,
+      }),
+    });
+    stageShare(PRIVATE_SHARE_BATCH, PRIVATE_MESSAGE, [{ ...sharedPrivateImage(), size }]);
+    await renderWithTheme(<NewChatScreen />);
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('Phone or email').props.editable).toBe(true),
+    );
+    await addRecipient(PRIVATE_ADDRESS);
+  }
+
+  function startDisabled(): boolean {
+    return screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled;
+  }
+
+  it('refuses to start an RCS chat with a file over the limit, and names the file', async () => {
+    await renderRcsShareWith(OVER_LIMIT);
+
+    expect(screen.getByRole('radio', { name: 'RCS' }).props.accessibilityState.selected).toBe(true);
+    expect(startDisabled()).toBe(true);
+    expect(screen.getByText(TOO_LARGE_NOTE)).toBeTruthy();
+  });
+
+  it('starts an RCS chat with a file of exactly the limit', async () => {
+    await renderRcsShareWith(MAX_RCS_ATTACHMENT_UPLOAD_BYTES);
+
+    expect(startDisabled()).toBe(false);
+    expect(screen.queryByText(/larger than RCS allows/)).toBeNull();
+  });
+
+  it('allows Start again once the oversized file is removed', async () => {
+    await renderRcsShareWith(OVER_LIMIT);
+    expect(startDisabled()).toBe(true);
+
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Remove attachment'));
+    });
+
+    await waitFor(() => expect(startDisabled()).toBe(false));
+    expect(screen.queryByText(/larger than RCS allows/)).toBeNull();
+  });
+
+  it('leaves iMessage as before: a staged file keeps Start off with the iMessage note', async () => {
+    await renderRcsShareWith(OVER_LIMIT);
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole('radio', { name: 'iMessage' }));
+    });
+
+    expect(startDisabled()).toBe(true);
+    expect(
+      screen.getByText(
+        'iMessage attachments are not available yet. Remove them or choose RCS to start.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/larger than RCS allows/)).toBeNull();
   });
 });

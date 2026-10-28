@@ -1529,7 +1529,7 @@ const CERTIFIED_ERROR_DIAGNOSTIC_COMMONJS_LOAD = Object.freeze({
   loaderName: 'loadErrorDiagnosticApi',
   loaderHash: '3400aa7c47d860d8e3bdba99a2cd6d52a20e58ff11c2ca7e478672ab453105d7',
   specifier: '@core/secure/errorDiagnostic',
-  targetHash: '345e279b23aeb7eb7bd9760e3737e5f4a1d70e9e8fc3fbe894d5edd242a4f222',
+  targetHash: 'a4e7e20bc21858e91f7aba1f164753b8a327faddcac17c799bc41f16f0e74324',
   targetPath: 'src/core/secure/errorDiagnostic.ts',
 });
 
@@ -2606,7 +2606,7 @@ function dbProcessRelaunchCertificateCandidate({
   const runtimeProductionCalleeFingerprints = new Map([
     [syncAllChats, 'c020fac074e1490f98ec8d53ae0ccde29ba6c827abbdb302ead4a5990fc5beda'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
-    [sendImageMessage, 'c17a1d44482187d7e6995858f44d603897c2555d3a5856ffabe8a5dcbe542f7f'],
+    [sendImageMessage, '1b6a139d97678a048cef2e099e4e13653e1c987898e0a9f04fe85807398f3316'],
     [sendVoice, 'c94cf97a65429ce60798d506291cc654f46685aad419e8f9c19b1cbe8d9781ce'],
     [
       sendCurrentLocationMessage,

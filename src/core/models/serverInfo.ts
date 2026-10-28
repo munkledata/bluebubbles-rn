@@ -11,6 +11,8 @@ export const MAX_IMESSAGE_VOICE_UPLOAD_BYTES = MAX_IMESSAGE_ATTACHMENT_UPLOAD_BY
 export const MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES = 512 * 1024;
 /** A group photo is streamed once and capped to match the narrow server route. */
 export const MAX_IMESSAGE_GROUP_PHOTO_BYTES = 20 * 1024 * 1024;
+/** Google's RCS media limit; the server refuses a larger RCS upload (bbd RCS_MEDIA_MAX_BYTES). */
+export const MAX_RCS_ATTACHMENT_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 export function isSupportedImessageAttachmentType(mimeType: string, name: string): boolean {
   return (

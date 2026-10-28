@@ -60,6 +60,7 @@ import {
   type ScheduleAttachmentArgs,
 } from './scheduleService';
 import {
+  RcsAttachmentTooLargeError,
   sendImageMessage,
   UnsendableAttachmentNameError,
   type AttachmentTextService,
@@ -141,8 +142,11 @@ export interface AttachmentQueueAdmission {
   /** True only after this attachment's optimistic message + queue transaction committed. */
   queued: boolean;
   tempGuid?: string;
-  /** Why an attachment was not queued, when the person can fix it ('file-name': rename it). */
-  reason?: 'file-name';
+  /**
+   * Why an attachment was not queued, when the person can fix it ('file-name': rename it;
+   * 'too-large': over the RCS size limit, remove it).
+   */
+  reason?: 'file-name' | 'too-large';
 }
 export type AttachmentQueueAdmissionObserver = (admission: AttachmentQueueAdmission) => void;
 
@@ -582,7 +586,9 @@ export function sendImages(
                   queued: false,
                   ...(error instanceof UnsendableAttachmentNameError
                     ? { reason: 'file-name' as const }
-                    : {}),
+                    : error instanceof RcsAttachmentTooLargeError
+                      ? { reason: 'too-large' as const }
+                      : {}),
                 });
               } catch (observerError) {
                 logger.warn('[send] optional attachment admission observer failed', observerError);

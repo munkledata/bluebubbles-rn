@@ -553,6 +553,16 @@ describe('share recovery in the capture and navigator', () => {
     ]);
   });
 
+  it('points a share of one of Gator’s own files to Forward or Save', async () => {
+    await renderWithTheme(<ShareIntentNavigator />);
+    await act(async () => {
+      useShareIntentStore.getState().setFailureReason('own_file');
+    });
+    expect(toastMessages()).toEqual([
+      'Gator can’t share a file to itself. Long-press the message and use Forward or Save instead.',
+    ]);
+  });
+
   it('remounts a failed navigator the next time the app comes to the foreground', async () => {
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     jest.spyOn(logger, 'warn').mockImplementation(() => undefined);

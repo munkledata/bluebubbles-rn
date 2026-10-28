@@ -4,7 +4,6 @@ import { MAX_IMESSAGE_VOICE_UPLOAD_BYTES } from '@core/models/serverInfo';
 import type { ShareIntakeManifestIdentity } from '@db/repositories';
 import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import {
-  isSupportedImessageAttachmentFile,
   sendImage,
   sendImages,
   sendTextAttachment,
@@ -15,6 +14,7 @@ import { showToast, type PendingAttachment } from '@ui';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
 import type { resolveChatService } from '@utils';
+import { imessageAttachmentRefusal } from './imessageAttachmentRefusal';
 import { observeQueueAdmission } from './observeQueueAdmission';
 import type { ChatCapabilities } from './useChatCapabilities';
 
@@ -35,6 +35,9 @@ interface DocumentPickerModule {
 }
 
 type DocumentPickerLoader = () => Promise<DocumentPickerModule>;
+
+const RCS_TOO_LARGE_TOAST =
+  'A file is larger than RCS allows (100 MiB), so it wasn’t sent. Remove it from your message.';
 
 /**
  * Open the account-neutral OS picker, then accept its result only if the screen that opened it
@@ -139,16 +142,9 @@ export function useChatAttachmentSends({
     (items: PendingAttachment[]): Promise<readonly string[]> => {
       if (!attachmentFeaturesAvailable) return Promise.resolve([]);
       if (imessageAttachmentFeaturesAvailable) {
-        if (
-          items.length !== 1 ||
-          !isSupportedImessageAttachmentFile(items[0]!) ||
-          (items[0]!.mimeType === 'application/pdf' && !imessagePdfFeaturesAvailable)
-        ) {
-          showToast(
-            imessagePdfFeaturesAvailable
-              ? 'Choose one JPEG, PNG, or PDF file no larger than 10 MiB'
-              : 'Choose one JPEG or PNG image no larger than 10 MiB',
-          );
+        const refusal = imessageAttachmentRefusal(items, imessagePdfFeaturesAvailable);
+        if (refusal !== null) {
+          showToast(refusal);
           return Promise.resolve([]);
         }
       }
@@ -174,7 +170,9 @@ export function useChatAttachmentSends({
             showToast(
               admission.reason === 'file-name'
                 ? 'A file’s name can’t be sent. Rename it without quotes or slashes (and shorter if it’s very long), then attach it again.'
-                : 'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
+                : admission.reason === 'too-large'
+                  ? RCS_TOO_LARGE_TOAST
+                  : 'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
             );
           }
           if (decidedUris.size === expectedUris.size) finish();
@@ -236,15 +234,9 @@ export function useChatAttachmentSends({
       if (!attachmentFeaturesAvailable) return false;
       if (chatService === 'iMessage') {
         if (!imessageCaptionFeaturesAvailable) return false;
-        if (
-          !isSupportedImessageAttachmentFile(item) ||
-          (item.mimeType === 'application/pdf' && !imessagePdfFeaturesAvailable)
-        ) {
-          showToast(
-            imessagePdfFeaturesAvailable
-              ? 'Choose one JPEG, PNG, or PDF file no larger than 10 MiB'
-              : 'Choose one JPEG or PNG image no larger than 10 MiB',
-          );
+        const refusal = imessageAttachmentRefusal([item], imessagePdfFeaturesAvailable);
+        if (refusal !== null) {
+          showToast(refusal);
           return false;
         }
       } else if (chatService !== 'RCS') {
@@ -268,8 +260,11 @@ export function useChatAttachmentSends({
         (error) => {
           if (!accountLease.isCurrent()) return;
           logger.warn('[chat] text-attachment queue admission failed', error);
+          // The send refuses an RCS file over the size limit before any upload; retrying cannot help.
           showToast(
-            'Couldn’t queue that text and attachment. They’re still in your composer—try again',
+            error instanceof Error && error.name === 'RcsAttachmentTooLargeError'
+              ? RCS_TOO_LARGE_TOAST
+              : 'Couldn’t queue that text and attachment. They’re still in your composer—try again',
           );
         },
       );

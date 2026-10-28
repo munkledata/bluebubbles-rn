@@ -16,7 +16,9 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { MAX_RCS_ATTACHMENT_UPLOAD_BYTES } from '@core/models/serverInfo';
 import {
+  RcsAttachmentTooLargeError,
   sendImageMessage,
   UnsendableAttachmentNameError,
   type AttachmentOwnershipPreparer,
@@ -739,6 +741,45 @@ describe('sendImageMessage', () => {
       expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
     },
   );
+
+  it('refuses an RCS file over the RCS limit before any bubble, cache, queue row, or upload', async () => {
+    // The server stops an RCS upload over 100 MiB only after receiving it, then answers 413.
+    const { db, raw } = await createTestDb();
+    await seedChat(db, RCS_CHAT_GUID);
+    const protect = jest.spyOn(attachmentCacheCoordinator, 'protect');
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: false }));
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid: RCS_CHAT_GUID, image: { ...IMG, size: MAX_RCS_ATTACHMENT_UPLOAD_BYTES + 1 } },
+        up.upload,
+        1_000,
+      ),
+    ).rejects.toBeInstanceOf(RcsAttachmentTooLargeError);
+
+    expect(protect).not.toHaveBeenCalled();
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it('still sends an RCS file of exactly the RCS limit', async () => {
+    const { db } = await createTestDb();
+    await seedChat(db, RCS_CHAT_GUID);
+    const up = fakeUploader(async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }));
+
+    await sendImageMessage(
+      db,
+      dummyHttp,
+      { chatGuid: RCS_CHAT_GUID, image: { ...IMG, size: MAX_RCS_ATTACHMENT_UPLOAD_BYTES } },
+      up.upload,
+      1_000,
+    );
+
+    expect(up.captured).toBeDefined();
+  });
 
   it('rejects an iMessage attachment before DB, cache, or upload when capability is false', async () => {
     const { db, raw } = await createTestDb();

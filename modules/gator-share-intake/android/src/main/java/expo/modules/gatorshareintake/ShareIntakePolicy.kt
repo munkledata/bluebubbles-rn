@@ -53,6 +53,9 @@ enum class ShareIntakeFailure {
   CACHE_QUOTA,
   BUSY,
   MALFORMED,
+
+  /** A share of one of Gator's own files, sent back into Gator. */
+  OWN_FILE,
 }
 
 internal class ShareIntakeException(
@@ -177,7 +180,7 @@ internal fun requireForeignShareProvider(
   providerPackage: (String) -> String?,
 ) {
   if (providerPackage(authority.substringAfterLast('@')) == ownPackage) {
-    throw ShareIntakeException(ShareIntakeFailure.PERMISSION)
+    throw ShareIntakeException(ShareIntakeFailure.OWN_FILE)
   }
 }
 
