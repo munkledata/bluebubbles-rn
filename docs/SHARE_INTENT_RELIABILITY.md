@@ -11,7 +11,8 @@
 > metadata and native-symbol path findings still keep the full Android release guard red; this
 > task-local completion does not claim otherwise. Sections explicitly labelled
 > **Historical** below describe the retired July implementation or the completed `IPC-01` /
-> `SHARE-01` disabled baseline, not current source behavior.
+> `SHARE-01` disabled baseline, not current source behavior. App 0.1.64 adds the release
+> diagnostics, stuck-share recovery and dead-end messages described in the sections below.
 
 _2026-07-24. Reported symptom: "I tried to share a PDF and Gator showed in the intent menu but
 failed after that" — and, when pressed for detail, **nothing happened at all**: no attachment, no
@@ -24,8 +25,12 @@ The replacement handles the Android intent before JavaScript through local
 `gator-share-intake` code. It rejects item count before provider reads; accepts only `content://`
 sources; enforces actual per-file, batch-byte, text, cache, concurrency, and one absolute deadline;
 streams into a pending app-private directory; and publishes only a complete, re-statted, atomic
-manifest. Exact native acknowledge/release/discard operations make a claimed batch replayable after
-process or React-context restart without exposing a partial copy.
+manifest. JavaScript holds one batch at a time; later batches wait in native storage and are taken
+oldest first. Exact native acknowledge and discard operations settle a claimed batch, and a claimed
+batch replays after a React-context restart (the pull returns it first) or a process restart (it
+goes back to ready first) without exposing a partial copy. The native release operation (claimed
+back to ready) and its JavaScript wrapper `releaseShareIntakeBatch` still exist, but nothing calls
+them: an abandoned share stays held, and the app reopens it until it is finished or discarded.
 
 Only an explicit user discard or an account reset may delete a complete batch before it is sent,
 with two exceptions. First, a batch that no running app holds is deleted once it is more than 24
@@ -33,7 +38,9 @@ hours old, counted from when the share was received. From app 0.1.64 that includ
 earlier app process left behind (owner decision 2026-10-27): a claim belongs to the app run that
 took it, so at the first share-storage use in each new process `EarlierClaimRelease` returns every
 earlier claim it can to ready, where it replays oldest first. A claim the running app holds is never
-deleted under it, and an entry the release cannot return stays as it was. Second (M169,
+deleted under it, and an entry the release cannot return stays as it was. This age deletion is
+silent: nothing tells the person and no `share.intake` event records it, so a share left waiting
+for a day behind one the app still holds is lost. Second (M169,
 2026-10-18): a claimed batch whose manifest this build cannot read would otherwise stay first in
 line and block every later share. The drain shows "Gator could not import that shared item",
 discards that exact batch by id, and pulls the next one; if the discard fails it stops instead of
