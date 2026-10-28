@@ -20,6 +20,7 @@ import {
   listReminders,
   listScheduledByChat,
   markAllChatsReadLocalWithinTransaction,
+  kvGetWithinTransaction,
   kvSetWithinTransaction,
   resumeChatPurges,
   recordShareIntakeNewChatWithinTransaction,
@@ -440,6 +441,35 @@ export function saveChatDraft(
       async (context) => {
         assertChatActionLease(activeLease);
         await kvSetWithinTransaction(context, `${DRAFT_KV_PREFIX}${chatGuid}`, text);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/**
+ * Put text typed in New Message into an existing conversation's saved draft ("Open it"). A draft
+ * the chat already has is kept and the new text goes on a new line after it, so neither is lost.
+ * Text that is already the draft's whole last line is not added a second time.
+ */
+export function addTextToChatDraft(
+  chatGuid: string,
+  text: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        const key = `${DRAFT_KV_PREFIX}${chatGuid}`;
+        const saved = (await kvGetWithinTransaction(context, key)) ?? '';
+        assertChatActionLease(activeLease);
+        if (saved === text || saved.endsWith(`\n${text}`)) return;
+        await kvSetWithinTransaction(context, key, saved.trim() ? `${saved}\n${text}` : text);
         assertChatActionLease(activeLease);
       },
       () => activeLease.isCurrent(),

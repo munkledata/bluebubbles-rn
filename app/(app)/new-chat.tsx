@@ -16,7 +16,7 @@ import {
   type ShareIntakeManifestIdentity,
   type ShareIntakeNewChatPlan,
 } from '@db/repositories';
-import { createNewChat } from '@/services';
+import { addTextToChatDraft, createNewChat } from '@/services';
 import type { NewChatService } from '@/services/chatActions';
 import {
   consumeShareIntakeBatchIfComplete,
@@ -33,9 +33,10 @@ import {
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
-import { sendImages } from '@/services/send';
+import { send, sendImages } from '@/services/send';
 import { logger } from '@core/secure';
 import { consumeForwardAttachmentHandoff } from '@features/conversations/forwardAttachmentHandoff';
+import { observeQueueAdmission } from '@features/conversations/observeQueueAdmission';
 import { useContactSearch } from '@features/contacts/useContactSearch';
 import { useRcsMutationEnabled, useSessionStore } from '@state/sessionStore';
 import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
@@ -159,6 +160,9 @@ export default function NewChatScreen(): React.JSX.Element {
     (s) => s.serverInfo?.supports_rcs_send_attempt_ownership === true,
   );
   const imessageEnabled = useSessionStore((s) => s.serverInfo?.supports_imessage_new_chat === true);
+  const exactIMessageTextSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_plain_text === true,
+  );
   const [requestedService, setRequestedService] = useState<NewChatService | null>(null);
   const selectedService: NewChatService | null =
     requestedService ?? (rcsEnabled ? 'RCS' : imessageEnabled ? 'iMessage' : null);
@@ -567,8 +571,23 @@ export default function NewChatScreen(): React.JSX.Element {
     initialContent.identity !== null &&
     !isShareIntakeNewChatRetryWindowOpen(initialContent.identity);
 
+  // With an existing one-to-one iMessage chat selected, Start adds the message to it through the
+  // normal send path: a bubble, the outgoing queue and the exact route's acknowledgement, whose
+  // message id merges the Mac's copy. A group's text goes through the server's AppleScript route,
+  // which returns no id, so a copy fetched as the chat opens could show twice; a group therefore
+  // uses "Open it", which keeps the message as its draft. A share keeps its own durable path. A
+  // typed but uncommitted address isn't part of the lookup, so it never reaches a found chat.
+  const choosesExisting =
+    selectedMatch !== null && pendingRecipient === null && initialContent.identity === null;
+  const sendsToExisting =
+    choosesExisting &&
+    !selectedMatch.isGroup &&
+    selectedService === 'iMessage' &&
+    exactIMessageTextSupported;
+  const groupUsesOpenIt = choosesExisting && selectedMatch.isGroup;
+
   // This slice creates only 1:1 chats. Group creation is a later helper capability.
-  const tooManyRecipients = effectiveRecipients.length > 1;
+  const tooManyRecipients = effectiveRecipients.length > 1 && !groupUsesOpenIt;
 
   // The server creates the thread by sending its required initial text. iMessage attachments are
   // not restored yet, so keep staged files visible but refuse to start until they are removed.
@@ -583,10 +602,104 @@ export default function NewChatScreen(): React.JSX.Element {
     (initialContent.identity === null ||
       selectedService !== 'RCS' ||
       rcsAttemptOwnershipSupported) &&
-    effectiveRecipients.length === 1 &&
+    (sendsToExisting || effectiveRecipients.length === 1) &&
     message.trim().length > 0 &&
     (selectedService !== 'iMessage' ||
-      (staged.length === 0 && imessageAddressValid && !imessageTextTooLong));
+      (staged.length === 0 && (sendsToExisting || imessageAddressValid) && !imessageTextTooLong));
+
+  /**
+   * "Open it": go to the selected existing chat. A share travels with the route, so it must never
+   * reach the guard's discard, which deletes it. Typed text is kept as that chat's draft first.
+   * Staged or forwarded files don't carry over, so then the guard asks before dropping them.
+   */
+  const openExistingChat = async (chatGuid: string): Promise<void> => {
+    if (!screenInteractionIsCurrent()) return;
+    const batchId = initialContent.batchId;
+    if (batchId !== null) {
+      navigateWithoutPrompt(() =>
+        router.replace(
+          `/chat/${encodeURIComponent(chatGuid)}?shareBatch=${encodeURIComponent(batchId)}`,
+        ),
+      );
+      return;
+    }
+    const text = message.trim();
+    if (text.length > 0) {
+      // Hold other taps while the draft is saved. The busy state would block this navigation and
+      // turn the guard's discard question into "Still starting the conversation".
+      submissionInFlightRef.current = true;
+      try {
+        await addTextToChatDraft(chatGuid, text, accountLease);
+      } catch (error) {
+        if (accountLease.isCurrent() && !abandonedRef.current) {
+          logger.warn('[new-chat] keeping the message as a draft failed', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+          showDialog(
+            'New message',
+            'Couldn’t keep your message as that conversation’s draft. It is still here.',
+          );
+        }
+        return;
+      } finally {
+        submissionInFlightRef.current = false;
+      }
+      if (!accountLease.isCurrent() || abandonedRef.current) return;
+    }
+    const destination = `/chat/${encodeURIComponent(chatGuid)}`;
+    if (staged.length === 0 && initialForwardHandoff == null) {
+      navigateWithoutPrompt(() => router.replace(destination));
+    } else {
+      router.replace(destination);
+    }
+  };
+
+  /** Start with an existing chat selected: queue the message there, then open that chat. */
+  const startInExistingChat = async (chatGuid: string): Promise<void> => {
+    submissionInFlightRef.current = true;
+    setBusy(true);
+    try {
+      // A refusal before the queue that shows no notice of its own (for example, capabilities
+      // refreshed mid-admission) resolves null; a full queue has already shown its notice.
+      let issuePresented = false;
+      const queued = await observeQueueAdmission(
+        (onQueued) =>
+          send(
+            { chatGuid, text: message.trim() },
+            accountLease,
+            (issue) => {
+              issuePresented = true;
+              presentSendIssue(issue);
+            },
+            onQueued,
+          ).then((result) => {
+            if (result == null && accountLease.isCurrent() && !issuePresented) {
+              throw new Error('Send capabilities changed before queue admission.');
+            }
+            return result;
+          }),
+        () => undefined,
+        (error) => {
+          if (!accountLease.isCurrent() || abandonedRef.current) return;
+          logger.warn('[new-chat] existing-chat send was not queued', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+          showDialog(
+            'New message',
+            'Couldn’t send to that conversation. Your message is still here.',
+          );
+        },
+      );
+      if (!queued || !accountLease.isCurrent() || abandonedRef.current) return;
+      // The bubble and the outgoing queue own the message now. Start needs every staged file
+      // removed for iMessage, so no forwarded file is left that needs its handoff pins.
+      releaseForwardProtection();
+      navigateWithoutPrompt(() => router.replace(`/chat/${encodeURIComponent(chatGuid)}`));
+    } finally {
+      submissionInFlightRef.current = false;
+      if (accountLease.isCurrent() && !abandonedRef.current) setBusy(false);
+    }
+  };
 
   const onStart = async (): Promise<void> => {
     const recipient = effectiveRecipients[0];
@@ -598,6 +711,10 @@ export default function NewChatScreen(): React.JSX.Element {
       submissionInFlightRef.current
     )
       return;
+    if (sendsToExisting && existingGuid) {
+      await startInExistingChat(existingGuid);
+      return;
+    }
     if (initialContent.identity && !isShareIntakeNewChatRetryWindowOpen(initialContent.identity)) {
       showDialog(
         'Shared item',
@@ -829,21 +946,7 @@ export default function NewChatScreen(): React.JSX.Element {
             <Pressable
               accessibilityRole="button"
               disabled={busy}
-              onPress={() => {
-                if (!screenInteractionIsCurrent()) return;
-                const destination = initialContent.batchId
-                  ? `/chat/${encodeURIComponent(existingGuid)}?shareBatch=${encodeURIComponent(initialContent.batchId)}`
-                  : `/chat/${encodeURIComponent(existingGuid)}`;
-                // A share travels with the route, so it must never reach the guard's discard, which
-                // deletes it; with nothing typed, staged or forwarded there is nothing to ask about.
-                // Otherwise the guard asks before dropping work that does not carry over.
-                const sharedItemTravels = initialContent.batchId !== null;
-                const nothingAuthored =
-                  message.length === 0 && staged.length === 0 && initialForwardHandoff == null;
-                if (sharedItemTravels || nothingAuthored)
-                  navigateWithoutPrompt(() => router.replace(destination));
-                else router.replace(destination);
-              }}
+              onPress={() => void openExistingChat(existingGuid)}
               style={[styles.existing, { backgroundColor: theme.color.secondaryBackground }]}
             >
               <Text style={[styles.existingText, { color: theme.color.tint }]}>
@@ -973,6 +1076,18 @@ export default function NewChatScreen(): React.JSX.Element {
             </Text>
           ) : null}
 
+          {sendsToExisting ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              Start sends your message to the existing conversation.
+            </Text>
+          ) : null}
+
+          {groupUsesOpenIt ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              To send to this group, choose Open it. Your message goes with you as a draft.
+            </Text>
+          ) : null}
+
           {tooManyRecipients ? (
             <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
               New conversations are one-to-one — remove extra recipients to start.
@@ -987,7 +1102,8 @@ export default function NewChatScreen(): React.JSX.Element {
 
           {selectedService === 'iMessage' &&
           effectiveRecipients.length === 1 &&
-          !imessageAddressValid ? (
+          !imessageAddressValid &&
+          !sendsToExisting ? (
             <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
               For iMessage, enter a full email address or a number with country code, such as
               +15551234567.

@@ -100,8 +100,12 @@ jest.mock('expo-image', () => {
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
-jest.mock('@/services', () => ({ createNewChat: jest.fn(), http: {} }));
-jest.mock('@/services/send', () => ({ sendImages: jest.fn() }));
+jest.mock('@/services', () => ({
+  addTextToChatDraft: jest.fn(),
+  createNewChat: jest.fn(),
+  http: {},
+}));
+jest.mock('@/services/send', () => ({ send: jest.fn(), sendImages: jest.fn() }));
 jest.mock('@/services/share/shareIntake', () => ({
   consumeShareIntakeBatchIfComplete: jest.fn(),
   discardShareIntakeItem: jest.fn(() => Promise.resolve()),
@@ -137,9 +141,9 @@ import NewChatScreen from '../../../app/(app)/new-chat';
 // eslint-disable-next-line import/first
 import * as Crypto from 'expo-crypto';
 // eslint-disable-next-line import/first
-import { createNewChat } from '@/services';
+import { addTextToChatDraft, createNewChat } from '@/services';
 // eslint-disable-next-line import/first
-import { sendImages } from '@/services/send';
+import { send, sendImages } from '@/services/send';
 // eslint-disable-next-line import/first
 import {
   consumeShareIntakeBatchIfComplete,
@@ -175,6 +179,8 @@ const mockCreateNewChat = createNewChat as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockRandomUUID = Crypto.randomUUID as jest.Mock;
 const mockSendImages = sendImages as jest.Mock;
+const mockSend = send as jest.Mock;
+const mockAddTextToChatDraft = addTextToChatDraft as jest.Mock;
 const mockConsumeShareIntakeBatchIfComplete = consumeShareIntakeBatchIfComplete as jest.Mock;
 const mockDiscardShareIntakeBatch = discardShareIntakeBatch as jest.Mock;
 const mockDrainShareIntake = drainShareIntake as jest.Mock;
@@ -356,6 +362,21 @@ beforeEach(() => {
   for (const k of Object.keys(mockFiles)) delete mockFiles[k];
   mockFileInfoReads.length = 0;
   mockSendImages.mockReset().mockResolvedValue([]);
+  // The real send reports queue admission before its network round trip completes.
+  mockSend
+    .mockReset()
+    .mockImplementation(
+      (
+        _args: unknown,
+        _lease: unknown,
+        _report: unknown,
+        onQueued?: (tempGuid: string) => void,
+      ) => {
+        onQueued?.('temp-existing-send');
+        return Promise.resolve({ tempGuid: 'temp-existing-send' });
+      },
+    );
+  mockAddTextToChatDraft.mockReset().mockResolvedValue(undefined);
   mockGetDatabase.mockReset();
   mockConsumeShareIntakeBatchIfComplete.mockReset().mockResolvedValue(true);
   mockDiscardShareIntakeBatch.mockReset().mockResolvedValue(true);
@@ -437,7 +458,48 @@ describe('NewChatScreen — opening an existing conversation', () => {
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
   });
 
-  it('leaves the discard question to the guard when typed text would not carry over', async () => {
+  it('keeps typed text as that chat’s draft and opens it without asking', async () => {
+    await renderWithTheme(<NewChatScreen />);
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), '  Typed before choosing ');
+    });
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await openIt();
+
+    await waitFor(() => expect(mockNavigateWithoutPrompt).toHaveBeenCalledTimes(1));
+    expect(mockAddTextToChatDraft).toHaveBeenCalledWith(
+      PRIVATE_EXISTING_GUID,
+      'Typed before choosing',
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    expect(mockAddTextToChatDraft.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockReplace.mock.invocationCallOrder[0]!,
+    );
+    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
+  });
+
+  it('keeps the text but leaves the discard question to the guard for a forwarded file', async () => {
+    stageProtectedForward(jest.fn());
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await openIt();
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledTimes(1));
+    expect(mockAddTextToChatDraft).toHaveBeenCalledWith(
+      PRIVATE_EXISTING_GUID,
+      PRIVATE_MESSAGE,
+      expect.anything(),
+    );
+    // The real guard asks "Discard new message?" for this replace, because the file stays behind.
+    expect(mockNavigateWithoutPrompt).not.toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
+  });
+
+  it('stays, with the text still here, when the draft cannot be kept', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    mockAddTextToChatDraft.mockRejectedValueOnce(new Error('disk full'));
     await renderWithTheme(<NewChatScreen />);
     await act(async () => {
       fireEvent.changeText(screen.getByPlaceholderText('Message'), 'Typed before choosing');
@@ -446,9 +508,167 @@ describe('NewChatScreen — opening an existing conversation', () => {
 
     await openIt();
 
-    // The real guard asks "Discard new message?" for this replace; it never touches a share.
-    expect(mockNavigateWithoutPrompt).not.toHaveBeenCalled();
-    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
+    await waitFor(() =>
+      expect(useDialogStore.getState().current?.message).toBe(
+        'Couldn’t keep your message as that conversation’s draft. It is still here.',
+      ),
+    );
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('Typed before choosing')).toBeTruthy();
+  });
+});
+
+describe('NewChatScreen — Start adds to an existing conversation', () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: 'test',
+        supports_imessage_new_chat: true,
+        supports_imessage_plain_text: true,
+      }),
+    });
+  });
+
+  const typeMessage = async (text: string): Promise<void> => {
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), text);
+    });
+  };
+  const pressStart = async (): Promise<void> => {
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+  };
+
+  it('sends into the existing one-to-one chat through the normal send path and opens it', async () => {
+    mockFindChat.mockResolvedValue([existing('any;-;+15559999999', { latestMessageDate: 1 })]);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15559999999');
+    await typeMessage(' hello ');
+    expect(
+      await screen.findByText('Start sends your message to the existing conversation.'),
+    ).toBeTruthy();
+
+    await pressStart();
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledTimes(1));
+    expect(mockSend).toHaveBeenCalledWith(
+      { chatGuid: 'any;-;+15559999999', text: 'hello' },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+    expect(mockNavigateWithoutPrompt).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent('any;-;+15559999999')}`);
+  });
+
+  it('sends to a group through Open it, which keeps the message as the group’s draft', async () => {
+    const now = Date.now();
+    mockFindChat.mockResolvedValue([
+      existing('any;+;chat-new', { name: 'Weekend', latestMessageDate: now, isGroup: true }),
+      existing('any;+;chat-old', { name: 'Old plans', latestMessageDate: now - 1, isGroup: true }),
+    ]);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551112222');
+    await addRecipient('+15553334444');
+    await typeMessage('hello group');
+    await fireEvent.press(await screen.findByRole('radio', { name: /^Old plans · / }));
+
+    // A group's send has no exact acknowledgement, so Start stays off and Open it carries the text.
+    expect(
+      screen.getByText(
+        'To send to this group, choose Open it. Your message goes with you as a draft.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/one-to-one/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
+    await fireEvent.press(screen.getByRole('button', { name: /Open it/ }));
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledTimes(1));
+    expect(mockAddTextToChatDraft).toHaveBeenCalledWith(
+      'any;+;chat-old',
+      'hello group',
+      expect.anything(),
+    );
+    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent('any;+;chat-old')}`);
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
+  it('creates as before when the server has no exact iMessage text route', async () => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+    });
+    mockCreateNewChat.mockResolvedValue('any;-;+15559999999');
+    mockFindChat.mockResolvedValue([existing('any;-;+15559999999')]);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15559999999');
+    await typeMessage('hello');
+    expect(screen.queryByText('Start sends your message to the existing conversation.')).toBeNull();
+
+    await pressStart();
+
+    await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('stays with the message when the send is refused before it was queued', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    mockSend.mockRejectedValueOnce(new Error('capability changed'));
+    mockFindChat.mockResolvedValue([existing('any;-;+15559999999')]);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15559999999');
+    await typeMessage('hello');
+
+    await pressStart();
+
+    await waitFor(() =>
+      expect(useDialogStore.getState().current?.message).toBe(
+        'Couldn’t send to that conversation. Your message is still here.',
+      ),
+    );
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('hello')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+        false,
+      ),
+    );
+  });
+
+  it('never sends to the chat found for the chosen people while another address is half-typed', async () => {
+    mockFindChat.mockResolvedValue([existing('any;-;+15559999999')]);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15559999999');
+    await typeMessage('hello');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Add another…'), '+15558888888');
+    });
+
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
+    await pressStart();
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
+  it('keeps a share on its own path: Start never sends it into a found chat', async () => {
+    stageShare(PRIVATE_SHARE_BATCH, 'shared text', []);
+    mockFindChat.mockResolvedValue([existing('any;-;+15559999999')]);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15559999999');
+
+    expect(await screen.findByRole('button', { name: /Open it/ })).toBeTruthy();
+    expect(screen.queryByText('Start sends your message to the existing conversation.')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
+    await pressStart();
+    expect(mockSend).not.toHaveBeenCalled();
   });
 });
 
