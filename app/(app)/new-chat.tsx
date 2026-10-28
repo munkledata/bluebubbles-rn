@@ -7,6 +7,7 @@ import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 import { showDialog } from '@ui/dialog/dialogStore';
 import { ApiError } from '@core/api/errors';
 import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';
+import { canonicalRecipientAddress } from '@core/recipientAddress';
 import { getDatabase } from '@db/database';
 import {
   findChatByParticipantAddresses,
@@ -61,7 +62,18 @@ function looksLikeAddress(raw: string): boolean {
   return digits.length >= 7 && /^[+\d\s()./-]+$/.test(raw);
 }
 
-/** Match the first iMessage mutation's explicit destination contract; never guess a country. */
+/**
+ * The address a recipient chip keeps: the standard form (lowercased email, or a `+` number using
+ * the owner's +1 rule) when there is one, else the exact text, which only an exact match can use.
+ */
+function recipientAddressFor(raw: string): string {
+  return canonicalRecipientAddress(raw) ?? raw.trim();
+}
+
+/**
+ * Match the first iMessage mutation's explicit destination contract. Chips already hold the
+ * standard form, so a number still without a country code here is one the +1 rule couldn't prove.
+ */
 function looksLikeIMessageAddress(raw: string): boolean {
   if (raw.includes('@')) return raw.length <= 254 && looksLikeAddress(raw);
   return /^\+[1-9][0-9]{1,14}$/.test(raw);
@@ -382,7 +394,9 @@ export default function NewChatScreen(): React.JSX.Element {
   const chosen = new Set(recipients.map((r) => r.address.toLowerCase()));
 
   // Already-chosen recipients are filtered out of the shared hook's suggestions.
-  const suggestions = useContactSearch(query).filter((c) => !chosen.has(c.address.toLowerCase()));
+  const suggestions = useContactSearch(query).filter(
+    (c) => !chosen.has(recipientAddressFor(c.address).toLowerCase()),
+  );
 
   // Offer a local existing-chat shortcut only where the stored participant is authoritative.
   // Cached RCS participant strings are presentation data (display name, formatted number, or opaque
@@ -484,8 +498,11 @@ export default function NewChatScreen(): React.JSX.Element {
   // pending-recipient derivation and the comma handler so both agree on what counts.
   const rawToRecipient = (text: string): Recipient | null => {
     const raw = text.trim().replace(/,$/, '').trim();
-    if (!looksLikeAddress(raw) || chosen.has(raw.toLowerCase())) return null;
-    return { address: raw, name: raw };
+    if (!looksLikeAddress(raw)) return null;
+    const address = recipientAddressFor(raw);
+    if (chosen.has(address.toLowerCase())) return null;
+    // The chip shows the address Start will use, so a +1 the app assumed is visible.
+    return { address, name: address };
   };
 
   const pendingRecipient = rawToRecipient(query);
@@ -991,7 +1008,7 @@ export default function NewChatScreen(): React.JSX.Element {
             onPick={(contact) => {
               if (!screenInteractionIsCurrent()) return;
               addRecipient({
-                address: contact.address,
+                address: recipientAddressFor(contact.address),
                 name: contact.name || contact.address,
               });
             }}

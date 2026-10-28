@@ -1180,6 +1180,100 @@ describe('NewChatScreen — recipient entry + create', () => {
   });
 });
 
+describe('NewChatScreen — standard recipient addresses', () => {
+  const useIMessageOnly = (): void => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+    });
+  };
+
+  it('starts an iMessage to a ten-digit number typed without a country code, as +1', async () => {
+    useIMessageOnly();
+    mockCreateNewChat.mockResolvedValue('any;-;+15551234567');
+    await renderWithTheme(<NewChatScreen />);
+
+    await addRecipient('(555) 123-4567');
+    // The chip shows the number Start will use, so the assumed +1 is visible.
+    expect(await screen.findByText('+15551234567 ✕')).toBeTruthy();
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hello');
+    });
+    expect(screen.queryByText(/number with country code/)).toBeNull();
+    await waitFor(() =>
+      expect(mockFindChat).toHaveBeenLastCalledWith(undefined, ['+15551234567'], 'iMessage'),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+
+    await waitFor(() =>
+      expect(mockCreateNewChat).toHaveBeenCalledWith(
+        ['+15551234567'],
+        'hello',
+        expect.anything(),
+        'iMessage',
+        'temp-00000000-0000-4000-8000-000000000001',
+      ),
+    );
+  });
+
+  it('standardizes a picked contact number and never adds the same person twice', async () => {
+    useIMessageOnly();
+    mockSearchContacts.mockResolvedValue([{ name: 'Alice', address: '(555) 000-0001' }]);
+    await renderWithTheme(<NewChatScreen />);
+
+    await act(async () => {
+      fireEvent.press(await screen.findByText('Alice'));
+    });
+    expect(await screen.findByText('Alice ✕')).toBeTruthy();
+    await waitFor(() =>
+      expect(mockFindChat).toHaveBeenLastCalledWith(undefined, ['+15550000001'], 'iMessage'),
+    );
+    // Picked, the contact leaves the suggestions; typed again in another format, it isn't added.
+    expect(screen.queryByText('Alice')).toBeNull();
+    await addRecipient('+1 555 000 0001');
+    expect(screen.getAllByText(/✕$/)).toHaveLength(1);
+  });
+
+  it.each([
+    ['555-123-4567', '+15551234567'],
+    ['Pat@Example.com', 'pat@example.com'],
+    // Not provably standard, so it is sent exactly as typed and Google reads it.
+    ['07700 900123', '07700 900123'],
+  ])('sends the RCS start for %j to %j', async (typed, expected) => {
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+
+    await addRecipient(typed);
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+
+    await waitFor(() =>
+      expect(mockCreateNewChat).toHaveBeenCalledWith(
+        [expected],
+        'Hi',
+        expect.anything(),
+        'RCS',
+        STABLE_RCS_ATTEMPT_ID,
+      ),
+    );
+  });
+
+  it('still refuses an iMessage start to a number it cannot standardize', async () => {
+    useIMessageOnly();
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+
+    await addRecipient('07700 900123');
+
+    expect(await screen.findByText(/number with country code/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
+  });
+});
+
 describe('NewChatScreen — account ownership and handoff lifetime', () => {
   it('does not consume external state for an initially stale account, then a fresh mount adopts it', async () => {
     const release = jest.fn();

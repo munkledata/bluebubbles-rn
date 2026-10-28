@@ -95,6 +95,10 @@ missing required epoch is an invalid identity, not a legacy match opportunity.
 - **Routing and existing-chat selection:** phone numbers require a complete canonical number, preferably E.164 with
   explicit region evidence. If the app cannot prove the canonical value, it keeps the exact raw endpoint and does not
   offer an inferred existing chat. Short codes and alphanumeric senders are exact-only.
+  The owner's region rule (2026-10-27) is that evidence for numbers typed or picked in New Message. Ten digits that
+  don't start with 0 or 1 are North American (`+1`), and so are eleven digits starting with 1
+  (`src/core/recipientAddress.ts`). The rule never applies to a number already stored in a chat, which stays
+  exact-only (fixture `local-number-without-region`).
 - **Email presentation:** trimming and case folding may find a presentation candidate. It does not join two chat
   GUIDs.
 - **Legacy last-ten-digits matching:** remains presentation-only until replaced. It must not select a conversation,
