@@ -20,6 +20,7 @@ import { useShareIntentStore } from '@state/shareIntentStore';
 import { showToast, type PendingAttachment } from '@ui';
 import type { ComposerAdmissionResult } from '@ui/conversations/useComposerAuthoringSession';
 import { showDialog, type DialogButton } from '@ui/dialog/dialogStore';
+import { useShareBatchOwnership } from '@ui/hooks/useShareBatchOwnership';
 
 export interface ChatShareIntakeOptions {
   guid: string;
@@ -81,6 +82,7 @@ export function useChatShareIntake({
       : null;
   });
   const ownedShareBatchId = ownedShareIdentity?.batchId ?? null;
+  useShareBatchOwnership(ownedShareBatchId);
   const [sharedAttachments] = useState<PendingAttachment[]>(() =>
     ownedShareBatchId
       ? useShareIntentStore.getState().files.map((file) => ({

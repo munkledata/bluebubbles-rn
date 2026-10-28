@@ -32,6 +32,8 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 
 let drainPromise: Promise<void> | null = null;
+/** Set by any pull that should record finding nothing; foreground re-checks stay quiet. */
+let recordEmptyPull = false;
 let wakeGeneration = 0;
 let handledWakeGeneration = 0;
 let attemptedWakeGeneration = 0;
@@ -155,10 +157,19 @@ function heldShareCounts(): { files: number; text: boolean; held?: ShareIntakeHe
   };
 }
 
-/** On return to the foreground, record a share still held in the app (counts only). */
+/**
+ * On return to the foreground. With no share held, pull again: a missed signal or a failed pickup
+ * leaves native shares waiting with nothing else to wake the app. With one held, record it, and ask
+ * the navigator to open it again when no screen shows it.
+ */
 export function noteShareIntakeForeground(): void {
-  if (useShareIntentStore.getState().batchId === null) return;
+  const state = useShareIntentStore.getState();
+  if (state.batchId === null) {
+    void drainShareIntake({ quiet: true });
+    return;
+  }
   logger.event('share.intake', { stage: 'held', outcome: 'foreground', ...heldShareCounts() });
+  if (state.owners === 0) state.requestReroute();
 }
 
 let lastDiscardedUnreadableBatchId: string | null = null;
@@ -193,6 +204,7 @@ function startDrainIfIdle(): Promise<void> {
       const batch = await takeNextNativeShareBatch();
       handledWakeGeneration = observedWake;
       if (batch) {
+        recordEmptyPull = false;
         useShareIntentStore.getState().stageIfEmpty(batch);
         logger.event('share.intake', {
           stage: 'pickup',
@@ -203,12 +215,14 @@ function startDrainIfIdle(): Promise<void> {
         return;
       }
       if (observedWake === wakeGeneration) {
-        logger.event('share.intake', { stage: 'pickup', outcome: 'none' });
+        if (recordEmptyPull) logger.event('share.intake', { stage: 'pickup', outcome: 'none' });
+        recordEmptyPull = false;
         return;
       }
     }
   })()
     .catch(async (error: unknown) => {
+      recordEmptyPull = false;
       handledWakeGeneration = Math.max(handledWakeGeneration, attemptedWakeGeneration);
       logger.warn('[share] completed native batch could not be staged', {
         errorName: error instanceof Error ? error.name : 'UnknownError',
@@ -219,6 +233,9 @@ function startDrainIfIdle(): Promise<void> {
       });
       if (error instanceof UnreadableNativeShareBatchError) {
         await settleUnreadableNativeBatch(error.batchId);
+      } else {
+        // Shown once the protected tree is visible; the next return to the foreground pulls again.
+        useShareIntentStore.getState().setFailureReason('pickup');
       }
     })
     .finally(() => {
@@ -236,12 +253,18 @@ function startDrainIfIdle(): Promise<void> {
   return currentDrain;
 }
 
-/** Stage at most the one exact native claim; loop if an event races any empty-pull boundary. */
-export function drainShareIntake(): Promise<void> {
+/**
+ * Stage at most the one exact native claim; loop if an event races any empty-pull boundary. A
+ * `quiet` pull (the foreground re-check) does not record finding nothing.
+ */
+export function drainShareIntake(options: { readonly quiet?: boolean } = {}): Promise<void> {
   noteWake();
   if (useShareIntentStore.getState().batchId !== null) {
     // The app takes one share at a time; a later one waits in native storage.
     logger.event('share.intake', { stage: 'pickup', outcome: 'held', ...heldShareCounts() });
+  } else if (options.quiet !== true) {
+    // Only a pull that will run sets this; the pull clears it however it ends.
+    recordEmptyPull = true;
   }
   return startDrainIfIdle();
 }
@@ -251,6 +274,12 @@ export function startShareIntake(): () => void {
   const unsubscribe = subscribeNativeShareIntake(
     () => {
       logger.event('share.intake', { stage: 'signal', outcome: 'received' });
+      const state = useShareIntentStore.getState();
+      if (state.batchId !== null) {
+        // Native keeps the newer share. Say so, and open the held one again if nothing shows it.
+        state.noteWaitingShare();
+        if (state.owners === 0) state.requestReroute();
+      }
       void drainShareIntake();
     },
     (reason) => {

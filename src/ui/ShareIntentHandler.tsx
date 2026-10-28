@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { logger } from '@core/secure';
 import { runTrackedRealtimeWork } from '@/services/realtime/deliveryCoordinator';
@@ -33,9 +33,42 @@ function ShareIntentCaptureInner(): null {
   return null;
 }
 
+/**
+ * A share boundary that failed renders nothing until the app restarts. Remount it the next time the
+ * app comes to the foreground, so a one-off failure cannot stop sharing for the rest of the run.
+ */
+function useBoundaryResetOnForeground(stage: 'signal' | 'route'): {
+  resetKey: number;
+  markFailed: () => void;
+} {
+  const [resetKey, setResetKey] = useState(0);
+  const failedRef = useRef(false);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active' || !failedRef.current) return;
+      failedRef.current = false;
+      logger.event('share.intake', { stage, outcome: 'boundary-reset' });
+      setResetKey((key) => key + 1);
+    });
+    return () => subscription.remove();
+  }, [stage]);
+  const markFailed = useCallback(() => {
+    failedRef.current = true;
+  }, []);
+  return { resetKey, markFailed };
+}
+
 export function ShareIntentCapture(): React.JSX.Element {
+  const { resetKey, markFailed } = useBoundaryResetOnForeground('signal');
   return (
-    <LoadErrorBoundary fallback={null} onError={() => logger.warn('[share] capture failed')}>
+    <LoadErrorBoundary
+      key={resetKey}
+      fallback={null}
+      onError={() => {
+        logger.warn('[share] capture failed');
+        markFailed();
+      }}
+    >
       <ShareIntentCaptureInner />
     </LoadErrorBoundary>
   );
@@ -50,8 +83,14 @@ function rejectionMessage(reason: string): string {
     return 'Gator could not finish importing that share. Try again.';
   }
   if (reason === 'permission') return 'The sending app did not grant access to the shared file.';
+  if (reason === 'pickup') {
+    return 'Gator could not open a shared item. It will try again the next time you open Gator.';
+  }
   return 'Gator could not import that shared item.';
 }
+
+/** A route just sent gets this long to show its screen before the held share counts as unshown. */
+const REROUTE_GRACE_MS = 3_000;
 
 /** Resolve and route one exact native claim only after the connected, unlocked tree exists. */
 function ShareIntentNavigatorInner(): null {
@@ -63,9 +102,16 @@ function ShareIntentNavigatorInner(): null {
   const text = useShareIntentStore((state) => state.text);
   const files = useShareIntentStore((state) => state.files);
   const failureReason = useShareIntentStore((state) => state.failureReason);
+  const rerouteRequest = useShareIntentStore((state) => state.rerouteRequest);
+  const waitingNotice = useShareIntentStore((state) => state.waitingNotice);
   const accountLease = useScreenAccountLease();
   const [routeRetryNonce, setRouteRetryNonce] = useState(0);
   const routedBatchRef = useRef<string | null>(null);
+  // Requests and notices from before this mount are moot: a fresh navigator routes the held batch.
+  const handledRerouteRef = useRef(rerouteRequest);
+  const shownNoticeRef = useRef(waitingNotice);
+  const routingRef = useRef(false);
+  const lastRoutedAtRef = useRef(0);
   const routeFailuresRef = useRef<{ batchId: string | null; count: number }>({
     batchId: null,
     count: 0,
@@ -86,6 +132,32 @@ function ShareIntentNavigatorInner(): null {
   }, [failureReason]);
 
   useEffect(() => {
+    if (waitingNotice === shownNoticeRef.current) return;
+    shownNoticeRef.current = waitingNotice;
+    showToast('Finish or discard your earlier shared item; your new share is waiting.');
+  }, [waitingNotice]);
+
+  // Open the held batch again when no screen shows it: its route was dropped, or its screen closed
+  // without settling. A route still being worked out, or sent moments ago, is left to land.
+  useEffect(() => {
+    if (rerouteRequest === handledRerouteRef.current) return;
+    handledRerouteRef.current = rerouteRequest;
+    const state = useShareIntentStore.getState();
+    if (
+      state.batchId === null ||
+      routedBatchRef.current !== state.batchId ||
+      state.owners !== 0 ||
+      routingRef.current ||
+      Date.now() - lastRoutedAtRef.current < REROUTE_GRACE_MS
+    ) {
+      return;
+    }
+    routedBatchRef.current = null;
+    logger.event('share.intake', { stage: 'route', outcome: 'reopened' });
+    setRouteRetryNonce((current) => current + 1);
+  }, [rerouteRequest]);
+
+  useEffect(() => {
     if (batchId === null) {
       routedBatchRef.current = null;
       routeFailuresRef.current = { batchId: null, count: 0 };
@@ -96,6 +168,10 @@ function ShareIntentNavigatorInner(): null {
     }
     if (routedBatchRef.current === batchId || !accountLease.isCurrent()) return;
     routedBatchRef.current = batchId;
+    // A navigator remounted after a failure can find a screen still showing this batch. Leave it
+    // there; if that screen closes without settling the batch, a reopen request routes it again.
+    if (useShareIntentStore.getState().owners > 0) return;
+    routingRef.current = true;
     let active = true;
 
     void (async () => {
@@ -191,27 +267,32 @@ function ShareIntentNavigatorInner(): null {
         logger.debug('[share] opening generic recipient review');
         router.push(`/new-chat?shareBatch=${encodedBatch}`);
       }
-    })().catch((error: unknown) => {
-      if (!active || !accountLease.isCurrent()) {
-        logger.event('share.intake', { stage: 'route', outcome: 'inactive' });
-        return;
-      }
-      routedBatchRef.current = null;
-      const failureCount = routeFailuresRef.current.count + 1;
-      routeFailuresRef.current = { batchId, count: failureCount };
-      logger.warn('[share] navigation failed', {
-        errorName: error instanceof Error ? error.name : 'UnknownError',
+    })()
+      .catch((error: unknown) => {
+        if (!active || !accountLease.isCurrent()) {
+          logger.event('share.intake', { stage: 'route', outcome: 'inactive' });
+          return;
+        }
+        routedBatchRef.current = null;
+        const failureCount = routeFailuresRef.current.count + 1;
+        routeFailuresRef.current = { batchId, count: failureCount };
+        logger.warn('[share] navigation failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+        if (failureCount <= 2) {
+          logger.event('share.intake', { stage: 'route', outcome: 'retry' });
+          showToast('Gator could not open the shared item. Retrying…');
+          setRouteRetryNonce((current) => current + 1);
+          return;
+        }
+        logger.event('share.intake', { stage: 'route', outcome: 'review' });
+        showToast('Gator could not open the shared item. Review it to retry or discard it.');
+        router.push(`/new-chat?shareBatch=${encodeURIComponent(batchId)}`);
+      })
+      .finally(() => {
+        routingRef.current = false;
+        lastRoutedAtRef.current = Date.now();
       });
-      if (failureCount <= 2) {
-        logger.event('share.intake', { stage: 'route', outcome: 'retry' });
-        showToast('Gator could not open the shared item. Retrying…');
-        setRouteRetryNonce((current) => current + 1);
-        return;
-      }
-      logger.event('share.intake', { stage: 'route', outcome: 'review' });
-      showToast('Gator could not open the shared item. Review it to retry or discard it.');
-      router.push(`/new-chat?shareBatch=${encodeURIComponent(batchId)}`);
-    });
 
     return () => {
       active = false;
@@ -233,8 +314,16 @@ function ShareIntentNavigatorInner(): null {
 
 /** Connected-layout consumer; App Lock unmounts it while shared content must remain hidden. */
 export function ShareIntentNavigator(): React.JSX.Element {
+  const { resetKey, markFailed } = useBoundaryResetOnForeground('route');
   return (
-    <LoadErrorBoundary fallback={null} onError={() => logger.warn('[share] navigator failed')}>
+    <LoadErrorBoundary
+      key={resetKey}
+      fallback={null}
+      onError={() => {
+        logger.warn('[share] navigator failed');
+        markFailed();
+      }}
+    >
       <ShareIntentNavigatorInner />
     </LoadErrorBoundary>
   );

@@ -80,3 +80,47 @@ describe('shareIntentStore exact native-batch handoff', () => {
     });
   });
 });
+
+describe('shareIntentStore ownership of the held batch', () => {
+  it('counts only screens that show the held batch, and releases each exactly once', () => {
+    const store = useShareIntentStore.getState();
+    store.stageIfEmpty(firstPayload);
+    const releaseFirst = store.adopt(FIRST_BATCH);
+    const releaseSecond = store.adopt(FIRST_BATCH);
+    const releaseOther = store.adopt(SECOND_BATCH);
+    expect(useShareIntentStore.getState().owners).toBe(2);
+
+    releaseOther();
+    releaseFirst();
+    releaseFirst();
+    expect(useShareIntentStore.getState().owners).toBe(1);
+    releaseSecond();
+    expect(useShareIntentStore.getState().owners).toBe(0);
+  });
+
+  it('never lets a release for a settled batch touch the newer one', () => {
+    const store = useShareIntentStore.getState();
+    store.stageIfEmpty(firstPayload);
+    const releaseOld = store.adopt(FIRST_BATCH);
+    expect(store.clearIf(FIRST_BATCH)).toBe(true);
+    expect(useShareIntentStore.getState().owners).toBe(0);
+
+    store.stageIfEmpty({ ...firstPayload, batchId: SECOND_BATCH });
+    store.adopt(SECOND_BATCH);
+    releaseOld();
+    expect(useShareIntentStore.getState().owners).toBe(1);
+
+    store.clear();
+    expect(useShareIntentStore.getState().owners).toBe(0);
+  });
+
+  it('counts reroute requests and waiting-share notices', () => {
+    const before = useShareIntentStore.getState();
+    before.requestReroute();
+    before.noteWaitingShare();
+    before.noteWaitingShare();
+    const after = useShareIntentStore.getState();
+    expect(after.rerouteRequest).toBe(before.rerouteRequest + 1);
+    expect(after.waitingNotice).toBe(before.waitingNotice + 2);
+  });
+});

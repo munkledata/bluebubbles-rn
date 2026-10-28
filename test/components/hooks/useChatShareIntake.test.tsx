@@ -69,9 +69,9 @@ async function openShare(overrides: Partial<ChatShareIntakeOptions> = {}) {
     headerGuid: CHAT,
     ...overrides,
   };
-  const { result } = await renderHook(() => useChatShareIntake(options));
+  const { result, unmount } = await renderHook(() => useChatShareIntake(options));
   await waitFor(() => expect(result.current.shareReceiptLoaded).toBe(true));
-  return { result, options };
+  return { result, options, unmount };
 }
 
 beforeEach(() => {
@@ -89,6 +89,14 @@ afterEach(() => {
 });
 
 describe('useChatShareIntake', () => {
+  it('owns the share while this chat shows it, and releases it when the chat closes', async () => {
+    const { unmount } = await openShare();
+    expect(useShareIntentStore.getState().owners).toBe(1);
+
+    await unmount();
+    expect(useShareIntentStore.getState().owners).toBe(0);
+  });
+
   it('finishes the share once every item is settled and starts the next one', async () => {
     const { result } = await openShare();
     expect(result.current.ownedShareBatchId).toBe(BATCH);

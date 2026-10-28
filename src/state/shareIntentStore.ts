@@ -25,6 +25,12 @@ interface ShareIntentState {
   targetToken: string | null;
   /** Content-free native rejection reason, shown only after the protected tree is visible. */
   failureReason: string | null;
+  /** Mounted screens showing the held batch right now; 0 means nothing on screen shows it. */
+  owners: number;
+  /** Bumped to ask the navigator to open the held batch again, because no screen shows it. */
+  rerouteRequest: number;
+  /** Bumped when a newer share arrives while one is held, so the navigator can say so. */
+  waitingNotice: number;
   stageIfEmpty: (payload: {
     batchId: string;
     createdAtMs: number;
@@ -33,6 +39,10 @@ interface ShareIntentState {
     targetToken: string | null;
   }) => boolean;
   clearIf: (batchId: string) => boolean;
+  /** Register a screen showing exactly this held batch; the returned release is idempotent. */
+  adopt: (batchId: string) => () => void;
+  requestReroute: () => void;
+  noteWaitingShare: () => void;
   setFailureReason: (reason: string) => void;
   clearFailureReason: () => void;
   /** Test/admin reset only; production consumers use clearIf with their captured token. */
@@ -51,6 +61,9 @@ export const useShareIntentStore = create<ShareIntentState>((set) => ({
   files: [],
   targetToken: null,
   failureReason: null,
+  owners: 0,
+  rerouteRequest: 0,
+  waitingNotice: 0,
   stageIfEmpty: (payload) => {
     let staged = false;
     set((state) => {
@@ -71,11 +84,38 @@ export const useShareIntentStore = create<ShareIntentState>((set) => ({
     set((state) => {
       if (state.batchId !== batchId) return state;
       cleared = true;
-      return { batchId: null, createdAtMs: null, text: null, files: [], targetToken: null };
+      return {
+        batchId: null,
+        createdAtMs: null,
+        text: null,
+        files: [],
+        targetToken: null,
+        owners: 0,
+      };
     });
     return cleared;
   },
+  adopt: (batchId) => {
+    let adopted = false;
+    set((state) => {
+      if (state.batchId !== batchId) return state;
+      adopted = true;
+      return { owners: state.owners + 1 };
+    });
+    let released = !adopted;
+    return () => {
+      if (released) return;
+      released = true;
+      // A release for a batch that was settled and replaced must not touch the newer one.
+      set((state) =>
+        state.batchId === batchId && state.owners > 0 ? { owners: state.owners - 1 } : state,
+      );
+    };
+  },
+  requestReroute: () => set((state) => ({ rerouteRequest: state.rerouteRequest + 1 })),
+  noteWaitingShare: () => set((state) => ({ waitingNotice: state.waitingNotice + 1 })),
   setFailureReason: (failureReason) => set({ failureReason }),
   clearFailureReason: () => set({ failureReason: null }),
-  clear: () => set({ batchId: null, createdAtMs: null, text: null, files: [], targetToken: null }),
+  clear: () =>
+    set({ batchId: null, createdAtMs: null, text: null, files: [], targetToken: null, owners: 0 }),
 }));

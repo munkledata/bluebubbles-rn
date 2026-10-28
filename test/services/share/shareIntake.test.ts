@@ -157,6 +157,7 @@ beforeEach(() => {
     files: [],
     targetToken: null,
     failureReason: null,
+    owners: 0,
   });
   takeNext.mockReset().mockResolvedValue(null);
   acknowledge.mockReset().mockResolvedValue(undefined);
@@ -724,5 +725,105 @@ describe('share intake diagnostic events', () => {
     expect(shareIntakeHeldAge(made, made + 24 * 60 * 60_000)).toBe('over-24h');
     // A clock set back makes the share look newer than now; it still reads as just made.
     expect(shareIntakeHeldAge(made + 5_000, made)).toBe('under-1m');
+  });
+});
+
+describe('share intake recovery', () => {
+  function captureNativeListeners(): { onPending: () => void } {
+    const captured = { onPending: () => undefined as void };
+    subscribe.mockImplementationOnce((pending) => {
+      captured.onPending = pending;
+      return jest.fn();
+    });
+    return captured;
+  }
+
+  it('pulls again on return to the foreground with nothing held, and stages what was waiting', async () => {
+    takeNext.mockResolvedValueOnce(batch(FIRST_BATCH, 'waited'));
+
+    noteShareIntakeForeground();
+    await waitForCondition(
+      () => useShareIntentStore.getState().batchId === FIRST_BATCH,
+      'the waiting share staged',
+    );
+
+    expect(takeNext).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a foreground pull that finds nothing out of the log, while a signal pull still records it', async () => {
+    noteShareIntakeForeground();
+    await waitForCondition(() => takeNext.mock.calls.length === 1, 'the quiet pull');
+    await nextEventLoopTurn();
+    expect(event).not.toHaveBeenCalled();
+
+    await drainShareIntake();
+    expect(event).toHaveBeenCalledWith('share.intake', { stage: 'pickup', outcome: 'none' });
+  });
+
+  it('does not let a pull asked for while a share is held make a later quiet pull record nothing found', async () => {
+    stageFirstBatch();
+    await drainShareIntake();
+    useShareIntentStore.getState().clearIf(FIRST_BATCH);
+    event.mockClear();
+
+    noteShareIntakeForeground();
+    await waitForCondition(() => takeNext.mock.calls.length === 1, 'the quiet pull');
+    await nextEventLoopTurn();
+    expect(event).not.toHaveBeenCalled();
+  });
+
+  it('asks to open the held share again on return to the foreground only when no screen shows it', () => {
+    stageFirstBatch();
+    const before = useShareIntentStore.getState().rerouteRequest;
+
+    noteShareIntakeForeground();
+    expect(useShareIntentStore.getState().rerouteRequest).toBe(before + 1);
+
+    const release = useShareIntentStore.getState().adopt(FIRST_BATCH);
+    noteShareIntakeForeground();
+    expect(useShareIntentStore.getState().rerouteRequest).toBe(before + 1);
+    release();
+    expect(takeNext).not.toHaveBeenCalled();
+  });
+
+  it('says a newer share is waiting when a signal arrives while one is held', async () => {
+    const native = captureNativeListeners();
+    const stop = startShareIntake();
+    await nextEventLoopTurn();
+    const start = useShareIntentStore.getState();
+
+    native.onPending();
+    expect(useShareIntentStore.getState().waitingNotice).toBe(start.waitingNotice);
+
+    stageFirstBatch();
+    native.onPending();
+    expect(useShareIntentStore.getState().waitingNotice).toBe(start.waitingNotice + 1);
+    expect(useShareIntentStore.getState().rerouteRequest).toBe(start.rerouteRequest + 1);
+
+    const release = useShareIntentStore.getState().adopt(FIRST_BATCH);
+    native.onPending();
+    expect(useShareIntentStore.getState().waitingNotice).toBe(start.waitingNotice + 2);
+    expect(useShareIntentStore.getState().rerouteRequest).toBe(start.rerouteRequest + 1);
+    release();
+    stop();
+  });
+
+  it('reports a failed pickup and pulls again on the next return to the foreground', async () => {
+    takeNext.mockRejectedValueOnce(new Error('bridge failed'));
+    await drainShareIntake();
+    expect(useShareIntentStore.getState().failureReason).toBe('pickup');
+
+    takeNext.mockResolvedValueOnce(batch(FIRST_BATCH, 'second try'));
+    noteShareIntakeForeground();
+    await waitForCondition(
+      () => useShareIntentStore.getState().batchId === FIRST_BATCH,
+      'the retried pickup staged',
+    );
+  });
+
+  it('reports an unreadable claim as malformed, not as a failed pickup', async () => {
+    takeNext.mockRejectedValueOnce(new UnreadableNativeShareBatchError(null));
+    await drainShareIntake();
+    expect(useShareIntentStore.getState().failureReason).toBe('malformed');
   });
 });

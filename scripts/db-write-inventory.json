@@ -303,7 +303,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d",
       "path": "app/(app)/new-chat.tsx",
-      "line": 349,
+      "line": 351,
       "symbol": "NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
@@ -316,7 +316,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3",
       "path": "app/(app)/new-chat.tsx",
-      "line": 487,
+      "line": 489,
       "symbol": "NewChatScreen.removeStaged.<callback:381edc2f98>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#discardShareIntakeItem",
@@ -329,7 +329,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart.<callback:aa379435cb>:mutator-call:f07a3220abc4",
       "path": "app/(app)/new-chat.tsx",
-      "line": 758,
+      "line": 760,
       "symbol": "NewChatScreen.onStart.<callback:aa379435cb>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan",
@@ -342,7 +342,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6c241088f98",
       "path": "app/(app)/new-chat.tsx",
-      "line": 797,
+      "line": 799,
       "symbol": "NewChatScreen.onStart",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#createNewChat",
@@ -355,7 +355,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:a5c83a9ee95e",
       "path": "app/(app)/new-chat.tsx",
-      "line": 801,
+      "line": 803,
       "symbol": "NewChatScreen.onStart",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#createNewChat",
@@ -368,7 +368,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345",
       "path": "app/(app)/new-chat.tsx",
-      "line": 872,
+      "line": 874,
       "symbol": "NewChatScreen.<callback:6cde4fbfd5>",
       "operation": "mutator-call",
       "target": "app/(app)/new-chat.tsx#NewChatScreen.onStart",
@@ -13355,7 +13355,7 @@
     {
       "id": "src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:08da8e75312d",
       "path": "src/features/conversations/useChatShareIntake.ts",
-      "line": 160,
+      "line": 162,
       "symbol": "useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#discardShareIntakeItem",
@@ -13368,7 +13368,7 @@
     {
       "id": "src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:ec3cc25fd6>.<callback:f613d3ead3>:mutator-call:ffe2eca9b54b",
       "path": "src/features/conversations/useChatShareIntake.ts",
-      "line": 212,
+      "line": 214,
       "symbol": "useChatShareIntake.<callback:ec3cc25fd6>.<callback:f613d3ead3>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
@@ -13381,7 +13381,7 @@
     {
       "id": "src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ce62f399b8c2",
       "path": "src/features/conversations/useChatShareIntake.ts",
-      "line": 296,
+      "line": 298,
       "symbol": "useChatShareIntake.<callback:84297bce06>.<callback:16329d1004>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#admitShareIntakeTextDraft",
@@ -24587,7 +24587,7 @@
     {
       "id": "src/services/share/shareIntake.ts#readShareIntakeReceipt:mutator-call:0194b9ad5aaf",
       "path": "src/services/share/shareIntake.ts",
-      "line": 55,
+      "line": 57,
       "symbol": "readShareIntakeReceipt",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#getShareIntakeReceipt",
@@ -24600,7 +24600,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardShareIntakeItem:mutator-call:35f793108f79",
       "path": "src/services/share/shareIntake.ts",
-      "line": 89,
+      "line": 91,
       "symbol": "discardShareIntakeItem",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#discardShareIntakeItem.<callback:9777bdb4a6>",
@@ -24613,7 +24613,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardShareIntakeItem:mutator-call:e15b7c40f12d",
       "path": "src/services/share/shareIntake.ts",
-      "line": 89,
+      "line": 91,
       "symbol": "discardShareIntakeItem",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24626,7 +24626,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardShareIntakeItem.<callback:9777bdb4a6>:mutator-call:90282e904d8f",
       "path": "src/services/share/shareIntake.ts",
-      "line": 92,
+      "line": 94,
       "symbol": "discardShareIntakeItem.<callback:9777bdb4a6>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#discardShareIntakeItemWithinTransaction",
@@ -24639,7 +24639,7 @@
     {
       "id": "src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:22bf7194136e",
       "path": "src/services/share/shareIntake.ts",
-      "line": 113,
+      "line": 115,
       "symbol": "admitShareIntakeTextDraft",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#admitShareIntakeTextDraft.<callback:cb922ac992>",
@@ -24652,7 +24652,7 @@
     {
       "id": "src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:c840fba1e912",
       "path": "src/services/share/shareIntake.ts",
-      "line": 113,
+      "line": 115,
       "symbol": "admitShareIntakeTextDraft",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24665,7 +24665,7 @@
     {
       "id": "src/services/share/shareIntake.ts#admitShareIntakeTextDraft.<callback:cb922ac992>:mutator-call:e2f680a53388",
       "path": "src/services/share/shareIntake.ts",
-      "line": 115,
+      "line": 117,
       "symbol": "admitShareIntakeTextDraft.<callback:cb922ac992>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#admitShareIntakeTextDraftWithinTransaction",
@@ -24678,7 +24678,7 @@
     {
       "id": "src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan:mutator-call:3389a46ba1af",
       "path": "src/services/share/shareIntake.ts",
-      "line": 126,
+      "line": 128,
       "symbol": "prepareShareIntakeNewChatPlan",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24691,7 +24691,7 @@
     {
       "id": "src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan:mutator-call:b70d0164d34f",
       "path": "src/services/share/shareIntake.ts",
-      "line": 126,
+      "line": 128,
       "symbol": "prepareShareIntakeNewChatPlan",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan.<callback:f45ff1fde5>",
@@ -24704,7 +24704,7 @@
     {
       "id": "src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan.<callback:f45ff1fde5>:mutator-call:bd2ced2cf645",
       "path": "src/services/share/shareIntake.ts",
-      "line": 128,
+      "line": 130,
       "symbol": "prepareShareIntakeNewChatPlan.<callback:f45ff1fde5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#prepareShareIntakeNewChatPlanWithinTransaction",
@@ -24717,7 +24717,7 @@
     {
       "id": "src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1",
       "path": "src/services/share/shareIntake.ts",
-      "line": 274,
+      "line": 303,
       "symbol": "consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#getShareIntakeReceipt",
@@ -24730,7 +24730,7 @@
     {
       "id": "src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:faef10ff18f3",
       "path": "src/services/share/shareIntake.ts",
-      "line": 277,
+      "line": 306,
       "symbol": "consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt",
@@ -24743,7 +24743,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardShareIntakeBatch.<callback:49cb1846bc>:mutator-call:9283adeb4a6d",
       "path": "src/services/share/shareIntake.ts",
-      "line": 322,
+      "line": 351,
       "symbol": "discardShareIntakeBatch.<callback:49cb1846bc>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt",
@@ -24756,7 +24756,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardAccountBoundShareIntake:mutator-call:9abbc352b6da",
       "path": "src/services/share/shareIntake.ts",
-      "line": 343,
+      "line": 372,
       "symbol": "discardAccountBoundShareIntake",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#listShareIntakeReceiptBatchIds",
@@ -27991,10 +27991,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; docs/WORK_PLAN_2026-08-03.md (PERF-02 Samsung measurement)"
     },
     {
-      "id": "src/ui/ShareIntentHandler.tsx#ShareIntentNavigatorInner.<callback:95f1dc6449>.<callback:60d0ae9b9a>.<callback:b17f885e16>:mutator-call:462eaaa4fa03",
+      "id": "src/ui/ShareIntentHandler.tsx#ShareIntentNavigatorInner.<callback:80e4fcc63b>.<callback:60d0ae9b9a>.<callback:b17f885e16>:mutator-call:bbb56fb15afc",
       "path": "src/ui/ShareIntentHandler.tsx",
-      "line": 114,
-      "symbol": "ShareIntentNavigatorInner.<callback:95f1dc6449>.<callback:60d0ae9b9a>.<callback:b17f885e16>",
+      "line": 190,
+      "symbol": "ShareIntentNavigatorInner.<callback:80e4fcc63b>.<callback:60d0ae9b9a>.<callback:b17f885e16>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
       "detectedContext": "coordinated-delegation",

@@ -67,6 +67,24 @@ Never a batch id, chat, file name or shared text: the projector rebuilds every e
 fields on capture, restore and export. `pickup` with outcome `held` means a new share is waiting in
 native storage behind one the app still holds, which is the "sharing does nothing" case.
 
+### Recovery from a stuck share (from app 0.1.64)
+
+The app holds one share at a time, and a screen that shows it registers as its owner
+(`useShareBatchOwnership`). Each time the app comes to the foreground:
+
+- with no share held, it pulls from native storage again, so a missed signal or a failed pickup
+  does not strand later shares (this quiet re-check records nothing when it finds nothing);
+- with a share held that no screen shows, it opens that share again (`route` `reopened`). A route
+  still being worked out, or one sent less than 3 seconds ago, is left to land first.
+
+When native signals a new share while one is held, the app says "Finish or discard your earlier
+shared item; your new share is waiting." and opens the held share again if nothing shows it. Native
+signals only once until a share is settled, so this message needs the native module to signal on
+every commit. A failed pickup shows "Gator could not open a shared item. It will try again the next
+time you open Gator." A share capture or navigator that failed is remounted the next time the app
+comes to the foreground (`boundary-reset`), instead of staying blank until a restart. A remounted
+navigator leaves a share that a screen still shows on that screen, rather than opening it twice.
+
 ## Summary
 
 Two independent problems, and the second is why the first stayed invisible for so long.

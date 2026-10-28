@@ -24,7 +24,13 @@ const mockRouter = { push: mockPush };
 jest.mock('expo-router', () => ({
   useRouter: () => mockRouter,
 }));
-jest.mock('@ui/useChatNavigator', () => ({ useChatNavigator: () => mockOpenChat }));
+const mockNavigatorRender = { fail: false };
+jest.mock('@ui/useChatNavigator', () => ({
+  useChatNavigator: () => {
+    if (mockNavigatorRender.fail) throw new Error('navigator render failed');
+    return mockOpenChat;
+  },
+}));
 jest.mock('@/services/share/shareIntake', () => ({
   consumeShareIntakeBatchIfComplete: jest.fn(),
   drainShareIntake: jest.fn(() => Promise.resolve()),
@@ -50,6 +56,8 @@ import {
 } from '@/services/share/shareIntake';
 // eslint-disable-next-line import/first
 import { resolveShareShortcutTarget } from '@/services/shortcuts/shareShortcuts';
+// eslint-disable-next-line import/first
+import { useToastStore } from '@ui/toast/toastStore';
 // eslint-disable-next-line import/first
 import {
   pauseRealtimeDeliveries,
@@ -103,6 +111,7 @@ beforeEach(() => {
   useShareIntentStore.getState().clear();
   useShareIntentStore.setState({ failureReason: null });
   recorded = jest.spyOn(logger, 'event').mockImplementation(() => undefined);
+  mockNavigatorRender.fail = false;
 });
 
 afterEach(() => {
@@ -122,21 +131,22 @@ describe('ShareIntentCapture', () => {
   });
 
   it('notes a held share each time the app comes to the foreground, while mounted', async () => {
-    const listeners: ((state: AppStateStatus) => void)[] = [];
-    const remove = jest.fn();
+    const subscriptions: { listener: (state: AppStateStatus) => void; remove: jest.Mock }[] = [];
     jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
-      listeners.push(listener as (state: AppStateStatus) => void);
+      const remove = jest.fn();
+      subscriptions.push({ listener: listener as (state: AppStateStatus) => void, remove });
       return { remove } as unknown as NativeEventSubscription;
     });
 
     const view = await renderWithTheme(<ShareIntentCapture />);
-    listeners.forEach((listener) => listener('background'));
+    subscriptions.forEach(({ listener }) => listener('background'));
     expect(mockNoteForeground).not.toHaveBeenCalled();
-    listeners.forEach((listener) => listener('active'));
+    subscriptions.forEach(({ listener }) => listener('active'));
     expect(mockNoteForeground).toHaveBeenCalledTimes(1);
 
     await view.unmount();
-    expect(remove).toHaveBeenCalledTimes(1);
+    expect(subscriptions.length).toBeGreaterThan(0);
+    subscriptions.forEach(({ remove }) => expect(remove).toHaveBeenCalledTimes(1));
   });
 });
 
@@ -428,5 +438,202 @@ describe('ShareIntentNavigator', () => {
     expect(mockPush).toHaveBeenLastCalledWith(
       `/new-chat?shareBatch=${encodeURIComponent(BATCH_TWO)}`,
     );
+  });
+});
+
+describe('share recovery in the capture and navigator', () => {
+  const WAITING = 'Finish or discard your earlier shared item; your new share is waiting.';
+  let now: number;
+
+  beforeEach(() => {
+    now = 1_700_000_000_000;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+    useToastStore.setState({ current: null, queue: [] });
+  });
+
+  function toastMessages(): string[] {
+    const { current, queue } = useToastStore.getState();
+    return [current, ...queue].flatMap((toast) => (toast ? [toast.message] : []));
+  }
+
+  function captureAppState(): ((state: AppStateStatus) => void)[] {
+    const listeners: ((state: AppStateStatus) => void)[] = [];
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
+      listeners.push(listener as (state: AppStateStatus) => void);
+      return { remove: jest.fn() } as unknown as NativeEventSubscription;
+    });
+    return listeners;
+  }
+
+  async function requestReroute(): Promise<void> {
+    await act(async () => {
+      useShareIntentStore.getState().requestReroute();
+    });
+  }
+
+  it('opens a held share again when no screen shows it after its route', async () => {
+    stageShare(BATCH_ONE);
+    await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+
+    now += 3_000;
+    await requestReroute();
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(2));
+    expect(mockPush).toHaveBeenLastCalledWith(
+      `/new-chat?shareBatch=${encodeURIComponent(BATCH_ONE)}`,
+    );
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('reopened'));
+  });
+
+  it('leaves a held share alone while a screen shows it', async () => {
+    stageShare(BATCH_ONE);
+    await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    const release = useShareIntentStore.getState().adopt(BATCH_ONE);
+
+    now += 60_000;
+    await requestReroute();
+
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(recorded).not.toHaveBeenCalledWith(...routeEvent('reopened'));
+    release();
+  });
+
+  it('gives a route it just sent a few seconds to show its screen', async () => {
+    stageShare(BATCH_ONE);
+    await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+
+    now += 2_999;
+    await requestReroute();
+
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(recorded).not.toHaveBeenCalledWith(...routeEvent('reopened'));
+  });
+
+  it('does not reopen a share whose route is still being worked out', async () => {
+    let finishRead!: (value: null) => void;
+    mockGetReceipt.mockReturnValue(
+      new Promise<null>((resolve) => {
+        finishRead = resolve;
+      }),
+    );
+    stageShare(BATCH_ONE);
+    await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockGetReceipt).toHaveBeenCalledTimes(1));
+
+    now += 60_000;
+    await requestReroute();
+    await act(async () => finishRead(null));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    expect(mockGetReceipt).toHaveBeenCalledTimes(1);
+    expect(recorded).not.toHaveBeenCalledWith(...routeEvent('reopened'));
+  });
+
+  it('says a newer share is waiting for each notice raised after it mounts', async () => {
+    useShareIntentStore.getState().noteWaitingShare();
+    await renderWithTheme(<ShareIntentNavigator />);
+    expect(toastMessages()).toEqual([]);
+
+    await act(async () => {
+      useShareIntentStore.getState().noteWaitingShare();
+    });
+    expect(toastMessages()).toEqual([WAITING]);
+  });
+
+  it('explains a failed pickup', async () => {
+    await renderWithTheme(<ShareIntentNavigator />);
+    await act(async () => {
+      useShareIntentStore.getState().setFailureReason('pickup');
+    });
+    expect(toastMessages()).toEqual([
+      'Gator could not open a shared item. It will try again the next time you open Gator.',
+    ]);
+  });
+
+  it('remounts a failed navigator the next time the app comes to the foreground', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const listeners = captureAppState();
+    mockNavigatorRender.fail = true;
+    stageShare(BATCH_ONE);
+    await renderWithTheme(<ShareIntentNavigator />);
+    expect(mockPush).not.toHaveBeenCalled();
+
+    mockNavigatorRender.fail = false;
+    await act(async () => listeners.forEach((listener) => listener('active')));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    expect(recorded).toHaveBeenCalledWith('share.intake', {
+      stage: 'route',
+      outcome: 'boundary-reset',
+    });
+  });
+
+  it('does not open a second screen for a share a screen shows when a failed navigator remounts', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const listeners = captureAppState();
+    stageShare(BATCH_ONE);
+    await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+    const release = useShareIntentStore.getState().adopt(BATCH_ONE);
+    mockNavigatorRender.fail = true;
+    await act(async () => {
+      useShareIntentStore.getState().noteWaitingShare();
+    });
+
+    mockNavigatorRender.fail = false;
+    await act(async () => listeners.forEach((listener) => listener('active')));
+    expect(recorded).toHaveBeenCalledWith('share.intake', {
+      stage: 'route',
+      outcome: 'boundary-reset',
+    });
+    await act(async () => undefined);
+    expect(mockPush).toHaveBeenCalledTimes(1);
+
+    // When that screen closes without settling the share, a reopen request still routes it.
+    release();
+    await requestReroute();
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(2));
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('reopened'));
+  });
+
+  it('does not remount a healthy navigator on return to the foreground', async () => {
+    const listeners = captureAppState();
+    stageShare(BATCH_ONE);
+    await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockPush).toHaveBeenCalledTimes(1));
+
+    await act(async () => listeners.forEach((listener) => listener('active')));
+
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(recorded).not.toHaveBeenCalledWith('share.intake', {
+      stage: 'route',
+      outcome: 'boundary-reset',
+    });
+  });
+
+  it('remounts a failed capture the next time the app comes to the foreground', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const listeners = captureAppState();
+    mockStartShareIntake.mockImplementation(() => {
+      throw new Error('subscribe failed');
+    });
+    await renderWithTheme(<ShareIntentCapture />);
+    const failedStarts = mockStartShareIntake.mock.calls.length;
+    expect(failedStarts).toBeGreaterThan(0);
+
+    mockStartShareIntake.mockReturnValue(jest.fn());
+    await act(async () => listeners.forEach((listener) => listener('active')));
+
+    await waitFor(() => expect(mockStartShareIntake.mock.calls.length).toBe(failedStarts + 1));
+    expect(recorded).toHaveBeenCalledWith('share.intake', {
+      stage: 'signal',
+      outcome: 'boundary-reset',
+    });
   });
 });

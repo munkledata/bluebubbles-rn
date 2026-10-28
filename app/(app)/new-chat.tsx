@@ -45,6 +45,7 @@ import { ContactSuggestionList } from '@ui/ContactSuggestionList';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { useShareBatchOwnership } from '@ui/hooks/useShareBatchOwnership';
 
 /** A chosen recipient chip: an address plus its best display name. */
 interface Recipient {
@@ -151,6 +152,7 @@ export default function NewChatScreen(): React.JSX.Element {
       attachments: ownsShare ? files : [],
     };
   });
+  useShareBatchOwnership(initialContent.batchId);
   const [message, setMessage] = useState(initialContent.message);
   // A narrow live server capability admits new iMessage chats without restoring broad Private API.
   // Preserve the user's explicit choice if that capability disappears; never silently switch the

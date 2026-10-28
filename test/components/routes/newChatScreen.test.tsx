@@ -434,6 +434,28 @@ describe('NewChatScreen — opening an existing conversation', () => {
     mockFindChat.mockResolvedValue([existing(PRIVATE_EXISTING_GUID)]);
   });
 
+  it('marks the share it shows as owned while open, and releases it on close', async () => {
+    stageShare(SECOND_SHARE_BATCH);
+    const view = await renderWithTheme(<NewChatScreen />);
+    expect(useShareIntentStore.getState().owners).toBe(1);
+
+    await view.unmount();
+    expect(useShareIntentStore.getState().owners).toBe(0);
+  });
+
+  it('owns no share when its route names none, even while one is held', async () => {
+    useShareIntentStore.setState({
+      batchId: SECOND_SHARE_BATCH,
+      createdAtMs: Date.now(),
+      text: null,
+      files: [],
+      targetToken: null,
+      owners: 0,
+    });
+    await renderWithTheme(<NewChatScreen />);
+    expect(useShareIntentStore.getState().owners).toBe(0);
+  });
+
   it('opens it with a shared item, keeping the share instead of asking to discard it', async () => {
     stageShare(SECOND_SHARE_BATCH);
     await renderWithTheme(<NewChatScreen />);

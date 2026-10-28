@@ -367,6 +367,7 @@ export const SHARE_INTAKE_EVENT_OUTCOMES = [
   'inactive',
   'retry',
   'review',
+  'reopened',
   // settle
   'acknowledged',
   'released',
@@ -388,6 +389,8 @@ export const SHARE_INTAKE_EVENT_OUTCOMES = [
   'unavailable',
   // held
   'foreground',
+  // a share capture or navigator remounted after it failed
+  'boundary-reset',
 ] as const;
 export type ShareIntakeEventOutcome = (typeof SHARE_INTAKE_EVENT_OUTCOMES)[number];
 
