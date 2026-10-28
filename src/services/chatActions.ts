@@ -6,6 +6,7 @@ import { logger } from '@core/secure';
 import {
   ATTACHMENT_CACHE_RECOVERY_MAX_FILES,
   ATTACHMENT_CACHE_RECOVERY_BATCH_FILES,
+  chatExistsWithinTransaction,
   clearChatTombstoneWithinTransaction,
   DRAFT_KV_PREFIX,
   deleteChatLocal,
@@ -543,10 +544,21 @@ export async function createNewChat(
         db,
         async (context) => {
           assertCreateChatLease(accountLease);
-          const handleIds = await upsertHandlesWithinTransaction(context, chat.participants ?? []);
+          // The reply usually carries only the chat GUID plus the typed address (see
+          // chatsApi.createChat). Saved over a conversation this device already has, it would blank
+          // the name, style and identifier and replace the members until the next sync, so only a
+          // chat that is new here is saved from it.
+          const isNewHere = !(await chatExistsWithinTransaction(context, chat.guid));
           assertCreateChatLease(accountLease);
-          await upsertChatsWithinTransaction(context, [chat], handleIds);
-          assertCreateChatLease(accountLease);
+          if (isNewHere) {
+            const handleIds = await upsertHandlesWithinTransaction(
+              context,
+              chat.participants ?? [],
+            );
+            assertCreateChatLease(accountLease);
+            await upsertChatsWithinTransaction(context, [chat], handleIds);
+            assertCreateChatLease(accountLease);
+          }
           // A 1:1 guid is `service;-;address`, so composing with someone whose thread was deleted here
           // returns the SAME guid — still under its deletion tombstone, i.e. hidden from the inbox we
           // are about to route into. Deliberately starting the conversation again is an un-delete.

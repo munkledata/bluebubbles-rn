@@ -430,3 +430,110 @@ describe('createNewChat account lease', () => {
     expect(count(raw, 'chats')).toBe(0);
   });
 });
+
+describe('createNewChat into a conversation this device already has', () => {
+  let raw: Database.Database;
+
+  beforeEach(async () => {
+    resumeRealtimeDeliveries();
+    ({ db: mockDb, raw } = await createTestDb());
+    mockServerRcsEnabled = true;
+    mockRcsProviderEpoch = RCS_EPOCH_A;
+    mockImessageNewChatEnabled = false;
+    mockEnsureDatabase.mockReset().mockImplementation(() => Promise.resolve(mockDb));
+    mockCreateChat.mockReset();
+  });
+
+  afterEach(() => {
+    resumeRealtimeDeliveries();
+    jest.restoreAllMocks();
+    raw.close();
+  });
+
+  const chatRow = (guid: string): unknown =>
+    raw
+      .prepare(
+        `SELECT display_name AS displayName, chat_identifier AS chatIdentifier, style,
+                deleted_at AS deletedAt
+           FROM chats WHERE guid = ?`,
+      )
+      .get(guid);
+
+  const memberAddresses = (guid: string): string[] =>
+    (
+      raw
+        .prepare(
+          `SELECT h.address AS address
+             FROM chat_handles ch
+             JOIN handles h ON h.id = ch.handle_id
+             JOIN chats c ON c.id = ch.chat_id
+            WHERE c.guid = ?
+            ORDER BY h.address`,
+        )
+        .all(guid) as { address: string }[]
+    ).map((row) => row.address);
+
+  async function seedExisting(chat: Chat): Promise<void> {
+    const handles = await chatRepositories.upsertHandles(mockDb, chat.participants ?? []);
+    await chatRepositories.upsertChats(mockDb, [chat], handles);
+  }
+
+  it('keeps a named RCS chat intact when the create reply carries only its GUID', async () => {
+    const guid = rcsChatGuid(RCS_EPOCH_A);
+    await seedExisting(
+      Chat.parse({
+        guid,
+        providerEpoch: RCS_EPOCH_A,
+        displayName: 'Pat Example',
+        chatIdentifier: 'Pat Example',
+        style: 45,
+        participants: [{ address: 'Pat Example', service: 'RCS' }],
+      }),
+    );
+    // chatsApi.createChat turns a GUID-only acknowledgement into this provisional shape.
+    mockCreateChat.mockResolvedValueOnce(
+      Chat.parse({ guid, participants: [{ address: 'old@example.com', service: 'RCS' }] }),
+    );
+
+    await expect(createNewChat(['old@example.com'], 'hello')).resolves.toBe(guid);
+
+    expect(chatRow(guid)).toEqual({
+      displayName: 'Pat Example',
+      chatIdentifier: 'Pat Example',
+      style: 45,
+      deletedAt: null,
+    });
+    expect(memberAddresses(guid)).toEqual(['Pat Example']);
+  });
+
+  it('keeps a proven one-to-one iMessage chat intact and still un-deletes it', async () => {
+    mockServerRcsEnabled = false;
+    mockImessageNewChatEnabled = true;
+    const guid = 'any;-;+15551234567';
+    await seedExisting(
+      Chat.parse({
+        guid,
+        chatIdentifier: '+15551234567',
+        style: 45,
+        participants: [{ address: '+15551234567', service: 'iMessage' }],
+      }),
+    );
+    raw.prepare('UPDATE chats SET deleted_at = 1000 WHERE guid = ?').run(guid);
+    mockCreateChat.mockResolvedValueOnce(
+      Chat.parse({ guid, participants: [{ address: '+15551234567', service: 'iMessage' }] }),
+    );
+
+    await expect(
+      createNewChat(['+15551234567'], 'hello', undefined, 'iMessage', 'temp-existing-1'),
+    ).resolves.toBe(guid);
+
+    // Style 45 is what proves a one-to-one iMessage chat; losing it drops the exact send path.
+    expect(chatRow(guid)).toEqual({
+      displayName: null,
+      chatIdentifier: '+15551234567',
+      style: 45,
+      deletedAt: null,
+    });
+    expect(memberAddresses(guid)).toEqual(['+15551234567']);
+  });
+});

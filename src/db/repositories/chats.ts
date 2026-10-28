@@ -1010,6 +1010,22 @@ export async function requireChatIdByGuidWithinTransaction(
 }
 
 /**
+ * Whether this device already stores a chat row for `guid` (deleted or not), read inside the
+ * caller's transaction so the answer cannot change before that transaction's next write.
+ */
+export function chatExistsWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db.all<{ id: number }>(
+      sql`SELECT id FROM chats WHERE guid = ${guid} LIMIT 1`,
+    );
+    return rows.length > 0;
+  });
+}
+
+/**
  * Transaction-scoped form of {@link setLastReadMessageGuid}. Use only when the caller already owns
  * the process-wide DB transaction and needs this marker change to commit atomically with other
  * writes (currently durable realtime delivery).
