@@ -22,7 +22,7 @@ import { Keyboard } from 'react-native';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 import { logger } from '@core/secure';
 import { ApiError } from '@core/api/errors';
-import type { ContactPick } from '@db/repositories';
+import type { ContactPick, ExistingChatMatch } from '@db/repositories';
 import { getDatabase } from '@db/database';
 import {
   pauseRealtimeDeliveries,
@@ -129,7 +129,7 @@ jest.mock('@ui/hooks/useUnsavedChangesGuard', () => ({
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
   searchContactAddresses: jest.fn(),
-  findChatByParticipantAddresses: jest.fn(),
+  findChatsByParticipantAddresses: jest.fn(),
 }));
 
 // eslint-disable-next-line import/first
@@ -154,7 +154,7 @@ import { presentSendIssue } from '@ui/conversations/sendNotices';
 // eslint-disable-next-line import/first
 import {
   searchContactAddresses,
-  findChatByParticipantAddresses,
+  findChatsByParticipantAddresses,
   SHARE_INTAKE_NEW_CHAT_RETRY_WINDOW_MS,
 } from '@db/repositories';
 // eslint-disable-next-line import/first
@@ -179,7 +179,7 @@ const mockConsumeShareIntakeBatchIfComplete = consumeShareIntakeBatchIfComplete 
 const mockDiscardShareIntakeBatch = discardShareIntakeBatch as jest.Mock;
 const mockDrainShareIntake = drainShareIntake as jest.Mock;
 const mockSearchContacts = searchContactAddresses as jest.Mock;
-const mockFindChat = findChatByParticipantAddresses as jest.Mock;
+const mockFindChat = findChatsByParticipantAddresses as jest.Mock;
 const mockGetShareIntakeReceipt = readShareIntakeReceipt as jest.Mock;
 const mockIsShareIntakeReceiptComplete = isShareIntakeReceiptComplete as jest.Mock;
 const mockPrepareSharePlan = prepareShareIntakeNewChatPlan as jest.Mock;
@@ -235,6 +235,11 @@ function deferred<T>(): Deferred<T> {
     reject = fail;
   });
   return { promise, resolve, reject };
+}
+
+/** An existing chat as the finder reports it (one-to-one unless overridden). */
+function existing(guid: string, overrides: Partial<ExistingChatMatch> = {}): ExistingChatMatch {
+  return { guid, latestMessageDate: null, name: null, isGroup: false, ...overrides };
 }
 
 function regexFor(value: string): RegExp {
@@ -356,7 +361,7 @@ beforeEach(() => {
   mockDiscardShareIntakeBatch.mockReset().mockResolvedValue(true);
   mockDrainShareIntake.mockClear();
   mockSearchContacts.mockReset().mockResolvedValue([] as ContactPick[]);
-  mockFindChat.mockReset().mockResolvedValue(null);
+  mockFindChat.mockReset().mockResolvedValue([]);
   mockGetShareIntakeReceipt.mockReset().mockResolvedValue(null);
   mockIsShareIntakeReceiptComplete.mockReset().mockReturnValue(false);
   mockPrepareSharePlan
@@ -405,7 +410,7 @@ describe('NewChatScreen — opening an existing conversation', () => {
     useSessionStore.setState({
       serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
     });
-    mockFindChat.mockResolvedValue(PRIVATE_EXISTING_GUID);
+    mockFindChat.mockResolvedValue([existing(PRIVATE_EXISTING_GUID)]);
   });
 
   it('opens it with a shared item, keeping the share instead of asking to discard it', async () => {
@@ -1396,8 +1401,8 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       useSessionStore.setState({
         serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
       });
-      const oldLookup = deferred<string | null>();
-      const freshLookup = deferred<string | null>();
+      const oldLookup = deferred<ExistingChatMatch[]>();
+      const freshLookup = deferred<ExistingChatMatch[]>();
       mockFindChat.mockReturnValueOnce(oldLookup.promise).mockReturnValueOnce(freshLookup.promise);
       const oldView = await renderWithTheme(<NewChatScreen />);
       await addRecipient(PRIVATE_ADDRESS);
@@ -1412,13 +1417,13 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       await addRecipient(PRIVATE_ADDRESS);
       await waitFor(() => expect(mockFindChat).toHaveBeenCalledTimes(2));
       await act(async () => {
-        freshLookup.resolve(PRIVATE_EXISTING_GUID);
+        freshLookup.resolve([existing(PRIVATE_EXISTING_GUID)]);
         await freshLookup.promise;
       });
       expect(await screen.findByText(/Open it/)).toBeTruthy();
 
       await act(async () => {
-        if (outcome === 'success') oldLookup.resolve('iMessage;-;retired-A-match-39e4');
+        if (outcome === 'success') oldLookup.resolve([existing('iMessage;-;retired-A-match-39e4')]);
         else oldLookup.reject(new Error('retired-existing-error-0aca'));
         await oldLookup.promise.catch(() => undefined);
       });
@@ -1569,7 +1574,7 @@ describe('NewChatScreen — existing conversation', () => {
   });
 
   it('offers to open an existing chat with the same recipients', async () => {
-    mockFindChat.mockResolvedValue('iMessage;-;existing');
+    mockFindChat.mockResolvedValue([existing('iMessage;-;existing')]);
     await renderWithTheme(<NewChatScreen />);
 
     const toInput = screen.getByPlaceholderText('Phone or email');
@@ -1587,10 +1592,48 @@ describe('NewChatScreen — existing conversation', () => {
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent('iMessage;-;existing')}`);
   });
 
+  it('lists every chat with these people, newest selected, and opens the one picked', async () => {
+    const now = Date.now();
+    mockFindChat.mockResolvedValue([
+      existing('any;+;chat-new', { name: 'Weekend', latestMessageDate: now, isGroup: true }),
+      existing('iMessage;+;chat-old', { latestMessageDate: now - 60_000, isGroup: true }),
+    ]);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551112222');
+    await addRecipient('+15553334444');
+
+    const newest = await screen.findByRole('radio', { name: /^Weekend · / });
+    const older = screen.getByRole('radio', { name: /^Group conversation · / });
+    expect(newest.props.accessibilityState.selected).toBe(true);
+    expect(older.props.accessibilityState.selected).toBe(false);
+
+    await fireEvent.press(older);
+    await waitFor(() =>
+      expect(
+        screen.getByRole('radio', { name: /^Group conversation · / }).props.accessibilityState
+          .selected,
+      ).toBe(true),
+    );
+    expect(
+      screen.getByRole('radio', { name: /^Weekend · / }).props.accessibilityState.selected,
+    ).toBe(false);
+    await fireEvent.press(screen.getByRole('button', { name: /Open it/ }));
+    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent('iMessage;+;chat-old')}`);
+  });
+
+  it('shows only the Open it banner when there is one match', async () => {
+    mockFindChat.mockResolvedValue([existing('any;-;+15559999999', { latestMessageDate: 1 })]);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15559999999');
+
+    expect(await screen.findByRole('button', { name: /Open it/ })).toBeTruthy();
+    expect(screen.queryByRole('radio')).toBeNull();
+  });
+
   it('transfers the exact share claim to an existing conversation without consuming it', async () => {
     const existingGuid = 'iMessage;-;existing-share-target';
     stageShare(PRIVATE_SHARE_BATCH);
-    mockFindChat.mockResolvedValue(existingGuid);
+    mockFindChat.mockResolvedValue([existing(existingGuid)]);
     await renderWithTheme(<NewChatScreen />);
     await addRecipient(PRIVATE_ADDRESS);
 
@@ -1605,9 +1648,9 @@ describe('NewChatScreen — existing conversation', () => {
   });
 
   it('hides a resolved A banner immediately while a new recipient-key lookup is pending', async () => {
-    const pendingB = deferred<string | null>();
+    const pendingB = deferred<ExistingChatMatch[]>();
     mockFindChat
-      .mockResolvedValueOnce('iMessage;-;existing-A')
+      .mockResolvedValueOnce([existing('iMessage;-;existing-A')])
       .mockReturnValueOnce(pendingB.promise);
     await renderWithTheme(<NewChatScreen />);
     await addRecipient('+15551112222');
@@ -1620,7 +1663,7 @@ describe('NewChatScreen — existing conversation', () => {
     expect(screen.queryByText(/Open it/)).toBeNull();
 
     await act(async () => {
-      pendingB.resolve(null);
+      pendingB.resolve([]);
       await pendingB.promise;
     });
     await waitFor(() => expect(screen.queryByText(/Open it/)).toBeNull());
@@ -1629,8 +1672,8 @@ describe('NewChatScreen — existing conversation', () => {
   it.each(['success', 'rejection'] as const)(
     'keeps a fresh same-key match when a cleaned-up lookup settles with %s',
     async (outcome) => {
-      const oldLookup = deferred<string | null>();
-      const freshLookup = deferred<string | null>();
+      const oldLookup = deferred<ExistingChatMatch[]>();
+      const freshLookup = deferred<ExistingChatMatch[]>();
       mockFindChat.mockReturnValueOnce(oldLookup.promise).mockReturnValueOnce(freshLookup.promise);
       await renderWithTheme(<NewChatScreen />);
       await addRecipient(PRIVATE_ADDRESS);
@@ -1641,13 +1684,14 @@ describe('NewChatScreen — existing conversation', () => {
       await addRecipient(PRIVATE_ADDRESS);
       await waitFor(() => expect(mockFindChat).toHaveBeenCalledTimes(2));
       await act(async () => {
-        freshLookup.resolve(PRIVATE_EXISTING_GUID);
+        freshLookup.resolve([existing(PRIVATE_EXISTING_GUID)]);
         await freshLookup.promise;
       });
       expect(await screen.findByText(/Open it/)).toBeTruthy();
 
       await act(async () => {
-        if (outcome === 'success') oldLookup.resolve('iMessage;-;stale-same-key-match-a714');
+        if (outcome === 'success')
+          oldLookup.resolve([existing('iMessage;-;stale-same-key-match-a714')]);
         else oldLookup.reject(new Error('stale-same-key-match-error-148c'));
         await oldLookup.promise.catch(() => undefined);
       });

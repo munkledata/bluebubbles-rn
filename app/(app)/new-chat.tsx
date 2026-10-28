@@ -8,9 +8,11 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { ApiError } from '@core/api/errors';
 import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';
 import { canonicalRecipientAddress } from '@core/recipientAddress';
+import { formatChatDate } from '@utils/date';
 import { getDatabase } from '@db/database';
 import {
-  findChatByParticipantAddresses,
+  findChatsByParticipantAddresses,
+  type ExistingChatMatch,
   type ShareIntakeManifestIdentity,
   type ShareIntakeNewChatPlan,
 } from '@db/repositories';
@@ -77,6 +79,13 @@ function recipientAddressFor(raw: string): string {
 function looksLikeIMessageAddress(raw: string): boolean {
   if (raw.includes('@')) return raw.length <= 254 && looksLikeAddress(raw);
   return /^\+[1-9][0-9]{1,14}$/.test(raw);
+}
+
+/** "Weekend · Yesterday": an existing chat's name (or its kind) and when it was last active. */
+function existingChatLabel(match: ExistingChatMatch): string {
+  const name = match.name ?? (match.isGroup ? 'Group conversation' : 'iMessage conversation');
+  const when = formatChatDate(match.latestMessageDate);
+  return when ? `${name} · ${when}` : name;
 }
 
 const MAX_INITIAL_IMESSAGE_TEXT_BYTES = 64 * 1024;
@@ -169,10 +178,14 @@ export default function NewChatScreen(): React.JSX.Element {
   // The helper create route sends the first text itself. Reuse this identity on an ambiguous
   // response and retry of the same authored message rather than sending it a second time.
   const createAttemptsRef = useRef(new Map<string, string>());
-  const [existingMatch, setExistingMatch] = useState<{
+  const [existingMatches, setExistingMatches] = useState<{
     recipientKey: string;
-    guid: string | null;
+    matches: ExistingChatMatch[];
   } | null>(null);
+  // The user's pick among several existing chats; a different recipient set drops it.
+  const [pickedMatch, setPickedMatch] = useState<{ recipientKey: string; guid: string } | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const submissionInFlightRef = useRef(false);
   // Native-owned share files remain replayable until this screen confirms durable send ownership.
@@ -398,11 +411,11 @@ export default function NewChatScreen(): React.JSX.Element {
     (c) => !chosen.has(recipientAddressFor(c.address).toLowerCase()),
   );
 
-  // Offer a local existing-chat shortcut only where the stored participant is authoritative.
-  // Cached RCS participant strings are presentation data (display name, formatted number, or opaque
-  // id), so they can never choose a Google conversation; Start uses Google's find/create route.
+  // Offer local existing chats only where the stored participant is authoritative. Cached RCS
+  // participant strings are presentation data (display name, formatted number, or opaque id), so
+  // they can never choose a Google conversation; Start uses Google's find/create route.
   // Effect cleanup plus the exact recipient key prevent an older iMessage set from publishing its
-  // shortcut, and the captured account lease prevents a retired route from adopting a result.
+  // matches, and the captured account lease prevents a retired route from adopting a result.
   const recipientKey = JSON.stringify([selectedService, recipients.map((r) => r.address)]);
   useEffect(() => {
     let active = true;
@@ -413,32 +426,40 @@ export default function NewChatScreen(): React.JSX.Element {
       !accountLease.isCurrent()
     )
       return;
-    void findChatByParticipantAddresses(
+    void findChatsByParticipantAddresses(
       getDatabase(),
       recipients.map((r) => r.address),
       selectedService,
     )
-      .then((g) => {
+      .then((matches) => {
         if (active && accountLease.isCurrent()) {
-          setExistingMatch({ recipientKey, guid: g });
+          setExistingMatches({ recipientKey, matches });
         }
       })
       .catch(() => {
         if (active && accountLease.isCurrent()) {
-          setExistingMatch({ recipientKey, guid: null });
+          setExistingMatches({ recipientKey, matches: [] });
         }
       });
     return () => {
       active = false;
     };
   }, [accountLease, accountUnavailable, recipients, recipientKey, selectedService]);
-  const existingGuid =
+  const matches =
     !accountUnavailable &&
     shareResumeReady &&
     !sharePlanPrepared &&
-    existingMatch?.recipientKey === recipientKey
-      ? existingMatch.guid
-      : null;
+    existingMatches?.recipientKey === recipientKey
+      ? existingMatches.matches
+      : [];
+  // The newest chat is selected until the user picks another one from the list.
+  const selectedMatch =
+    matches.find(
+      (match) => pickedMatch?.recipientKey === recipientKey && match.guid === pickedMatch.guid,
+    ) ??
+    matches[0] ??
+    null;
+  const existingGuid = selectedMatch?.guid ?? null;
 
   const addRecipient = (r: Recipient): void => {
     if (!screenInteractionIsCurrent() || sharePlanPrepared) return;
@@ -832,6 +853,46 @@ export default function NewChatScreen(): React.JSX.Element {
             </Pressable>
           ) : null}
 
+          {matches.length > 1 ? (
+            <View
+              style={styles.matchList}
+              accessibilityRole="radiogroup"
+              accessibilityLabel="Existing conversation"
+            >
+              {matches.map((match) => {
+                const selected = match.guid === existingGuid;
+                const label = existingChatLabel(match);
+                return (
+                  <Pressable
+                    key={match.guid}
+                    accessibilityRole="radio"
+                    accessibilityLabel={label}
+                    accessibilityState={{ selected, disabled: busy }}
+                    disabled={busy}
+                    onPress={() => {
+                      if (screenInteractionIsCurrent()) {
+                        setPickedMatch({ recipientKey, guid: match.guid });
+                      }
+                    }}
+                    style={[
+                      styles.matchRow,
+                      {
+                        borderColor: selected ? theme.color.tint : theme.color.separator,
+                        backgroundColor: selected
+                          ? theme.color.secondaryBackground
+                          : theme.color.background,
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: selected ? theme.color.tint : theme.color.label }}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+
           {showServiceChoice ? (
             <View
               style={styles.serviceChoiceRow}
@@ -1036,6 +1097,13 @@ const styles = StyleSheet.create({
   toInput: { flexGrow: 1, minWidth: 120, fontSize: 16, paddingVertical: 4 },
   existing: { borderRadius: 10, padding: 12 },
   existingText: { fontSize: 14, fontWeight: '500' },
+  matchList: { gap: 6 },
+  matchRow: {
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
   rcsNote: { fontSize: 13 },
   serviceChoiceRow: { flexDirection: 'row', gap: 8 },
   serviceChoice: {

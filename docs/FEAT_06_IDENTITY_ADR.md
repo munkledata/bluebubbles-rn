@@ -247,7 +247,7 @@ inventory: the shared moving tree still has unrelated callback-certificate drift
 
 The app no longer uses a cached RCS participant string to select or offer an existing Google
 conversation. `NewChatScreen` skips the local shortcut for RCS, and the repository lookup itself
-returns `null` for explicit RCS callers. This is intentionally stricter than exact string matching:
+returns no match for explicit RCS callers. This is intentionally stricter than exact string matching:
 the sidecar may put a display name, formatted number, or opaque participant id in the presentation
 field, and the public chat contract does not carry canonical-number provenance.
 

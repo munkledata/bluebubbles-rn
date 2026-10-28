@@ -4,7 +4,7 @@ import { Chat, Message } from '@core/models';
 import {
   applyMessageStateWithinTransaction,
   deleteChatLocal,
-  findChatByParticipantAddresses,
+  findChatsByParticipantAddresses,
   getAttachmentCacheEntry,
   getChatHeader,
   getChatIdByGuid,
@@ -322,7 +322,7 @@ describe('chat actions repo', () => {
     // Hidden everywhere a chat is LISTED.
     expect(await listChatsForInbox(db)).toHaveLength(0);
     expect(await listChatsForInbox(db, { includeArchived: true })).toHaveLength(0);
-    expect(await findChatByParticipantAddresses(db, ['a@b.com'], 'iMessage')).toBeNull();
+    expect(await findChatsByParticipantAddresses(db, ['a@b.com'], 'iMessage')).toEqual([]);
     // …but NOT from the identity/preferences lookup, which is not a list: a null header reads as
     // "no such chat" to the notification builder, which silently switches the chat's MUTE off.
     expect((await getChatHeader(db, 'c1'))?.guid).toBe('c1');

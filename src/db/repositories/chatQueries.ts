@@ -1219,34 +1219,57 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
   return rows[0] ?? null;
 }
 
-/** New iMessage creation admits E.164 numbers, where the country code is part of identity. */
+/**
+ * Addresses compare exactly, except that emails ignore case. Callers standardize what was typed
+ * (`canonicalRecipientAddress`); a stored number is never given a country code.
+ */
 function normalizeIMessageAddrForMatch(a: string): string {
   return a.includes('@') ? a.trim().toLowerCase() : a.trim();
 }
 
+/** One existing chat that New Message can offer for the chosen recipients. */
+export interface ExistingChatMatch {
+  guid: string;
+  /** Newest message time (epoch ms), or null when the chat has none yet. */
+  latestMessageDate: number | null;
+  /** The custom name, else the chat's own name; null when it has neither. */
+  name: string | null;
+  isGroup: boolean;
+}
+
 /**
- * Find an existing iMessage chat whose participant set equals `addresses` (order-independent).
+ * Every visible iMessage chat whose members are exactly `addresses` (order-independent), newest
+ * first, so New Message can list them and preselect the most recent.
+ *
+ * - One address: a one-to-one chat (style 45) whose handles are all iMessage, keyed
+ *   `iMessage;-;…` or the native `any;-;<that address>`.
+ * - Two or more: a group (style 43) whose handles are all iMessage, keyed `iMessage;+;…` or the
+ *   native `any;+;…`. Two groups with the same members stay separate matches (FEAT-06 §2).
  *
  * RCS deliberately returns no local match. Its cached participant string is presentation data: the
  * sidecar may supply a display name, formatted number, or opaque participant id without canonical
  * endpoint provenance. It therefore cannot authorize navigation to a Google conversation, even on
  * exact string equality. Starting an RCS message uses the server's Google-owned find/create route.
  */
-export async function findChatByParticipantAddresses(
+export async function findChatsByParticipantAddresses(
   db: AppDatabase,
   addresses: string[],
   service: 'RCS' | 'iMessage',
-): Promise<string | null> {
-  if (service !== 'iMessage') return null;
+): Promise<ExistingChatMatch[]> {
+  if (service !== 'iMessage') return [];
   const want = new Set(addresses.map(normalizeIMessageAddrForMatch).filter(Boolean));
-  if (want.size === 0) return null;
+  if (want.size === 0) return [];
   const rows = await db.all<{
     guid: string;
     style: number | null;
+    latestMessageDate: number | null;
+    name: string | null;
     address: string;
     handleService: string | null;
   }>(sql`
-    SELECT c.guid AS guid, c.style AS style, h.address AS address, h.service AS handleService
+    SELECT c.guid AS guid, c.style AS style, c.latest_message_date AS latestMessageDate,
+           COALESCE(NULLIF(TRIM(c.custom_name), ''), NULLIF(TRIM(c.display_name), '')) AS name,
+           h.address AS address, h.service AS handleService
       FROM chats c
       JOIN chat_handles ch ON ch.chat_id = c.id
       JOIN handles h ON h.id = ch.handle_id
@@ -1254,11 +1277,19 @@ export async function findChatByParticipantAddresses(
   `);
   const byChat = new Map<
     string,
-    { style: number | null; addresses: Set<string>; allIMessageHandles: boolean }
+    {
+      style: number | null;
+      latestMessageDate: number | null;
+      name: string | null;
+      addresses: Set<string>;
+      allIMessageHandles: boolean;
+    }
   >();
   for (const r of rows) {
     const match = byChat.get(r.guid) ?? {
       style: r.style,
+      latestMessageDate: r.latestMessageDate,
+      name: r.name,
       addresses: new Set<string>(),
       allIMessageHandles: true,
     };
@@ -1267,25 +1298,35 @@ export async function findChatByParticipantAddresses(
     byChat.set(r.guid, match);
   }
   const singleWantedAddress = want.size === 1 ? want.values().next().value : undefined;
+  const found: ExistingChatMatch[] = [];
   for (const [guid, match] of byChat) {
     const { addresses: set } = match;
-    const exactNativeIMessage =
-      singleWantedAddress !== undefined &&
-      match.allIMessageHandles &&
-      guid.startsWith('any;-;') &&
-      normalizeIMessageAddrForMatch(guid.slice('any;-;'.length)) === singleWantedAddress;
-    // A service-prefixed GUID alone is not DM proof: sparse group and SMS rows can carry one
-    // matching handle. Wait for authoritative style/handle data after a create.
-    if (
-      match.style !== 45 ||
-      !match.allIMessageHandles ||
-      (!guid.startsWith('iMessage;-;') && !exactNativeIMessage)
-    ) {
+    if (!match.allIMessageHandles) continue;
+    if (set.size !== want.size || ![...want].every((a) => set.has(a))) continue;
+    if (singleWantedAddress !== undefined) {
+      const exactNativeIMessage =
+        guid.startsWith('any;-;') &&
+        normalizeIMessageAddrForMatch(guid.slice('any;-;'.length)) === singleWantedAddress;
+      // A service-prefixed GUID alone is not DM proof: sparse group and SMS rows can carry one
+      // matching handle. Wait for authoritative style/handle data after a create.
+      if (match.style !== 45 || (!guid.startsWith('iMessage;-;') && !exactNativeIMessage)) {
+        continue;
+      }
+    } else if (match.style !== 43 || !/^(?:iMessage|any);\+;./su.test(guid)) {
       continue;
     }
-    if (set.size === want.size && [...want].every((a) => set.has(a))) return guid;
+    found.push({
+      guid,
+      latestMessageDate: match.latestMessageDate,
+      name: match.name,
+      isGroup: singleWantedAddress === undefined,
+    });
   }
-  return null;
+  return found.sort(
+    (a, b) =>
+      (b.latestMessageDate ?? -Infinity) - (a.latestMessageDate ?? -Infinity) ||
+      a.guid.localeCompare(b.guid),
+  );
 }
 
 export interface ChatParticipant {

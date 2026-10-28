@@ -1,12 +1,12 @@
 /**
  * Branch top-ups for the chats + contacts repositories: `persistServerChat`,
- * `findChatByParticipantAddresses` (including fail-closed RCS presentation data), local read/unread
+ * `findChatsByParticipantAddresses` (including fail-closed RCS presentation data), local read/unread
  * markers (`setChatUnreadLocal`, `markAllChatsReadLocal`), the server-avatar helpers, and
  * `searchContactAddresses`'s corrupt-JSON tolerance. Real in-memory DB (createTestDb).
  */
 import { Chat, Message } from '@core/models';
 import {
-  findChatByParticipantAddresses,
+  findChatsByParticipantAddresses,
   getChatIdByGuid,
   getChatParticipants,
   handleMapKey,
@@ -29,7 +29,16 @@ import {
   setHandleServerAvatar,
 } from '../support/repositoryWrappers';
 
-describe('persistServerChat + findChatByParticipantAddresses', () => {
+/** The GUIDs New Message would list for these recipients, newest first. */
+async function guidsFor(
+  db: Parameters<typeof findChatsByParticipantAddresses>[0],
+  addresses: string[],
+  service: 'RCS' | 'iMessage',
+): Promise<string[]> {
+  return (await findChatsByParticipantAddresses(db, addresses, service)).map((m) => m.guid);
+}
+
+describe('persistServerChat + findChatsByParticipantAddresses', () => {
   it('persists a server chat with its participant links', async () => {
     const { db } = await createTestDb();
     await persistServerChat(
@@ -57,11 +66,13 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
       );
     }
 
-    await expect(findChatByParticipantAddresses(db, ['+15551234567'], 'RCS')).resolves.toBeNull();
+    await expect(findChatsByParticipantAddresses(db, ['+15551234567'], 'RCS')).resolves.toEqual([]);
     await expect(
-      findChatByParticipantAddresses(db, ['+1 (555) 123-4567'], 'RCS'),
-    ).resolves.toBeNull();
-    await expect(findChatByParticipantAddresses(db, ['+445551234567'], 'RCS')).resolves.toBeNull();
+      findChatsByParticipantAddresses(db, ['+1 (555) 123-4567'], 'RCS'),
+    ).resolves.toEqual([]);
+    await expect(findChatsByParticipantAddresses(db, ['+445551234567'], 'RCS')).resolves.toEqual(
+      [],
+    );
   });
 
   it('returns null for an empty address list and for a non-matching set', async () => {
@@ -74,8 +85,8 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
         participants: [{ address: '+15551112222', service: 'iMessage' }],
       }),
     );
-    expect(await findChatByParticipantAddresses(db, [], 'iMessage')).toBeNull();
-    expect(await findChatByParticipantAddresses(db, ['+19998887777'], 'iMessage')).toBeNull();
+    expect(await guidsFor(db, [], 'iMessage')).toEqual([]);
+    expect(await guidsFor(db, ['+19998887777'], 'iMessage')).toEqual([]);
   });
 
   it('keeps RCS local lookup closed when RCS and iMessage share a recipient', async () => {
@@ -90,10 +101,8 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
         }),
       );
     }
-    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'RCS')).toBeNull();
-    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBe(
-      'iMessage;-;+15551112222',
-    );
+    expect(await guidsFor(db, ['+15551112222'], 'RCS')).toEqual([]);
+    expect(await guidsFor(db, ['+15551112222'], 'iMessage')).toEqual(['iMessage;-;+15551112222']);
   });
 
   it('never treats a different iMessage country code as the same recipient', async () => {
@@ -106,7 +115,7 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
         participants: [{ address: '+445551112222', service: 'iMessage' }],
       }),
     );
-    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBeNull();
+    expect(await guidsFor(db, ['+15551112222'], 'iMessage')).toEqual([]);
     await persistServerChat(
       db,
       Chat.parse({
@@ -115,9 +124,7 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
         participants: [{ address: '+15551112222', service: 'iMessage' }],
       }),
     );
-    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBe(
-      'iMessage;-;+15551112222',
-    );
+    expect(await guidsFor(db, ['+15551112222'], 'iMessage')).toEqual(['iMessage;-;+15551112222']);
   });
 
   it('finds an exact native any-service iMessage chat without adopting an SMS chat', async () => {
@@ -130,7 +137,7 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
         participants: [{ address: '+15551112222', service: 'SMS' }],
       }),
     );
-    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBeNull();
+    expect(await guidsFor(db, ['+15551112222'], 'iMessage')).toEqual([]);
     await persistServerChat(
       db,
       Chat.parse({
@@ -139,10 +146,8 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
         participants: [{ address: '+15553334444', service: 'iMessage' }],
       }),
     );
-    expect(await findChatByParticipantAddresses(db, ['+15553334444'], 'iMessage')).toBe(
-      'any;-;+15553334444',
-    );
-    expect(await findChatByParticipantAddresses(db, ['+15553334444'], 'RCS')).toBeNull();
+    expect(await guidsFor(db, ['+15553334444'], 'iMessage')).toEqual(['any;-;+15553334444']);
+    expect(await guidsFor(db, ['+15553334444'], 'RCS')).toEqual([]);
   });
 
   it('does not offer a group or SMS row as an existing iMessage conversation', async () => {
@@ -163,8 +168,112 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
         participants: [{ address: '+15553334444', service: 'SMS' }],
       }),
     );
-    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBeNull();
-    expect(await findChatByParticipantAddresses(db, ['+15553334444'], 'iMessage')).toBeNull();
+    expect(await guidsFor(db, ['+15551112222'], 'iMessage')).toEqual([]);
+    expect(await guidsFor(db, ['+15553334444'], 'iMessage')).toEqual([]);
+  });
+
+  it('finds a group with exactly the same members, in any order and email case', async () => {
+    const { db } = await createTestDb();
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'any;+;chat-group-1',
+        style: 43,
+        participants: [
+          { address: '+15551112222', service: 'iMessage' },
+          { address: 'craig@apple.com', service: 'iMessage' },
+        ],
+      }),
+    );
+
+    await expect(
+      findChatsByParticipantAddresses(db, ['Craig@Apple.com', '+15551112222'], 'iMessage'),
+    ).resolves.toEqual([
+      { guid: 'any;+;chat-group-1', latestMessageDate: null, name: null, isGroup: true },
+    ]);
+    // A group is never offered as the one-to-one chat with one of its members, nor for a
+    // different member set.
+    expect(await guidsFor(db, ['+15551112222'], 'iMessage')).toEqual([]);
+    expect(
+      await guidsFor(db, ['+15551112222', 'craig@apple.com', '+15553334444'], 'iMessage'),
+    ).toEqual([]);
+    expect(await guidsFor(db, ['+15551112222', 'craig@apple.com'], 'RCS')).toEqual([]);
+  });
+
+  it('lists every chat with the same members newest first, with its name', async () => {
+    const { db, raw } = await createTestDb();
+    const members = [
+      { address: '+15551112222', service: 'iMessage' },
+      { address: '+15553334444', service: 'iMessage' },
+    ];
+    for (const [guid, displayName] of [
+      ['iMessage;+;chat-old', 'Old plans'],
+      ['any;+;chat-new', null],
+      ['any;+;chat-quiet', 'Quiet'],
+    ] as const) {
+      await persistServerChat(
+        db,
+        Chat.parse({ guid, style: 43, displayName, participants: members }),
+      );
+    }
+    const setLatest = raw.prepare('UPDATE chats SET latest_message_date = ? WHERE guid = ?');
+    setLatest.run(1_000, 'iMessage;+;chat-old');
+    setLatest.run(2_000, 'any;+;chat-new');
+    raw.prepare("UPDATE chats SET custom_name = 'Weekend' WHERE guid = 'any;+;chat-new'").run();
+
+    await expect(
+      findChatsByParticipantAddresses(db, ['+15553334444', '+15551112222'], 'iMessage'),
+    ).resolves.toEqual([
+      { guid: 'any;+;chat-new', latestMessageDate: 2_000, name: 'Weekend', isGroup: true },
+      { guid: 'iMessage;+;chat-old', latestMessageDate: 1_000, name: 'Old plans', isGroup: true },
+      { guid: 'any;+;chat-quiet', latestMessageDate: null, name: 'Quiet', isGroup: true },
+    ]);
+  });
+
+  it('does not offer a group with an SMS member or a group not keyed as iMessage', async () => {
+    const { db } = await createTestDb();
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'any;+;chat-mixed',
+        style: 43,
+        participants: [
+          { address: '+15551112222', service: 'iMessage' },
+          { address: '+15553334444', service: 'SMS' },
+        ],
+      }),
+    );
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'SMS;+;chat-sms',
+        style: 43,
+        participants: [
+          { address: '+15555556666', service: 'iMessage' },
+          { address: '+15557778888', service: 'iMessage' },
+        ],
+      }),
+    );
+
+    expect(await guidsFor(db, ['+15551112222', '+15553334444'], 'iMessage')).toEqual([]);
+    expect(await guidsFor(db, ['+15555556666', '+15557778888'], 'iMessage')).toEqual([]);
+  });
+
+  it('never gives a stored number without a country code a +1 (local-number-without-region)', async () => {
+    const { db } = await createTestDb();
+    for (const guid of ['iMessage;-;5550000034', 'any;-;5550000034']) {
+      await persistServerChat(
+        db,
+        Chat.parse({
+          guid,
+          style: 45,
+          participants: [{ address: '5550000034', service: 'iMessage' }],
+        }),
+      );
+    }
+
+    // New Message passes "5550000034" typed by the user as +15550000034, which must not adopt them.
+    expect(await guidsFor(db, ['+15550000034'], 'iMessage')).toEqual([]);
   });
 });
 
