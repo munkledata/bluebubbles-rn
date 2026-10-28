@@ -1,11 +1,13 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { logger } from '@core/secure';
 import { runTrackedRealtimeWork } from '@/services/realtime/deliveryCoordinator';
 import {
   consumeShareIntakeBatchIfComplete,
   drainShareIntake,
   isShareIntakeReceiptComplete,
+  noteShareIntakeForeground,
   readShareIntakeReceipt,
   startShareIntake,
 } from '@/services/share/shareIntake';
@@ -22,6 +24,12 @@ import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
  */
 function ShareIntentCaptureInner(): null {
   useEffect(() => startShareIntake(), []);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') noteShareIntakeForeground();
+    });
+    return () => subscription.remove();
+  }, []);
   return null;
 }
 
@@ -117,22 +125,33 @@ function ShareIntentNavigatorInner(): null {
           reconciliation.completedDestination = receipt.destination.chatGuid;
         }
       });
-      if (receiptStatus !== 'delivered' || !accountLease.isCurrent()) return;
+      if (receiptStatus !== 'delivered' || !accountLease.isCurrent()) {
+        logger.event('share.intake', { stage: 'route', outcome: 'not-delivered' });
+        return;
+      }
       const { receipt, completedDestination } = reconciliation;
       if (completedDestination) {
         // A successful acknowledgement clears this exact Zustand batch, which cleans up this
         // effect. The protected navigator itself is still mounted, so use its lifetime—not the old
         // batch dependency's `active` flag—to finish the already-owned route.
-        if (!mountedRef.current) return;
+        if (!mountedRef.current) {
+          logger.event('share.intake', { stage: 'route', outcome: 'inactive' });
+          return;
+        }
         routeFailuresRef.current = { batchId, count: 0 };
+        logger.event('share.intake', { stage: 'route', outcome: 'completed' });
         logger.debug('[share] opening completed receipt destination');
         openChat(`/chat/${encodeURIComponent(completedDestination)}`);
         void drainShareIntake();
         return;
       }
-      if (!active) return;
+      if (!active) {
+        logger.event('share.intake', { stage: 'route', outcome: 'inactive' });
+        return;
+      }
       if (receipt?.destination) {
         routeFailuresRef.current = { batchId, count: 0 };
+        logger.event('share.intake', { stage: 'route', outcome: 'resume-chat' });
         logger.debug('[share] resuming partial receipt destination');
         openChat(
           `/chat/${encodeURIComponent(receipt.destination.chatGuid)}?shareBatch=${encodeURIComponent(batchId)}`,
@@ -141,6 +160,7 @@ function ShareIntentNavigatorInner(): null {
       }
       if (receipt?.newChatPlan) {
         routeFailuresRef.current = { batchId, count: 0 };
+        logger.event('share.intake', { stage: 'route', outcome: 'resume-new-chat' });
         logger.debug('[share] resuming durable new-chat plan');
         router.push(`/new-chat?shareBatch=${encodeURIComponent(batchId)}`);
         return;
@@ -153,19 +173,29 @@ function ShareIntentNavigatorInner(): null {
         !accountLease.isCurrent() ||
         useShareIntentStore.getState().batchId !== batchId
       ) {
+        logger.event('share.intake', { stage: 'route', outcome: 'inactive' });
         return;
       }
       const encodedBatch = encodeURIComponent(batchId);
       routeFailuresRef.current = { batchId, count: 0 };
       if (resolved) {
+        logger.event('share.intake', { stage: 'route', outcome: 'chat', target: 'resolved' });
         logger.debug('[share] opening resolved Direct Share target');
         openChat(`/chat/${encodeURIComponent(resolved)}?shareBatch=${encodedBatch}`);
       } else {
+        logger.event('share.intake', {
+          stage: 'route',
+          outcome: 'new-chat',
+          target: targetToken ? 'unresolved' : 'none',
+        });
         logger.debug('[share] opening generic recipient review');
         router.push(`/new-chat?shareBatch=${encodedBatch}`);
       }
     })().catch((error: unknown) => {
-      if (!active || !accountLease.isCurrent()) return;
+      if (!active || !accountLease.isCurrent()) {
+        logger.event('share.intake', { stage: 'route', outcome: 'inactive' });
+        return;
+      }
       routedBatchRef.current = null;
       const failureCount = routeFailuresRef.current.count + 1;
       routeFailuresRef.current = { batchId, count: failureCount };
@@ -173,10 +203,12 @@ function ShareIntentNavigatorInner(): null {
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
       if (failureCount <= 2) {
+        logger.event('share.intake', { stage: 'route', outcome: 'retry' });
         showToast('Gator could not open the shared item. Retrying…');
         setRouteRetryNonce((current) => current + 1);
         return;
       }
+      logger.event('share.intake', { stage: 'route', outcome: 'review' });
       showToast('Gator could not open the shared item. Review it to retry or discard it.');
       router.push(`/new-chat?shareBatch=${encodeURIComponent(batchId)}`);
     });

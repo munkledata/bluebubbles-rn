@@ -1,4 +1,4 @@
-import { logger } from '@core/secure';
+import { logger, shareIntakeEventOutcome, type ShareIntakeHeldAge } from '@core/secure';
 import {
   acknowledgeNativeShareBatch,
   discardNativeShareBatch,
@@ -134,6 +134,33 @@ function noteWake(): void {
   wakeGeneration += 1;
 }
 
+/** How long ago a share was made, as the coarse bucket the `share.intake` event keeps. */
+export function shareIntakeHeldAge(createdAtMs: number, nowMs = Date.now()): ShareIntakeHeldAge {
+  // A clock set back gives a negative age, which reads as just made.
+  const ageMs = nowMs - createdAtMs;
+  if (ageMs < 60_000) return 'under-1m';
+  if (ageMs < 10 * 60_000) return 'under-10m';
+  if (ageMs < 60 * 60_000) return 'under-1h';
+  if (ageMs < 24 * 60 * 60_000) return 'under-24h';
+  return 'over-24h';
+}
+
+/** Counts that describe the share held in the app right now, never its content. */
+function heldShareCounts(): { files: number; text: boolean; held?: ShareIntakeHeldAge } {
+  const state = useShareIntentStore.getState();
+  return {
+    files: state.files.length,
+    text: state.text !== null,
+    ...(state.createdAtMs == null ? {} : { held: shareIntakeHeldAge(state.createdAtMs) }),
+  };
+}
+
+/** On return to the foreground, record a share still held in the app (counts only). */
+export function noteShareIntakeForeground(): void {
+  if (useShareIntentStore.getState().batchId === null) return;
+  logger.event('share.intake', { stage: 'held', outcome: 'foreground', ...heldShareCounts() });
+}
+
 let lastDiscardedUnreadableBatchId: string | null = null;
 
 /**
@@ -167,15 +194,28 @@ function startDrainIfIdle(): Promise<void> {
       handledWakeGeneration = observedWake;
       if (batch) {
         useShareIntentStore.getState().stageIfEmpty(batch);
+        logger.event('share.intake', {
+          stage: 'pickup',
+          outcome: 'staged',
+          files: batch.files.length,
+          text: batch.text !== null,
+        });
         return;
       }
-      if (observedWake === wakeGeneration) return;
+      if (observedWake === wakeGeneration) {
+        logger.event('share.intake', { stage: 'pickup', outcome: 'none' });
+        return;
+      }
     }
   })()
     .catch(async (error: unknown) => {
       handledWakeGeneration = Math.max(handledWakeGeneration, attemptedWakeGeneration);
       logger.warn('[share] completed native batch could not be staged', {
         errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      logger.event('share.intake', {
+        stage: 'pickup',
+        outcome: error instanceof UnreadableNativeShareBatchError ? 'unreadable' : 'failed',
       });
       if (error instanceof UnreadableNativeShareBatchError) {
         await settleUnreadableNativeBatch(error.batchId);
@@ -199,15 +239,23 @@ function startDrainIfIdle(): Promise<void> {
 /** Stage at most the one exact native claim; loop if an event races any empty-pull boundary. */
 export function drainShareIntake(): Promise<void> {
   noteWake();
+  if (useShareIntentStore.getState().batchId !== null) {
+    // The app takes one share at a time; a later one waits in native storage.
+    logger.event('share.intake', { stage: 'pickup', outcome: 'held', ...heldShareCounts() });
+  }
   return startDrainIfIdle();
 }
 
 /** Subscribe above App Lock before the cold-start pull so no completion wake can be lost. */
 export function startShareIntake(): () => void {
   const unsubscribe = subscribeNativeShareIntake(
-    () => void drainShareIntake(),
+    () => {
+      logger.event('share.intake', { stage: 'signal', outcome: 'received' });
+      void drainShareIntake();
+    },
     (reason) => {
       logger.warn('[share] native intake rejected', { reason });
+      logger.event('share.intake', { stage: 'reject', outcome: shareIntakeEventOutcome(reason) });
       useShareIntentStore.getState().setFailureReason(reason);
     },
   );
@@ -237,6 +285,7 @@ export async function consumeShareIntakeBatchIfComplete(
       await drainShareIntake();
     }
   });
+  if (consumed) logger.event('share.intake', { stage: 'settle', outcome: 'acknowledged' });
   return outcome === 'delivered' && consumed;
 }
 
@@ -253,6 +302,8 @@ export async function releaseShareIntakeBatch(
       await drainShareIntake();
     }
   });
+  if (outcome === 'delivered')
+    logger.event('share.intake', { stage: 'settle', outcome: 'released' });
   return outcome === 'delivered' && cleared;
 }
 
@@ -278,6 +329,8 @@ export async function discardShareIntakeBatch(
       await drainShareIntake();
     }
   });
+  if (outcome === 'delivered')
+    logger.event('share.intake', { stage: 'settle', outcome: 'discarded' });
   return outcome === 'delivered' && cleared;
 }
 
@@ -290,6 +343,7 @@ export async function discardAccountBoundShareIntake(db: AppDatabase): Promise<v
   const batchIds = await listShareIntakeReceiptBatchIds(db);
   for (const batchId of batchIds) {
     await discardNativeShareBatchForAccountReset(batchId);
+    logger.event('share.intake', { stage: 'settle', outcome: 'account-reset' });
   }
   const activeBatchId = useShareIntentStore.getState().batchId;
   if (activeBatchId && batchIds.includes(activeBatchId)) {

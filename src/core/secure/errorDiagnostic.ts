@@ -330,14 +330,97 @@ export interface PrivacySafeErrorReport extends Omit<PrivacySafeErrorDiagnostic,
   meta: string;
 }
 
-export type DiagnosticEventCode = 'fcm.push_received';
+export type DiagnosticEventCode = 'fcm.push_received' | 'share.intake';
 export type DiagnosticReceiptSource = 'background' | 'foreground';
+
+/** Where in share intake a `share.intake` event was recorded. */
+export const SHARE_INTAKE_EVENT_STAGES = [
+  'signal',
+  'pickup',
+  'route',
+  'settle',
+  'reject',
+  'held',
+] as const;
+export type ShareIntakeEventStage = (typeof SHARE_INTAKE_EVENT_STAGES)[number];
+
+/**
+ * Every outcome a `share.intake` event can name. Fixed labels only, so a retained line can never
+ * carry a batch id, a chat, a file name or shared text. Rejections use the native module's reasons.
+ */
+export const SHARE_INTAKE_EVENT_OUTCOMES = [
+  // signal
+  'received',
+  // pickup
+  'staged',
+  'none',
+  'held',
+  'failed',
+  'unreadable',
+  // route
+  'completed',
+  'resume-chat',
+  'resume-new-chat',
+  'chat',
+  'new-chat',
+  'not-delivered',
+  'inactive',
+  'retry',
+  'review',
+  // settle
+  'acknowledged',
+  'released',
+  'discarded',
+  'account-reset',
+  // reject
+  'count',
+  'file_size',
+  'batch_size',
+  'text_size',
+  'deadline',
+  'empty',
+  'scheme',
+  'permission',
+  'provider',
+  'cache_quota',
+  'busy',
+  'malformed',
+  'unavailable',
+  // held
+  'foreground',
+] as const;
+export type ShareIntakeEventOutcome = (typeof SHARE_INTAKE_EVENT_OUTCOMES)[number];
+
+/** Whether a share named a Direct Share target, and whether that target resolved to a chat. */
+export const SHARE_INTAKE_EVENT_TARGETS = ['none', 'resolved', 'unresolved'] as const;
+export type ShareIntakeEventTarget = (typeof SHARE_INTAKE_EVENT_TARGETS)[number];
+
+/** How long ago a held share was made, as a coarse bucket. */
+export const SHARE_INTAKE_HELD_AGES = [
+  'under-1m',
+  'under-10m',
+  'under-1h',
+  'under-24h',
+  'over-24h',
+] as const;
+export type ShareIntakeHeldAge = (typeof SHARE_INTAKE_HELD_AGES)[number];
+
+/** Native intake accepts at most 10 files; anything larger is not a real count. */
+const SHARE_INTAKE_MAX_FILES = 99;
 
 export interface DiagnosticEventInputByCode {
   'fcm.push_received': {
     /** Provider input stays open; the projector maps every unknown value to `unknown`. */
     readonly eventName: string;
     readonly source: DiagnosticReceiptSource;
+  };
+  'share.intake': {
+    readonly stage: ShareIntakeEventStage;
+    readonly outcome: ShareIntakeEventOutcome | 'unknown';
+    readonly files?: number;
+    readonly text?: boolean;
+    readonly target?: ShareIntakeEventTarget;
+    readonly held?: ShareIntakeHeldAge;
   };
 }
 
@@ -347,11 +430,27 @@ export interface SafeDiagnosticEventMeta {
   readonly source: DiagnosticReceiptSource | 'unknown';
 }
 
-export interface PrivacySafeDiagnosticEvent {
-  readonly message: string;
-  readonly tag: 'fcm';
-  readonly meta: SafeDiagnosticEventMeta;
+export interface SafeShareIntakeEventMeta {
+  readonly schemaVersion: typeof DIAGNOSTIC_EVENT_ENVELOPE_VERSION;
+  readonly stage: ShareIntakeEventStage | 'unknown';
+  readonly outcome: ShareIntakeEventOutcome | 'unknown';
+  readonly files?: number;
+  readonly text?: boolean;
+  readonly target?: ShareIntakeEventTarget;
+  readonly held?: ShareIntakeHeldAge;
 }
+
+export type PrivacySafeDiagnosticEvent =
+  | {
+      readonly message: string;
+      readonly tag: 'fcm';
+      readonly meta: SafeDiagnosticEventMeta;
+    }
+  | {
+      readonly message: string;
+      readonly tag: 'share';
+      readonly meta: SafeShareIntakeEventMeta;
+    };
 
 export interface PrivacySafeDiagnosticEventReport extends Omit<PrivacySafeDiagnosticEvent, 'meta'> {
   readonly level: 'info';
@@ -430,7 +529,19 @@ function diagnosticEventCodeFor(message: unknown): DiagnosticEventCode | undefin
   if (typeof message !== 'string' || message.length > 4_096) return undefined;
   const qualifierAt = message.indexOf(' [');
   const possibleCode = qualifierAt === -1 ? message : message.slice(0, qualifierAt);
-  return possibleCode === 'fcm.push_received' ? possibleCode : undefined;
+  return possibleCode === 'fcm.push_received' || possibleCode === 'share.intake'
+    ? possibleCode
+    : undefined;
+}
+
+function allowedValue<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  if (typeof value !== 'string' || value.length > 64) return undefined;
+  return allowed.find((candidate) => candidate === value);
+}
+
+/** Map a native share rejection reason onto the fixed outcomes; anything else reads `unknown`. */
+export function shareIntakeEventOutcome(value: unknown): ShareIntakeEventOutcome | 'unknown' {
+  return allowedValue(value, SHARE_INTAKE_EVENT_OUTCOMES) ?? 'unknown';
 }
 
 function safeServerEventName(value: unknown): ServerEventName | 'unknown' {
@@ -442,6 +553,35 @@ function safeDiagnosticReceiptSource(value: unknown): DiagnosticReceiptSource | 
   return value === 'background' || value === 'foreground' ? value : 'unknown';
 }
 
+function projectShareIntakeEvent(
+  record: Record<string, unknown> | undefined,
+): PrivacySafeDiagnosticEvent {
+  const stage = allowedValue(read(record, 'stage'), SHARE_INTAKE_EVENT_STAGES) ?? 'unknown';
+  const outcome = shareIntakeEventOutcome(read(record, 'outcome'));
+  const files = safeInteger(read(record, 'files'), SHARE_INTAKE_MAX_FILES);
+  const text = safeBoolean(read(record, 'text'));
+  const target = allowedValue(read(record, 'target'), SHARE_INTAKE_EVENT_TARGETS);
+  const held = allowedValue(read(record, 'held'), SHARE_INTAKE_HELD_AGES);
+  const meta: SafeShareIntakeEventMeta = {
+    schemaVersion: DIAGNOSTIC_EVENT_ENVELOPE_VERSION,
+    stage,
+    outcome,
+    ...(files === undefined ? {} : { files }),
+    ...(text === undefined ? {} : { text }),
+    ...(target === undefined ? {} : { target }),
+    ...(held === undefined ? {} : { held }),
+  };
+  const qualifiers = [
+    `stage:${stage}`,
+    `outcome:${outcome}`,
+    ...(files === undefined ? [] : [`files:${files}`]),
+    ...(text === undefined ? [] : [`text:${text ? 'yes' : 'no'}`]),
+    ...(target === undefined ? [] : [`target:${target}`]),
+    ...(held === undefined ? [] : [`held:${held}`]),
+  ];
+  return { message: `share.intake [${qualifiers.join('|')}]`, tag: 'share', meta };
+}
+
 /** Project one selected non-error event before any release sink can inspect arbitrary metadata. */
 export function projectCapturedDiagnosticEvent(
   message: unknown,
@@ -450,6 +590,7 @@ export function projectCapturedDiagnosticEvent(
   const code = diagnosticEventCodeFor(message);
   if (code === undefined) return undefined;
   const record = asRecord(meta);
+  if (code === 'share.intake') return projectShareIntakeEvent(record);
   const eventNameValue = read(record, 'eventName') ?? read(record, 'event');
   const eventName = safeServerEventName(eventNameValue);
   const source = safeDiagnosticReceiptSource(read(record, 'source'));

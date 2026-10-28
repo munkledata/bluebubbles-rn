@@ -1529,7 +1529,7 @@ const CERTIFIED_ERROR_DIAGNOSTIC_COMMONJS_LOAD = Object.freeze({
   loaderName: 'loadErrorDiagnosticApi',
   loaderHash: '3400aa7c47d860d8e3bdba99a2cd6d52a20e58ff11c2ca7e478672ab453105d7',
   specifier: '@core/secure/errorDiagnostic',
-  targetHash: 'dc9db788abeb81bdc78b5e65743895ce6aeb937009012d6b6ed0d4ed77341e62',
+  targetHash: '9c8f9de0d65e1cd0a302d7b1575740f9471c21963f25c46b2408edc3c6e102d3',
   targetPath: 'src/core/secure/errorDiagnostic.ts',
 });
 

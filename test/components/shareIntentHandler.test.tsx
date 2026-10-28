@@ -6,6 +6,7 @@
  * resolved Direct Share conversation. Neither component consumes the durable batch on mount.
  */
 import React from 'react';
+import { AppState, type AppStateStatus, type NativeEventSubscription } from 'react-native';
 import { act, waitFor } from '@testing-library/react-native';
 import { renderWithTheme } from './support/renderWithTheme';
 import { logger } from '@core/secure';
@@ -28,6 +29,7 @@ jest.mock('@/services/share/shareIntake', () => ({
   consumeShareIntakeBatchIfComplete: jest.fn(),
   drainShareIntake: jest.fn(() => Promise.resolve()),
   isShareIntakeReceiptComplete: jest.fn(),
+  noteShareIntakeForeground: jest.fn(),
   readShareIntakeReceipt: jest.fn(),
   startShareIntake: jest.fn(),
 }));
@@ -42,11 +44,17 @@ import {
   consumeShareIntakeBatchIfComplete,
   drainShareIntake,
   isShareIntakeReceiptComplete,
+  noteShareIntakeForeground,
   readShareIntakeReceipt,
   startShareIntake,
 } from '@/services/share/shareIntake';
 // eslint-disable-next-line import/first
 import { resolveShareShortcutTarget } from '@/services/shortcuts/shareShortcuts';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const mockStartShareIntake = startShareIntake as jest.Mock;
 const mockConsumeIfComplete = consumeShareIntakeBatchIfComplete as jest.Mock;
@@ -54,6 +62,12 @@ const mockDrainShareIntake = drainShareIntake as jest.Mock;
 const mockGetReceipt = readShareIntakeReceipt as jest.Mock;
 const mockIsReceiptComplete = isShareIntakeReceiptComplete as jest.Mock;
 const mockResolveShareShortcutTarget = resolveShareShortcutTarget as jest.Mock;
+const mockNoteForeground = noteShareIntakeForeground as jest.Mock;
+let recorded: jest.SpyInstance;
+
+function routeEvent(outcome: string, target?: string): [string, object] {
+  return ['share.intake', { stage: 'route', outcome, ...(target === undefined ? {} : { target }) }];
+}
 
 function stageShare(
   batchId: string,
@@ -88,6 +102,7 @@ beforeEach(() => {
   mockDrainShareIntake.mockResolvedValue(undefined);
   useShareIntentStore.getState().clear();
   useShareIntentStore.setState({ failureReason: null });
+  recorded = jest.spyOn(logger, 'event').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -104,6 +119,24 @@ describe('ShareIntentCapture', () => {
 
     await view.unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('notes a held share each time the app comes to the foreground, while mounted', async () => {
+    const listeners: ((state: AppStateStatus) => void)[] = [];
+    const remove = jest.fn();
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, listener) => {
+      listeners.push(listener as (state: AppStateStatus) => void);
+      return { remove } as unknown as NativeEventSubscription;
+    });
+
+    const view = await renderWithTheme(<ShareIntentCapture />);
+    listeners.forEach((listener) => listener('background'));
+    expect(mockNoteForeground).not.toHaveBeenCalled();
+    listeners.forEach((listener) => listener('active'));
+    expect(mockNoteForeground).toHaveBeenCalledTimes(1);
+
+    await view.unmount();
+    expect(remove).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -128,6 +161,7 @@ describe('ShareIntentNavigator', () => {
     );
     expect(mockOpenChat).not.toHaveBeenCalled();
     expect(debug).toHaveBeenCalledWith('[share] opening generic recipient review');
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('new-chat', 'none'));
     expect(useShareIntentStore.getState()).toMatchObject({
       batchId: BATCH_ONE,
       text: 'Shared note',
@@ -153,6 +187,7 @@ describe('ShareIntentNavigator', () => {
     );
     expect(mockPush).not.toHaveBeenCalled();
     expect(debug).toHaveBeenCalledWith('[share] opening resolved Direct Share target');
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('chat', 'resolved'));
     expect(useShareIntentStore.getState().batchId).toBe(BATCH_ONE);
   });
 
@@ -168,6 +203,7 @@ describe('ShareIntentNavigator', () => {
     );
     expect(mockResolveShareShortcutTarget).toHaveBeenCalledTimes(1);
     expect(mockOpenChat).not.toHaveBeenCalled();
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('new-chat', 'unresolved'));
   });
 
   it('does not route an in-flight Direct Share result after the protected tree unmounts', async () => {
@@ -186,6 +222,7 @@ describe('ShareIntentNavigator', () => {
 
     expect(mockOpenChat).not.toHaveBeenCalled();
     expect(mockPush).not.toHaveBeenCalled();
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('inactive'));
   });
 
   it('resumes a durable new-chat plan before consulting a stale Direct Share target', async () => {
@@ -206,6 +243,7 @@ describe('ShareIntentNavigator', () => {
     );
     expect(mockResolveShareShortcutTarget).not.toHaveBeenCalled();
     expect(mockOpenChat).not.toHaveBeenCalled();
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('resume-new-chat'));
   });
 
   it('routes a completed durable receipt without replaying its batch', async () => {
@@ -233,6 +271,127 @@ describe('ShareIntentNavigator', () => {
       mockDrainShareIntake.mock.invocationCallOrder[0]!,
     );
     expect(mockResolveShareShortcutTarget).not.toHaveBeenCalled();
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('completed'));
+  });
+
+  it('resumes a partial durable destination in its chat', async () => {
+    mockGetReceipt.mockResolvedValue({
+      destination: { chatGuid: DIRECT_GUID, routeKind: 'existing_chat' },
+      newChatPlan: null,
+      items: {},
+    });
+    stageShare(BATCH_ONE);
+
+    await renderWithTheme(<ShareIntentNavigator />);
+
+    await waitFor(() =>
+      expect(mockOpenChat).toHaveBeenCalledWith(
+        `/chat/${encodeURIComponent(DIRECT_GUID)}?shareBatch=${encodeURIComponent(BATCH_ONE)}`,
+      ),
+    );
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('resume-chat'));
+  });
+
+  it('sends the share to review after two retries, recording each attempt', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    mockGetReceipt.mockRejectedValue(new Error('receipt read keeps failing'));
+    stageShare(BATCH_ONE);
+
+    await renderWithTheme(<ShareIntentNavigator />);
+
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith(
+        `/new-chat?shareBatch=${encodeURIComponent(BATCH_ONE)}`,
+      ),
+    );
+    const routeOutcomes = recorded.mock.calls
+      .filter(([code]) => code === 'share.intake')
+      .map(([, meta]) => (meta as { outcome: string }).outcome);
+    expect(routeOutcomes).toEqual(['retry', 'retry', 'review']);
+  });
+
+  it('records a completed share whose navigator unmounted before it could open the chat', async () => {
+    let finishConsume!: (value: boolean) => void;
+    mockGetReceipt.mockResolvedValue({
+      destination: { chatGuid: DIRECT_GUID, routeKind: 'new_chat' },
+      newChatPlan: null,
+      items: {},
+    });
+    mockIsReceiptComplete.mockReturnValue(true);
+    mockConsumeIfComplete.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        finishConsume = resolve;
+      }),
+    );
+    stageShare(BATCH_ONE);
+
+    const view = await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockConsumeIfComplete).toHaveBeenCalledTimes(1));
+    await view.unmount();
+    await act(async () => finishConsume(true));
+
+    await waitFor(() => expect(recorded).toHaveBeenCalledWith(...routeEvent('inactive')));
+    expect(mockOpenChat).not.toHaveBeenCalled();
+  });
+
+  it('records a share abandoned before its route was chosen', async () => {
+    let finishRead!: (value: null) => void;
+    mockGetReceipt.mockReturnValue(
+      new Promise<null>((resolve) => {
+        finishRead = resolve;
+      }),
+    );
+    stageShare(BATCH_ONE);
+
+    const view = await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockGetReceipt).toHaveBeenCalledTimes(1));
+    await view.unmount();
+    await act(async () => finishRead(null));
+
+    await waitFor(() => expect(recorded).toHaveBeenCalledWith(...routeEvent('inactive')));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('records a failure that lands after the navigator unmounted, without retrying', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    let failRead!: (error: Error) => void;
+    mockGetReceipt.mockReturnValue(
+      new Promise<null>((_resolve, reject) => {
+        failRead = reject;
+      }),
+    );
+    stageShare(BATCH_ONE);
+
+    const view = await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockGetReceipt).toHaveBeenCalledTimes(1));
+    await view.unmount();
+    await act(async () => failRead(new Error('receipt read failed late')));
+
+    await waitFor(() => expect(recorded).toHaveBeenCalledWith(...routeEvent('inactive')));
+    expect(recorded).not.toHaveBeenCalledWith(...routeEvent('retry'));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('records a route that stops because account work was paused during the receipt read', async () => {
+    let finishRead!: (value: null) => void;
+    mockGetReceipt.mockReturnValue(
+      new Promise<null>((resolve) => {
+        finishRead = resolve;
+      }),
+    );
+    stageShare(BATCH_ONE);
+
+    await renderWithTheme(<ShareIntentNavigator />);
+    await waitFor(() => expect(mockGetReceipt).toHaveBeenCalledTimes(1));
+    const paused = pauseRealtimeDeliveries();
+    try {
+      await act(async () => finishRead(null));
+      await paused;
+      await waitFor(() => expect(recorded).toHaveBeenCalledWith(...routeEvent('not-delivered')));
+      expect(mockPush).not.toHaveBeenCalled();
+    } finally {
+      resumeRealtimeDeliveries();
+    }
   });
 
   it('retries a transient reconciliation failure instead of stranding the staged batch', async () => {
@@ -248,6 +407,8 @@ describe('ShareIntentNavigator', () => {
         `/new-chat?shareBatch=${encodeURIComponent(BATCH_ONE)}`,
       ),
     );
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('retry'));
+    expect(recorded).toHaveBeenCalledWith(...routeEvent('new-chat', 'none'));
   });
 
   it('re-arms only after the exact staged batch is cleared', async () => {

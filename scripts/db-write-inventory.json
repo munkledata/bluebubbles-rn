@@ -24665,7 +24665,7 @@
     {
       "id": "src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1",
       "path": "src/services/share/shareIntake.ts",
-      "line": 226,
+      "line": 274,
       "symbol": "consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#getShareIntakeReceipt",
@@ -24678,7 +24678,7 @@
     {
       "id": "src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:faef10ff18f3",
       "path": "src/services/share/shareIntake.ts",
-      "line": 229,
+      "line": 277,
       "symbol": "consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt",
@@ -24691,7 +24691,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardShareIntakeBatch.<callback:49cb1846bc>:mutator-call:9283adeb4a6d",
       "path": "src/services/share/shareIntake.ts",
-      "line": 271,
+      "line": 322,
       "symbol": "discardShareIntakeBatch.<callback:49cb1846bc>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt",
@@ -24704,7 +24704,7 @@
     {
       "id": "src/services/share/shareIntake.ts#discardAccountBoundShareIntake:mutator-call:9abbc352b6da",
       "path": "src/services/share/shareIntake.ts",
-      "line": 290,
+      "line": 343,
       "symbol": "discardAccountBoundShareIntake",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#listShareIntakeReceiptBatchIds",
@@ -27939,10 +27939,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; docs/WORK_PLAN_2026-08-03.md (PERF-02 Samsung measurement)"
     },
     {
-      "id": "src/ui/ShareIntentHandler.tsx#ShareIntentNavigatorInner.<callback:6c24eb213d>.<callback:6762af135c>.<callback:b17f885e16>:mutator-call:e7bd003c6756",
+      "id": "src/ui/ShareIntentHandler.tsx#ShareIntentNavigatorInner.<callback:95f1dc6449>.<callback:60d0ae9b9a>.<callback:b17f885e16>:mutator-call:462eaaa4fa03",
       "path": "src/ui/ShareIntentHandler.tsx",
-      "line": 106,
-      "symbol": "ShareIntentNavigatorInner.<callback:6c24eb213d>.<callback:6762af135c>.<callback:b17f885e16>",
+      "line": 114,
+      "symbol": "ShareIntentNavigatorInner.<callback:95f1dc6449>.<callback:60d0ae9b9a>.<callback:b17f885e16>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
       "detectedContext": "coordinated-delegation",

@@ -47,6 +47,26 @@ excluded shortcuts before calling Android, and Android keeps them only when AppS
 integration is on (off by default), so the rows would vanish from the share sheet too. The names
 shown are the ones the share sheet already shows, and App Lock publishes none.
 
+### Release diagnostics: the `share.intake` event (from app 0.1.64)
+
+Release builds keep errors only, so before 0.1.64 a share that went nowhere left no trace. Each step
+of share intake now records a finite `share.intake` event (`src/core/secure/errorDiagnostic.ts`), one
+of the two INFO events release builds keep, with `fcm.push_received`. It appears in Settings → App
+Logs and in Share diagnostics; it never reaches logcat or the error-report upload. Fields, all
+optional except the first two, and nothing else:
+
+- `stage`: `signal` (native says a share is waiting), `pickup`, `route`, `settle`, `reject`, or
+  `held` (the app came to the foreground with a share still held);
+- `outcome`: a fixed label for that stage, or a native rejection reason (`count`, `file_size`,
+  `busy`, …); anything else reads `unknown`;
+- `files` (a count), `text` (yes or no), `target` (`none`, `resolved` or `unresolved` Direct Share
+  target), and `held` (how long ago the share was made: under 1 minute, 10 minutes, 1 hour or 24
+  hours, or over 24 hours).
+
+Never a batch id, chat, file name or shared text: the projector rebuilds every event from these
+fields on capture, restore and export. `pickup` with outcome `held` means a new share is waiting in
+native storage behind one the app still holds, which is the "sharing does nothing" case.
+
 ## Summary
 
 Two independent problems, and the second is why the first stayed invisible for so long.

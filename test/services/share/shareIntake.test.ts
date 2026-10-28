@@ -34,7 +34,9 @@ jest.mock('@db/repositories', () => ({
 }));
 
 jest.mock('@core/secure', () => ({
-  logger: { warn: jest.fn() },
+  logger: { warn: jest.fn(), event: jest.fn() },
+  shareIntakeEventOutcome: jest.requireActual('@core/secure/errorDiagnostic')
+    .shareIntakeEventOutcome as (value: unknown) => string,
 }));
 
 // eslint-disable-next-line import/first
@@ -62,7 +64,9 @@ import {
   discardAccountBoundShareIntake,
   discardShareIntakeBatch,
   drainShareIntake,
+  noteShareIntakeForeground,
   releaseShareIntakeBatch,
+  shareIntakeHeldAge,
   startShareIntake,
 } from '@/services/share/shareIntake';
 // eslint-disable-next-line import/first
@@ -104,6 +108,7 @@ const subscribe = subscribeNativeShareIntake as jest.MockedFunction<
   typeof subscribeNativeShareIntake
 >;
 const warn = logger.warn as jest.MockedFunction<typeof logger.warn>;
+const event = logger.event as jest.MockedFunction<typeof logger.event>;
 
 const FIRST_BATCH = '1720000000000-1-0123456789abcdef';
 const SECOND_BATCH = '1720000000001-2-fedcba9876543210';
@@ -164,6 +169,7 @@ beforeEach(() => {
   listReceiptBatchIds.mockReset().mockResolvedValue([]);
   subscribe.mockReset().mockReturnValue(jest.fn());
   warn.mockReset();
+  event.mockReset();
 });
 
 describe('share intake draining', () => {
@@ -587,5 +593,136 @@ describe('share intake exact-batch settlement', () => {
       text: 'first',
     });
     expect(takeNext).not.toHaveBeenCalled();
+  });
+});
+
+describe('share intake diagnostic events', () => {
+  const sharedFile = (index: number) => ({
+    uri: `file:///data/shared-in/files/${FIRST_BATCH}/0${index}-private-photo.jpg`,
+    name: 'private-photo.jpg',
+    mimeType: 'image/jpeg',
+    size: 1_000,
+    origin: 'share' as const,
+    shareItemIndex: index,
+  });
+
+  function shareEvents(): unknown[] {
+    return event.mock.calls.filter(([code]) => code === 'share.intake').map(([, meta]) => meta);
+  }
+
+  it('records each pickup with counts only, and an empty pull as none', async () => {
+    takeNext.mockResolvedValueOnce({
+      ...batch(FIRST_BATCH, 'PRIVATE_SHARED_TEXT'),
+      files: [sharedFile(0), sharedFile(1)],
+    });
+    await drainShareIntake();
+    useShareIntentStore.getState().clearIf(FIRST_BATCH);
+    await drainShareIntake();
+
+    expect(shareEvents()).toEqual([
+      { stage: 'pickup', outcome: 'staged', files: 2, text: true },
+      { stage: 'pickup', outcome: 'none' },
+    ]);
+    expect(JSON.stringify(event.mock.calls)).not.toMatch(/PRIVATE|private-photo|1720000000000-1/);
+  });
+
+  it('records a pull asked for while a share is already held, with that share counts', async () => {
+    stageFirstBatch();
+    await drainShareIntake();
+
+    expect(shareEvents()).toEqual([
+      { stage: 'pickup', outcome: 'held', files: 0, text: true, held: 'over-24h' },
+    ]);
+    expect(takeNext).not.toHaveBeenCalled();
+  });
+
+  it('records a failed pickup and an unreadable claim apart', async () => {
+    takeNext.mockRejectedValueOnce(new Error('bridge failed'));
+    await drainShareIntake();
+    takeNext.mockRejectedValueOnce(new UnreadableNativeShareBatchError(null));
+    await drainShareIntake();
+
+    expect(shareEvents()).toEqual([
+      { stage: 'pickup', outcome: 'failed' },
+      { stage: 'pickup', outcome: 'unreadable' },
+    ]);
+  });
+
+  it('records the native signal and every rejection, mapping unknown reasons to unknown', async () => {
+    let onPending: () => void = () => undefined;
+    let onRejected: (reason: string) => void = () => undefined;
+    subscribe.mockImplementationOnce((pending, rejected) => {
+      onPending = pending;
+      onRejected = rejected;
+      return jest.fn();
+    });
+    const stop = startShareIntake();
+    await nextEventLoopTurn();
+    event.mockClear();
+
+    onPending();
+    await nextEventLoopTurn();
+    onRejected('busy');
+    onRejected('a reason with private words');
+    stop();
+
+    expect(shareEvents()).toEqual([
+      { stage: 'signal', outcome: 'received' },
+      { stage: 'pickup', outcome: 'none' },
+      { stage: 'reject', outcome: 'busy' },
+      { stage: 'reject', outcome: 'unknown' },
+    ]);
+  });
+
+  it('records each settlement once it is done, and none when it fails', async () => {
+    stageFirstBatch();
+    // A receipt that is not complete yet acknowledges nothing, so it records nothing.
+    await consumeShareIntakeBatchIfComplete(identityFor(FIRST_BATCH), settlementOptions());
+    receiptIsComplete();
+    await consumeShareIntakeBatchIfComplete(identityFor(FIRST_BATCH), settlementOptions());
+    stageFirstBatch();
+    await releaseShareIntakeBatch(FIRST_BATCH, settlementOptions({ drainNext: false }));
+    stageFirstBatch();
+    await discardShareIntakeBatch(FIRST_BATCH, settlementOptions({ drainNext: false }));
+    listReceiptBatchIds.mockResolvedValueOnce([FIRST_BATCH, SECOND_BATCH]);
+    await discardAccountBoundShareIntake(ACCOUNT_A_DB);
+    stageFirstBatch();
+    receiptIsComplete();
+    acknowledge.mockRejectedValueOnce(new Error('native acknowledge failed'));
+    await expect(
+      consumeShareIntakeBatchIfComplete(identityFor(FIRST_BATCH), settlementOptions()),
+    ).rejects.toThrow('native acknowledge failed');
+
+    expect(shareEvents().filter((meta) => (meta as { stage: string }).stage === 'settle')).toEqual([
+      { stage: 'settle', outcome: 'acknowledged' },
+      { stage: 'settle', outcome: 'released' },
+      { stage: 'settle', outcome: 'discarded' },
+      { stage: 'settle', outcome: 'account-reset' },
+      { stage: 'settle', outcome: 'account-reset' },
+    ]);
+  });
+
+  it('notes a share still held on return to the foreground, and nothing otherwise', () => {
+    noteShareIntakeForeground();
+    expect(shareEvents()).toEqual([]);
+
+    stageFirstBatch();
+    noteShareIntakeForeground();
+    expect(shareEvents()).toEqual([
+      { stage: 'held', outcome: 'foreground', files: 0, text: true, held: 'over-24h' },
+    ]);
+  });
+
+  it('buckets how long ago a share was made', () => {
+    const made = 1_000_000_000_000;
+    expect(shareIntakeHeldAge(made, made)).toBe('under-1m');
+    expect(shareIntakeHeldAge(made, made + 59_999)).toBe('under-1m');
+    expect(shareIntakeHeldAge(made, made + 60_000)).toBe('under-10m');
+    expect(shareIntakeHeldAge(made, made + 10 * 60_000)).toBe('under-1h');
+    expect(shareIntakeHeldAge(made, made + 60 * 60_000)).toBe('under-24h');
+    expect(shareIntakeHeldAge(made, made + 24 * 60 * 60_000 - 1)).toBe('under-24h');
+    expect(shareIntakeHeldAge(made, made + 24 * 60 * 60_000)).toBe('over-24h');
+    // A clock set back makes the share look newer than now; it still reads as just made.
+    expect(shareIntakeHeldAge(made + 5_000, made)).toBe('under-1m');
   });
 });

@@ -3409,7 +3409,7 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
         'coordinated-delegation',
       ],
       [
-        'src/ui/ShareIntentHandler.tsx#ShareIntentNavigatorInner.<callback:6c24eb213d>.<callback:6762af135c>.<callback:b17f885e16>:mutator-call:e7bd003c6756',
+        'src/ui/ShareIntentHandler.tsx#ShareIntentNavigatorInner.<callback:95f1dc6449>.<callback:60d0ae9b9a>.<callback:b17f885e16>:mutator-call:462eaaa4fa03',
         'src/services/share/shareIntake.ts#readShareIntakeReceipt',
         'coordinated-delegation',
       ],
