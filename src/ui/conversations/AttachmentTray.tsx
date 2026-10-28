@@ -57,6 +57,8 @@ function mimeFromName(name: string, isVideo: boolean): string {
     png: 'image/png',
     gif: 'image/gif',
     heic: 'image/heic',
+    heif: 'image/heif',
+    avif: 'image/avif',
     webp: 'image/webp',
     mp4: 'video/mp4',
     mov: 'video/quicktime',

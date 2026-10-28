@@ -282,6 +282,20 @@ describe('AttachmentTray — media library', () => {
     );
   });
 
+  it.each([
+    ['IMG_2.heif', 'image/heif'],
+    ['IMG_3.avif', 'image/avif'],
+  ])('labels a %s photo as %s instead of JPEG', async (filename, mimeType) => {
+    grantWith([{ ...PHOTO, filename }]);
+    getAssetInfo.mockResolvedValue({ localUri: `file://real/${filename}` });
+    const onPick = jest.fn();
+    await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
+    await fireEvent.press(await screen.findByLabelText('Attach photo'));
+    await waitFor(() =>
+      expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ name: filename, mimeType })),
+    );
+  });
+
   it('falls back to the raw asset uri when getAssetInfoAsync throws', async () => {
     grantWith([PHOTO]);
     const error = new Error('scoped storage');
