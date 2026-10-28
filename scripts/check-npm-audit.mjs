@@ -7,6 +7,9 @@
 // That kept CI red for weeks and hid real typecheck/test failures behind the same red X. This
 // check still fails on every high or critical advisory, except the ones listed in
 // scripts/npm-audit-allowlist.json, each of which needs a written reason and an expiry date.
+// An exception may also list `paths`: the install paths it covers (for example
+// node_modules/expo/node_modules/zod). The advisory then still fails for any other copy, so a
+// build-tool exception cannot hide the same advisory in a copy the app ships.
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
@@ -28,7 +31,16 @@ export function advisoriesFromAuditReport(report) {
         .split('/')
         .pop();
       if (!id) continue;
-      advisories.set(id, { id, package: via.name, severity: via.severity, title: via.title });
+      // `nodes` are the install paths of the affected copies of the package.
+      const reported = Array.isArray(vulnerability.nodes) ? vulnerability.nodes : [];
+      const nodes = new Set([...(advisories.get(id)?.nodes ?? []), ...reported]);
+      advisories.set(id, {
+        id,
+        package: via.name,
+        severity: via.severity,
+        title: via.title,
+        nodes: [...nodes],
+      });
     }
   }
   return [...advisories.values()];
@@ -49,10 +61,14 @@ export function evaluateAudit({ report, allowlist, today }) {
       typeof entry.package === 'string' &&
       typeof entry.reason === 'string' &&
       entry.reason.trim().length > 0 &&
-      ISO_DATE.test(entry.expires ?? '');
+      ISO_DATE.test(entry.expires ?? '') &&
+      (entry.paths === undefined ||
+        (Array.isArray(entry.paths) &&
+          entry.paths.length > 0 &&
+          entry.paths.every((path) => typeof path === 'string' && path.trim().length > 0)));
     if (!complete) {
       errors.push(
-        `Allowlist entry ${JSON.stringify(entry)} needs id, package, reason and expires (YYYY-MM-DD).`,
+        `Allowlist entry ${JSON.stringify(entry)} needs id, package, reason and expires (YYYY-MM-DD); optional paths must be a non-empty list of install paths.`,
       );
       continue;
     }
@@ -71,6 +87,18 @@ export function evaluateAudit({ report, allowlist, today }) {
       errors.push(
         `The reviewed exception for ${advisory.id} (${advisory.package}) expired on ${exception.expires}; re-review it.`,
       );
+    } else if (exception.paths && advisory.nodes.length === 0) {
+      // Fail closed: without install paths the report cannot show which copies are affected.
+      errors.push(
+        `npm audit reported no install paths for ${advisory.id} (${advisory.package}), so its path-limited exception cannot be checked.`,
+      );
+    } else if (exception.paths) {
+      const uncovered = advisory.nodes.filter((node) => !exception.paths.includes(node));
+      if (uncovered.length > 0) {
+        errors.push(
+          `${advisory.severity} advisory ${advisory.id} in ${advisory.package} also affects ${uncovered.join(', ')}, which its reviewed exception does not cover.`,
+        );
+      }
     }
   }
 

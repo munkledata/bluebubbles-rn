@@ -107,6 +107,81 @@ test('counts each advisory once and skips inherited package references', () => {
   );
 });
 
+/** A report where one advisory affects the given install paths (`nodes` in `npm audit --json`). */
+function zodReportAt(nodes) {
+  const zod = advisory('GHSA-mrhx-c7xc-m3w5', 'zod', 'high');
+  return {
+    auditReportVersion: 2,
+    vulnerabilities: { zod: { name: 'zod', severity: 'high', via: [zod], nodes } },
+  };
+}
+
+const zodBuildToolException = {
+  id: 'GHSA-mrhx-c7xc-m3w5',
+  package: 'zod',
+  paths: ['node_modules/expo/node_modules/zod'],
+  reason: 'build-only copy',
+  expires: '2027-01-31',
+};
+
+test('a path-scoped exception excuses only the install paths it lists', () => {
+  const allowlist = { exceptions: [zodBuildToolException] };
+  const buildToolOnly = evaluateAudit({
+    report: zodReportAt(['node_modules/expo/node_modules/zod']),
+    allowlist,
+    today: TODAY,
+  });
+  assert.deepEqual(buildToolOnly.errors, []);
+
+  const shippedCopyToo = evaluateAudit({
+    report: zodReportAt(['node_modules/expo/node_modules/zod', 'node_modules/zod']),
+    allowlist,
+    today: TODAY,
+  });
+  assert.equal(shippedCopyToo.errors.length, 1);
+  assert.match(
+    shippedCopyToo.errors[0],
+    /high advisory GHSA-mrhx-c7xc-m3w5 in zod also affects node_modules\/zod, which/,
+  );
+});
+
+test('a path-scoped exception fails closed when the report names no install paths', () => {
+  const result = evaluateAudit({
+    report: zodReportAt(undefined),
+    allowlist: { exceptions: [zodBuildToolException] },
+    today: TODAY,
+  });
+  assert.equal(result.errors.length, 1);
+  assert.match(result.errors[0], /no install paths for GHSA-mrhx-c7xc-m3w5 \(zod\)/);
+});
+
+test('rejects malformed exception paths', () => {
+  for (const paths of [[], ['  '], 'node_modules/expo/node_modules/zod', [3]]) {
+    const result = evaluateAudit({
+      report: zodReportAt(['node_modules/expo/node_modules/zod']),
+      allowlist: { exceptions: [{ ...zodBuildToolException, paths }] },
+      today: TODAY,
+    });
+    assert.ok(result.errors.some((error) => error.includes('optional paths must be')));
+    assert.ok(result.errors.some((error) => error.includes('high advisory GHSA-mrhx-c7xc-m3w5')));
+  }
+});
+
+test('collects install paths from every report entry for the same advisory', () => {
+  const report = zodReportAt(['node_modules/zod']);
+  report.vulnerabilities['zod-copy'] = {
+    name: 'zod',
+    severity: 'high',
+    via: [advisory('GHSA-mrhx-c7xc-m3w5', 'zod', 'high')],
+    nodes: ['node_modules/expo/node_modules/zod'],
+  };
+  const [only] = advisoriesFromAuditReport(report);
+  assert.deepEqual(only.nodes.toSorted(), [
+    'node_modules/expo/node_modules/zod',
+    'node_modules/zod',
+  ]);
+});
+
 test('the committed allowlist entries are complete and unexpired', () => {
   const allowlist = JSON.parse(
     readFileSync(resolve(root, 'scripts/npm-audit-allowlist.json'), 'utf8'),

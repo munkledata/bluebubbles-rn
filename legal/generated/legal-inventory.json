@@ -5,7 +5,7 @@
     "exactAab": false
   },
   "inputs": {
-    "dependencyLockSha256": "2bdf713cfd300cef2b5011724550d383e778677d3503fa90a3f5a54747f1261f",
+    "dependencyLockSha256": "0d773edd998d58eab48632a4efbb66b5eb319de68d4485622ac304c9159d45b5",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "9faa6b47f887c55528bc18f511a4c99aad5c66150aa22542fa4a7ce096fb5134"
@@ -16,7 +16,7 @@
     "assetFiles": 14,
     "pendingAssetProvenance": 14,
     "localComponents": 14,
-    "dependencyLockSha256": "2bdf713cfd300cef2b5011724550d383e778677d3503fa90a3f5a54747f1261f",
+    "dependencyLockSha256": "0d773edd998d58eab48632a4efbb66b5eb319de68d4485622ac304c9159d45b5",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },
@@ -16985,10 +16985,10 @@
     {
       "installPath": "node_modules/zod",
       "name": "zod",
-      "version": "4.4.3",
+      "version": "4.6.7",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/zod/-/zod-4.4.3.tgz",
-      "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
       "optional": false,
       "legalDocuments": [
         {

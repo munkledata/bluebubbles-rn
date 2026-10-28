@@ -1,15 +1,16 @@
 {
   "exceptions": [
     {
-      "id": "GHSA-vfj7-8cjw-p6xm",
-      "package": "braces",
-      "reason": "Build-machine only: glob matching in Metro, Jest and patch-package over trusted project config. Absent from the app bundle. Locally patched by patches/braces+3.0.3.patch (depth limit backported from upstream PR 72, which closed unmerged); no fixed upstream release yet.",
-      "expires": "2027-01-31"
-    },
-    {
       "id": "GHSA-86w9-cpqp-85rv",
       "package": "node-forge",
       "reason": "Build-machine only: Expo CLI manifest code signing; the app ships no expo-updates. Absent from the app bundle. Locally patched by patches/node-forge+1.4.0.patch (upstream PR 1152). Remove when node-forge 1.4.1 or later is installed.",
+      "expires": "2027-01-31"
+    },
+    {
+      "id": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "paths": ["node_modules/expo/node_modules/zod"],
+      "reason": "Build-machine only: the zod 3.25.76 copy nested under Expo CLI. Expo CLI uses it only for its DevTools plugin and MCP CLI-extension schemas (@expo/cli build/src/start/server/DevToolsPlugin.schema.js and createMCPDevToolsExtensionSchema.js), which check developer-machine input: plugin metadata from locally installed packages and, in the optional MCP mode, local tool-call arguments. Absent from the app bundle; the app's own zod is 4.6.7, and this exception does not cover it. The fix shipped only in zod 4.6.6 (no fixed zod 3 release), and the newest @expo/cli for SDK 57 (57.0.32) still requires zod ^3.25.76. Remove when Expo CLI depends on zod 4.6.6 or later.",
       "expires": "2027-01-31"
     }
   ]

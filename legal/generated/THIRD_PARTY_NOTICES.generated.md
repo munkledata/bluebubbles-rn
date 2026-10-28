@@ -2,7 +2,7 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Dependency lock SHA-256 (package-lock.json without the app's own version): `2bdf713cfd300cef2b5011724550d383e778677d3503fa90a3f5a54747f1261f`
+- Dependency lock SHA-256 (package-lock.json without the app's own version): `0d773edd998d58eab48632a4efbb66b5eb319de68d4485622ac304c9159d45b5`
 - Production package records: 1014
 - Unique package versions: 922
 - Source assets: 14
@@ -1063,7 +1063,7 @@
 | `yargs` | `17.7.3` | MIT | no | `2f1a503bfab84b3ba7393627308b3274501e459e3b5185bbb56bbf16cb1602d4` | none |
 | `yargs-parser` | `21.1.1` | ISC | no | `365496ca1f56da40b23c9815fc40fa9005847b2f8f8fd1c1a4929ef25ec8cd1d` | none |
 | `yocto-queue` | `0.1.0` | MIT | no | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` | none |
-| `zod` | `4.4.3` | MIT | no | `3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8` | none |
+| `zod` | `4.6.7` | MIT | no | `3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8` | none |
 | `zustand` | `5.0.14` | MIT | no | `c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417` | none |
 | `zxing-wasm` | `3.1.1` | MIT | no | `fb506e4ade12d7a9efa67c9d76a9a28c8e15d347ca49a69e48e29b40b34ad2ab` | none |
 | `type-fest` | `5.8.0` | (MIT OR CC0-1.0) | no | `a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` | license choice requires review |
