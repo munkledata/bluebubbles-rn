@@ -37,7 +37,7 @@ interface GatorShareIntakeNative {
   takeLastError(): string | null;
   addListener(
     event: 'onPending' | 'onRejected',
-    listener: (event: { reason?: unknown }) => void,
+    listener: (event: { reason?: unknown; newShare?: unknown }) => void,
   ): NativeSubscription;
 }
 
@@ -200,12 +200,15 @@ export async function discardNativeShareBatchForAccountReset(batchId: string): P
 }
 
 export function subscribeNativeShareIntake(
-  onPending: () => void,
+  onPending: (signal: { readonly newShare: boolean }) => void,
   onRejected: (reason: string) => void,
 ): () => void {
   const native = getNative();
   if (!native) return () => undefined;
-  const pending = native.addListener('onPending', onPending);
+  // True only for a share native just committed; a reminder that one is waiting is false.
+  const pending = native.addListener('onPending', (event) =>
+    onPending({ newShare: event.newShare === true }),
+  );
   const rejected = native.addListener('onRejected', (event) => {
     // Native also persists every rejection for a cold start that misses the event. This one was
     // delivered live, so consume that receipt; otherwise the next launch reports it again.

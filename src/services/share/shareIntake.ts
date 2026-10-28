@@ -272,10 +272,12 @@ export function drainShareIntake(options: { readonly quiet?: boolean } = {}): Pr
 /** Subscribe above App Lock before the cold-start pull so no completion wake can be lost. */
 export function startShareIntake(): () => void {
   const unsubscribe = subscribeNativeShareIntake(
-    () => {
+    ({ newShare }) => {
       logger.event('share.intake', { stage: 'signal', outcome: 'received' });
       const state = useShareIntentStore.getState();
-      if (state.batchId !== null) {
+      // Only a newly committed share counts: settling the held share also signals the next one,
+      // and that signal arrives before the held share is cleared here.
+      if (newShare && state.batchId !== null) {
         // Native keeps the newer share. Say so, and open the held one again if nothing shows it.
         state.noteWaitingShare();
         if (state.owners === 0) state.requestReroute();

@@ -56,8 +56,8 @@ class GatorShareIntakeModule : Module(), ShareIntakeListener {
     }
   }
 
-  override fun onPending() {
-    sendEvent(EVENT_PENDING, emptyMap<String, Any>())
+  override fun onPending(newShare: Boolean) {
+    sendEvent(EVENT_PENDING, mapOf("newShare" to newShare))
   }
 
   override fun onRejected(reason: ShareIntakeFailure) {

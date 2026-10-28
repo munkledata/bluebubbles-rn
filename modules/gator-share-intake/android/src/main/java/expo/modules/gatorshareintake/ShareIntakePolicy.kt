@@ -276,6 +276,8 @@ private fun extensionForMime(mimeType: String): String = when (mimeType.lowercas
   "image/png" -> ".png"
   "image/gif" -> ".gif"
   "image/webp" -> ".webp"
+  "image/heic" -> ".heic"
+  "image/heif" -> ".heif"
   "video/mp4" -> ".mp4"
   "application/pdf" -> ".pdf"
   "text/plain" -> ".txt"

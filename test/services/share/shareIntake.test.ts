@@ -340,7 +340,7 @@ describe('share intake draining', () => {
 
 describe('share intake startup and failure receipts', () => {
   it('subscribes before the cold-start pull and stores reason-only rejection receipts', async () => {
-    let onPending!: () => void;
+    let onPending!: (signal: { readonly newShare: boolean }) => void;
     let onRejected!: (reason: string) => void;
     const unsubscribe = jest.fn();
     subscribe.mockImplementationOnce((pending, rejected) => {
@@ -362,7 +362,7 @@ describe('share intake startup and failure receipts', () => {
     });
 
     takeNext.mockResolvedValueOnce(batch(FIRST_BATCH, 'event-driven'));
-    onPending();
+    onPending({ newShare: true });
     await drainShareIntake();
     expect(useShareIntentStore.getState().batchId).toBe(FIRST_BATCH);
 
@@ -650,7 +650,7 @@ describe('share intake diagnostic events', () => {
   });
 
   it('records the native signal and every rejection, mapping unknown reasons to unknown', async () => {
-    let onPending: () => void = () => undefined;
+    let onPending: (signal: { readonly newShare: boolean }) => void = () => undefined;
     let onRejected: (reason: string) => void = () => undefined;
     subscribe.mockImplementationOnce((pending, rejected) => {
       onPending = pending;
@@ -661,7 +661,7 @@ describe('share intake diagnostic events', () => {
     await nextEventLoopTurn();
     event.mockClear();
 
-    onPending();
+    onPending({ newShare: true });
     await nextEventLoopTurn();
     onRejected('busy');
     onRejected('a reason with private words');
@@ -729,8 +729,12 @@ describe('share intake diagnostic events', () => {
 });
 
 describe('share intake recovery', () => {
-  function captureNativeListeners(): { onPending: () => void } {
-    const captured = { onPending: () => undefined as void };
+  function captureNativeListeners(): {
+    onPending: (signal: { readonly newShare: boolean }) => void;
+  } {
+    const captured: { onPending: (signal: { readonly newShare: boolean }) => void } = {
+      onPending: () => undefined,
+    };
     subscribe.mockImplementationOnce((pending) => {
       captured.onPending = pending;
       return jest.fn();
@@ -792,19 +796,34 @@ describe('share intake recovery', () => {
     await nextEventLoopTurn();
     const start = useShareIntentStore.getState();
 
-    native.onPending();
+    native.onPending({ newShare: true });
     expect(useShareIntentStore.getState().waitingNotice).toBe(start.waitingNotice);
 
     stageFirstBatch();
-    native.onPending();
+    native.onPending({ newShare: true });
     expect(useShareIntentStore.getState().waitingNotice).toBe(start.waitingNotice + 1);
     expect(useShareIntentStore.getState().rerouteRequest).toBe(start.rerouteRequest + 1);
 
     const release = useShareIntentStore.getState().adopt(FIRST_BATCH);
-    native.onPending();
+    native.onPending({ newShare: true });
     expect(useShareIntentStore.getState().waitingNotice).toBe(start.waitingNotice + 2);
     expect(useShareIntentStore.getState().rerouteRequest).toBe(start.rerouteRequest + 1);
     release();
+    stop();
+  });
+
+  it('treats a reminder that a share is waiting as no news while one is held', async () => {
+    const native = captureNativeListeners();
+    const stop = startShareIntake();
+    await nextEventLoopTurn();
+    stageFirstBatch();
+    const start = useShareIntentStore.getState();
+
+    // Settling the held share signals the next one before the held share is cleared here.
+    native.onPending({ newShare: false });
+
+    expect(useShareIntentStore.getState().waitingNotice).toBe(start.waitingNotice);
+    expect(useShareIntentStore.getState().rerouteRequest).toBe(start.rerouteRequest);
     stop();
   });
 

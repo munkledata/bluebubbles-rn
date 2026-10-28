@@ -1,5 +1,5 @@
 type NativeEvent = 'onPending' | 'onRejected';
-type NativeListener = (event: { reason?: unknown }) => void;
+type NativeListener = (event: { reason?: unknown; newShare?: unknown }) => void;
 
 const listeners = new Map<NativeEvent, NativeListener>();
 const native = {
@@ -301,10 +301,19 @@ describe('native share completion and rejection notifications', () => {
     );
     expect(onRejected).toHaveBeenCalledWith('deadline');
 
+    listeners.get('onPending')?.({ newShare: true });
+    listeners.get('onPending')?.({ newShare: false });
     listeners.get('onPending')?.({});
+    listeners.get('onPending')?.({ newShare: 'true' });
     listeners.get('onRejected')?.({ reason: 'permission' });
     listeners.get('onRejected')?.({ reason: 123 });
-    expect(onPending).toHaveBeenCalledTimes(1);
+    // Only a literal true marks a newly committed share; anything else is a reminder.
+    expect(onPending.mock.calls).toEqual([
+      [{ newShare: true }],
+      [{ newShare: false }],
+      [{ newShare: false }],
+      [{ newShare: false }],
+    ]);
     expect(onRejected).toHaveBeenNthCalledWith(2, 'permission');
     expect(onRejected).toHaveBeenNthCalledWith(3, 'unavailable');
 

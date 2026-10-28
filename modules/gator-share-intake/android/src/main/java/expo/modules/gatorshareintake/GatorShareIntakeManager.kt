@@ -14,7 +14,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.SynchronousQueue
@@ -28,12 +27,6 @@ import java.util.concurrent.atomic.AtomicReference
 private const val MAX_QUEUED_SHARE_BATCHES = 1
 private const val MAX_ACTIVE_PROVIDER_WORKERS = 4
 private const val MAX_PROVIDER_NAME_CHARS = 512
-
-internal interface ShareIntakeListener {
-  fun onPending()
-
-  fun onRejected(reason: ShareIntakeFailure)
-}
 
 private data class ShareInput(
   val uri: Uri,
@@ -87,11 +80,12 @@ private fun boundedProviderExecutor(name: String): ThreadPoolExecutor = ThreadPo
 internal object GatorShareIntakeManager {
   private val initialized = AtomicBoolean(false)
   private val batchSequence = AtomicLong(0L)
-  private val listeners = CopyOnWriteArraySet<ShareIntakeListener>()
+  private val signal = ShareIntakeSignal()
   private val activePendingBatchIds = ConcurrentHashMap.newKeySet<String>()
   private val lastFailure = AtomicReference<ShareIntakeFailure?>(null)
-  private val pendingEventLatched = AtomicBoolean(false)
   private val storageLock = Any()
+  // Guarded by storageLock.
+  private val earlierClaims = EarlierClaimRelease()
   private val controller = ThreadPoolExecutor(
     1,
     1,
@@ -174,12 +168,11 @@ internal object GatorShareIntakeManager {
   }
 
   fun addListener(listener: ShareIntakeListener) {
-    listeners.add(listener)
-    if (pendingEventLatched.get()) runCatching { listener.onPending() }
+    signal.add(listener)
   }
 
   fun removeListener(listener: ShareIntakeListener) {
-    listeners.remove(listener)
+    signal.remove(listener)
   }
 
   fun consumeLastFailure(): ShareIntakeFailure? {
@@ -337,7 +330,7 @@ internal object GatorShareIntakeManager {
       if (!committedWithinDeadline) {
         throw ShareIntakeException(ShareIntakeFailure.DEADLINE)
       }
-      signalPending()
+      signal.pending(newShare = true)
     } catch (error: Exception) {
       runCatching {
         synchronized(storageLock) {
@@ -524,12 +517,16 @@ internal object GatorShareIntakeManager {
     }
   }
 
-  private fun storage(context: Context): ShareIntakeStorage =
-    ShareIntakeStorage(File(context.noBackupFilesDir, SHARE_INPUT_CACHE_DIRECTORY))
+  /** Callers hold storageLock, so earlier claims return to ready before this process claims any. */
+  private fun storage(context: Context): ShareIntakeStorage {
+    check(Thread.holdsLock(storageLock)) { "Share storage used without its lock" }
+    return ShareIntakeStorage(File(context.noBackupFilesDir, SHARE_INPUT_CACHE_DIRECTORY))
+      .also(earlierClaims::beforeFirstUse)
+  }
 
-  private fun signalPendingIfPresent() {
-    val context = applicationContext ?: return
-    val present = runCatching {
+  private fun completeBatchPresent(): Boolean {
+    val context = applicationContext ?: return false
+    return runCatching {
       synchronized(storageLock) {
         storage(context).hasCompleteBatch(
           System.currentTimeMillis(),
@@ -537,17 +534,14 @@ internal object GatorShareIntakeManager {
         )
       }
     }.getOrDefault(false)
-    if (present) signalPending()
   }
 
-  private fun signalPending() {
-    if (!pendingEventLatched.compareAndSet(false, true)) return
-    listeners.forEach { listener -> runCatching { listener.onPending() } }
+  private fun signalPendingIfPresent() {
+    if (completeBatchPresent()) signal.pending(newShare = false)
   }
 
   private fun advancePendingEvent() {
-    pendingEventLatched.set(false)
-    signalPendingIfPresent()
+    signal.settled(::completeBatchPresent)
   }
 
   private fun reject(reason: ShareIntakeFailure) {
@@ -557,7 +551,7 @@ internal object GatorShareIntakeManager {
         synchronized(storageLock) { storage(context).recordRejection(reason) }
       }
     }
-    listeners.forEach { listener -> runCatching { listener.onRejected(reason) } }
+    signal.rejected(reason)
   }
 
   private fun failureReason(error: Throwable): ShareIntakeFailure =

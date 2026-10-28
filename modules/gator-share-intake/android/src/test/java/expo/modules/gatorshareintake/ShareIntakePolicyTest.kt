@@ -214,6 +214,14 @@ class ShareIntakePolicyTest {
     assertEquals("09-attachment.bin", sharedFileName(9, "Отчёт.", "application/octet-stream"))
   }
 
+  // A HEIC or HEIF photo with no usable name of its own used to arrive as "attachment.bin".
+  @Test
+  fun `heic and heif photos without a usable name of their own get their type's extension`() {
+    assertEquals("00-attachment.heic", sharedFileName(0, null, "image/heic"))
+    assertEquals("01-IMG_0001.heif", sharedFileName(1, "IMG_0001", "image/heif"))
+    assertEquals("02-attachment.heic", sharedFileName(2, "照片", "image/heic"))
+  }
+
   @Test
   fun `provider mime resolves wildcard share hints without trusting malformed types`() {
     assertEquals("image/jpeg", resolvedShareMimeType("IMAGE/JPEG", "image/*"))
@@ -389,6 +397,119 @@ class ShareIntakePolicyTest {
     assertTrue(storage.acknowledge(claimed.batchId))
     assertEquals(later, storage.takeNext(afterCutoff))
     assertTrue(storage.discard(later.batchId))
+  }
+
+  @Test
+  fun `a new process returns an earlier claim to ready and replays it first`() {
+    val root = temporaryRoot()
+    val first = ShareIntakeStorage(root)
+    val earlier = manifest(createdAtMs = 1_000L)
+    val later = manifest(createdAtMs = 1_001L)
+    commitBatch(first, earlier)
+    commitBatch(first, later)
+    assertEquals(earlier, first.takeNext(1_001L))
+
+    val restarted = ShareIntakeStorage(root)
+    restarted.releaseAllClaims()
+    val queue = java.io.File(root, SHARE_QUEUE_DIRECTORY)
+    assertFalse(java.io.File(queue, "${earlier.batchId}.claimed").exists())
+    assertTrue(java.io.File(queue, "${earlier.batchId}.share").isFile)
+
+    assertEquals(earlier, restarted.takeNext(1_001L))
+    assertTrue(restarted.acknowledge(earlier.batchId))
+    assertEquals(later, restarted.takeNext(1_001L))
+  }
+
+  @Test
+  fun `an earlier process's claim ages out once it is returned to ready`() {
+    val root = temporaryRoot()
+    val first = ShareIntakeStorage(root)
+    val abandoned = manifest(createdAtMs = 1L)
+    commitBatch(first, abandoned)
+    assertEquals(abandoned, first.takeNext(abandoned.createdAtMs))
+
+    val restarted = ShareIntakeStorage(root)
+    restarted.releaseAllClaims()
+
+    assertNull(restarted.takeNext(SHARE_CACHE_MAX_AGE_MS + 2L))
+    assertFalse(restarted.committedFile(abandoned, abandoned.files.single()).exists())
+  }
+
+  @Test
+  fun `returning claims leaves ready work alone, and a claim whose ready copy already exists`() {
+    val root = temporaryRoot()
+    val storage = ShareIntakeStorage(root)
+    val ready = manifest(createdAtMs = 1_000L)
+    commitBatch(storage, ready)
+    storage.releaseAllClaims()
+    assertEquals(ready, storage.takeNext(ready.createdAtMs))
+
+    val queue = java.io.File(root, SHARE_QUEUE_DIRECTORY)
+    java.io.File(queue, "${ready.batchId}.claimed")
+      .copyTo(java.io.File(queue, "${ready.batchId}.share"))
+    storage.releaseAllClaims()
+
+    assertTrue(java.io.File(queue, "${ready.batchId}.claimed").isFile)
+    assertTrue(java.io.File(queue, "${ready.batchId}.share").isFile)
+  }
+
+  @Test
+  fun `returning claims skips an entry it cannot return and still returns the rest`() {
+    val root = temporaryRoot()
+    val storage = ShareIntakeStorage(root)
+    val claimed = manifest(createdAtMs = 1_000L)
+    commitBatch(storage, claimed)
+    assertEquals(claimed, storage.takeNext(claimed.createdAtMs))
+    val queue = java.io.File(root, SHARE_QUEUE_DIRECTORY)
+    val invalid = java.io.File(queue, "not-a-valid-id.claimed").apply { writeText("x") }
+    val directory = java.io.File(queue, "1001-1-0123456789abcdef.claimed")
+    assertTrue(directory.mkdir())
+
+    storage.releaseAllClaims()
+
+    assertTrue(java.io.File(queue, "${claimed.batchId}.share").isFile)
+    assertTrue(invalid.isFile)
+    assertTrue(directory.isDirectory)
+  }
+
+  @Test
+  fun `earlier claims return to ready at the first storage use only`() {
+    val root = temporaryRoot()
+    val earlierRun = ShareIntakeStorage(root)
+    val share = manifest(createdAtMs = 1_000L)
+    commitBatch(earlierRun, share)
+    assertEquals(share, earlierRun.takeNext(share.createdAtMs))
+    val queue = java.io.File(root, SHARE_QUEUE_DIRECTORY)
+
+    val earlierClaims = EarlierClaimRelease()
+    val current = ShareIntakeStorage(root).also(earlierClaims::beforeFirstUse)
+    assertTrue(java.io.File(queue, "${share.batchId}.share").isFile)
+
+    // This process claims it again; a later storage use must leave that live claim alone.
+    assertEquals(share, current.takeNext(share.createdAtMs))
+    ShareIntakeStorage(root).also(earlierClaims::beforeFirstUse)
+    assertTrue(java.io.File(queue, "${share.batchId}.claimed").isFile)
+  }
+
+  @Test
+  fun `a failed release never fails the storage use and is not tried again`() {
+    val root = temporaryRoot()
+    val storage = ShareIntakeStorage(root)
+    val share = manifest(createdAtMs = 1_000L)
+    commitBatch(storage, share)
+    assertEquals(share, storage.takeNext(share.createdAtMs))
+    val queue = java.io.File(root, SHARE_QUEUE_DIRECTORY)
+    // One entry too many for a bounded listing, so the release cannot read the queue at all.
+    val crowd = (0 until SHARE_CACHE_MAX_ROOT_ENTRIES).map { index ->
+      java.io.File(queue, "crowd-$index").apply { writeText("x") }
+    }
+
+    val earlierClaims = EarlierClaimRelease()
+    earlierClaims.beforeFirstUse(ShareIntakeStorage(root))
+    crowd.forEach { assertTrue(it.delete()) }
+    earlierClaims.beforeFirstUse(ShareIntakeStorage(root))
+
+    assertTrue(java.io.File(queue, "${share.batchId}.claimed").isFile)
   }
 
   @Test
@@ -643,6 +764,79 @@ class ShareIntakePolicyTest {
     assertTrue(unknown.exists())
   }
 
+  @Test
+  fun `every committed batch signals as new, even while an earlier one is still waiting`() {
+    val signal = ShareIntakeSignal()
+    val listener = RecordingListener().also(signal::add)
+
+    signal.pending(newShare = true)
+    signal.pending(newShare = true)
+
+    assertEquals(listOf(true, true), listener.pending)
+  }
+
+  @Test
+  fun `a listener added later is reminded once that a batch waits, until a batch settles`() {
+    val signal = ShareIntakeSignal()
+    assertEquals(emptyList<Boolean>(), RecordingListener().also(signal::add).pending)
+
+    signal.pending(newShare = true)
+    assertEquals(listOf(false), RecordingListener().also(signal::add).pending)
+
+    signal.settled { false }
+    assertEquals(emptyList<Boolean>(), RecordingListener().also(signal::add).pending)
+  }
+
+  @Test
+  fun `settling signals the next waiting batch as a reminder, not as a new share`() {
+    val signal = ShareIntakeSignal()
+    val listener = RecordingListener().also(signal::add)
+    signal.pending(newShare = true)
+
+    signal.settled { true }
+
+    assertEquals(listOf(true, false), listener.pending)
+    assertEquals(listOf(false), RecordingListener().also(signal::add).pending)
+  }
+
+  @Test
+  fun `settling forgets the old signal before it looks for another batch`() {
+    val signal = ShareIntakeSignal()
+    signal.pending(newShare = true)
+    var heardDuringLook: List<Boolean>? = null
+
+    signal.settled {
+      heardDuringLook = RecordingListener().also(signal::add).pending
+      false
+    }
+
+    assertEquals(emptyList<Boolean>(), heardDuringLook)
+  }
+
+  @Test
+  fun `a failing or removed listener does not stop the others hearing signals and rejections`() {
+    val signal = ShareIntakeSignal()
+    signal.add(
+      object : ShareIntakeListener {
+        override fun onPending(newShare: Boolean) = throw IllegalStateException("listener failed")
+
+        override fun onRejected(reason: ShareIntakeFailure) =
+          throw IllegalStateException("listener failed")
+      },
+    )
+    val kept = RecordingListener().also(signal::add)
+    val removed = RecordingListener().also(signal::add)
+    signal.remove(removed)
+
+    signal.pending(newShare = true)
+    signal.rejected(ShareIntakeFailure.BUSY)
+
+    assertEquals(listOf(true), kept.pending)
+    assertEquals(listOf(ShareIntakeFailure.BUSY), kept.rejected)
+    assertEquals(emptyList<Boolean>(), removed.pending)
+    assertEquals(emptyList<ShareIntakeFailure>(), removed.rejected)
+  }
+
   private fun temporaryRoot(): java.io.File =
     Files.createTempDirectory("gator-share-intake-").toFile().also(temporaryRoots::add)
 
@@ -711,5 +905,18 @@ private class NonCooperativeInputStream : InputStream() {
     while (!releaseLatch.await(10, TimeUnit.MILLISECONDS)) {
       Thread.interrupted()
     }
+  }
+}
+
+private class RecordingListener : ShareIntakeListener {
+  val pending = mutableListOf<Boolean>()
+  val rejected = mutableListOf<ShareIntakeFailure>()
+
+  override fun onPending(newShare: Boolean) {
+    pending += newShare
+  }
+
+  override fun onRejected(reason: ShareIntakeFailure) {
+    rejected += reason
   }
 }

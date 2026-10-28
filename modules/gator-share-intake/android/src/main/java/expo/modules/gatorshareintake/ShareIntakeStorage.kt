@@ -167,7 +167,8 @@ internal class ShareIntakeStorage(private val root: File) {
     }
     // A claimed batch may still be staged in the live JavaScript process. Opportunistic recovery
     // cannot delete it behind that owner's back: exact acknowledge/discard/release/account-reset
-    // operations are the only safe terminal transitions. Unclaimed ready work can still expire.
+    // operations are the only safe terminal transitions. Unclaimed ready work can still expire,
+    // including a claim an earlier process left behind once releaseAllClaims returned it to ready.
     readyManifests.keys.toList().forEach { batchId ->
       val manifestFile = readyManifests[batchId] ?: return@forEach
       val manifest = readManifest(manifestFile)
@@ -277,6 +278,28 @@ internal class ShareIntakeStorage(private val root: File) {
       throw ShareIntakeException(ShareIntakeFailure.CACHE_QUOTA)
     }
     return next.first
+  }
+
+  /**
+   * Return every claimed batch to ready, one entry at a time. An entry it cannot return (an invalid
+   * name, a non-file, a batch already ready, a failed rename) stays as it was for recoverAndPrune to
+   * judge. A claim belongs to the JavaScript runtime that took it and ends with its process, so
+   * EarlierClaimRelease calls this at the first storage use in each new process. A returned batch
+   * replays oldest first and ages out like any ready batch.
+   */
+  @Synchronized
+  fun releaseAllClaims() {
+    prepareRoots()
+    boundedChildren(queueRoot)
+      .filter { it.name.endsWith(CLAIMED_MANIFEST_SUFFIX) }
+      .forEach { claimed ->
+        runCatching {
+          requireOwnedChild(queueRoot, claimed)
+          require(claimed.isFile) { "Share queue contains a non-file entry" }
+          val ready = readyManifest(checkNotNull(manifestEntry(claimed)).first)
+          if (!ready.exists()) claimed.renameTo(ready)
+        }
+      }
   }
 
   @Synchronized
@@ -561,6 +584,22 @@ internal class ShareIntakeStorage(private val root: File) {
       !ackedManifest(batchId).exists() &&
       !pendingFilesDirectory(batchId).exists() &&
       !committedFilesDirectory(batchId).exists()
+}
+
+/**
+ * Returns the claims earlier processes left behind to ready, once per process, at the first storage
+ * use. Callers hold the storage lock, so this runs before the process can claim anything itself. It
+ * never fails the storage use that triggers it and is not retried: a claim it could not return
+ * behaves as before, replayed first and never expired.
+ */
+internal class EarlierClaimRelease {
+  private var done = false
+
+  fun beforeFirstUse(storage: ShareIntakeStorage) {
+    if (done) return
+    done = true
+    runCatching { storage.releaseAllClaims() }
+  }
 }
 
 private fun ensureOwnedRoot(root: File) {

@@ -27,9 +27,15 @@ streams into a pending app-private directory; and publishes only a complete, re-
 manifest. Exact native acknowledge/release/discard operations make a claimed batch replayable after
 process or React-context restart without exposing a partial copy.
 
-Only an explicit user discard may delete a complete batch before it is sent, with one exception
-(M169, 2026-10-18): a claimed batch whose manifest this build cannot read would otherwise stay first
-in line and block every later share. The drain shows "Gator could not import that shared item",
+Only an explicit user discard or an account reset may delete a complete batch before it is sent,
+with two exceptions. First, a batch that no running app holds is deleted once it is more than 24
+hours old, counted from when the share was received. From app 0.1.64 that includes a claim an
+earlier app process left behind (owner decision 2026-10-27): a claim belongs to the app run that
+took it, so at the first share-storage use in each new process `EarlierClaimRelease` returns every
+earlier claim it can to ready, where it replays oldest first. A claim the running app holds is never
+deleted under it, and an entry the release cannot return stays as it was. Second (M169,
+2026-10-18): a claimed batch whose manifest this build cannot read would otherwise stay first in
+line and block every later share. The drain shows "Gator could not import that shared item",
 discards that exact batch by id, and pulls the next one; if the discard fails it stops instead of
 retrying. A claim whose own id is invalid cannot be discarded and still blocks, but the user sees
 the message on each attempt.
@@ -50,9 +56,9 @@ shown are the ones the share sheet already shows, and App Lock publishes none.
 ### Release diagnostics: the `share.intake` event (from app 0.1.64)
 
 Release builds keep errors only, so before 0.1.64 a share that went nowhere left no trace. Each step
-of share intake now records a finite `share.intake` event (`src/core/secure/errorDiagnostic.ts`), one
-of the two INFO events release builds keep, with `fcm.push_received`. It appears in Settings → App
-Logs and in Share diagnostics; it never reaches logcat or the error-report upload. Fields, all
+of share intake now records a finite `share.intake` event (`src/core/secure/errorDiagnostic.ts`),
+one of the two INFO events release builds keep, with `fcm.push_received`. It appears in Settings →
+App Logs and in Share diagnostics; it never reaches logcat or the error-report upload. Fields, all
 optional except the first two, and nothing else:
 
 - `stage`: `signal` (native says a share is waiting), `pickup`, `route`, `settle`, `reject`, or
@@ -79,11 +85,15 @@ The app holds one share at a time, and a screen that shows it registers as its o
 
 When native signals a new share while one is held, the app says "Finish or discard your earlier
 shared item; your new share is waiting." and opens the held share again if nothing shows it. Native
-signals only once until a share is settled, so this message needs the native module to signal on
-every commit. A failed pickup shows "Gator could not open a shared item. It will try again the next
-time you open Gator." A share capture or navigator that failed is remounted the next time the app
-comes to the foreground (`boundary-reset`), instead of staying blank until a restart. A remounted
-navigator leaves a share that a screen still shows on that screen, rather than opening it twice.
+signals every committed share as new (`ShareIntakeSignal`, `newShare: true`), not only once until a
+share settles, so the message appears for each newer share. Its other signals are reminders that a
+share is waiting (`newShare: false`): one found at start-up, a single replay to a listener added
+later, and the next share after one settles. Settling signals the next share before the app has
+cleared the settled one, so a reminder never shows the message. A failed pickup shows "Gator could
+not open a shared item. It will try again the next time you open Gator." A share capture or
+navigator that failed is remounted the next time the app comes to the foreground
+(`boundary-reset`), instead of staying blank until a restart. A remounted navigator leaves a share
+that a screen still shows on that screen, rather than opening it twice.
 
 ## Summary
 
