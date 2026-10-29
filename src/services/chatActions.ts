@@ -408,11 +408,14 @@ export function movePinnedChat(
   });
 }
 
-/** Clear every local inbox unread marker without sending server read receipts. */
-export function markAllChatsRead(
+/**
+ * Clear every local inbox unread marker without sending server read receipts, then dismiss the
+ * message notifications those markers covered: every chat is read now, so each one is stale.
+ */
+export async function markAllChatsRead(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  return runChatAction(accountLease, async (activeLease) => {
+  await runChatAction(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
     assertChatActionLease(activeLease);
     await withDbTransaction(
@@ -425,6 +428,28 @@ export function markAllChatsRead(
       () => activeLease.isCurrent(),
     );
   });
+  // Reached only after the markers committed (a failed mark throws above). Its own tracked action,
+  // so Disconnect drains it and a retired account skips it.
+  await runChatAction(accountLease, clearReadMessageNotifications);
+}
+
+/**
+ * Dismiss every chat's message notification after Mark All Read committed. Runs after the
+ * transaction, and only for the account that marked: the cleanup re-checks the lease before each
+ * native step. Reminders and other notices keep their own ids and stay. Lazy import (as for the
+ * delete path below) keeps the notification graph out of this module; a failure only leaves the
+ * notices up until their chat is opened, so it never costs the committed mark.
+ */
+async function clearReadMessageNotifications(accountLease: RealtimeDeliveryLease): Promise<void> {
+  try {
+    const { clearAllMessageNotifications } =
+      await import('./notifications/readNotificationCleanup');
+    assertChatActionLease(accountLease);
+    await clearAllMessageNotifications(accountLease);
+  } catch (e) {
+    if (e === STALE_CHAT_ACTION || !accountLease.isCurrent()) throw STALE_CHAT_ACTION;
+    logger.warn('[chats] tray notification cleanup failed after mark all read', e);
+  }
 }
 
 /** Persist the current body-text draft for one conversation. */

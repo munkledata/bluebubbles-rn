@@ -12,6 +12,7 @@ import {
   setChatMuted,
   setChatPinned,
 } from '@/services';
+import { clearChatNotification } from '@/services/notifications/notifeeService';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { resolveTitle } from '@utils';
 import { useTheme } from '../theme';
@@ -112,11 +113,13 @@ export function ChatActionsSheet({ target, onClose }: ChatActionsSheetProps): Re
                 color={theme.color.tint}
                 sep={theme.color.separator}
                 onPress={() =>
-                  run(() =>
-                    target.unread
-                      ? markRead(target.guid, accountLease)
-                      : markUnread(target.guid, accountLease),
-                  )
+                  run(async () => {
+                    if (!target.unread) return markUnread(target.guid, accountLease);
+                    await markRead(target.guid, accountLease);
+                    // Read now, so its tray notification is stale — dismiss it exactly as opening
+                    // the chat does. The lease keeps a retired account's cleanup from running.
+                    clearChatNotification(target.guid, accountLease);
+                  })
                 }
               />
               <Row

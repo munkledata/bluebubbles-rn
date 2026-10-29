@@ -40,6 +40,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { showDialog } from '@ui/dialog/dialogStore';
+import { clearChatNotification } from '@/services/notifications/notifeeService';
 
 // Zero insets so useSafeAreaInsets() resolves without a SafeAreaProvider.
 jest.mock('react-native-safe-area-context', () => ({
@@ -57,6 +58,9 @@ jest.mock('@/services', () => ({
 }));
 
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
+// The same tray-dismiss helper the chat-open path uses; its native/lease behavior is covered by the
+// notifeeService suite. Here we prove WHEN the sheet calls it.
+jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotification: jest.fn() }));
 
 const mockSetChatPinned = setChatPinned as jest.Mock;
 const mockSetChatMuted = setChatMuted as jest.Mock;
@@ -66,6 +70,7 @@ const mockMarkUnread = markUnread as jest.Mock;
 const mockMarkRead = markRead as jest.Mock;
 const mockShowDialog = showDialog as jest.Mock;
 const mockDeleteChat = deleteChat as jest.Mock;
+const mockClearChatNotification = clearChatNotification as jest.Mock;
 const PRIVATE_TITLE = 'private-conversation-title-7c91@example.test';
 const GENERIC_DELETE_MESSAGE =
   'Delete this conversation? This removes it from this device (not from the server).';
@@ -135,6 +140,7 @@ beforeEach(() => {
   mockMarkRead.mockReset().mockResolvedValue(undefined);
   mockShowDialog.mockClear();
   mockDeleteChat.mockReset().mockResolvedValue(undefined);
+  mockClearChatNotification.mockReset();
 });
 
 afterEach(() => {
@@ -381,6 +387,27 @@ describe('ChatActionsSheet — Mark read / unread', () => {
     );
     expect(mockMarkRead).not.toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    // Marking unread must never dismiss the chat's notification.
+    expect(mockClearChatNotification).not.toHaveBeenCalled();
+  });
+
+  it('Mark as Read dismisses the chat notification only after the mark commits', async () => {
+    const gate = deferred();
+    mockMarkRead.mockReturnValueOnce(gate.promise);
+    const t = makeTarget({ unread: true });
+    const onClose = await renderSheet(t);
+    fireEvent.press(screen.getByText('Mark as Read'));
+    await waitFor(() => expect(mockMarkRead).toHaveBeenCalledTimes(1));
+    expect(mockClearChatNotification).not.toHaveBeenCalled();
+
+    await act(async () => {
+      gate.resolve();
+      await gate.promise;
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    const lease = mockMarkRead.mock.calls[0]?.[1] as { isCurrent(): boolean };
+    expect(mockClearChatNotification).toHaveBeenCalledTimes(1);
+    expect(mockClearChatNotification).toHaveBeenCalledWith(t.guid, lease);
   });
 });
 
