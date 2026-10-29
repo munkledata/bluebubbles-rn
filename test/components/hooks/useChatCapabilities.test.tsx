@@ -162,6 +162,34 @@ describe('useChatCapabilities', () => {
     expect(missing.mentionParticipants).toEqual([]);
   });
 
+  it('offers New Message (and so Forward) in any chat while RCS or iMessage new chat is available', async () => {
+    serverInfo({ supports_imessage_new_chat: true });
+    expect((await capabilitiesFor(GROUP, GROUP_HEADER)).newChatAvailable).toBe(true);
+    const { result } = await renderHook(() =>
+      useChatCapabilities(ONE_TO_ONE, header(), resolveChatService(ONE_TO_ONE, 'iMessage')),
+    );
+    expect(result.current.newChatAvailable).toBe(true);
+
+    await act(async () => {
+      serverInfo({
+        rcs: true,
+        supports_rcs_epoch_qualified_ids: true,
+        rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+      });
+    });
+    expect(result.current.newChatAvailable).toBe(true);
+
+    await act(async () => {
+      serverInfo({ supports_imessage_new_chat: false });
+    });
+    expect(result.current.newChatAvailable).toBe(false);
+
+    await act(async () => {
+      serverInfo({ rcs: true, supports_rcs_epoch_qualified_ids: true, rcs_provider_epoch: null });
+    });
+    expect(result.current.newChatAvailable).toBe(false);
+  });
+
   it('turns RCS features off as soon as the RCS provider changes while the chat is open', async () => {
     const rcsHeader = header({ guid: RCS_GUID, handleServices: 'RCS' });
     serverInfo({

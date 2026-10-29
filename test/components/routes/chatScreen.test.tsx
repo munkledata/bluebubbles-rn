@@ -1468,6 +1468,27 @@ describe('ChatScreen — send routing', () => {
     );
   });
 
+  it('offers Forward in an iMessage chat while New Message can start a chat', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', private_api: false, supports_imessage_new_chat: true } as any,
+    });
+    await renderWithTheme(<ChatScreen />);
+
+    await longPressMessage(makeMsg({ guid: 'forward-me', text: 'pass this on' }));
+    expect(mockCaptured.overlay?.onForward).toEqual(expect.any(Function));
+
+    await act(async () => {
+      useSessionStore.setState({
+        serverInfo: {
+          version: 'test',
+          private_api: false,
+          supports_imessage_new_chat: false,
+        } as any,
+      });
+    });
+    expect(mockCaptured.overlay?.onForward).toBeUndefined();
+  });
+
   it('preserves supported RCS reaction, attachment, contact, typing, and voice controls', async () => {
     configureRcsChat({ supports_send_contact: false });
     await renderWithTheme(<ChatScreen />);

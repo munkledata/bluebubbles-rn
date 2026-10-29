@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
+import { currentRcsProviderEpoch, isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import type { ChatHeaderRow } from '@db/repositories';
 import type { ServerCapabilityFlag } from '@/services/capabilityGatedAction';
 import { useSendAttachmentTextSupported, useSessionStore } from '@state/sessionStore';
@@ -18,6 +18,12 @@ export interface MentionParticipant {
 export interface ChatCapabilities {
   /** The server's current RCS provider owns this chat. */
   rcsAvailable: boolean;
+  /**
+   * New Message can start a chat: the server's current RCS provider, or text-only iMessage new
+   * chat. Forward opens New Message, so it follows the inbox's New message button
+   * (`ConversationListScreen`); New Message itself enforces each service's file and text limits.
+   */
+  newChatAvailable: boolean;
   serverInfoLoaded: boolean;
   /** RCS-only interactive features (reactions, typing, voice, attachments) for an RCS chat. */
   rcsInteractiveFeaturesAvailable: boolean;
@@ -68,6 +74,11 @@ export function useChatCapabilities(
   chatService: ReturnType<typeof resolveChatService>,
 ): ChatCapabilities {
   const rcsAvailable = useSessionStore((s) => isCurrentRcsChatGuid(s.serverInfo, guid));
+  const newChatAvailable = useSessionStore(
+    (s) =>
+      currentRcsProviderEpoch(s.serverInfo) !== null ||
+      s.serverInfo?.supports_imessage_new_chat === true,
+  );
   const serverInfoLoaded = useSessionStore((s) => s.serverInfo != null);
   const attachmentSupported = useServerSupports('supports_imessage_attachment_upload');
   const pdfSupported = useServerSupports('supports_imessage_pdf_attachment_upload');
@@ -123,6 +134,7 @@ export function useChatCapabilities(
 
   return {
     rcsAvailable,
+    newChatAvailable,
     serverInfoLoaded,
     rcsInteractiveFeaturesAvailable,
     contactCardAvailable: rcsInteractiveFeaturesAvailable || (contactSupported && oneToOne),

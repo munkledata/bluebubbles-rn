@@ -129,7 +129,7 @@ function ChatScreenInner({
   const chatService = resolveChatService(guid, header.data?.handleServices);
   const capabilities = useChatCapabilities(guid, header.data, chatService);
   const {
-    rcsAvailable,
+    newChatAvailable,
     serverInfoLoaded,
     rcsInteractiveFeaturesAvailable,
     contactCardAvailable,
@@ -954,7 +954,7 @@ function ChatScreenInner({
         {...(imessageRemoteDeleteAvailable
           ? { onRemoteDeleteFromMac: onRemoteDeleteSelected }
           : {})}
-        onForward={rcsAvailable ? onForwardSelected : undefined}
+        onForward={newChatAvailable ? onForwardSelected : undefined}
         onSave={onSaveSelected}
         onShare={onShareSelected}
         onDelete={onDeleteSelected}
