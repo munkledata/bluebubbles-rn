@@ -65,6 +65,11 @@ jest.mock('@ui', () => ({
 }));
 jest.mock('@db/useReactiveQuery', () => ({ useReactiveQuery: jest.fn() }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn(() => ({ testDb: true })) }));
+jest.mock('@db/repositories', () => ({
+  getChatHeader: jest.fn(),
+  listAllScheduled: jest.fn(),
+  listScheduledHistory: jest.fn(),
+}));
 jest.mock('@/services/send', () => ({
   ScheduledCancellationChangedError: class ScheduledCancellationChangedError extends Error {},
   cancelScheduled: jest.fn(),
@@ -79,7 +84,12 @@ jest.mock('react-native-safe-area-context', () => ({
 // eslint-disable-next-line import/first
 import ScheduledScreen from '../../../app/(app)/scheduled';
 // eslint-disable-next-line import/first
-import type { ScheduledRow } from '@db/repositories';
+import {
+  getChatHeader,
+  listAllScheduled,
+  listScheduledHistory,
+  type ScheduledRow,
+} from '@db/repositories';
 // eslint-disable-next-line import/first
 import { useReactiveQuery } from '@db/useReactiveQuery';
 // eslint-disable-next-line import/first
@@ -100,6 +110,9 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 
 const mockUseReactiveQuery = useReactiveQuery as jest.Mock;
+const mockGetChatHeader = getChatHeader as jest.Mock;
+const mockListAllScheduled = listAllScheduled as jest.Mock;
+const mockListScheduledHistory = listScheduledHistory as jest.Mock;
 const mockCancelScheduled = cancelScheduled as jest.Mock;
 const mockClearScheduledHistoryItem = clearScheduledHistoryItem as jest.Mock;
 const mockSyncScheduled = syncScheduledFromServer as jest.Mock;
@@ -136,10 +149,14 @@ function makeRow(overrides: Partial<ScheduledRow> = {}): ScheduledRow {
   };
 }
 
-function setRows(pending: ScheduledRow[], history: ScheduledRow[] = []): void {
-  // The screen reads `{ pending, history }` (pending list + completed/uncertain history).
+function setRows(
+  pending: ScheduledRow[],
+  history: ScheduledRow[] = [],
+  chatNames?: Record<string, string>,
+): void {
+  // The screen reads `{ pending, history, chatNames }` (pending list + completed history).
   mockUseReactiveQuery.mockReturnValue({
-    data: { pending, history },
+    data: { pending, history, chatNames },
     isLoading: false,
     error: null,
   });
@@ -188,6 +205,44 @@ describe('ScheduledScreen', () => {
     await renderWithTheme(<ScheduledScreen />);
     expect(screen.getByText('See you soon')).toBeTruthy();
     expect(screen.getByText('On my way')).toBeTruthy();
+  });
+
+  it('names the conversation each scheduled message goes to', async () => {
+    setRows(
+      [makeRow({ id: 1, chatGuid: 'chat-a', text: 'first' })],
+      [makeRow({ id: 2, chatGuid: 'chat-b', text: 'second', status: 'sent' })],
+      { 'chat-a': 'Test Chat A', 'chat-b': 'Test Chat B' },
+    );
+    await renderWithTheme(<ScheduledScreen />);
+    expect(screen.getByText(/^To Test Chat A · /)).toBeTruthy();
+    expect(screen.getByText(/^To Test Chat B · ✓ Sent/)).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Edit scheduled message: first To Test Chat A.' }),
+    ).toBeTruthy();
+  });
+
+  it('builds the chat names from each distinct conversation’s header', async () => {
+    await renderWithTheme(<ScheduledScreen />);
+    const load = mockUseReactiveQuery.mock.calls[0]![0] as () => Promise<unknown>;
+    mockListAllScheduled.mockResolvedValue([
+      makeRow({ id: 1, chatGuid: 'chat-a' }),
+      makeRow({ id: 3, chatGuid: 'chat-a' }),
+    ]);
+    mockListScheduledHistory.mockResolvedValue([makeRow({ id: 2, chatGuid: 'chat-gone' })]);
+    mockGetChatHeader.mockImplementation(async (_db: unknown, guid: string) =>
+      guid === 'chat-a'
+        ? {
+            customName: 'Test Chat A',
+            displayName: null,
+            chatIdentifier: null,
+            style: 45,
+            participantCount: 1,
+            participantNames: null,
+          }
+        : null,
+    );
+    await expect(load()).resolves.toMatchObject({ chatNames: { 'chat-a': 'Test Chat A' } });
+    expect(mockGetChatHeader).toHaveBeenCalledTimes(2);
   });
 
   it('routes to the editor when a row is tapped', async () => {

@@ -6,7 +6,12 @@ import { asRecurrence, recurrenceLabel } from '@core/schedule';
 import { ApiError } from '@core/api/errors';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
-import { listAllScheduled, listScheduledHistory, type ScheduledRow } from '@db/repositories';
+import {
+  getChatHeader,
+  listAllScheduled,
+  listScheduledHistory,
+  type ScheduledRow,
+} from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import {
   cancelScheduled,
@@ -16,7 +21,12 @@ import {
 } from '@/services/send';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/ScheduleSheet';
-import { formatChatDate, formatSeparatorDate, isRcsChatFromAnotherKnownPairing } from '@utils';
+import {
+  formatChatDate,
+  formatSeparatorDate,
+  isRcsChatFromAnotherKnownPairing,
+  resolveTitle,
+} from '@utils';
 import { useSessionStore } from '@state/sessionStore';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
@@ -48,16 +58,28 @@ export default function ScheduledScreen(): React.JSX.Element {
       mounted = false;
     };
   }, [accountLease]);
-  const { data } = useReactiveQuery<{ pending: ScheduledRow[]; history: ScheduledRow[] }>(
-    async () => ({
-      pending: await listAllScheduled(getDatabase()),
-      history: await listScheduledHistory(getDatabase()),
-    }),
+  const { data } = useReactiveQuery<{
+    pending: ScheduledRow[];
+    history: ScheduledRow[];
+    chatNames?: Record<string, string>;
+  }>(
+    async () => {
+      const pending = await listAllScheduled(getDatabase());
+      const history = await listScheduledHistory(getDatabase());
+      // This list spans every conversation, so each row names the chat it will be sent to.
+      const chatNames: Record<string, string> = {};
+      for (const chatGuid of new Set([...pending, ...history].map((row) => row.chatGuid))) {
+        const header = await getChatHeader(getDatabase(), chatGuid);
+        if (header) chatNames[chatGuid] = resolveTitle(header);
+      }
+      return { pending, history, chatNames };
+    },
     ['scheduled_messages'],
     [],
   );
   const pending = data?.pending ?? [];
   const history = data?.history ?? [];
+  const chatNames = data?.chatNames ?? {};
   const items: ListItem[] = [
     ...pending.map((row): ListItem => ({ kind: 'row', row })),
     ...(history.length > 0
@@ -123,7 +145,8 @@ export default function ScheduledScreen(): React.JSX.Element {
           const pendingRow = isPendingRow(row);
           // Compact recurrence tag, e.g. "· Repeats daily" (null for one-shot rows).
           const rec = asRecurrence(row.recurrence);
-          const subtitle = `${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}${rec && pendingRow ? ` · ${recurrenceLabel(rec)}` : ''}${row.attachmentName && row.text ? ` · 📎 ${row.attachmentName}` : ''}`;
+          const chatName = chatNames[row.chatGuid];
+          const subtitle = `${chatName ? `To ${chatName} · ` : ''}${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}${rec && pendingRow ? ` · ${recurrenceLabel(rec)}` : ''}${row.attachmentName && row.text ? ` · 📎 ${row.attachmentName}` : ''}`;
           const title =
             row.text || (row.attachmentName ? `📎 ${row.attachmentName}` : 'Scheduled message');
           return (
@@ -133,13 +156,13 @@ export default function ScheduledScreen(): React.JSX.Element {
               subtitleColor={status.color}
               disabled={!pendingRow || !!row.attachmentName}
               onPress={() => router.push(`/scheduled-edit/${row.id}`)}
-              accessibilityLabel={
+              accessibilityLabel={`${
                 pendingRow
                   ? row.attachmentName
                     ? `Scheduled file: ${title}. Cancel to change it.`
                     : `Edit scheduled message: ${title}`
                   : `Scheduled message ${status.label}: ${title}`
-              }
+              }${chatName ? ` To ${chatName}.` : ''}`}
               action={
                 pendingRow
                   ? {

@@ -39,6 +39,7 @@ const REVIEWED_UI_DB_REPOSITORY_VALUES = new Set([
   'DRAFT_KV_PREFIX',
   'MAX_CUSTOM_FOLDER_MEMBERS',
   'findChatsByParticipantAddresses',
+  'getChatHeader',
   'getChatParticipants',
   'getChatTheme',
   'getScheduledById',
