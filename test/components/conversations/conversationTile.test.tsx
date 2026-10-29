@@ -3,7 +3,7 @@
  * row. This suite locks in the USER-OBSERVABLE behavior the tile derives from pure utils:
  *   - the chat TITLE via resolveTitle semantics (src/utils/chat.ts),
  *   - the UNREAD affordances (a11y "Unread." prefix + bolder title weight),
- *   - the SERVICE badge label via resolveChatService (guid prefix, with the SMS-handle override),
+ *   - the SERVICE badge label via resolveChatDisplayService (guid prefix, with the SMS-handle override),
  *   - exact title, preview, accessibility copy, and 1:1/group avatar photos,
  *   - the always-generic Delete dialog without changing the exact guid/account callback,
  *   - press / long-press callbacks wired to the row guid + row.
@@ -220,7 +220,7 @@ describe('ConversationTile — unread state', () => {
   });
 });
 
-describe('ConversationTile — service badge (resolveChatService)', () => {
+describe('ConversationTile — service badge (resolveChatDisplayService)', () => {
   it('badges an iMessage guid as "iMessage"', async () => {
     await renderWithTheme(
       <ConversationTile row={makeRow({ guid: 'iMessage;-;+15551230000' })} onPress={() => {}} />,
@@ -251,6 +251,17 @@ describe('ConversationTile — service badge (resolveChatService)', () => {
       />,
     );
     expect(screen.getByText('SMS', HIDDEN)).toBeTruthy();
+    expect(screen.queryByText('iMessage', HIDDEN)).toBeNull();
+  });
+
+  it('badges an RCS chat the Mac relays from an iPhone (any;-; guid, RCS handles) as "RCS"', async () => {
+    await renderWithTheme(
+      <ConversationTile
+        row={makeRow({ guid: 'any;-;+15551234567', handleServices: 'RCS' })}
+        onPress={() => {}}
+      />,
+    );
+    expect(screen.getByText('RCS', HIDDEN)).toBeTruthy();
     expect(screen.queryByText('iMessage', HIDDEN)).toBeNull();
   });
 });

@@ -15,7 +15,7 @@ import {
   participantColors,
   participantList,
   primaryParticipantColor,
-  resolveChatService,
+  resolveChatDisplayService,
   resolveTitle,
 } from '@utils';
 import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
@@ -53,9 +53,10 @@ export const ConversationTile = React.memo(function ConversationTile({
   const muted = row.muteType === 'mute';
   // Service pill (iMessage / SMS / RCS) — same treatment for all three, coloured to match the
   // bubble palette. Resolved from the participant handle service (not just the guid prefix) so an
-  // SMS-only contact/shortcode reads SMS even when its guid was reported as iMessage. De-duplicated
+  // SMS-only contact/shortcode reads SMS even when its guid was reported as iMessage, and an RCS chat the
+  // Mac relays from an iPhone reads RCS (display only — see resolveChatDisplayService). De-duplicated
   // participant photos for the group collage (a contact with two handles otherwise renders twice).
-  const service = resolveChatService(row.guid, row.handleServices);
+  const service = resolveChatDisplayService(row.guid, row.handleServices);
   const badge =
     service === 'RCS'
       ? { label: 'RCS', color: theme.color.bubble.rcsBackground }

@@ -5394,7 +5394,7 @@ function perf02InboxBenchmarkCertificateCandidate({
     sha(listFile, listFile) !==
       'a7ec3609167bdeeedac173e9bc7babc178e4917c6da7e4ec65aa5c937961991d' ||
     sha(tileFile, tileFile) !==
-      'e2693f0dd78b27c6e2a23273f9b5d2c963bc0558786f734653a6845d4d05f0f9' ||
+      '80d8d106f5608973eb1ecc229a7aae336b4f2a0af9a1823363b390b947e2ac3b' ||
     !(nameState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(nameState.declaration.initializer, harnessFile) !==
       "'perf02-inbox-benchmark.db'" ||
