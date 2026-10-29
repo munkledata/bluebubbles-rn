@@ -301,6 +301,31 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
     expect(useFeatureSettingsStore.getState().maxConcurrentDownloads).toBe(3);
   });
 
+  it('steps Messages per Chat from 25 up to All, with All as the largest choice', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    const fewer = () => screen.getByRole('button', { name: 'Fewer messages per chat' });
+    const more = () => screen.getByRole('button', { name: 'More messages per chat' });
+    // The default is All: nothing is above it, and one step down is the largest number.
+    expect(more().props.accessibilityState).toMatchObject({ disabled: true });
+    await act(async () => {
+      fireEvent.press(fewer());
+    });
+    expect(useSyncSettingsStore.getState().messagesPerChat).toBe(500);
+    await act(async () => {
+      fireEvent.press(more());
+    });
+    expect(useSyncSettingsStore.getState().messagesPerChat).toBe(0);
+    // 25 is the smallest: nothing is below it, and one step up is 50.
+    await act(async () => {
+      useSyncSettingsStore.setState({ messagesPerChat: 25 });
+    });
+    expect(fewer().props.accessibilityState).toMatchObject({ disabled: true });
+    await act(async () => {
+      fireEvent.press(more());
+    });
+    expect(useSyncSettingsStore.getState().messagesPerChat).toBe(50);
+  });
+
   it('explains error-report data and requires informed confirmation before opt-in', async () => {
     await renderWithTheme(<SettingsScreen />);
     expect(screen.getByText(/Off by default/)).toBeTruthy();

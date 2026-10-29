@@ -6,8 +6,8 @@ import { canCommitHydration, reportHydrationError, type HydrationOptions } from 
 
 export const SYNC_MESSAGES_PER_CHAT_KEY = 'sync.messagesPerChat';
 
-/** The selectable caps for the initial per-chat history sync (0 = all history). */
-export const MESSAGES_PER_CHAT_OPTIONS = [0, 25, 50, 100, 250, 500] as const;
+/** Initial per-chat sync caps in stepper order, smallest first; 0 = all history, so it is last. */
+export const MESSAGES_PER_CHAT_OPTIONS = [25, 50, 100, 250, 500, 0] as const;
 
 interface SyncSettingsState {
   /** Cap on messages fetched per chat during the INITIAL full sync (0 = all). Full history
