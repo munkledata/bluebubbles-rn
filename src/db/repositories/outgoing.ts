@@ -2033,6 +2033,39 @@ async function findAcknowledgedModernOwnerWithinTransaction(
   });
 }
 
+/**
+ * Google stores a captioned RCS picture as TWO messages: the caption, then the picture with no
+ * words. The server links only the picture copy to our upload (by its exact attempt ids), so our
+ * bubble would keep its local caption while Google's separate caption message also arrives: the
+ * caption showed twice on the sending phone. When the exact-linked copy of our own RCS upload
+ * arrives with no text, drop the bubble's local caption so the chat matches Google Messages
+ * (caption message, then picture). Only RCS, only an exact link, only a row that has files; a copy
+ * that does carry the caption (Google kept one message) leaves the bubble alone.
+ */
+function dropSplitRcsCaptionWithinTransaction(
+  context: DbTransactionContext,
+  m: EchoMatchFields,
+  chatId: number,
+  disposition: ExactOutgoingAttemptSuccessDisposition,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    if (disposition !== 'reconciled' && disposition !== 'already-reconciled') return;
+    // Only an explicit empty text (null or "") proves a wordless copy; an omitted field proves nothing.
+    if (!m.isFromMe || !(m.text === null || m.text === '')) return;
+    await db.all(sql`
+      UPDATE messages
+         SET text = NULL
+       WHERE guid = ${m.guid}
+         AND chat_id = ${chatId}
+         AND is_from_me = 1
+         AND text IS NOT NULL
+         AND EXISTS (SELECT 1 FROM chats c WHERE c.id = ${chatId} AND substr(c.guid, 1, 6) = 'RCS;-;')
+         AND EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = messages.id)
+      RETURNING id
+    `);
+  });
+}
+
 /** Reconcile a modern copy through its one acknowledged owner; anything but success changes nothing. */
 async function reconcileModernCopyThroughOwnerWithinTransaction(
   context: DbTransactionContext,
@@ -2088,7 +2121,7 @@ export async function reconcileEchoByContent(
         // Partial modern correlation is a protocol violation, not permission to content-match.
         return 'unmatched';
       }
-      return reconcileExactOutgoingAttemptSuccessWithinTransaction(context, {
+      const disposition = await reconcileExactOutgoingAttemptSuccessWithinTransaction(context, {
         tempGuid: m.tempGuid,
         attemptGuid: m.attemptGuid,
         clientAttemptGeneration: m.clientAttemptGeneration,
@@ -2097,6 +2130,8 @@ export async function reconcileEchoByContent(
         dateCreated: m.dateCreated ?? null,
         dateDelivered: m.dateDelivered ?? null,
       });
+      await dropSplitRcsCaptionWithinTransaction(context, m, chatId, disposition);
+      return disposition;
     }
     // A modern send's copy that carries no attempt ids: reconcile it through its one owner.
     const modernOwner = await findAcknowledgedModernOwnerWithinTransaction(context, m, chatId);
@@ -2241,7 +2276,7 @@ export async function reconcileOutgoingAttachmentByContent(
         if (!m.tempGuid || !m.attemptGuid || m.clientAttemptGeneration == null) {
           return 'unmatched';
         }
-        return reconcileExactOutgoingAttemptSuccessWithinTransaction(context, {
+        const disposition = await reconcileExactOutgoingAttemptSuccessWithinTransaction(context, {
           tempGuid: m.tempGuid,
           attemptGuid: m.attemptGuid,
           clientAttemptGeneration: m.clientAttemptGeneration,
@@ -2250,6 +2285,8 @@ export async function reconcileOutgoingAttachmentByContent(
           dateCreated: m.dateCreated ?? null,
           dateDelivered: m.dateDelivered ?? null,
         });
+        await dropSplitRcsCaptionWithinTransaction(context, m, chatId, disposition);
+        return disposition;
       }
       // A modern send's copy that carries no attempt ids: reconcile it through its one owner.
       const modernOwner = await findAcknowledgedModernOwnerWithinTransaction(context, m, chatId);

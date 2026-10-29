@@ -1448,6 +1448,99 @@ describe('RCS active send-attempt ownership', () => {
   const liveMerge = (db: AppDatabase, copy: CopyFields, chatId: number) =>
     withDbTransaction(db, (context) => reconcileEchoByContent(context, copy, chatId));
 
+  // Google stores a captioned RCS picture as two messages (caption, then a wordless picture); the
+  // server links only the picture copy. The sending phone must not keep a second caption.
+  async function sendCaptionedPicture(db: AppDatabase, tempGuid: string, now: number) {
+    const inserted = await insertOutgoingAttachment(db, {
+      tempGuid,
+      attachmentGuid: `${tempGuid}-att`,
+      chatGuid: CHAT_GUID,
+      localPath: `file:///${tempGuid}.jpg`,
+      mimeType: 'image/jpeg',
+      transferName: `${tempGuid}.jpg`,
+      totalBytes: 1_000,
+      now,
+      text: 'caption-canary-7b2e',
+      attemptAware: true,
+    });
+    return inserted.attemptOwnerToken!.generation;
+  }
+  const textOf = (raw: Database.Database, guid: string) =>
+    (raw.prepare('SELECT text FROM messages WHERE guid = ?').get(guid) as { text: string | null })
+      .text;
+
+  it('drops the local caption when the exact-linked RCS picture copy has no words', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-split-caption';
+      const generation = await sendCaptionedPicture(db, tempGuid, 90_000);
+      const exact = {
+        tempGuid,
+        attemptGuid: `attempt-${tempGuid}`,
+        clientAttemptGeneration: generation,
+      };
+      await expect(
+        liveMerge(db, { ...pictureCopy('rcs-split-copy', 90_200), ...exact }, chatId),
+      ).resolves.toBe('reconciled');
+      expect(textOf(raw, 'rcs-split-copy')).toBeNull();
+      // The caller's upsert of the same wordless copy keeps it cleared.
+      expect(
+        raw.prepare('SELECT COUNT(*) AS c FROM messages WHERE chat_id = ?').get(chatId),
+      ).toEqual({ c: 1 });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('keeps the caption when the linked copy carries it, or says nothing about text', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      for (const [tempGuid, copyGuid, copyText] of [
+        ['temp-kept-caption', 'rcs-kept-copy', 'caption-canary-7b2e'],
+        ['temp-unsaid-caption', 'rcs-unsaid-copy', undefined],
+      ] as const) {
+        const generation = await sendCaptionedPicture(db, tempGuid, 91_000);
+        const copy = {
+          ...pictureCopy(copyGuid, 91_200),
+          tempGuid,
+          attemptGuid: `attempt-${tempGuid}`,
+          clientAttemptGeneration: generation,
+          text: copyText,
+        };
+        await expect(liveMerge(db, copy, chatId)).resolves.toBe('reconciled');
+        expect(textOf(raw, copyGuid)).toBe('caption-canary-7b2e');
+      }
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('drops the split caption on the sync path too', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-split-sync';
+      const generation = await sendCaptionedPicture(db, tempGuid, 92_000);
+      await expect(
+        reconcileOutgoingAttachmentByContent(
+          db,
+          {
+            ...pictureCopy('rcs-split-sync-copy', 92_200),
+            tempGuid,
+            attemptGuid: `attempt-${tempGuid}`,
+            clientAttemptGeneration: generation,
+          },
+          chatId,
+        ),
+      ).resolves.toBe('reconciled');
+      expect(textOf(raw, 'rcs-split-sync-copy')).toBeNull();
+    } finally {
+      raw.close();
+    }
+  });
+
   it('merges an acknowledged modern picture with its live copy that carries no ids', async () => {
     const { db, raw } = await createTestDb();
     try {
