@@ -663,6 +663,90 @@ export async function createNewChat(
   }
 }
 
+/**
+ * Find (or have Google create, empty) the one-to-one RCS chat for one address, without sending.
+ * The caller then sends its message through the normal outgoing path, so it gets a bubble, the
+ * outgoing queue and an exact acknowledgement. Only a chat that is new here is saved from the
+ * reply, matching createNewChat; sync owns updates to a conversation this device already has.
+ */
+export async function findOrCreateRcsChat(
+  address: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<string> {
+  try {
+    assertCreateChatLease(accountLease);
+    if (address.trim().length === 0) {
+      throw new Error('Starting a new conversation requires exactly one recipient.');
+    }
+    if (!sessionAccessors.rcsFindOrCreateChatSupported()) {
+      throw new Error('Finding an RCS conversation is unavailable on this server.');
+    }
+    const rcsProviderEpoch = assertCreateChatCapability('RCS');
+    if (!rcsProviderEpoch) {
+      throw new Error('Starting a new RCS conversation is unavailable for this Google pairing.');
+    }
+    const providerIsCurrent = (): boolean =>
+      sessionAccessors.rcsProviderEpoch() === rcsProviderEpoch;
+    const db = await ensureDatabase();
+    assertCreateChatLease(accountLease);
+    assertCreateChatCapability('RCS', rcsProviderEpoch);
+    const chat = await chatsApi.findOrCreateRcsChat(http, address, rcsProviderEpoch);
+    assertCreateChatLease(accountLease);
+    assertCreateChatCapability('RCS', rcsProviderEpoch);
+    if (parseRcsChatGuid(chat.guid)?.providerEpoch !== rcsProviderEpoch) {
+      throw new Error('The server returned a conversation from a different Google pairing.');
+    }
+
+    const commit = await runTrackedRealtimeWork(accountLease, () =>
+      withDbTransaction(
+        db,
+        async (context) => {
+          assertCreateChatLease(accountLease);
+          const isNewHere = !(await chatExistsWithinTransaction(context, chat.guid));
+          assertCreateChatLease(accountLease);
+          if (isNewHere) {
+            const handleIds = await upsertHandlesWithinTransaction(
+              context,
+              chat.participants ?? [],
+            );
+            assertCreateChatLease(accountLease);
+            await upsertChatsWithinTransaction(context, [chat], handleIds);
+            assertCreateChatLease(accountLease);
+          }
+          // Choosing the person again un-deletes a conversation deleted on this device.
+          await clearChatTombstoneWithinTransaction(context, chat.guid);
+          assertCreateChatLease(accountLease);
+        },
+        () => accountLease.isCurrent() && providerIsCurrent(),
+      ),
+    );
+    if (commit === 'paused') throw STALE_CREATE_CHAT;
+    assertCreateChatLease(accountLease);
+    assertCreateChatCapability('RCS', rcsProviderEpoch);
+
+    // Contact matching reads the address book, so it runs after the short commit (as createNewChat).
+    try {
+      await linkHandlesToContacts(
+        db,
+        (chat.participants ?? []).map((participant) => participant.address),
+        undefined,
+        () => accountLease.isCurrent() && providerIsCurrent(),
+      );
+    } catch (error) {
+      if (!accountLease.isCurrent() || !providerIsCurrent()) throw STALE_CREATE_CHAT;
+      logger.debug('[chats] post-find contact linking skipped', error);
+    }
+    assertCreateChatLease(accountLease);
+    assertCreateChatCapability('RCS', rcsProviderEpoch);
+    return chat.guid;
+  } catch (error) {
+    if (error === STALE_CREATE_CHAT) {
+      throw new Error('Finding the chat stopped because the account session changed');
+    }
+    throw error;
+  }
+}
+
 interface TypingIntent {
   readonly isTyping: boolean;
   readonly socket: NonNullable<ReturnType<typeof getSocket>>;
