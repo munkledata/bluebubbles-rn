@@ -553,13 +553,13 @@ describe('share recovery in the capture and navigator', () => {
     ]);
   });
 
-  it('points a share of one of Gator’s own files to Forward or Save', async () => {
+  it('points a share of one of Gator’s own files to Save to Photos', async () => {
     await renderWithTheme(<ShareIntentNavigator />);
     await act(async () => {
       useShareIntentStore.getState().setFailureReason('own_file');
     });
     expect(toastMessages()).toEqual([
-      'Gator can’t share a file to itself. Long-press the message and use Forward or Save instead.',
+      'Gator can’t share a file to itself. Long-press the message and use Save to Photos instead.',
     ]);
   });
 

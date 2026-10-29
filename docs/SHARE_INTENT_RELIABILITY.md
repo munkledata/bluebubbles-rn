@@ -114,7 +114,9 @@ that a screen still shows on that screen, rather than opening it twice.
 - A file shared from Gator back into Gator is still refused, because Gator must not read its own
   provider's files on another app's behalf, but native now reports it as `own_file` instead of
   `permission`. The app says "Gator can’t share a file to itself. Long-press the message and use
-  Forward or Save instead." Forward is offered in RCS chats; Save works in every chat.
+  Save to Photos instead." Save to Photos is offered in every chat. Forward is offered only in RCS
+  chats, so the 0.1.64 wording ("use Forward or Save") pointed iMessage and SMS chats at a missing
+  button.
 
 ## Summary
 
