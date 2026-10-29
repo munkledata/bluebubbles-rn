@@ -30,7 +30,7 @@ import {
 import { checkUnsend, discardMessage, react, unsend } from '@/services/send';
 import { useRcsMutationEnabled } from '@state/sessionStore';
 import type { SelectedMessage } from '@ui';
-import { pickReminderTime } from '@ui/conversations/pickReminderTime';
+import { pickReminderTime, reminderTimeLabel } from '@ui/conversations/pickReminderTime';
 import {
   presentDiscardMessageFailure,
   presentDiscardMessageResult,
@@ -921,7 +921,10 @@ export function useMessageActions({
           screenLease,
         );
         if (screenLease.isCurrent()) {
-          showDialog('Reminder set', 'You’ll be reminded about this message.');
+          showDialog(
+            'Reminder set',
+            `You’ll be reminded about this message ${reminderTimeLabel(when)}.`,
+          );
         }
       } catch (error) {
         if (!screenLease.isCurrent()) return;

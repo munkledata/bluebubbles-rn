@@ -52,7 +52,10 @@ jest.mock('@state/sessionStore', () => ({
   useRcsEnabled: () => mockRcsEnabled,
   useRcsMutationEnabled: () => mockRcsEnabled,
 }));
-jest.mock('@ui/conversations/pickReminderTime', () => ({ pickReminderTime: jest.fn() }));
+jest.mock('@ui/conversations/pickReminderTime', () => ({
+  pickReminderTime: jest.fn(),
+  reminderTimeLabel: (at: number) => `at test time ${at}`,
+}));
 jest.mock('@/services/send', () => ({
   checkUnsend: jest.fn(),
   discardMessage: jest.fn(async () => {}),
@@ -601,6 +604,13 @@ describe('useMessageActions — narrow iMessage actions and RCS reactions', () =
         expect.objectContaining({ messageGuid: 'message-balloon' }),
         expect.objectContaining({ isCurrent: expect.any(Function) }),
       ),
+    );
+    // The confirmation says exactly when, not just that a reminder exists.
+    await waitFor(() =>
+      expect(dialogs[dialogs.length - 1]).toMatchObject({
+        title: 'Reminder set',
+        body: 'You’ll be reminded about this message at test time 2000.',
+      }),
     );
   });
 

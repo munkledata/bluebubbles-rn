@@ -7,7 +7,7 @@ jest.mock('@react-native-community/datetimepicker', () => ({
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
-import { pickReminderTime } from '@ui/conversations/pickReminderTime';
+import { pickReminderTime, reminderTimeLabel } from '@ui/conversations/pickReminderTime';
 
 const HOUR = 60 * 60 * 1000;
 
@@ -65,6 +65,11 @@ describe('pickReminderTime', () => {
       if (savedTz === undefined) delete process.env.TZ;
       else process.env.TZ = savedTz;
     }
+  });
+
+  it('labels a reminder with its weekday, date and clock time', () => {
+    const label = reminderTimeLabel(new Date(2026, 10, 5, 13, 29).getTime());
+    expect(label).toMatch(/^on Thu, Nov 5 at 1:29\sPM$/u);
   });
 
   it('resolves null when cancelled', async () => {

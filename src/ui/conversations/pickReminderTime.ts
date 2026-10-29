@@ -29,6 +29,13 @@ function whenLabel(target: number, isHours: boolean): string {
     : d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
+/** "on Thu, Nov 5 at 1:29 PM": the exact day and time a reminder will fire. */
+export function reminderTimeLabel(at: number): string {
+  const d = new Date(at);
+  const day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  return `on ${day} at ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 /**
  * Quick reminder-time picker (parity with the old app's `showTimeframePicker`): relative presets
  * — 1 Hour / 3 Hours / 6 Hours / 1 Day / 1 Week / 1 Month, each showing the resolved time — plus a
