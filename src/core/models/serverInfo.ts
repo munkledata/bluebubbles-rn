@@ -69,6 +69,8 @@ export const ServerInfo = z
     supports_rcs_send_attempt_ownership: z.boolean().nullish(),
     /** Whether all app-facing RCS ids carry the current persisted Google pairing epoch. */
     supports_rcs_epoch_qualified_ids: z.boolean().nullish(),
+    /** Whether POST /rcs/chat/find-or-create returns one one-to-one RCS chat without sending. */
+    supports_rcs_find_or_create_chat: z.boolean().nullish(),
     /**
      * Opaque current Google pairing epoch; null while the RCS identity is unavailable. A malformed
      * value reads as null rather than rejecting the whole reply (that blocked connecting).

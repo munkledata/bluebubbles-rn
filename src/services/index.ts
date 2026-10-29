@@ -52,6 +52,7 @@ export { ensureDatabase, rotateDatabaseKey } from './databaseControl';
 export {
   addTextToChatDraft,
   createNewChat,
+  findOrCreateRcsChat,
   sendTyping,
   stopAllTyping,
   markRead,

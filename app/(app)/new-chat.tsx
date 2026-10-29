@@ -17,7 +17,7 @@ import {
   type ShareIntakeManifestIdentity,
   type ShareIntakeNewChatPlan,
 } from '@db/repositories';
-import { addTextToChatDraft, createNewChat } from '@/services';
+import { addTextToChatDraft, createNewChat, findOrCreateRcsChat } from '@/services';
 import type { NewChatService } from '@/services/chatActions';
 import {
   consumeShareIntakeBatchIfComplete,
@@ -165,6 +165,9 @@ export default function NewChatScreen(): React.JSX.Element {
   const imessageEnabled = useSessionStore((s) => s.serverInfo?.supports_imessage_new_chat === true);
   const exactIMessageTextSupported = useSessionStore(
     (s) => s.serverInfo?.supports_imessage_plain_text === true,
+  );
+  const rcsFindOrCreateSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_rcs_find_or_create_chat === true,
   );
   const [requestedService, setRequestedService] = useState<NewChatService | null>(null);
   const selectedService: NewChatService | null =
@@ -713,6 +716,32 @@ export default function NewChatScreen(): React.JSX.Element {
     }
   };
 
+  /** Find (never send) the RCS chat for one address, then queue the message there. */
+  const startInFoundRcsChat = async (address: string): Promise<void> => {
+    submissionInFlightRef.current = true;
+    setBusy(true);
+    let chatGuid: string;
+    try {
+      chatGuid = await findOrCreateRcsChat(address, accountLease);
+    } catch (error) {
+      if (!accountLease.isCurrent() || abandonedRef.current) return;
+      logger.warn('[new-chat] finding the RCS conversation failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      // Nothing was sent: the find step never sends.
+      showDialog(
+        'New message',
+        'Couldn’t start the conversation. Check the address and your server connection. Your message is still here.',
+      );
+      return;
+    } finally {
+      submissionInFlightRef.current = false;
+      if (accountLease.isCurrent() && !abandonedRef.current) setBusy(false);
+    }
+    if (!accountLease.isCurrent() || abandonedRef.current) return;
+    await startInExistingChat(chatGuid);
+  };
+
   const onStart = async (): Promise<void> => {
     const recipient = effectiveRecipients[0];
     if (
@@ -725,6 +754,17 @@ export default function NewChatScreen(): React.JSX.Element {
       return;
     if (sendsToExisting && existingGuid) {
       await startInExistingChat(existingGuid);
+      return;
+    }
+    // A plain RCS message (no share, no files): find or create the Google thread without sending,
+    // then send through the normal path so it gets a bubble and the outgoing queue.
+    if (
+      selectedService === 'RCS' &&
+      rcsFindOrCreateSupported &&
+      initialContent.identity === null &&
+      staged.length === 0
+    ) {
+      await startInFoundRcsChat(recipient.address.trim());
       return;
     }
     if (initialContent.identity && !isShareIntakeNewChatRetryWindowOpen(initialContent.identity)) {

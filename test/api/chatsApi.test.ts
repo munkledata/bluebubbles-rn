@@ -185,3 +185,49 @@ describe('chatsApi.markChatRead', () => {
     });
   });
 });
+
+describe('chatsApi.findOrCreateRcsChat', () => {
+  const chat = (overrides: Record<string, unknown> = {}) => ({
+    guid: RCS_CHAT_GUID,
+    providerEpoch: RCS_PROVIDER_EPOCH,
+    style: 45,
+    participants: [{ address: '+1555', service: 'RCS' }],
+    ...overrides,
+  });
+
+  it('POSTs the address and pairing and returns the one-to-one RCS chat', async () => {
+    const post = jest.fn((..._a: unknown[]) => Promise.resolve({ chat: chat() }));
+    const http = { post } as unknown as HttpClient;
+
+    await expect(
+      chatsApi.findOrCreateRcsChat(http, '+1555', RCS_PROVIDER_EPOCH),
+    ).resolves.toMatchObject({ guid: RCS_CHAT_GUID, style: 45 });
+    expect(post).toHaveBeenCalledWith('/rcs/chat/find-or-create', expect.anything(), {
+      captureErrorDetail: true,
+      json: { address: '+1555', providerEpoch: RCS_PROVIDER_EPOCH },
+    });
+  });
+
+  it('refuses a group, another service, or another pairing', async () => {
+    for (const reply of [
+      chat({ style: 43 }),
+      chat({ guid: 'iMessage;-;+1555' }),
+      chat({ providerEpoch: `gpe1_${'B'.repeat(42)}A` }),
+    ]) {
+      const http = {
+        post: jest.fn(() => Promise.resolve({ chat: reply })),
+      } as unknown as HttpClient;
+      await expect(chatsApi.findOrCreateRcsChat(http, '+1555', RCS_PROVIDER_EPOCH)).rejects.toThrow(
+        'not this one-to-one RCS chat',
+      );
+    }
+  });
+
+  it('refuses a malformed pairing before any request', async () => {
+    const post = jest.fn();
+    await expect(
+      chatsApi.findOrCreateRcsChat({ post } as unknown as HttpClient, '+1555', 'not-an-epoch'),
+    ).rejects.toThrow('pairing epoch');
+    expect(post).not.toHaveBeenCalled();
+  });
+});

@@ -248,6 +248,9 @@ export const sessionAccessors = {
   /** Whether this server supplies exact RCS success/error attempt correlation. */
   rcsSendAttemptOwnershipSupported: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_rcs_send_attempt_ownership === true,
+  /** Whether this server can find or create an RCS chat without sending its first message. */
+  rcsFindOrCreateChatSupported: (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_rcs_find_or_create_chat === true,
   /** Whether the connected server accepts client error-report uploads. */
   errorLogUploadSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_error_log_upload,

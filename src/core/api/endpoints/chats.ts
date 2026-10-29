@@ -138,6 +138,36 @@ export async function createChat(http: HttpClient, params: CreateChatParams): Pr
   };
 }
 
+const FoundRcsChat = z.object({ chat: Chat });
+
+/**
+ * POST /api/v1/rcs/chat/find-or-create — Google's get-or-create for one address. Nothing is sent:
+ * an existing one-to-one thread comes back as it is, otherwise Google makes an empty one. The reply
+ * must be a one-to-one RCS chat from the same Google pairing.
+ */
+export async function findOrCreateRcsChat(
+  http: HttpClient,
+  address: string,
+  providerEpoch: string,
+): Promise<Chat> {
+  if (!isRcsProviderEpoch(providerEpoch)) {
+    throw new Error('Finding an RCS conversation requires the current Google pairing epoch.');
+  }
+  const res = await http.post('/rcs/chat/find-or-create', FoundRcsChat, {
+    captureErrorDetail: true,
+    json: { address, providerEpoch },
+  });
+  const chat = res.chat;
+  if (
+    !chat.guid.startsWith('RCS;-;') ||
+    (chat.providerEpoch != null && chat.providerEpoch !== providerEpoch) ||
+    chat.style === 43
+  ) {
+    throw new Error('The server returned a conversation that is not this one-to-one RCS chat.');
+  }
+  return chat;
+}
+
 /**
  * GET /api/v1/chat/{guid} — single chat with participants.
  * Implemented on the Gator server (`get-chat` op). Returns `{ chat }`; 404s for an unknown

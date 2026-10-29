@@ -103,6 +103,7 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('@/services', () => ({
   addTextToChatDraft: jest.fn(),
   createNewChat: jest.fn(),
+  findOrCreateRcsChat: jest.fn(),
   http: {},
 }));
 jest.mock('@/services/send', () => ({ send: jest.fn(), sendImages: jest.fn() }));
@@ -141,7 +142,7 @@ import NewChatScreen from '../../../app/(app)/new-chat';
 // eslint-disable-next-line import/first
 import * as Crypto from 'expo-crypto';
 // eslint-disable-next-line import/first
-import { addTextToChatDraft, createNewChat } from '@/services';
+import { addTextToChatDraft, createNewChat, findOrCreateRcsChat } from '@/services';
 // eslint-disable-next-line import/first
 import { send, sendImages } from '@/services/send';
 // eslint-disable-next-line import/first
@@ -176,6 +177,7 @@ import {
 } from '@features/conversations/forwardAttachmentHandoff';
 
 const mockCreateNewChat = createNewChat as jest.Mock;
+const mockFindOrCreateRcsChat = findOrCreateRcsChat as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockRandomUUID = Crypto.randomUUID as jest.Mock;
 const mockSendImages = sendImages as jest.Mock;
@@ -2250,5 +2252,74 @@ describe('NewChatScreen — RCS file size limit', () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/larger than RCS allows/)).toBeNull();
+  });
+});
+
+describe('NewChatScreen — RCS find-or-create', () => {
+  const FOUND_GUID = 'RCS;-;new-chat-found-rcs-5c0a';
+
+  beforeEach(() => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: '1.9.0',
+        private_api: true,
+        rcs: true,
+        supports_rcs_send_attempt_ownership: true,
+        supports_rcs_find_or_create_chat: true,
+        ...RCS_SERVER_IDENTITY,
+      }),
+    });
+    mockFindOrCreateRcsChat.mockReset().mockResolvedValue(FOUND_GUID);
+    mockReplace.mockClear();
+  });
+
+  async function typeAndStart(): Promise<void> {
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(SECOND_ADDRESS);
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), SECOND_MESSAGE);
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+  }
+
+  it('finds the RCS chat without sending, then sends there through the normal path', async () => {
+    await typeAndStart();
+
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(FOUND_GUID)}`),
+    );
+    expect(mockFindOrCreateRcsChat).toHaveBeenCalledWith(SECOND_ADDRESS, expect.anything());
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0]?.[0]).toEqual({ chatGuid: FOUND_GUID, text: SECOND_MESSAGE });
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
+  it('keeps the message and sends nothing when the find step fails', async () => {
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    mockFindOrCreateRcsChat.mockRejectedValueOnce(new Error('bridge restarting'));
+
+    await typeAndStart();
+
+    await waitFor(() =>
+      expect(useDialogStore.getState().current).toMatchObject({
+        message:
+          'Couldn’t start the conversation. Check the address and your server connection. Your message is still here.',
+      }),
+    );
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue(SECOND_MESSAGE)).toBeTruthy();
+  });
+
+  it('still creates through the old path when the server lacks the find step', async () => {
+    useSessionStore.setState({ serverInfo: rcsServerInfo });
+
+    await typeAndStart();
+
+    await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
+    expect(mockFindOrCreateRcsChat).not.toHaveBeenCalled();
   });
 });
