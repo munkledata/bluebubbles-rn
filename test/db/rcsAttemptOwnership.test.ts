@@ -1450,11 +1450,16 @@ describe('RCS active send-attempt ownership', () => {
 
   // Google stores a captioned RCS picture as two messages (caption, then a wordless picture); the
   // server links only the picture copy. The sending phone must not keep a second caption.
-  async function sendCaptionedPicture(db: AppDatabase, tempGuid: string, now: number) {
+  async function sendCaptionedPicture(
+    db: AppDatabase,
+    tempGuid: string,
+    now: number,
+    chatGuid = CHAT_GUID,
+  ) {
     const inserted = await insertOutgoingAttachment(db, {
       tempGuid,
       attachmentGuid: `${tempGuid}-att`,
-      chatGuid: CHAT_GUID,
+      chatGuid,
       localPath: `file:///${tempGuid}.jpg`,
       mimeType: 'image/jpeg',
       transferName: `${tempGuid}.jpg`,
@@ -1488,6 +1493,48 @@ describe('RCS active send-attempt ownership', () => {
       expect(
         raw.prepare('SELECT COUNT(*) AS c FROM messages WHERE chat_id = ?').get(chatId),
       ).toEqual({ c: 1 });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('drops the split caption in an RCS group chat too (same RCS;-; prefix)', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const groupGuid = `RCS;-;grp.${RCS_PROVIDER_EPOCH}.Zw`;
+      const members = [
+        { address: 'member-one@example.test', service: 'RCS' },
+        { address: 'member-two@example.test', service: 'RCS' },
+      ];
+      const handles = await upsertHandles(db, members);
+      await upsertChats(
+        db,
+        [
+          Chat.parse({
+            guid: groupGuid,
+            providerEpoch: RCS_PROVIDER_EPOCH,
+            style: 43,
+            participants: members,
+          }),
+        ],
+        handles,
+      );
+      const chatId = (await getChatIdByGuid(db, groupGuid))!;
+      const tempGuid = 'temp-split-group';
+      const generation = await sendCaptionedPicture(db, tempGuid, 93_000, groupGuid);
+      await expect(
+        liveMerge(
+          db,
+          {
+            ...pictureCopy('rcs-split-group-copy', 93_200),
+            tempGuid,
+            attemptGuid: `attempt-${tempGuid}`,
+            clientAttemptGeneration: generation,
+          },
+          chatId,
+        ),
+      ).resolves.toBe('reconciled');
+      expect(textOf(raw, 'rcs-split-group-copy')).toBeNull();
     } finally {
       raw.close();
     }
