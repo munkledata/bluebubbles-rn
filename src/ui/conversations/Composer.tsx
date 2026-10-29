@@ -31,7 +31,10 @@ import {
   MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES,
   isSupportedImessageAttachmentType,
 } from '@core/models/serverInfo';
-import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
+import { logger } from '@core/secure';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { AttachmentTray, pendingFromCameraAsset, type PendingAttachment } from './AttachmentTray';
+import { takePendingCameraCapture } from './pendingCameraCapture';
 import { ScheduleSheet } from './ScheduleSheet';
 import { EffectPicker } from './effects';
 import {
@@ -171,6 +174,9 @@ interface ComposerProps {
   /** Pre-stage attachments into the tray on mount (e.g. a photo shared INTO this chat via the
    *  Android Direct Share row). Seeded once; the user reviews + taps send. */
   initialAttachments?: PendingAttachment[];
+  /** This chat's guid. Lets the camera remember which chat opened it, and lets this composer take
+   *  back a photo taken while Android killed Gator behind the camera. Omitted = no recovery. */
+  cameraChatGuid?: string;
   /** Whether this composer is the active chat surface (false while multi-select replaces it). */
   active?: boolean;
   /** Reports authored state that is NOT covered by the normal per-chat text draft. */
@@ -244,6 +250,7 @@ export const Composer = React.memo(function Composer({
   initialText,
   onDraftChange,
   initialAttachments,
+  cameraChatGuid,
   active = true,
   onRemovalStateChange,
   onAdmissionApplied,
@@ -412,6 +419,30 @@ export const Composer = React.memo(function Composer({
     }
     setPending((cur) => (cur.some((p) => p.uri === item.uri) ? cur : [...cur, item]));
   };
+
+  // Android can kill Gator while the system camera is in front. Once this chat can take files,
+  // put a photo taken in that gap back into this composer (only if this chat opened the camera).
+  const accountLease = useScreenAccountLease();
+  const addPendingRef = useRef(addPending);
+  addPendingRef.current = addPending;
+  const cameraRecoveryStartedRef = useRef(false);
+  useEffect(() => {
+    if (!cameraChatGuid || !attachmentsEnabled || !active || cameraRecoveryStartedRef.current) {
+      return;
+    }
+    cameraRecoveryStartedRef.current = true;
+    const isCurrent = (): boolean => mountedRef.current && accountLease.isCurrent();
+    void (async () => {
+      const asset = await takePendingCameraCapture(cameraChatGuid, accountLease);
+      if (!asset || !isCurrent()) return;
+      const item = await pendingFromCameraAsset(asset, imessageImageOnly ?? false, isCurrent);
+      if (!item || !isCurrent()) return;
+      addPendingRef.current(item);
+      setTrayOpen(true);
+    })().catch((error: unknown) => {
+      logger.warn('[composer] could not recover a camera photo', error);
+    });
+  }, [accountLease, active, attachmentsEnabled, cameraChatGuid, imessageImageOnly]);
 
   /**
    * Pasted pictures/files (long-press Paste, a keyboard image/GIF/sticker commit, or a drop).
@@ -1203,6 +1234,7 @@ export const Composer = React.memo(function Composer({
           onPickFiles={handlePickFiles}
           mediaEnabled={attachmentsEnabled}
           imessageImageOnly={imessageImageOnly}
+          cameraChatGuid={cameraChatGuid}
           onPickContact={
             onPickContact
               ? () => {

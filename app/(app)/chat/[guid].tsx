@@ -838,6 +838,7 @@ function ChatScreenInner({
           translucent={hasWallpaper}
           initialText={composerInitialText}
           onDraftChange={onDraftChange}
+          cameraChatGuid={guid}
           initialAttachments={
             shareReceiptLoaded &&
             attachmentFeaturesAvailable &&

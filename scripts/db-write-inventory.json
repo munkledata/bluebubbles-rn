@@ -16226,6 +16226,45 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
+      "id": "src/services/cameraCapture.ts#saveCameraCaptureChat.<callback:207643d126>:mutator-call:514a7af90d05",
+      "path": "src/services/cameraCapture.ts",
+      "line": 21,
+      "symbol": "saveCameraCaptureChat.<callback:207643d126>",
+      "operation": "mutator-call",
+      "target": "src/services/cameraCapture.ts#saveCameraCaptureChat.<callback:207643d126>.<callback:696cda2c20>",
+      "detectedContext": "withDbTransaction",
+      "owner": "saveCameraCaptureChat",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "test/services/cameraCapture.test.ts; test/components/conversations/composerCameraRecovery.test.tsx; test/components/conversations/attachmentTray.test.tsx; test/db/withDbTransaction.test.ts; test/db/kv.test.ts"
+    },
+    {
+      "id": "src/services/cameraCapture.ts#saveCameraCaptureChat.<callback:207643d126>:mutator-call:6e75052b1241",
+      "path": "src/services/cameraCapture.ts",
+      "line": 21,
+      "symbol": "saveCameraCaptureChat.<callback:207643d126>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "saveCameraCaptureChat",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "test/services/cameraCapture.test.ts; test/components/conversations/composerCameraRecovery.test.tsx; test/components/conversations/attachmentTray.test.tsx; test/db/withDbTransaction.test.ts; test/db/kv.test.ts"
+    },
+    {
+      "id": "src/services/cameraCapture.ts#saveCameraCaptureChat.<callback:207643d126>.<callback:696cda2c20>:mutator-call:f2065f62f26c",
+      "path": "src/services/cameraCapture.ts",
+      "line": 23,
+      "symbol": "saveCameraCaptureChat.<callback:207643d126>.<callback:696cda2c20>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "saveCameraCaptureChat",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "test/services/cameraCapture.test.ts; test/components/conversations/composerCameraRecovery.test.tsx; test/components/conversations/attachmentTray.test.tsx; test/db/withDbTransaction.test.ts; test/db/kv.test.ts"
+    },
+    {
       "id": "src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:fba04b522cb8",
       "path": "src/services/chatActions.ts",
       "line": 225,

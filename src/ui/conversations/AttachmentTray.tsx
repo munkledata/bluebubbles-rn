@@ -21,6 +21,7 @@ import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { showToast } from '../toast/toastStore';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { saveCameraCaptureChat } from '@/services/cameraCapture';
 
 /** A photo/video/file the composer has staged but not yet sent (shape sendImages accepts). */
 export interface PendingAttachment {
@@ -76,6 +77,45 @@ export function forgetPhotoPromptDismissal(): void {
   photoPromptDismissed = false;
 }
 
+/** A picked file's byte size, or null (after saying so) when it cannot be read for sending. */
+async function readableImageSize(uri: string, isCurrent: () => boolean): Promise<number | null> {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (!isCurrent()) return null;
+    if (info.exists && Number.isSafeInteger(info.size) && info.size > 0) return info.size;
+  } catch {
+    // An inaccessible media-library URI is not eligible for a new one-shot send.
+  }
+  if (isCurrent()) showToast('Couldn’t read this photo for sending');
+  return null;
+}
+
+/**
+ * Turn a system-camera result into a composer attachment, or null when it can't be staged. Shared
+ * by a live capture and a photo recovered after Android killed Gator behind the camera.
+ */
+export async function pendingFromCameraAsset(
+  a: ImagePicker.ImagePickerAsset,
+  imessageImageOnly: boolean,
+  isCurrent: () => boolean,
+): Promise<PendingAttachment | null> {
+  const isVideo = a.type === 'video';
+  if (imessageImageOnly && isVideo) return null;
+  const size =
+    imessageImageOnly && !(a.fileSize && a.fileSize > 0)
+      ? await readableImageSize(a.uri, isCurrent)
+      : (a.fileSize ?? 0);
+  if (size === null || !isCurrent()) return null;
+  return {
+    uri: a.uri,
+    name: a.fileName ?? `capture.${isVideo ? 'mp4' : 'jpg'}`,
+    mimeType: a.mimeType ?? mimeFromName(a.fileName ?? (isVideo ? '.mp4' : '.jpg'), isVideo),
+    size,
+    width: a.width,
+    height: a.height,
+  };
+}
+
 interface AttachmentTrayProps {
   /** Stage a selected device photo/video onto the composer's pending list. */
   onPick: (item: PendingAttachment) => void;
@@ -90,6 +130,9 @@ interface AttachmentTrayProps {
   mediaEnabled?: boolean;
   /** The first iMessage upload slice accepts a single bounded still image with known bytes. */
   imessageImageOnly?: boolean;
+  /** The chat this tray belongs to, recorded before the camera opens so a photo taken while
+   *  Android killed Gator can be put back into this chat's composer (see pendingCameraCapture). */
+  cameraChatGuid?: string;
 }
 
 /**
@@ -105,6 +148,7 @@ export function AttachmentTray({
   onShareLocation,
   mediaEnabled = true,
   imessageImageOnly = false,
+  cameraChatGuid,
 }: AttachmentTrayProps): React.JSX.Element {
   const theme = useTheme();
   const accountLease = useScreenAccountLease();
@@ -143,18 +187,6 @@ export function AttachmentTray({
       setPermissionDialogVisible(true);
     }
   }, [imessageImageOnly, isCurrent]);
-
-  const readableImageSize = async (uri: string): Promise<number | null> => {
-    try {
-      const info = await FileSystem.getInfoAsync(uri);
-      if (!isCurrent()) return null;
-      if (info.exists && Number.isSafeInteger(info.size) && info.size > 0) return info.size;
-    } catch {
-      // An inaccessible media-library URI is not eligible for a new one-shot send.
-    }
-    if (isCurrent()) showToast('Couldn’t read this photo for sending');
-    return null;
-  };
 
   const inspectMediaPermission = useCallback(async (): Promise<void> => {
     if (!isCurrent()) return;
@@ -287,29 +319,33 @@ export function AttachmentTray({
       return;
     }
     if (cameraPermissionIssue) setCameraPermissionIssue(null);
+    if (cameraChatGuid) {
+      // Android may kill Gator while the camera app is in front. Record the chat first, so the
+      // restarted app knows whose composer the recovered photo belongs to.
+      try {
+        await saveCameraCaptureChat(cameraChatGuid, accountLease);
+      } catch (e) {
+        logger.warn('[attachment-tray] could not record the camera chat', e);
+      }
+      if (!isCurrent()) return;
+    }
     try {
       const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
       if (!isCurrent()) return;
       const a = res.assets?.[0];
       if (res.canceled || !a) return;
-      const isVideo = a.type === 'video';
-      if (imessageImageOnly && isVideo) return;
-      const size =
-        imessageImageOnly && !(a.fileSize && a.fileSize > 0)
-          ? await readableImageSize(a.uri)
-          : (a.fileSize ?? 0);
-      if (size === null || !isCurrent()) return;
-      onPick({
-        uri: a.uri,
-        name: a.fileName ?? `capture.${isVideo ? 'mp4' : 'jpg'}`,
-        mimeType: a.mimeType ?? mimeFromName(a.fileName ?? (isVideo ? '.mp4' : '.jpg'), isVideo),
-        size,
-        width: a.width,
-        height: a.height,
-      });
+      const item = await pendingFromCameraAsset(a, imessageImageOnly, isCurrent);
+      if (item) onPick(item);
     } catch (e) {
       if (!isCurrent()) return;
       logger.warn('[attachment-tray] camera capture failed', e);
+    } finally {
+      // The camera answered in this process, so nothing is left to recover.
+      if (cameraChatGuid) {
+        void saveCameraCaptureChat('', accountLease).catch(() => {
+          // Best-effort: a leftover record only makes a later chat open look for a result again.
+        });
+      }
     }
   };
 
@@ -331,7 +367,7 @@ export function AttachmentTray({
       logger.warn('[attachment-tray] getAssetInfoAsync failed; staging raw asset uri', e);
     }
     if (!isCurrent()) return;
-    const size = imessageImageOnly ? await readableImageSize(uri) : 0;
+    const size = imessageImageOnly ? await readableImageSize(uri, isCurrent) : 0;
     if (size === null || !isCurrent()) return;
     onPick({
       uri,

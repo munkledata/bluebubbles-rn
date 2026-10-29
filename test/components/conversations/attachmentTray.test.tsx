@@ -65,6 +65,14 @@ jest.mock('expo-file-system/legacy', () => ({
   getInfoAsync: jest.fn(),
 }));
 
+// The camera-owner record lives in the account database; record the calls in order instead.
+const mockCameraEvents: string[] = [];
+jest.mock('@/services/cameraCapture', () => ({
+  saveCameraCaptureChat: jest.fn(async (chatGuid: string) => {
+    mockCameraEvents.push(`record:${chatGuid}`);
+  }),
+}));
+
 // eslint-disable-next-line import/first
 import { AttachmentTray, forgetPhotoPromptDismissal } from '@ui/conversations/AttachmentTray';
 // eslint-disable-next-line import/first
@@ -559,6 +567,23 @@ describe('AttachmentTray — camera capture', () => {
         height: 20,
       }),
     );
+  });
+
+  it('records the chat before opening the camera and clears it once the camera answers', async () => {
+    mockCameraEvents.length = 0;
+    grantWith([]);
+    requestCamera.mockResolvedValue({ granted: true });
+    launchCamera.mockImplementation(async () => {
+      mockCameraEvents.push('launch');
+      return { canceled: true, assets: null };
+    });
+    await renderWithTheme(
+      <AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} cameraChatGuid="chat-A" />,
+    );
+    await waitForMediaCheckToSettle();
+    await fireEvent.press(screen.getByLabelText('Take a photo'));
+    // If Android kills Gator behind the camera, the record written first names the chat.
+    await waitFor(() => expect(mockCameraEvents).toEqual(['record:chat-A', 'launch', 'record:']));
   });
 
   it('derives capture.mp4 / video/mp4 for a video capture with missing fields', async () => {
