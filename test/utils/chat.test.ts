@@ -12,6 +12,7 @@ import {
   participantList,
   primaryParticipantColor,
   resolveBubbleColor,
+  resolveChatDisplayService,
   resolveChatService,
   resolveTitle,
   type TitleInput,
@@ -127,6 +128,35 @@ describe('resolveChatService', () => {
     expect(resolveChatService('iMessage;-;g', '')).toBe('iMessage');
     expect(resolveChatService('iMessage;-;g', null)).toBe('iMessage');
     expect(resolveChatService('iMessage;-;g', ' , ')).toBe('iMessage');
+  });
+
+  it('keeps the Mac (iMessage) route for an RCS chat relayed by the Mac', () => {
+    // Send routing and capability gates read this value; the RCS label is display-only.
+    expect(resolveChatService('any;-;+15551234567', 'RCS')).toBe('iMessage');
+    expect(resolveChatService('any;+;chat123', 'RCS,RCS')).toBe('iMessage');
+  });
+});
+
+describe('resolveChatDisplayService', () => {
+  it('shows an Apple-relayed RCS chat (every handle RCS) as RCS', () => {
+    expect(resolveChatDisplayService('any;-;+15551234567', 'RCS')).toBe('RCS');
+    expect(resolveChatDisplayService('any;+;chat123', 'RCS, RCS ,RCS')).toBe('RCS');
+  });
+
+  it('keeps iMessage for mixed or absent handle services', () => {
+    expect(resolveChatDisplayService('any;+;chat123', 'RCS,iMessage')).toBe('iMessage');
+    expect(resolveChatDisplayService('any;+;chat123', 'RCS,SMS')).toBe('iMessage');
+    expect(resolveChatDisplayService('any;-;+15551234567', '')).toBe('iMessage');
+    expect(resolveChatDisplayService('any;-;+15551234567', null)).toBe('iMessage');
+  });
+
+  it('matches resolveChatService everywhere else, including the Google bridge guid', () => {
+    expect(resolveChatDisplayService('RCS;-;g1.epoch.dGhyZWFk', 'RCS')).toBe('RCS');
+    expect(resolveChatDisplayService('RCS;-;g1.epoch.dGhyZWFk', 'iMessage')).toBe('RCS');
+    expect(resolveChatDisplayService('SMS;-;+1555', 'RCS')).toBe('SMS');
+    expect(resolveChatDisplayService('any;-;433768', 'SMS')).toBe('SMS');
+    expect(resolveChatDisplayService('iMessage;-;g', 'iMessage')).toBe('iMessage');
+    expect(resolveChatDisplayService(null, 'RCS')).toBeNull();
   });
 });
 

@@ -194,31 +194,34 @@ export function inboxFilterSql(options: {
         ? sql`AND (c.mute_type IS NULL OR c.mute_type <> 'mute')`
         : sql``;
 
-  // Mirror resolveChatService. RCS/SMS GUIDs win. An iMessage-shaped/opaque GUID is SMS only when
-  // it has at least one non-empty handle service and every non-empty service is exactly 'SMS'.
+  // Mirror resolveChatDisplayService. RCS/SMS GUIDs win. An iMessage-shaped/opaque GUID is SMS
+  // (or RCS) only when it has at least one non-empty handle service and every non-empty service is
+  // exactly 'SMS' (or 'RCS'). The RCS case is a chat the Mac's Messages app relays from an iPhone
+  // (`any;-;…`): it shows and filters as RCS.
   const hasServiceGuid = sql`LENGTH(c.guid) > 0`;
-  const isRcs = sql`(${hasServiceGuid} AND substr(c.guid, 1, 6) = 'RCS;-;')`;
+  const iMessageShapedWithUnanimousService = (service: 'SMS' | 'RCS') => sql`(
+    substr(c.guid, 1, 6) <> 'RCS;-;'
+    AND substr(c.guid, 1, 6) <> 'SMS;-;'
+    AND EXISTS(
+      SELECT 1 FROM chat_handles cs
+      JOIN handles hs ON hs.id = cs.handle_id
+      WHERE cs.chat_id = c.id AND TRIM(COALESCE(hs.service, '')) <> ''
+    )
+    AND NOT EXISTS(
+      SELECT 1 FROM chat_handles cs
+      JOIN handles hs ON hs.id = cs.handle_id
+      WHERE cs.chat_id = c.id
+        AND TRIM(COALESCE(hs.service, '')) <> ''
+        AND TRIM(hs.service) <> ${service}
+    )
+  )`;
+  const isRcs = sql`(
+    ${hasServiceGuid}
+    AND (substr(c.guid, 1, 6) = 'RCS;-;' OR ${iMessageShapedWithUnanimousService('RCS')})
+  )`;
   const isSms = sql`(
     ${hasServiceGuid}
-    AND (
-      substr(c.guid, 1, 6) = 'SMS;-;'
-      OR (
-        substr(c.guid, 1, 6) <> 'RCS;-;'
-        AND substr(c.guid, 1, 6) <> 'SMS;-;'
-        AND EXISTS(
-          SELECT 1 FROM chat_handles cs
-          JOIN handles hs ON hs.id = cs.handle_id
-          WHERE cs.chat_id = c.id AND TRIM(COALESCE(hs.service, '')) <> ''
-        )
-        AND NOT EXISTS(
-          SELECT 1 FROM chat_handles cs
-          JOIN handles hs ON hs.id = cs.handle_id
-          WHERE cs.chat_id = c.id
-            AND TRIM(COALESCE(hs.service, '')) <> ''
-            AND TRIM(hs.service) <> 'SMS'
-        )
-      )
-    )
+    AND (substr(c.guid, 1, 6) = 'SMS;-;' OR ${iMessageShapedWithUnanimousService('SMS')})
   )`;
   const service =
     filters.service === 'rcs'

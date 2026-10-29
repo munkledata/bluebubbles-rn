@@ -307,6 +307,15 @@ describe('ConversationHeader — service badge', () => {
     );
     expect(screen.getByText('iMessage', HIDDEN)).toBeTruthy();
   });
+
+  it('badges an RCS chat the Mac relays from an iPhone (any;-; guid, RCS handles) as "RCS"', async () => {
+    mockHeaderData = makeHeader({ guid: 'any;-;+15551230000', handleServices: 'RCS' });
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+    expect(screen.getByText('RCS', HIDDEN)).toBeTruthy();
+    expect(screen.queryByText('iMessage', HIDDEN)).toBeNull();
+  });
 });
 
 describe('ConversationHeader — affordances', () => {

@@ -59,6 +59,13 @@ interface MessageListProps {
    * from-me bubbles green). Omit → fall back to the guid prefix alone.
    */
   chatService?: 'iMessage' | 'SMS' | 'RCS' | null;
+  /**
+   * The service to COLOUR bubbles with, from `resolveChatDisplayService`. It differs from
+   * `chatService` only for an RCS chat relayed by the Mac's Messages app, which shows as RCS but
+   * keeps its iMessage-route behaviour (so the retry rules below still read `chatService`). Omit →
+   * `chatService`.
+   */
+  displayService?: 'iMessage' | 'SMS' | 'RCS' | null;
   /** A chat background image is set → unbacked overlay text needs a legibility pill. */
   hasBackground?: boolean;
   /** Extra content padding when the list runs under a floating (wallpaper-mode) header, so the
@@ -106,6 +113,7 @@ export function MessageList({
   messages,
   accentColor,
   chatService: chatServiceProp,
+  displayService: displayServiceProp,
   hasBackground,
   topInset = 0,
   bottomInset = 0,
@@ -143,6 +151,7 @@ export function MessageList({
   // The chat's own outgoing service — from-me rows have no joined handle, so this is what colours an
   // outgoing SMS/RCS bubble. Prefer the handle-resolved value the screen passes; else the guid prefix.
   const chatService = chatServiceProp ?? chatServiceFromGuid(chatGuid);
+  const bubbleService = displayServiceProp ?? chatService;
 
   // messages is newest-first; reverse to chronological for display.
   const rows = useMemo(() => messages.slice().reverse(), [messages]);
@@ -465,7 +474,7 @@ export function MessageList({
             newer={rows[index + 1] ?? null}
             isGroup={isGroup}
             accentColor={accentColor}
-            chatService={chatService}
+            chatService={bubbleService}
             hasBackground={hasBackground}
             isLastOutgoing={item.id === lastOutgoingId}
             onRetry={handleRetry}

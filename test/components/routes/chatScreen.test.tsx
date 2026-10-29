@@ -1339,6 +1339,59 @@ describe('ChatScreen — send routing', () => {
     expect(mockCaptured.composer!.onSendAttachments).toBeUndefined();
   });
 
+  it('shows an Apple-relayed RCS chat as RCS but keeps its Mac send route and features', async () => {
+    // macOS 26+ Messages relays an iPhone's RCS thread under an iMessage-shaped `any;-;` guid with
+    // RCS handles. It must LOOK like RCS, yet never pick up the Google-bridge features or route.
+    const appleRcsGuid = 'any;-;+15551234567';
+    mockGuid = appleRcsGuid;
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: true,
+        rcs: true,
+        supports_rcs_epoch_qualified_ids: true,
+        rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+        supports_imessage_attachment_upload: true,
+        supports_imessage_reactions: true,
+        supports_imessage_replies: true,
+        supports_imessage_typing: true,
+        supports_imessage_voice_upload: true,
+        supports_send_contact: true,
+      } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 4, guid: appleRcsGuid, style: 45, participantCount: 1, handleServices: 'RCS' },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+
+    expect(mockCaptured.composer?.placeholder).toBe('RCS Message');
+    expect(mockCaptured.list?.displayService).toBe('RCS');
+    // Routing/retry rules still see the Mac (iMessage) route.
+    expect(mockCaptured.list?.chatService).toBe('iMessage');
+    expect(mockCaptured.composer).toEqual(
+      expect.objectContaining({
+        onSendAttachments: undefined,
+        onPickFiles: undefined,
+        onPickContact: undefined,
+        onStartVoice: undefined,
+        onTyping: undefined,
+      }),
+    );
+    expect(mockCaptured.list?.onSwipeReply).toBeUndefined();
+
+    await run(() => mockCaptured.composer!.onSend('via the Mac'));
+    expect(send).toHaveBeenCalledWith(
+      { chatGuid: appleRcsGuid, text: 'via the Mac' },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+
+    await longPressMessage(makeMsg({ guid: 'apple-rcs-message', text: 'hi' }));
+    expect(mockCaptured.overlay?.selected).toEqual(expect.objectContaining({ canReact: false }));
+  });
+
   it('says a captioned RCS file is over the size limit instead of asking to try again', async () => {
     configureRcsChat({ supports_rcs_text_with_attachment: true });
     const loggerWarn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);

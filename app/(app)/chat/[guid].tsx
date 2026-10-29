@@ -68,7 +68,7 @@ import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { useTypingStore } from '@state/typingStore';
-import { isGroupRow, resolveChatService } from '@utils';
+import { isGroupRow, resolveChatDisplayService, resolveChatService } from '@utils';
 
 // Lazy: expo-audio (native) is only pulled in when the user actually records a voice memo,
 // so the chat opens fine on a build that hasn't linked the module yet.
@@ -124,9 +124,12 @@ function ChatScreenInner({
   const backgroundUri = useChatBackgroundUri(guid);
   const visibleBackgroundUri = accountLease.isCurrent() ? backgroundUri : null;
   const isGroup = header.data ? isGroupRow(header.data) : false;
-  // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
-  // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
+  // The chat's service for send routing and capability gates. Resolved from the participant handle
+  // service (not just the guid prefix) so an SMS-only thread reads SMS.
   const chatService = resolveChatService(guid, header.data?.handleServices);
+  // What the badge, composer placeholder and bubble colours SHOW. Only an RCS chat relayed by the
+  // Mac's Messages app differs: it shows RCS but keeps the Mac route (see resolveChatDisplayService).
+  const displayService = resolveChatDisplayService(guid, header.data?.handleServices);
   const capabilities = useChatCapabilities(guid, header.data, chatService);
   const {
     newChatAvailable,
@@ -719,6 +722,7 @@ function ChatScreenInner({
       messages={messages}
       accentColor={header.data?.customColor}
       chatService={chatService}
+      displayService={displayService}
       hasBackground={hasWallpaper}
       topInset={hasWallpaper ? topBar + BAR_GAP : 0}
       bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
@@ -785,9 +789,9 @@ function ChatScreenInner({
       {shareComposerReady ? (
         <Composer
           placeholder={
-            chatService === 'RCS'
+            displayService === 'RCS'
               ? 'RCS Message'
-              : chatService === 'SMS'
+              : displayService === 'SMS'
                 ? 'Text Message'
                 : 'iMessage'
           }
@@ -973,7 +977,7 @@ function ChatScreenInner({
       <MessageDetailsSheet
         data={details}
         onClose={() => setDetails(null)}
-        chatService={chatService}
+        chatService={displayService}
       />
       {screenEffect.effect ? (
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />

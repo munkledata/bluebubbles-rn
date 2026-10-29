@@ -108,12 +108,44 @@ export function resolveChatService(
   const fromGuid = chatServiceFromGuid(guid);
   if (fromGuid !== 'iMessage') return fromGuid; // null / RCS / real-SMS guid are already correct
   // guid says iMessage — override to SMS only when the handles are present AND unanimously SMS.
+  if (handleServicesAreUnanimously(handleServices, 'SMS')) return 'SMS';
+  return 'iMessage';
+}
+
+function handleServicesAreUnanimously(
+  handleServices: string | null | undefined,
+  service: 'SMS' | 'RCS',
+): boolean {
   const services = (handleServices ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  if (services.length > 0 && services.every((s) => s === 'SMS')) return 'SMS';
-  return 'iMessage';
+  return services.length > 0 && services.every((s) => s === service);
+}
+
+/**
+ * The service to SHOW for a chat: its badge, colours, composer placeholder and the inbox's service
+ * filter. Identical to `resolveChatService` except for one case: an RCS conversation that the Mac's
+ * own Messages app relays from a paired iPhone (macOS 26+). chat.db stores those under an
+ * iMessage-shaped guid (`any;-;+1555…`, `any;+;…` for groups) and links them to handles whose
+ * service is 'RCS'. Every linked handle being 'RCS' (the same unanimity rule as the SMS override
+ * above) shows the chat as RCS.
+ *
+ * DISPLAY ONLY, by design. In the rest of the app 'RCS' means the Google Messages bridge
+ * (`RCS;-;g1.…` guids): the RCS send route, `rcsAvailable` and the RCS-only actions all key off that
+ * guid. An Apple-relayed chat must keep using the Mac (the route it used before this label existed),
+ * so capability gates and send routing go on calling `resolveChatService`, which still says
+ * 'iMessage' here. That keeps every feature exactly as it was: the iMessage one-to-one/group proofs
+ * already refuse these chats because their handles are not 'iMessage', and the bridge-only RCS
+ * features never match their guid.
+ */
+export function resolveChatDisplayService(
+  guid: string | null | undefined,
+  handleServices: string | null | undefined,
+): 'iMessage' | 'SMS' | 'RCS' | null {
+  const service = resolveChatService(guid, handleServices);
+  if (service === 'iMessage' && handleServicesAreUnanimously(handleServices, 'RCS')) return 'RCS';
+  return service;
 }
 
 /** A loaded, one-to-one iMessage chat with an explicit iMessage participant service. */

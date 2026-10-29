@@ -258,6 +258,57 @@ describe('listChatsForInbox', () => {
     });
   });
 
+  it('files an RCS chat the Mac relays from an iPhone under the RCS service filter', async () => {
+    const t = await createTestDb();
+    await seedChat(t, 'any;-;+15550000001', {
+      participants: ['+15550000001'],
+      style: 45,
+      messages: [{ guid: 'arcs1', text: 'apple rcs direct', date: 500 }],
+    });
+    await seedChat(t, 'any;+;apple-rcs-group', {
+      participants: ['+15550000002', '+15550000003'],
+      style: 43,
+      messages: [{ guid: 'arcs2', text: 'apple rcs group', date: 400 }],
+    });
+    await seedChat(t, 'any;+;mixed-group', {
+      participants: ['+15550000004', 'mixed-imessage@example.test'],
+      style: 43,
+      messages: [{ guid: 'mix1', text: 'mixed', date: 300 }],
+    });
+    await seedChat(t, 'RCS;-;bridge', {
+      participants: ['+15550000005'],
+      style: 45,
+      messages: [{ guid: 'bridge1', text: 'bridge', date: 200 }],
+    });
+    t.raw
+      .prepare(
+        `UPDATE handles SET service = 'RCS'
+          WHERE address IN ('+15550000001', '+15550000002', '+15550000003', '+15550000004')`,
+      )
+      .run();
+    t.raw
+      .prepare(
+        "UPDATE handles SET service = 'iMessage' WHERE address = 'mixed-imessage@example.test'",
+      )
+      .run();
+
+    const guids = async (service: InboxFilters['service']): Promise<string[]> =>
+      (
+        await listChatsForInboxPage(t.db, {
+          limit: 10,
+          filters: { ...DEFAULT_INBOX_FILTERS, service },
+        })
+      ).rows.map((row) => row.guid);
+
+    await expect(guids('rcs')).resolves.toEqual([
+      'any;-;+15550000001',
+      'any;+;apple-rcs-group',
+      'RCS;-;bridge',
+    ]);
+    await expect(guids('imessage')).resolves.toEqual(['any;+;mixed-group']);
+    await expect(guids('sms')).resolves.toEqual([]);
+  });
+
   it('keeps manual pin order stable across activity and growing-prefix pages', async () => {
     const t = await createTestDb();
     await seedChat(t, 'old', {

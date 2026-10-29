@@ -15,7 +15,7 @@ import {
   participantList,
   primaryChatAddress,
   primaryParticipantColor,
-  resolveChatService,
+  resolveChatDisplayService,
   resolveTitle,
 } from '@utils';
 import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
@@ -55,7 +55,7 @@ export function ConversationHeader({
   // Over a wallpaper the bar disappears and each control floats in its own frosted bubble.
   const chip = withAlpha(theme.color.background, 0.62);
   const bubble = translucent ? [styles.bubble, { backgroundColor: chip }] : null;
-  const service = resolveChatService(chatGuid, data?.handleServices);
+  const service = resolveChatDisplayService(chatGuid, data?.handleServices);
   const badge =
     service === 'RCS'
       ? { label: 'RCS', color: theme.color.bubble.rcsBackground }
