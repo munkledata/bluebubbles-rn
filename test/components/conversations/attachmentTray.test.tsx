@@ -66,7 +66,7 @@ jest.mock('expo-file-system/legacy', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import { AttachmentTray } from '@ui/conversations/AttachmentTray';
+import { AttachmentTray, forgetPhotoPromptDismissal } from '@ui/conversations/AttachmentTray';
 // eslint-disable-next-line import/first
 import * as MediaLibrary from 'expo-media-library/legacy';
 // eslint-disable-next-line import/first
@@ -126,6 +126,10 @@ async function openAccessReview(): Promise<void> {
 async function waitForMediaCheckToSettle(): Promise<void> {
   await waitFor(() => expect(screen.queryByLabelText('Review photo and video access')).toBeNull());
 }
+
+beforeEach(() => {
+  forgetPhotoPromptDismissal();
+});
 
 describe('AttachmentTray — always-visible controls', () => {
   it('renders the Camera and Files buttons regardless of permission', async () => {
@@ -212,6 +216,32 @@ describe('AttachmentTray — media library', () => {
     await waitFor(() => expect(requestPerm).toHaveBeenCalledWith(false, ['photo', 'video']));
     await waitFor(() => expect(getAssets).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText('Photos and videos')).toBeNull());
+  });
+
+  it('does not reopen the first-run explanation after Not Now, but keeps it on the access tile', async () => {
+    getPerm.mockResolvedValue({
+      status: 'undetermined',
+      granted: false,
+      canAskAgain: true,
+      accessPrivileges: 'none',
+    });
+    const first = await renderWithTheme(
+      <AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />,
+    );
+    await fireEvent.press(await screen.findByRole('button', { name: 'Not Now' }));
+    await waitFor(() => expect(screen.queryByText('Photos and videos')).toBeNull());
+    await first.unmount();
+
+    // Opening the tray again: no pop-up, and Android's prompt is never launched on its own.
+    await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
+    await waitFor(() => expect(getPerm).toHaveBeenCalledTimes(2));
+    expect(
+      await screen.findByRole('button', { name: 'Review photo and video access' }),
+    ).toBeTruthy();
+    expect(screen.queryByText('Photos and videos')).toBeNull();
+    await openAccessReview();
+    expect(await screen.findByText('Photos and videos')).toBeTruthy();
+    expect(requestPerm).not.toHaveBeenCalled();
   });
 
   it('renders a thumbnail per asset with photo/video-specific labels', async () => {

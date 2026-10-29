@@ -67,6 +67,15 @@ function mimeFromName(name: string, isVideo: boolean): string {
   return map[ext] ?? (isVideo ? 'video/mp4' : 'image/jpeg');
 }
 
+// "Not Now" on the first-run explanation lasts until the app restarts. Android hasn't asked yet, so
+// its status stays undetermined; without this the explanation reopened on every tray open.
+let photoPromptDismissed = false;
+
+/** Test hook: start each test as if the app had just launched. */
+export function forgetPhotoPromptDismissal(): void {
+  photoPromptDismissed = false;
+}
+
 interface AttachmentTrayProps {
   /** Stage a selected device photo/video onto the composer's pending list. */
   onPick: (item: PendingAttachment) => void;
@@ -166,7 +175,7 @@ export function AttachmentTray({
       setMediaPermission(nextState);
       // Explain once, before Android has asked. After the user said no, the access tile offers the
       // same explanation; opening it on every tray open would nag about optional access.
-      if (nextState === 'rationale') setPermissionDialogVisible(true);
+      if (nextState === 'rationale' && !photoPromptDismissed) setPermissionDialogVisible(true);
     } catch (error) {
       if (!isCurrent()) return;
       logger.warn('[attachment-tray] could not check media-library permission', error);
@@ -511,7 +520,10 @@ export function AttachmentTray({
             <View style={styles.dialogActions}>
               {mediaPermission !== 'requesting' ? (
                 <Pressable
-                  onPress={() => setPermissionDialogVisible(false)}
+                  onPress={() => {
+                    if (mediaPermission === 'rationale') photoPromptDismissed = true;
+                    setPermissionDialogVisible(false);
+                  }}
                   style={[
                     styles.dialogButton,
                     { backgroundColor: theme.color.secondaryBackground },
