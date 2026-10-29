@@ -285,6 +285,16 @@
       "upgradeTest": "test/db/migrations/0055_messages_active_send_attempt_index.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 56,
+      "name": "0056_retire_doubled_rcs_local_copies",
+      "task": "OWNER-RCS-OLD-DOUBLES",
+      "branchPr": "fix/rcs-old-double-cleanup",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0056_retire_doubled_rcs_local_copies.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

@@ -1207,4 +1207,88 @@ export const MIGRATIONS: Migration[] = [
          WHERE active_send_attempt_guid IS NOT NULL`,
     ],
   },
+  {
+    // Before server 2.0.38 an RCS text sent from Gator often failed to link to Google's copy of
+    // it, so the chat kept the app's own bubble (still under its temp- guid) next to the server's
+    // copy: the message showed twice. 2.0.38 links new sends; this hides the old leftovers once.
+    // A leftover pairs with a server copy only when each is the other's nearest match: same RCS
+    // chat, both ours, same non-empty text, text-only, within ten minutes. Anything ambiguous stays
+    // visible, so a mistake can only leave a double, never hide a message. The leftover is
+    // tombstoned like a local delete (ledger marker scoped to its chat, date_deleted, and the chat's
+    // sort key recomputed with the chatLatestMessageDateSql rule); the server copy is untouched.
+    name: '0056_retire_doubled_rcs_local_copies',
+    statements: [
+      `CREATE TEMP TABLE m0056_leftovers AS
+       WITH local_copy AS (
+         SELECT m.id, m.guid, m.chat_id, c.guid AS chat_guid, m.text, m.date_created
+           FROM messages m
+           JOIN chats c ON c.id = m.chat_id
+          WHERE substr(c.guid, 1, 6) = 'RCS;-;'
+            AND substr(m.guid, 1, 5) = 'temp-'
+            AND m.is_from_me = 1
+            AND m.send_state = 'sent'
+            AND m.date_deleted IS NULL
+            AND m.date_retracted IS NULL
+            AND m.associated_message_type IS NULL
+            AND COALESCE(m.item_type, 0) = 0
+            AND m.date_created IS NOT NULL
+            AND length(m.text) > 0
+            AND COALESCE(m.has_attachments, 0) = 0
+            AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)
+       ),
+       candidate AS (
+         SELECT l.id AS local_id, l.guid AS local_guid, l.chat_id, l.chat_guid, s.id AS server_id,
+                abs(s.date_created - l.date_created) AS gap
+           FROM local_copy l
+           JOIN messages s
+             ON s.chat_id = l.chat_id
+            AND s.text = l.text
+            AND s.is_from_me = 1
+            AND substr(s.guid, 1, 5) <> 'temp-'
+            AND s.date_deleted IS NULL
+            AND s.associated_message_type IS NULL
+            AND s.date_created IS NOT NULL
+            AND abs(s.date_created - l.date_created) <= 600000
+            AND COALESCE(s.has_attachments, 0) = 0
+            AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = s.id)
+       ),
+       ranked AS (
+         SELECT *,
+                ROW_NUMBER() OVER (PARTITION BY local_id ORDER BY gap, server_id) AS local_rank,
+                ROW_NUMBER() OVER (PARTITION BY server_id ORDER BY gap, local_id) AS server_rank
+           FROM candidate
+       )
+       SELECT local_id, local_guid, chat_id, chat_guid
+         FROM ranked
+        WHERE local_rank = 1 AND server_rank = 1`,
+      `INSERT INTO message_deletion_ledger (guid, date_deleted, chat_guid)
+       SELECT local_guid, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER), chat_guid
+         FROM m0056_leftovers
+        WHERE true
+       ON CONFLICT (guid) DO UPDATE
+          SET date_deleted = MAX(message_deletion_ledger.date_deleted, excluded.date_deleted),
+              chat_guid = COALESCE(message_deletion_ledger.chat_guid, excluded.chat_guid)
+        WHERE message_deletion_ledger.chat_guid IS NULL
+           OR message_deletion_ledger.chat_guid = excluded.chat_guid`,
+      `UPDATE messages
+          SET date_deleted = (
+                SELECT l.date_deleted
+                  FROM message_deletion_ledger l
+                 WHERE l.guid = messages.guid
+                   AND l.chat_guid = (SELECT c.guid FROM chats c WHERE c.id = messages.chat_id)
+              )
+        WHERE id IN (SELECT local_id FROM m0056_leftovers)
+          AND date_deleted IS NULL`,
+      `UPDATE chats
+          SET latest_message_date = COALESCE(
+                (SELECT MAX(sm.date_created) FROM messages sm
+                  WHERE sm.chat_id = chats.id AND sm.date_deleted IS NULL
+                    AND sm.associated_message_type IS NULL),
+                (SELECT MAX(sm.date_created) FROM messages sm
+                  WHERE sm.chat_id = chats.id AND sm.date_deleted IS NULL)
+              )
+        WHERE id IN (SELECT DISTINCT chat_id FROM m0056_leftovers)`,
+      `DROP TABLE m0056_leftovers`,
+    ],
+  },
 ];
