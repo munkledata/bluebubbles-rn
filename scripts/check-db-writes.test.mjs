@@ -3299,7 +3299,10 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
     if (finding.path === 'app/(app)/new-chat.tsx') {
       return (
         finding.target !== 'src/services/chatActions.ts#createNewChat' &&
-        finding.target !== 'app/(app)/new-chat.tsx#NewChatScreen.onStart'
+        finding.target !== 'app/(app)/new-chat.tsx#NewChatScreen.onStart' &&
+        // The RCS find-or-create path never runs for a share (new-chat.tsx onStart).
+        finding.target !== 'src/services/chatActions.ts#findOrCreateRcsChat' &&
+        finding.target !== 'app/(app)/new-chat.tsx#NewChatScreen.startInFoundRcsChat'
       );
     }
     return false;
@@ -7437,8 +7440,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
       'app/(app)/new-chat.tsx#NewChatScreen.onStart.<callback:aa379435cb>:mutator-call:f07a3220abc4',
       'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:a5c83a9ee95e',
+      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:c822d7410122',
       'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6c241088f98',
       'app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3',
+      'app/(app)/new-chat.tsx#NewChatScreen.startInFoundRcsChat:mutator-call:3ac19249078d',
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4f80cbb6f44f',
       'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
@@ -7562,7 +7567,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 129);
+  assert.equal(selected.length, 131);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
