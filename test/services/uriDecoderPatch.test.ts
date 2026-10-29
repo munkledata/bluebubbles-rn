@@ -33,6 +33,10 @@ describe('compatible URI decoder security patch', () => {
     ['tail%G%', 'tail%G%'],
     ['%84%D7%25%88%90', '%84%D7%%88%90'],
     ['%20%20%25%80', '  %%80'],
+    // GHSA-qr28-fpjm-wq7f (upstream 0.5.1): runs decode in one pass and are never decoded again.
+    ['%41%FE%FF', 'A\uFFFD\uFFFD'],
+    ['%25C2%zz', '%C2%zz'],
+    ['%25%41%zz', '%A%zz'],
   ])('decodes %s without recombining malformed percent separators', (input, expected) => {
     expect(decode(input)).toBe(expected);
   });
@@ -79,6 +83,15 @@ describe('compatible URI decoder security patch', () => {
         assert.equal(decode('%C3%41'.repeat(count)), '%C3A'.repeat(count));
         assert.equal(decode('%F0%9F%98%80%FF'.repeat(count)), '😀%FF'.repeat(count));
       }
+      // Many DISTINCT percent-encoded runs plus a malformed tail: the pre-0.5.1 replace loop was
+      // quadratic here (about 28 s on a dev Mac); single-pass decoding takes tens of milliseconds.
+      let distinctRuns = '';
+      for (let index = 0; index < 32000; index++) {
+        const high = Math.floor(index / 256).toString(16).padStart(2, '0');
+        const low = (index % 256).toString(16).padStart(2, '0');
+        distinctRuns += '%' + high + '%' + low + 'x';
+      }
+      decode(distinctRuns + '%zz');
       process.stdout.write('bounded malformed decoding passed');
     `,
         decodePath,

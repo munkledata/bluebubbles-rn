@@ -1,8 +1,8 @@
 diff --git a/node_modules/decode-uri-component/index.js b/node_modules/decode-uri-component/index.js
-index 24e7db0..1826ff5 100644
+index 24e7db0..150e1fb 100644
 --- a/node_modules/decode-uri-component/index.js
 +++ b/node_modules/decode-uri-component/index.js
-@@ -1,42 +1,123 @@
+@@ -1,80 +1,144 @@
 +// Security backport: upstream decode-uri-component v0.5.0 / fa479da.
 +// Preserve the 0.2.2 CommonJS export and plus-to-space behavior; see adjacent MIT license.
  'use strict';
@@ -22,17 +22,14 @@ index 24e7db0..1826ff5 100644
 +function parsePercentByte(input, position) {
 +	if (input.codePointAt(position) !== 37 || position + 3 > input.length) {
 +		return;
- 	}
- 
--	if (components.length === 1) {
--		return components;
++	}
++
 +	const digits = input.slice(position + 1, position + 3);
 +
 +	if (!hexPair.test(digits)) {
 +		return;
- 	}
- 
--	split = split || 1;
++	}
++
 +	return {byte: Number.parseInt(digits, 16), next: position + 3};
 +}
 +
@@ -43,32 +40,35 @@ index 24e7db0..1826ff5 100644
 +function utf8SequenceLength(byte) {
 +	if (byte <= 0x7F) {
 +		return 1;
+ 	}
+ 
+-	if (components.length === 1) {
+-		return components;
++	// Start at 0xC2 to exclude overlong 2-byte encodings (0xC0/0xC1).
++	if (byte >= 0xC2 && byte <= 0xDF) {
++		return 2;
+ 	}
+ 
+-	split = split || 1;
++	if (byte >= 0xE0 && byte <= 0xEF) {
++		return 3;
 +	}
  
 -	// Split the array in 2 parts
 -	var left = components.slice(0, split);
 -	var right = components.slice(split);
-+	// Start at 0xC2 to exclude overlong 2-byte encodings (0xC0/0xC1).
-+	if (byte >= 0xC2 && byte <= 0xDF) {
-+		return 2;
-+	}
- 
--	return Array.prototype.concat.call([], decodeComponents(left), decodeComponents(right));
-+	if (byte >= 0xE0 && byte <= 0xEF) {
-+		return 3;
-+	}
-+
 +	if (byte >= 0xF0 && byte <= 0xF4) {
 +		return 4;
 +	}
 +
 +	return 0;
- }
++}
  
+-	return Array.prototype.concat.call([], decodeComponents(left), decodeComponents(right));
 +function isContinuationByte(byte) {
 +	return byte >= 0x80 && byte <= 0xBF;
-+}
-+
+ }
+ 
 +/**
 + * Decode as much of `input` as possible without throwing.
 + *Scans left-to-right in O(n), decoding valid UTF-8 runs and leaving the rest literal.
@@ -88,33 +88,70 @@ index 24e7db0..1826ff5 100644
 +				position++;
 +				continue;
 +			}
-+
+ 
+-		for (var i = 1; i < tokens.length; i++) {
+-			input = decodeComponents(tokens, i).join('');
 +			const firstByte = parsePercentByte(input, position);
-+
+ 
+-			tokens = input.match(singleMatcher) || [];
+-		}
 +			// `%` not followed by two hex digits (e.g. `%` or `%G`).
 +			if (!firstByte) {
 +				output += input.charAt(position);
 +				position++;
 +				continue;
 +			}
-+
+ 
+-		return input;
+-	}
+-}
 +			const sequenceLength = utf8SequenceLength(firstByte.byte);
-+
+ 
+-function customDecodeURIComponent(input) {
+-	// Keep track of all the replacements and prefill the map with the `BOM`
+-	var replaceMap = {
+-		'%FE%FF': '\uFFFD\uFFFD',
+-		'%FF%FE': '\uFFFD\uFFFD'
+-	};
+-
+-	var match = multiMatcher.exec(input);
+-	while (match) {
+-		try {
+-			// Decode as big chunks as possible
+-			replaceMap[match[0]] = decodeURIComponent(match[0]);
+-		} catch (err) {
+-			var result = decode(match[0]);
+-
+-			if (result !== match[0]) {
+-				replaceMap[match[0]] = result;
 +			// Continuation byte or invalid lead byte — emit one `%XX` literally.
 +			if (sequenceLength === 0) {
++				var pair = input.slice(position, position + 6);
++
++				// UTF-16 BOM byte pairs become two replacement characters.
++				if (pair === '%FE%FF' || pair === '%FF%FE') {
++					output += '\uFFFD\uFFFD';
++					position += 6;
++					continue;
++				}
++
 +				output += input.slice(position, position + 3);
 +				position += 3;
 +				continue;
-+			}
+ 			}
+-		}
  
--		for (var i = 1; i < tokens.length; i++) {
--			input = decodeComponents(tokens, i).join('');
+-		match = multiMatcher.exec(input);
+-	}
 +			let end = firstByte.next;
 +			let validSequence = true;
-+
+ 
+-	// Add `%C2` at the end of the map to make sure it does not replace the combinator before everything else
+-	replaceMap['%C2'] = '\uFFFD';
 +			for (let index = 1; index < sequenceLength; index++) {
 +				const nextByte = parsePercentByte(input, end);
-+
+ 
+-	var entries = Object.keys(replaceMap);
 +				if (!nextByte || !isContinuationByte(nextByte.byte)) {
 +					validSequence = false;
 +					break;
@@ -122,7 +159,11 @@ index 24e7db0..1826ff5 100644
 +
 +				end = nextByte.next;
 +			}
-+
+ 
+-	for (var i = 0; i < entries.length; i++) {
+-		// Replace all decoded components
+-		var key = entries[i];
+-		input = input.replace(new RegExp(key, 'g'), replaceMap[key]);
 +			if (validSequence) {
 +				const encodedSequence = input.slice(position, end);
 +
@@ -134,15 +175,26 @@ index 24e7db0..1826ff5 100644
 +					// Invalid UTF-8 despite correct structure — emit the first byte literally.
 +				}
 +			}
- 
--			tokens = input.match(singleMatcher) || [];
++
 +			// Missing continuation bytes or decode failure — emit the first byte literally.
-+			output += input.slice(position, position + 3);
++			var literal = input.slice(position, position + 3);
++
++			// A truncated `%C2` becomes a replacement character.
++			output += literal === '%C2' ? '\uFFFD' : literal;
 +			position += 3;
- 		}
- 
--		return input;
++		}
++
 +		return output;
  	}
++}
+ 
+-	return input;
++// Security backport: upstream decode-uri-component v0.5.1 / fad01d6 (GHSA-qr28-fpjm-wq7f).
++function customDecodeURIComponent(input) {
++	// Decode each percent-encoded run in place in a single pass. Decoded output is never rescanned.
++	return input.replace(multiMatcher, function (run) {
++		return decode(run);
++	});
  }
  
+ module.exports = function (encodedURI) {
