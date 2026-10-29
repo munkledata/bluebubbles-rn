@@ -746,8 +746,12 @@ export default function ServerManagementScreen(): React.JSX.Element {
           ) : (
             <>
               <InfoRow label="Messages" value={statVal(totals?.messages)} />
+              <InfoRow label="Chats" value={statVal(totals?.chats)} />
+              <InfoRow label="People" value={statVal(totals?.handles)} />
+              <InfoRow label="Attachments" value={statVal(totals?.attachments)} />
               <InfoRow label="Photos" value={statVal(totals?.images)} />
               <InfoRow label="Videos" value={statVal(totals?.videos)} />
+              <InfoRow label="Locations" value={statVal(totals?.locations)} />
               {statsError ? (
                 <View style={styles.row}>
                   <Text style={[styles.errorText, { color: theme.color.destructive }]}>

@@ -92,8 +92,12 @@ export type UpdateCheck = z.infer<typeof UpdateCheck>;
 
 export interface StatTotals {
   messages: number;
+  chats: number;
+  handles: number;
+  attachments: number;
   images: number;
   videos: number;
+  locations: number;
 }
 
 // Mirrors the server's StatsSnapshotV1 field for field: every server with this route (2.0.15+)
@@ -114,7 +118,7 @@ const StatisticsSnapshot = z
   })
   .strict();
 
-/** All-time message/photo/video totals from the supported typed statistics route. */
+/** All-time totals (messages, chats, people, attachments, photos, videos, locations). */
 export async function serverStatTotals(
   http: HttpClient,
   signal?: AbortSignal,
@@ -127,8 +131,12 @@ export async function serverStatTotals(
   );
   return {
     messages: snapshot.messageCount,
+    chats: snapshot.chatCount,
+    handles: snapshot.handleCount,
+    attachments: snapshot.attachmentCount,
     images: snapshot.imageCount,
     videos: snapshot.videoCount,
+    locations: snapshot.locationCount,
   };
 }
 

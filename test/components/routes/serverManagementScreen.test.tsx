@@ -17,7 +17,14 @@
 import React from 'react';
 import { AccessibilityInfo, Share } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
+import {
+  renderWithTheme,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  within,
+} from '../support/renderWithTheme';
 
 const mockPush = jest.fn();
 const mockBack = jest.fn();
@@ -1069,10 +1076,18 @@ describe('ServerManagementScreen — statistics query', () => {
   it('renders the stat totals', async () => {
     await renderScreen();
     expect(await screen.findByText('42')).toBeTruthy(); // messages
-    expect(screen.getByText('6')).toBeTruthy(); // photos
-    expect(screen.getByText('2')).toBeTruthy(); // videos
-    for (const retiredLabel of ['Chats', 'iMessage Numbers', 'Attachments', 'Locations']) {
-      expect(screen.queryByText(retiredLabel)).toBeNull();
+    // Each of the seven totals sits on the row its label names.
+    for (const [label, value] of [
+      ['Messages', TOTALS.messages],
+      ['Chats', TOTALS.chats],
+      ['People', TOTALS.handles],
+      ['Attachments', TOTALS.attachments],
+      ['Photos', TOTALS.images],
+      ['Videos', TOTALS.videos],
+      ['Locations', TOTALS.locations],
+    ] as const) {
+      const row = screen.getByText(label).parent!;
+      expect(within(row).getByText(value.toLocaleString())).toBeTruthy();
     }
   });
 

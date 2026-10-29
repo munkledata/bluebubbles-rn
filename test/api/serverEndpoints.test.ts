@@ -129,11 +129,19 @@ describe('serverStatTotals uses the typed statistics route', () => {
     bestFriend: '+15555550123',
   };
 
-  it('maps only Messages, Photos, and Videos from an all-time snapshot', async () => {
+  it('maps all seven totals from an all-time snapshot', async () => {
     mockKy.mockResolvedValueOnce(envelope(allTimeSnapshot));
 
     const res = await serverApi.serverStatTotals(client());
-    expect(res).toEqual({ messages: 1234, images: 42, videos: 7 });
+    expect(res).toEqual({
+      messages: 1234,
+      chats: 56,
+      handles: 78,
+      attachments: 90,
+      images: 42,
+      videos: 7,
+      locations: 3,
+    });
     expect(mockKy).toHaveBeenCalledTimes(1);
 
     const [url, init] = mockKy.mock.calls[0] as [string, { method: string; json: unknown }];
