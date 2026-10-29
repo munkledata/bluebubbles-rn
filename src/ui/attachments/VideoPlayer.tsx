@@ -43,6 +43,9 @@ export function VideoPlayer({
   const upload = useUploadStore((s) => s.byGuid[att.guid]);
   const [playing, setPlaying] = useState(false);
   const [thumb, setThumb] = useState<VideoThumbnail | null>(null);
+  const [measuredAspect, setMeasuredAspect] = useState<{ guid: string; aspect: number } | null>(
+    null,
+  );
 
   const player = useVideoPlayer(att.localPath ?? null, (p) => {
     p.loop = false;
@@ -71,11 +74,24 @@ export function VideoPlayer({
   // cancel-on-unmount so a late resolve doesn't setState on a recycled row.
   useEffect(() => {
     if (!att.localPath) return;
+    const guid = att.guid;
     let cancelled = false;
     void (async () => {
       try {
         const thumbs = await player.generateThumbnailsAsync([0], { maxWidth: 600 });
-        if (!cancelled && thumbs[0]) setThumb(thumbs[0]);
+        const first = thumbs[0];
+        if (cancelled || !first) return;
+        setThumb(first);
+        // The poster is the video's first frame at its own shape, so it sizes a video that has no
+        // recorded width/height (every RCS video) instead of the portrait guess below.
+        if (first.width > 0 && first.height > 0) {
+          const posterAspect = first.width / first.height;
+          setMeasuredAspect((current) =>
+            current?.guid === guid && current.aspect === posterAspect
+              ? current
+              : { guid, aspect: posterAspect },
+          );
+        }
       } catch {
         // player released, asset not ready, or codec unsupported — keep the gray poster + play badge.
       }
@@ -83,11 +99,15 @@ export function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [player, att.localPath]);
+  }, [player, att.localPath, att.guid]);
 
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;
-  const aspect = att.width && att.height ? att.width / att.height : 0.78;
+  // The record's size wins. RCS videos arrive without one, so the poster's own shape (measured
+  // when it is generated, keyed to this attachment because list rows are recycled) replaces the
+  // portrait guess instead of cropping a landscape video to its middle.
+  const recordAspect = att.width && att.height ? att.width / att.height : null;
+  const aspect = recordAspect ?? (measuredAspect?.guid === att.guid ? measuredAspect.aspect : 0.78);
   const width = Math.max(120, Math.min(att.width ?? maxW, maxW));
   const height = Math.max(80, Math.min(width / aspect, win.height * 0.55));
 

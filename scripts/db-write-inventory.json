@@ -27876,7 +27876,7 @@
     {
       "id": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer.onPress:mutator-call:9e1d5a50a2f3",
       "path": "src/ui/attachments/VideoPlayer.tsx",
-      "line": 107,
+      "line": 127,
       "symbol": "VideoPlayer.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27889,7 +27889,7 @@
     {
       "id": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer:mutator-reference:53bdc004099c",
       "path": "src/ui/attachments/VideoPlayer.tsx",
-      "line": 124,
+      "line": 144,
       "symbol": "VideoPlayer",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer.onPress",
