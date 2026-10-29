@@ -1417,8 +1417,8 @@ describe('monotonic receipt/edit/unsend columns survive a STALE re-upsert', () =
     expect(errorOf('f1')).toBe(0);
     await upsert({ guid: 'f1', isFromMe: true, error: 22 });
     expect(errorOf('f1')).toBe(22);
-    // A later receipt-shaped copy (no `error` key) or an explicit 0 must not hide the failure.
-    await upsert({ guid: 'f1', isFromMe: true, dateRead: 900 });
+    // A later copy without success evidence (no `error` key) or an explicit 0 must not hide it.
+    await upsert({ guid: 'f1', isFromMe: true, isSent: true });
     await upsert({ guid: 'f1', isFromMe: true, error: 0 });
     expect(errorOf('f1')).toBe(22);
 
@@ -1427,6 +1427,47 @@ describe('monotonic receipt/edit/unsend columns survive a STALE re-upsert', () =
     await upsert({ guid: 'f3', isFromMe: false, error: 4, handle: { address: 'b@x.com' } });
     await upsert({ guid: 'f4', isFromMe: true, error: 10_001 });
     expect([errorOf('f2'), errorOf('f3'), errorOf('f4')]).toEqual([4, 0, 0]);
+  });
+
+  // A server code clears only on proof the send went through after all (e.g. Try Again on the Mac).
+  it('a later delivered or read copy clears a server failure code, and only that kind', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    const rcsChatId = (
+      await upsertChats(db, [Chat.parse({ guid: 'RCS;-;+15550001111' })], new Map())
+    ).get('RCS;-;+15550001111')!;
+    const errorOf = (guid: string): number =>
+      (raw.prepare('SELECT error v FROM messages WHERE guid = ?').get(guid) as { v: number }).v;
+    const upsert = (fields: Record<string, unknown>, inChat = chatId) =>
+      upsertMessages(
+        db,
+        [Message.parse({ text: 'hi', dateCreated: 800, isFromMe: true, ...fields })],
+        () => inChat,
+        new Map(),
+      );
+
+    // Server code, then a delivered copy: cleared. A read copy clears too.
+    await upsert({ guid: 'c1', error: 22 });
+    await upsert({ guid: 'c1', dateDelivered: 900 });
+    await upsert({ guid: 'c2', error: 22 });
+    await upsert({ guid: 'c2', dateRead: 950 });
+    // A copy with no success evidence keeps it.
+    await upsert({ guid: 'c3', error: 22 });
+    await upsert({ guid: 'c3', isSent: true });
+    expect([errorOf('c1'), errorOf('c2'), errorOf('c3')]).toEqual([0, 0, 22]);
+
+    // The outgoing layer's own failure (send_state 'error') and the app's 10000+ codes stay.
+    await upsert({ guid: 'c4' });
+    await markMessageSendError(db, 'c4', 22);
+    await upsert({ guid: 'c4', dateDelivered: 900 });
+    await upsert({ guid: 'c5' });
+    raw.prepare("UPDATE messages SET error = 10010 WHERE guid = 'c5'").run();
+    await upsert({ guid: 'c5', dateDelivered: 900 });
+    // RCS is unchanged: a stored code in an RCS chat is never cleared from a message copy.
+    await upsert({ guid: 'c6' }, rcsChatId);
+    raw.prepare("UPDATE messages SET error = 22 WHERE guid = 'c6'").run();
+    await upsert({ guid: 'c6', dateDelivered: 900 }, rcsChatId);
+    expect([errorOf('c4'), errorOf('c5'), errorOf('c6')]).toEqual([22, 10010, 22]);
   });
 });
 

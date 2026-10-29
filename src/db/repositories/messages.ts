@@ -774,15 +774,26 @@ export function upsertMessagesWithinTransaction(
           // The extension identity is immutable for a message. Preserve it when a receipt-shaped
           // update omits the field, while allowing a later hydrated sync to fill an earlier NULL.
           balloonBundleId: sql`COALESCE(excluded.balloon_bundle_id, ${messages.balloonBundleId})`,
-          // NOTE — `error` only ever moves TO a server failure here, never back to 0. A newer server
-          // sends a non-zero `error` when Apple marks one of our sends failed (an iMessage that was
-          // not delivered), which turns the bubble into the failed "iMessage Error (Code N)" with
-          // Try Again. Every other copy has excluded.error = 0 (the key is absent on ordinary
-          // messages, older servers, and RCS), and taking that 0 would ERASE a real failure: the
-          // next receipt or re-sync would degrade the bubble to "Sent" or the generic "Message
-          // Failed to Send". Clearing stays with the send/outgoing layer, which sets the column
-          // (markMessageSendError) and clears it on every promotion/retry.
-          error: sql`CASE WHEN excluded.error > 0 THEN excluded.error ELSE ${messages.error} END`,
+          // NOTE — `error`. A newer server sends a non-zero `error` when Apple marks one of our
+          // sends failed (an iMessage that was not delivered); it turns the bubble into the failed
+          // "iMessage Error (Code N)" with Try Again. Every other copy has excluded.error = 0 (the
+          // key is absent on ordinary messages, older servers, and RCS), so 0 alone never clears a
+          // stored failure: a stale receipt or re-sync must not hide it. A stored SERVER code
+          // (1..9999) clears only on proof the send went through after all: a later copy of our
+          // own message with a delivered or read date (for example a Try Again on the Mac). It
+          // stays when the send/outgoing layer owns the failure (send_state 'error', set by
+          // markMessageSendError, which also clears it on every promotion/retry), for the app's
+          // own 10000+ codes, and in RCS chats, whose failures arrive only as message-send-error.
+          error: sql`CASE
+          WHEN excluded.error > 0 THEN excluded.error
+          WHEN ${messages.error} BETWEEN 1 AND 9999
+            AND ${messages.sendState} IS NOT 'error'
+            AND excluded.is_from_me = 1
+            AND (excluded.date_delivered IS NOT NULL OR excluded.date_read IS NOT NULL)
+            AND NOT EXISTS (SELECT 1 FROM chats rc WHERE rc.id = excluded.chat_id AND rc.guid LIKE 'RCS;-;%')
+            THEN 0
+          ELSE ${messages.error}
+        END`,
           //
           // NOTE — `date_deleted` is deliberately never taken from the wire model: MessageV1 has no
           // deletion field. It has three stored sources: genuine per-message events in
