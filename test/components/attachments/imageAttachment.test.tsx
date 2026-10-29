@@ -58,6 +58,7 @@ jest.mock('expo-image', () => {
         testID: 'expo-image',
         source: props.source,
         placeholder: props.placeholder,
+        onLoad: props.onLoad,
       }),
   };
 });
@@ -510,5 +511,67 @@ describe('ImageAttachment — accessibility label', () => {
       />,
     );
     expect(await screen.findByLabelText('a smiling cat wearing a top hat')).toBeTruthy();
+  });
+});
+
+describe('ImageAttachment — size when the record has none', () => {
+  const wrapStyle = (): { width: number; height: number } => {
+    const style = StyleSheet.flatten(screen.getByTestId('expo-image').parent!.props.style) as {
+      width: number;
+      height: number;
+    };
+    return { width: style.width, height: style.height };
+  };
+  const load = async (width: number, height: number): Promise<void> => {
+    await act(async () => {
+      screen.getByTestId('expo-image').props.onLoad({
+        cacheType: 'none',
+        source: { url: 'file:///data/p.png', width, height, mediaType: 'image/png' },
+      });
+    });
+  };
+
+  it('takes a landscape picture’s own shape once it loads instead of a tall crop (RCS has no size)', async () => {
+    useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
+    await renderWithTheme(
+      <ImageAttachment
+        att={makeImg({ guid: 'rcs-wide', localPath: '/data/p.png', width: null, height: null })}
+        isFromMe
+        showTail
+      />,
+    );
+    // Before the picture loads, the box keeps the portrait guess.
+    expect(wrapStyle().height).toBeGreaterThan(wrapStyle().width);
+
+    await load(640, 400);
+
+    const { width, height } = wrapStyle();
+    expect(width / height).toBeCloseTo(1.6, 1);
+  });
+
+  it('keeps the recorded size even when the loaded picture reports another shape', async () => {
+    useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: '/data/p.jpg' })} isFromMe showTail />,
+    );
+    const before = wrapStyle();
+
+    await load(640, 400);
+
+    expect(wrapStyle()).toEqual(before);
+  });
+
+  it('never lends one attachment’s measured shape to the next one shown in the same row', async () => {
+    useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
+    const first = makeImg({ guid: 'first', localPath: '/data/a.png', width: null, height: null });
+    const second = makeImg({ guid: 'second', localPath: '/data/b.png', width: null, height: null });
+    const view = await renderWithTheme(<ImageAttachment att={first} isFromMe showTail />);
+    const portrait = wrapStyle();
+    await load(640, 400);
+    expect(wrapStyle().width / wrapStyle().height).toBeCloseTo(1.6, 1);
+
+    // A recycled list row now shows another unsized picture: back to the guess until it loads.
+    await view.rerender(<ImageAttachment att={second} isFromMe showTail />);
+    expect(wrapStyle()).toEqual(portrait);
   });
 });

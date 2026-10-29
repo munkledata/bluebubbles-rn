@@ -1,4 +1,4 @@
-import { Image } from 'expo-image';
+import { Image, type ImageLoadEventData } from 'expo-image';
 import * as Network from 'expo-network';
 import { useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
@@ -37,6 +37,10 @@ export function ImageAttachment({
 }: ImageAttachmentProps): React.JSX.Element {
   const theme = useTheme();
   const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
+  const [measuredAspect, setMeasuredAspect] = React.useState<{
+    guid: string;
+    aspect: number;
+  } | null>(null);
   const router = useRouter();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const failure = useDownloadStore((s) => s.failure[att.guid]);
@@ -73,7 +77,11 @@ export function ImageAttachment({
 
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;
-  const aspect = att.width && att.height ? att.width / att.height : 0.78;
+  // The record's size wins. RCS pictures and some picked files arrive without one, so the decoded
+  // image's own shape (measured on load, keyed to this attachment because list rows are recycled)
+  // replaces the portrait guess instead of cropping a landscape picture to its middle.
+  const recordAspect = att.width && att.height ? att.width / att.height : null;
+  const aspect = recordAspect ?? (measuredAspect?.guid === att.guid ? measuredAspect.aspect : 0.78);
   // A gallery grid cell (cellSize set) wins over the inline-Genmoji size — a Genmoji inside a
   // multi-attachment grid must fill its square cell, not shrink to emoji size and break the grid.
   // Genmoji size applies only to a standalone Genmoji (no cellSize).
@@ -106,6 +114,19 @@ export function ImageAttachment({
   const onPress = (): void => {
     if (att.localPath) router.push(`/media/${encodeURIComponent(att.guid)}`);
     else void download(att, 'manual', accountLease);
+  };
+
+  const onImageLoad = (event: ImageLoadEventData): void => {
+    if (recordAspect !== null || cellSize != null || isGenmoji) return;
+    const { width: loadedWidth, height: loadedHeight } = event.source;
+    if (!(loadedWidth > 0 && loadedHeight > 0)) return;
+    const loadedAspect = loadedWidth / loadedHeight;
+    const guid = att.guid;
+    setMeasuredAspect((current) =>
+      current?.guid === guid && current.aspect === loadedAspect
+        ? current
+        : { guid, aspect: loadedAspect },
+    );
   };
 
   return (
@@ -152,6 +173,7 @@ export function ImageAttachment({
         placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
         contentFit={isGenmoji ? 'contain' : 'cover'}
         transition={150}
+        onLoad={onImageLoad}
         style={styles.img}
       />
       {/* Upload wins over every download state: a file we are SENDING came from this device, so it

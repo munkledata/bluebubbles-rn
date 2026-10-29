@@ -27785,7 +27785,7 @@
     {
       "id": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment.<callback:3ce78bcbe6>:mutator-call:d25f31bcd5a6",
       "path": "src/ui/attachments/ImageAttachment.tsx",
-      "line": 62,
+      "line": 66,
       "symbol": "ImageAttachment.<callback:3ce78bcbe6>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27798,7 +27798,7 @@
     {
       "id": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment.onPress:mutator-call:75c9a2b2048c",
       "path": "src/ui/attachments/ImageAttachment.tsx",
-      "line": 108,
+      "line": 116,
       "symbol": "ImageAttachment.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27811,7 +27811,7 @@
     {
       "id": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment:mutator-reference:82a46914061d",
       "path": "src/ui/attachments/ImageAttachment.tsx",
-      "line": 113,
+      "line": 134,
       "symbol": "ImageAttachment",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment.onPress",
