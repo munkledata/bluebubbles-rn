@@ -32,5 +32,7 @@ export const ChatSummary = z.object({
   backgroundChannelGuid: z.string().nullish(),
   /** A group's own photo id. Declared here for the same reason as `backgroundChannelGuid`. */
   groupPhotoGuid: z.string().nullish(),
+  /** Apple's screening flag (see `Chat.isFiltered`). Declared for the same reason as above. */
+  isFiltered: z.boolean().nullish(),
 });
 export type ChatSummary = z.infer<typeof ChatSummary>;

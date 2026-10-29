@@ -1300,4 +1300,15 @@ export const MIGRATIONS: Migration[] = [
       `ALTER TABLE chats ADD COLUMN group_photo_uri TEXT`,
     ],
   },
+  {
+    // Apple's Messages screening flags, sent only by a server that advertises
+    // supports_apple_screening. Nullable: null means unknown, so an older server never reads as
+    // "not filtered". The partial index keeps the Unknown Senders spam check cheap.
+    name: '0058_apple_screening_flags',
+    statements: [
+      `ALTER TABLE chats ADD COLUMN apple_filtered INTEGER`,
+      `ALTER TABLE messages ADD COLUMN apple_spam INTEGER`,
+      `CREATE INDEX messages_apple_spam_chat_idx ON messages (chat_id) WHERE apple_spam = 1`,
+    ],
+  },
 ];

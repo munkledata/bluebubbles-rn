@@ -676,6 +676,21 @@ Accepted residuals:
   behavior is fail-closed: an existing tombstone wins unless a future protocol supplies an explicit
   restore signal. These are post-remediation designs, not unrecorded completion gaps.
 
+## 🟡 App source ready (2026-10-29) — Apple screening flags (`isFiltered` / `isSpam`)
+
+- **Server** (branch `feat/expose-filtered-and-spam`): config `exposeAppleScreening` (default OFF) adds
+  `ChatV1.isFiltered` (Apple's `chat.is_filtered`) and `MessageV1.isSpam` (`message.is_spam`), and
+  advertises `supports_apple_screening` in `/server/info`. While OFF the keys are omitted entirely.
+- **App** (branch `feat/apple-spam-filter`): migration `0058_apple_screening_flags` adds nullable
+  `chats.apple_filtered` and `messages.apple_spam` (null = unknown) plus a partial index. The chat and
+  message upserts store a flag only while the live server info says `supports_apple_screening` and the
+  payload carries a boolean; otherwise they keep the stored value (`COALESCE`). A killed-app push wake
+  has no server info, so it leaves the flags alone.
+- **Behavior**: only while Settings → Filter Unknown Senders is ON, a chat Apple filtered, or holding a
+  stored incoming message Apple flagged as spam, moves to Unknown Senders even when it has a contact,
+  and its notifications are silenced like other unknown senders. With the setting OFF nothing visible
+  changes. Device acceptance against a server with the setting on is still pending.
+
 ## 📱 RCS bridge (Google Messages)
 
 The Gator server's RCS bridge (a `libgm` sidecar) serves RCS chats through the **same frozen v1

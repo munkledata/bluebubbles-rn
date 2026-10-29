@@ -5388,7 +5388,7 @@ function perf02InboxBenchmarkCertificateCandidate({
     sha(routeFile, routeFile) !==
       'ff92c4c0efe0899004d4ac009ada33d152a5961c506fedc0856c3647fb838b00' ||
     sha(hookFile, hookFile) !==
-      'c88fb682529c0b4115645769236bc75129272d3557c013e9b86a1b9193e96bd8' ||
+      'a629df006cfbc55d0ec9938e7b96b591fd739622c93a1a7c912a894e16b67c87' ||
     sha(reactiveFile, reactiveFile) !==
       '052cde3cfd637a3aed40f083910a8fb126f92be445c5ff3650b6fc1be34a406e' ||
     sha(listFile, listFile) !==

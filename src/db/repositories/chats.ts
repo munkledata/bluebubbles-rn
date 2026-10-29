@@ -7,6 +7,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
+import { appleScreeningEmitted, appleScreeningFlagForStorage } from '../appleScreeningCapability';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
 import { getChatIdByGuid } from './chatQueries';
@@ -69,6 +70,7 @@ export function upsertChatsWithinTransaction(
       .where(inArray(kv.key, [...retirementKeyByGuid.values()]));
     const retirementFloorByKey = new Map(retirementRows.map((row) => [row.key, row.value]));
 
+    const screeningEmitted = appleScreeningEmitted();
     const rows = await db
       .insert(chats)
       .values(
@@ -88,6 +90,11 @@ export function upsertChatsWithinTransaction(
             ('backgroundChannelGuid' in c ? c.backgroundChannelGuid : null) ?? null,
           // Server-owned like the background channel: the group photo's id, or null for none.
           groupPhotoGuid: ('groupPhotoGuid' in c ? c.groupPhotoGuid : null) ?? null,
+          // Apple screening: only a server that emits the flag may set it; null = keep stored.
+          appleFiltered: appleScreeningFlagForStorage(
+            'isFiltered' in c ? c.isFiltered : null,
+            screeningEmitted,
+          ),
         })),
       )
       .onConflictDoUpdate({
@@ -102,6 +109,8 @@ export function upsertChatsWithinTransaction(
           // Server-owned → refreshed on re-sync (a changed/removed background propagates).
           syncedBackgroundChannel: sql`excluded.synced_background_channel`,
           groupPhotoGuid: sql`excluded.group_photo_guid`,
+          // Server-owned but OPTIONAL: an absent flag (older server, setting off) is not "false".
+          appleFiltered: sql`COALESCE(excluded.apple_filtered, ${chats.appleFiltered})`,
           // is_pinned, pin_order, is_archived, mute_type, custom_name and custom_color are
           // device-local:
           // SEEDED on first insert from the server, but NOT overwritten on a re-sync — the

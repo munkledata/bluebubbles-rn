@@ -33,6 +33,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
+import { appleScreeningEmitted, appleScreeningFlagForStorage } from '../appleScreeningCapability';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
 import { upsertAttachmentsWithinTransaction } from './attachments';
@@ -527,6 +528,7 @@ export function upsertMessagesWithinTransaction(
       ]),
     );
 
+    const screeningEmitted = appleScreeningEmitted();
     const rows = await db
       .insert(messages)
       .values(
@@ -620,6 +622,8 @@ export function upsertMessagesWithinTransaction(
             // Messages extension identity (Digital Touch, handwriting, third-party apps). NULL
             // when omitted so a lean receipt/re-sync cannot wipe a value learned earlier.
             balloonBundleId: m.balloonBundleId ?? null,
+            // Apple spam flag: only a server that emits it may set it; null = keep stored.
+            appleSpam: appleScreeningFlagForStorage(m.isSpam, screeningEmitted),
           };
         }),
       )
@@ -774,6 +778,8 @@ export function upsertMessagesWithinTransaction(
           // The extension identity is immutable for a message. Preserve it when a receipt-shaped
           // update omits the field, while allowing a later hydrated sync to fill an earlier NULL.
           balloonBundleId: sql`COALESCE(excluded.balloon_bundle_id, ${messages.balloonBundleId})`,
+          // Server-owned but OPTIONAL: an absent flag (older server, setting off) is not "false".
+          appleSpam: sql`COALESCE(excluded.apple_spam, ${messages.appleSpam})`,
           // NOTE — `error`. A newer server sends a non-zero `error` when Apple marks one of our
           // sends failed (an iMessage that was not delivered); it turns the bubble into the failed
           // "iMessage Error (Code N)" with Try Again. Every other copy has excluded.error = 0 (the

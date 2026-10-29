@@ -84,6 +84,8 @@ export const chats = sqliteTable(
     groupPhotoGuid: text('group_photo_guid'),
     /** A group's own photo: local file downloaded for `groupPhotoGuid`. */
     groupPhotoUri: text('group_photo_uri'),
+    /** Apple's `chat.is_filtered` screening flag (server-owned, opt-in). Null = unknown. */
+    appleFiltered: integer('apple_filtered', { mode: 'boolean' }),
     /** Luminance of the effective wallpaper (true = light image → dark overlay text). Null = unknown. */
     backgroundIsLight: integer('background_is_light', { mode: 'boolean' }),
     lastReadMessageGuid: text('last_read_message_guid'),
@@ -338,6 +340,8 @@ export const messages = sqliteTable(
         is_from_me). Paired with isScheduled to hide the "Scheduled" badge once a Send-Later message
         delivers. Nullable (NULL = unknown, e.g. rows synced before this column existed → re-synced). */
     isSent: integer('is_sent', { mode: 'boolean' }),
+    /** Apple's `message.is_spam` flag (server-owned, opt-in). Null = unknown. */
+    appleSpam: integer('apple_spam', { mode: 'boolean' }),
     /** Apple `message_summary_info` (macOS 13+): per-part edit history + unsent parts, stored as a
         JSON TEXT blob (the parsed `{ editedParts?, retractedParts? }` shape). Presence-driven — the
         server emits it only on edited/retracted messages, so NULL on everything else. Powers the
@@ -359,6 +363,10 @@ export const messages = sqliteTable(
     activeSendAttemptIdx: index('messages_active_send_attempt_idx')
       .on(t.activeSendAttemptGuid)
       .where(sql`${t.activeSendAttemptGuid} IS NOT NULL`),
+    // Migration 0058: the Unknown Senders split asks "does this chat hold Apple spam?".
+    appleSpamChatIdx: index('messages_apple_spam_chat_idx')
+      .on(t.chatId)
+      .where(sql`${t.appleSpam} = 1`),
     errorMessageBounded: check(
       'messages_error_message_bounded',
       sql`${t.errorMessage} IS NULL OR (length(${t.errorMessage}) BETWEEN 1 AND 240 AND length(CAST(${t.errorMessage} AS BLOB)) <= 512)`,

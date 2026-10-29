@@ -305,6 +305,16 @@
       "upgradeTest": "test/db/migrations/0057_chat_group_photo.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 58,
+      "name": "0058_apple_screening_flags",
+      "task": "B4-APPLE-SCREENING",
+      "branchPr": "feat/apple-spam-filter",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0058_apple_screening_flags.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }
