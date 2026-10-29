@@ -49,12 +49,27 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.66` / version code `88` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.67` / version code `89` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-10-29 — not a checklist rebind:** **`0.1.66` / code `88`** was built
+**Latest live artifact, 2026-10-29 — not a checklist rebind:** **`0.1.67` / code `89`** was built
+from source `c510df6ff226c9261c8dad8b91cd703e1ba6dff2` (0.1.66 plus migration `0057_chat_group_photo`,
+which brings back group chat photos, a server availability chip on New Message, the app side of RCS
+find-or-create (it stays off until the server reports `supports_rcs_find_or_create_chat`), and the
+removal of a `node_modules` symlink committed by mistake; CI run `40905607781` green) and promoted as
+release commit `9cee2279204f8fbdd1e8bc2d20675f1d0696461a` on local branch `release/android-0.1.67`. Run
+`android-0.1.67-c510df6-20261029172540` produced `gator-release-0.1.67-v89-9cee227.aab`,
+**58,447,443 bytes**, SHA-256 `fe5614ca539e938a0365b3d0992fd3490e8ed7dc87c82b60b4dde8ce0647d472`.
+The clean local production build and validation pass. The owner approved this release directly on
+2026-10-29; the agent submitted it with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.67 v89 fe5614ca539e TO PLAY INTERNAL`; the Maps key came from the login Keychain. Android
+Publisher readback after the 2026-10-29T18:16Z submission confirms Internal release `0.1.67`, code
+`89`, `completed`. The device update and the pending rows in `docs/DEVICE_VERIFICATION_CHECKLIST.md`
+remain open. No task status or frozen v77 checklist row is changed by this Internal release.
+
+**Historical v88 artifact, 2026-10-29:** **`0.1.66` / code `88`** was built
 from source `8140beb8f761cf5a2d3a28f3b04181198ac5d6fd` (0.1.65 plus migration
 `0056_retire_doubled_rcs_local_copies`, which hides old doubled RCS texts left from before server
 2.0.38, and nine fixes from master: a server failure code cleared when the send later went through, an
