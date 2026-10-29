@@ -19,6 +19,7 @@ import {
   scheduleReminder,
   type ReminderScheduler,
 } from '@/services/notifications/remindersService';
+import { ReminderUnavailableError } from '@/services/notifications/reminderErrors';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -359,6 +360,52 @@ describe('scheduleReminder', () => {
     await drain;
     expect(cancelled).toContain(reminderId(5000));
     expect(await listReminders(db)).toEqual([]);
+  });
+
+  it('refuses the phone’s own unlinked copy of an RCS send with a reason the user can read', async () => {
+    const previousSession = useSessionStore.getState();
+    const { db } = await createTestDb();
+    let scheduleCalls = 0;
+    const scheduler: ReminderScheduler = {
+      schedule: async () => {
+        scheduleCalls += 1;
+      },
+      cancel: async () => {},
+    };
+    try {
+      useSessionStore.getState().connected('https://server.test', 'password', rcsInfo(RCS_EPOCH_A));
+      const attempt = scheduleReminder(
+        db,
+        { chatGuid: rcsChatGuid(RCS_EPOCH_A), messageGuid: 'temp-local-copy', scheduledFor: 5_000 },
+        scheduler,
+      );
+
+      await expect(attempt).rejects.toBeInstanceOf(ReminderUnavailableError);
+      await expect(attempt).rejects.toThrow('isn’t linked to the server yet');
+      expect(scheduleCalls).toBe(0);
+      expect(await listReminders(db)).toEqual([]);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
+  it('explains a reminder refused because the RCS pairing changed', async () => {
+    const previousSession = useSessionStore.getState();
+    const { db } = await createTestDb();
+    try {
+      useSessionStore.getState().connected('https://server.test', 'password', rcsInfo(RCS_EPOCH_B));
+      const attempt = scheduleReminder(db, {
+        chatGuid: rcsChatGuid(RCS_EPOCH_A),
+        messageGuid: rcsMessageGuid(RCS_EPOCH_A),
+        scheduledFor: 5_000,
+      });
+
+      await expect(attempt).rejects.toBeInstanceOf(ReminderUnavailableError);
+      await expect(attempt).rejects.toThrow('Google pairing is no longer current');
+      expect(await listReminders(db)).toEqual([]);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
   });
 
   it('cancels a qualified RCS trigger when the provider epoch rotates while native scheduling is pending', async () => {

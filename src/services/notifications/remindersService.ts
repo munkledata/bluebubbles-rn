@@ -14,6 +14,7 @@ import { sessionAccessors } from '@state/sessionStore';
 import { ensureDatabase } from '../databaseControl';
 import { cancelReminderNotification, scheduleReminderNotification } from './notifeeService';
 import { isSafeReminderNotificationId, newReminderNotificationId } from './notificationRouting';
+import { ReminderUnavailableError } from './reminderErrors';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -55,6 +56,13 @@ function captureReminderIdentityGuard(
   const rcsChat = target.chatGuid.startsWith('RCS;-;');
   const rcsMessage = target.messageGuid.startsWith('rcs-');
   if (!rcsChat && !rcsMessage) return () => true;
+  if (rcsChat && !rcsMessage) {
+    // The phone's own copy of an RCS send keeps its temporary id until the server's copy is linked
+    // to it, so there is no server message yet for the reminder to point at.
+    throw new ReminderUnavailableError(
+      'This copy of the message isn’t linked to the server yet, so it can’t have a reminder. If the message shows twice, use the other copy.',
+    );
+  }
   const expectedEpoch = sessionAccessors.rcsProviderEpoch();
   if (
     !rcsChat ||
@@ -63,7 +71,7 @@ function captureReminderIdentityGuard(
     parseRcsChatGuid(target.chatGuid)?.providerEpoch !== expectedEpoch ||
     parseRcsMessageGuid(target.messageGuid)?.providerEpoch !== expectedEpoch
   ) {
-    throw new Error(
+    throw new ReminderUnavailableError(
       'This RCS message is read-only because its Google pairing is no longer current.',
     );
   }

@@ -89,6 +89,8 @@ import { devSendFakeReaction } from '@features/conversations/devSeed';
 import { scheduleMessageReminder } from '@/services/notifications/remindersService';
 // eslint-disable-next-line import/first
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
+// eslint-disable-next-line import/first
+import { ReminderUnavailableError } from '@/services/notifications/reminderErrors';
 
 const mockScheduleMessageReminder = scheduleMessageReminder as jest.Mock;
 const mockPickReminderTime = pickReminderTime as jest.Mock;
@@ -599,6 +601,40 @@ describe('useMessageActions — narrow iMessage actions and RCS reactions', () =
         expect.objectContaining({ messageGuid: 'message-balloon' }),
         expect.objectContaining({ isCurrent: expect.any(Function) }),
       ),
+    );
+  });
+
+  it('says why a reminder can’t be set, and stays generic for any other failure', async () => {
+    mockRcsEnabled = true;
+    const target = msg('temp-local-copy', 'sent');
+    const { result } = await mount([target], 'RCS;-;thread-1');
+    const lastDialog = () => dialogs[dialogs.length - 1];
+
+    await act(async () => {
+      result.current.onLongPressMessage(target, rect);
+    });
+    mockScheduleMessageReminder.mockRejectedValueOnce(
+      new ReminderUnavailableError('This copy of the message isn’t linked to the server yet.'),
+    );
+    await act(async () => {
+      result.current.onRemindLater();
+    });
+    await waitFor(() =>
+      expect(lastDialog()).toMatchObject({
+        title: 'Reminder',
+        body: 'This copy of the message isn’t linked to the server yet.',
+      }),
+    );
+
+    await act(async () => {
+      result.current.onLongPressMessage(target, rect);
+    });
+    mockScheduleMessageReminder.mockRejectedValueOnce(new Error('native scheduler failed'));
+    await act(async () => {
+      result.current.onRemindLater();
+    });
+    await waitFor(() =>
+      expect(lastDialog()).toMatchObject({ title: 'Reminder', body: 'Couldn’t set the reminder.' }),
     );
   });
 

@@ -20,6 +20,7 @@ import { logger } from '@core/secure';
 import type { MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
+import { ReminderUnavailableError } from '@/services/notifications/reminderErrors';
 import { scheduleMessageReminder } from '@/services/notifications/remindersService';
 import { deleteMessageFromMac } from '@/services/remoteMessageDeleteUiService';
 import {
@@ -922,8 +923,12 @@ export function useMessageActions({
         if (screenLease.isCurrent()) {
           showDialog('Reminder set', 'You’ll be reminded about this message.');
         }
-      } catch {
-        if (screenLease.isCurrent()) showDialog('Reminder', 'Couldn’t set the reminder.');
+      } catch (error) {
+        if (!screenLease.isCurrent()) return;
+        showDialog(
+          'Reminder',
+          error instanceof ReminderUnavailableError ? error.message : 'Couldn’t set the reminder.',
+        );
       }
     })();
   };

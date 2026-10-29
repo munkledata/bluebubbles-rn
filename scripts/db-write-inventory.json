@@ -20297,7 +20297,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#acquireReminderDatabase.<callback:1c95c15809>:mutator-call:e3d9f088a065",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 81,
+      "line": 89,
       "symbol": "acquireReminderDatabase.<callback:1c95c15809>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -20310,7 +20310,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:2dd3b79ed6d7",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 289,
+      "line": 297,
       "symbol": "scheduleReminder.<callback:bf4fe406d2>",
       "operation": "mutator-call",
       "target": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:63ddd06ef2>",
@@ -20323,7 +20323,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:6351e1f44e1c",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 289,
+      "line": 297,
       "symbol": "scheduleReminder.<callback:bf4fe406d2>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20336,7 +20336,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:63ddd06ef2>:mutator-call:abe03326536b",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 292,
+      "line": 300,
       "symbol": "scheduleReminder.<callback:bf4fe406d2>.<callback:63ddd06ef2>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction",
@@ -20349,7 +20349,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:2b84b1873777",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 306,
+      "line": 314,
       "symbol": "scheduleReminder.<callback:bf4fe406d2>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20362,7 +20362,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:fe436ced4e32",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 306,
+      "line": 314,
       "symbol": "scheduleReminder.<callback:bf4fe406d2>",
       "operation": "mutator-call",
       "target": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:04f4d3fd8d>",
@@ -20375,7 +20375,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:04f4d3fd8d>:mutator-call:7a70fb282b9a",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 309,
+      "line": 317,
       "symbol": "scheduleReminder.<callback:bf4fe406d2>.<callback:04f4d3fd8d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#createReminderWithinTransaction",
@@ -20388,7 +20388,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>:mutator-call:bcbf7e23e475",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 366,
+      "line": 374,
       "symbol": "cancelReminder.<callback:874375fa5e>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20401,7 +20401,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>:mutator-call:d0cd941932cd",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 366,
+      "line": 374,
       "symbol": "cancelReminder.<callback:874375fa5e>",
       "operation": "mutator-call",
       "target": "src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>.<callback:e767effe3c>",
@@ -20414,7 +20414,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>.<callback:e767effe3c>:mutator-call:4f3fa0734c19",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 369,
+      "line": 377,
       "symbol": "cancelReminder.<callback:874375fa5e>.<callback:e767effe3c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminderWithinTransaction",
@@ -20427,7 +20427,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:6fa89ed6b038",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 440,
+      "line": 448,
       "symbol": "rescheduleReminder.<callback:5632cc03da>",
       "operation": "mutator-call",
       "target": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>.<callback:e57c656026>",
@@ -20440,7 +20440,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:cbb0784d6576",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 440,
+      "line": 448,
       "symbol": "rescheduleReminder.<callback:5632cc03da>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20453,7 +20453,7 @@
     {
       "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>.<callback:e57c656026>:mutator-call:79b8466b9ed4",
       "path": "src/services/notifications/remindersService.ts",
-      "line": 443,
+      "line": 451,
       "symbol": "rescheduleReminder.<callback:5632cc03da>.<callback:e57c656026>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction",
