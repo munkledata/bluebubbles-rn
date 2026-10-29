@@ -611,6 +611,108 @@ describe('contacts matching', () => {
  * genuinely observed. The replacement adds the new generation above a recorded id cutoff and
  * prunes the old one afterwards, in that order.
  */
+// Outside North America people save numbers in local form with a trunk 0 ("0401 111 111"), while
+// iMessage hands the app the international form ("+61401111111"). The last-10-digits key alone
+// misses whenever the national number is shorter than ten digits.
+describe('contacts saved in local national format', () => {
+  const handleRow = (raw: Awaited<ReturnType<typeof createTestDb>>['raw'], address: string) =>
+    raw
+      .prepare(
+        `SELECT display_name AS name, contact_id AS contactId, contact_ambiguous AS ambiguous
+           FROM handles WHERE address = ?`,
+      )
+      .get(address) as { name: string | null; contactId: number | null; ambiguous: number };
+
+  it.each([
+    ['Australian mobile', '0401 111 111', '+61401111111'],
+    ['UK mobile', '07700 900123', '+447700900123'],
+    ['German landline', '030 1234567', '+49301234567'],
+  ])('matches a %s saved locally to its international handle', async (_label, local, address) => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address, displayName: 'Server Name' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'local', displayName: 'Local', phones: [local] }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(1);
+    expect(handleRow(raw, address)).toMatchObject({ name: 'Local', ambiguous: 0 });
+    expect(handleRow(raw, address).contactId).not.toBeNull();
+  });
+
+  it('still matches US numbers and never links a short code by suffix', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [
+      { address: '+15551234567', displayName: 'Server US' },
+      { address: '12345', displayName: 'Server Short' },
+      { address: '+15559876543', displayName: 'Server Other US' },
+    ]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'us', displayName: 'Jenny', phones: ['(555) 123-4567'] }),
+      contact({ sourceId: 'short', displayName: 'Short', phones: ['012345'] }),
+      // A foreign local number equal to a US number without its "+15" must not claim it.
+      contact({ sourceId: 'foreign', displayName: 'Foreign', phones: ['0559 876 543'] }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(1);
+    expect(handleRow(raw, '+15551234567').name).toBe('Jenny');
+    expect(handleRow(raw, '12345')).toEqual({
+      name: 'Server Short',
+      contactId: null,
+      ambiguous: 0,
+    });
+    expect(handleRow(raw, '+15559876543')).toEqual({
+      name: 'Server Other US',
+      contactId: null,
+      ambiguous: 0,
+    });
+  });
+
+  it('links nobody when differently named contacts save the same local number', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: '+61401111111', displayName: 'Server Name' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'ana', displayName: 'Ana', phones: ['0401 111 111'] }),
+      contact({ sourceId: 'ben', displayName: 'Ben', phones: ['0401-111-111'] }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(0);
+    // Unlinked, but still a known number.
+    expect(handleRow(raw, '+61401111111')).toEqual({
+      name: 'Server Name',
+      contactId: null,
+      ambiguous: 1,
+    });
+  });
+
+  it('links nobody when two country-code lengths lead to different contacts', async () => {
+    const { db, raw } = await createTestDb();
+    // +49 30 123456 strips to 30123456 (2-digit code) or 930123456 (1-digit code).
+    await upsertHandles(db, [{ address: '+4930123456', displayName: 'Server Name' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'berlin', displayName: 'Berlin', phones: ['030 123456'] }),
+      contact({ sourceId: 'other', displayName: 'Other', phones: ['0930 123456'] }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(0);
+    expect(handleRow(raw, '+4930123456')).toEqual({
+      name: 'Server Name',
+      contactId: null,
+      ambiguous: 1,
+    });
+  });
+
+  it('lets the exact key decide when a contact already claims it', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: '+61401111111', displayName: 'Server Name' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'intl', displayName: 'Ana', phones: ['+61 401 111 111'] }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(1);
+    expect(handleRow(raw, '+61401111111').name).toBe('Ana');
+  });
+});
+
 describe('upsertContacts — add-then-prune', () => {
   /** Row count straight off the raw handle, i.e. what a reader would see at this instant. */
   const count = (raw: { prepare: (s: string) => { get: () => unknown } }): number =>

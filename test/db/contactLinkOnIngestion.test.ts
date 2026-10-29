@@ -96,6 +96,19 @@ describe('contact-link on handle ingestion (1.5)', () => {
     expect(h.c).not.toBeNull();
   });
 
+  it('links an international handle to a contact saved in local trunk-0 format at ingestion time', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertContacts(db, [
+      contact({ sourceId: 'au', displayName: 'Ana', phones: ['0401 111 111'] }),
+    ]);
+    await upsertHandles(db, [{ address: '+61401111111' }]);
+    const h = raw
+      .prepare("SELECT display_name d, contact_id c FROM handles WHERE address='+61401111111'")
+      .get() as { d: string; c: number | null };
+    expect(h.d).toBe('Ana');
+    expect(h.c).not.toBeNull();
+  });
+
   it('does not opportunistically link a handle when two contacts claim its normalized endpoint', async () => {
     const { db, raw } = await createTestDb();
     await upsertContacts(db, [

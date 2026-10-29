@@ -2,6 +2,8 @@ import { and, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import {
   contactEmailMatchKey,
   contactHandleMatchKey,
+  contactHandleNationalMatchKeys,
+  contactNationalMatchKey,
   contactPhoneMatchKey,
 } from '@utils/contactMatch';
 import { contacts, handles } from '../schema';
@@ -204,6 +206,9 @@ interface ContactBlock {
 interface ContactIndex {
   matches: Map<string, ContactMatch>;
   blocked: Map<string, ContactBlock>;
+  /** Local trunk-`0` numbers keyed by national number; consulted only by `lookupContact`. */
+  nationalMatches: Map<string, ContactMatch>;
+  nationalBlocked: Map<string, ContactBlock>;
   hasContacts: boolean;
   highWater: number;
 }
@@ -286,6 +291,8 @@ async function buildContactIndex(
 
   const matches = new Map<string, ContactMatch>();
   const blocked = new Map<string, ContactBlock>();
+  const nationalMatches = new Map<string, ContactMatch>();
+  const nationalBlocked = new Map<string, ContactBlock>();
   const newestBySource = new Map<string, (typeof contactRows)[number]>();
   const unidentified: Array<(typeof contactRows)[number]> = [];
   for (const row of contactRows) {
@@ -307,13 +314,51 @@ async function buildContactIndex(
       ...emails.map(contactEmailMatchKey).filter(Boolean),
     ]);
     for (const key of keys) addContactIndexClaim(matches, blocked, key, candidate);
+    const nationalKeys = new Set(phones.map(contactNationalMatchKey).filter(Boolean));
+    for (const key of nationalKeys) {
+      addContactIndexClaim(nationalMatches, nationalBlocked, key, candidate);
+    }
   }
   return {
     matches,
     blocked,
+    nationalMatches,
+    nationalBlocked,
     hasContacts: contactRows.length > 0,
     highWater: contactRows[0]?.highWater ?? 0,
   };
+}
+
+/**
+ * Find the contact for a handle address. The exact key (last ten digits, or the email) decides
+ * whenever any contact claims it. Only when none does, an international handle is compared with
+ * contacts saved in local trunk-`0` format by national number ("+61 401 111 111" with
+ * "0401 111 111"). The handle does not say how long its country code is, so up to three
+ * candidates are tried; they must lead to one person, judged by the same rules as an exact key,
+ * or the number is treated as ambiguous: known, but linked to nobody.
+ */
+function lookupContact(
+  index: ContactIndex,
+  address: string,
+): { match?: ContactMatch; blocked?: ContactBlock } {
+  const key = contactHandleMatchKey(address);
+  const match = index.matches.get(key);
+  const blocked = index.blocked.get(key);
+  if (match || blocked) return { match, blocked };
+  const hits: ContactMatch[] = [];
+  const witnesses: ContactMatch[] = [];
+  for (const nationalKey of contactHandleNationalMatchKeys(address)) {
+    const hit = index.nationalMatches.get(nationalKey);
+    if (hit) hits.push(hit);
+    witnesses.push(...(index.nationalBlocked.get(nationalKey)?.witnesses ?? []));
+  }
+  if (witnesses.length > 0) return { blocked: { witnesses: [...witnesses, ...hits] } };
+  // Fold the candidates' contacts through the exact-key rules: one owner (or duplicate cards with
+  // the same name) is a match; anything else is ambiguous.
+  const folded = new Map<string, ContactMatch>();
+  const foldedBlocked = new Map<string, ContactBlock>();
+  for (const hit of hits) addContactIndexClaim(folded, foldedBlocked, 'handle', hit);
+  return { match: folded.get('handle'), blocked: foldedBlocked.get('handle') };
 }
 
 /**
@@ -411,7 +456,14 @@ export async function linkHandlesToContacts(
 ): Promise<number> {
   if (addresses.length === 0) return 0;
   const index = await buildContactIndex(db);
-  if (index.matches.size === 0 && index.blocked.size === 0) return 0;
+  if (
+    index.matches.size === 0 &&
+    index.blocked.size === 0 &&
+    index.nationalMatches.size === 0 &&
+    index.nationalBlocked.size === 0
+  ) {
+    return 0;
+  }
 
   // Keep both potentially large reads outside the writer queue. Each actual match below owns one
   // short transaction and rechecks its optimistic contact/handle facts before updating.
@@ -427,8 +479,7 @@ export async function linkHandlesToContacts(
            WHERE address IN (${inList}) AND contact_id IS NULL`,
     );
     for (const handle of handleRows) {
-      const key = contactHandleMatchKey(handle.address);
-      const block = index.blocked.get(key);
+      const { match, blocked: block } = lookupContact(index, handle.address);
       if (block) {
         if (handle.contactAmbiguous !== 1) {
           const witnessIds = block.witnesses.map((witness) => witness.id);
@@ -445,7 +496,6 @@ export async function linkHandlesToContacts(
         }
         continue;
       }
-      const match = index.matches.get(key);
       if (
         match &&
         (await runDbTask(() =>
@@ -510,9 +560,7 @@ export async function matchContactsToHandles(
   );
   let updated = 0;
   for (const h of handleRows) {
-    const key = contactHandleMatchKey(h.address);
-    const match = index.matches.get(key);
-    const blocked = index.blocked.get(key);
+    const { match, blocked } = lookupContact(index, h.address);
     // A number claimed ambiguously is still in the address book, so it keeps counting as a known
     // sender (bookkeeping, not counted as an update). Mark it before an old link is cleared below,
     // and unmark it only after a new link is written, so it never briefly looks unknown.
