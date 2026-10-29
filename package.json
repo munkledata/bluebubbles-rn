@@ -178,6 +178,7 @@
         "buildFromSource": [
           "expo-background-task",
           "expo-file-system",
+          "expo-sharing",
           "expo-task-manager",
           "unimodules-app-loader"
         ]

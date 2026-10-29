@@ -63,6 +63,7 @@ const EXPO_TASK_MANAGER_VERSION = '57.0.21';
 const UNIMODULES_APP_LOADER_VERSION = '57.0.2';
 const EXPO_FILE_SYSTEM_VERSION = '57.0.7';
 const EXPO_ROUTER_VERSION = '57.0.24';
+const EXPO_SHARING_VERSION = '57.0.24';
 const REACT_NATIVE_SCREENS_VERSION = '4.26.2';
 const REACT_NATIVE_SCREENS_RANGE = '~4.26.0';
 const PATCH_PACKAGE_VERSION = '8.0.1';
@@ -121,6 +122,9 @@ export const UPLOAD_FILENAME_SOURCE_PATHS = {
 const EXPO_ROUTER_PATCH_PATH = `patches/expo-router+${EXPO_ROUTER_VERSION}.patch`;
 const EXPO_ROUTER_EXPERIMENTAL_STACK_PATH =
   'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js';
+const EXPO_SHARING_PATCH_PATH = `patches/expo-sharing+${EXPO_SHARING_VERSION}.patch`;
+const EXPO_SHARING_MODULE_PATH =
+  'node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt';
 const REACT_NATIVE_SCREENS_PATCH_PATH = `patches/react-native-screens+${REACT_NATIVE_SCREENS_VERSION}.patch`;
 export const REACT_NATIVE_SCREENS_SOURCE_PATHS = {
   stackContainerSource:
@@ -1125,6 +1129,74 @@ export function validateExpoRouterPredictiveBackBridge({
     }
   }
 
+  return errors;
+}
+
+/**
+ * Keep the outbound share sheet from sticking after a share into Gator itself.
+ *
+ * expo-sharing clears its pending share only in OnActivityResult. When the chosen target is Gator's
+ * own singleTask MainActivity, the share arrives as a new intent and that result never comes back,
+ * so every later share throws "already in progress" until the process dies. The patch settles the
+ * pending share on OnNewIntent. expo-sharing ships a prebuilt AAR, so it must build from source.
+ */
+export function validateExpoSharingSelfShareSettlement({
+  packageJson,
+  packageLock,
+  patchSource,
+  moduleSource,
+}) {
+  const errors = [];
+  const expectedRange = `~${EXPO_SHARING_VERSION}`;
+  if (packageJson?.dependencies?.['expo-sharing'] !== expectedRange) {
+    errors.push(
+      `expo-sharing must remain pinned to ${expectedRange} while its local patch applies`,
+    );
+  }
+  if (packageLock?.packages?.['']?.dependencies?.['expo-sharing'] !== expectedRange) {
+    errors.push(`package-lock root must pin expo-sharing to ${expectedRange}`);
+  }
+  if (packageLock?.packages?.['node_modules/expo-sharing']?.version !== EXPO_SHARING_VERSION) {
+    errors.push(`package-lock must resolve expo-sharing ${EXPO_SHARING_VERSION}`);
+  }
+
+  const sourceBuild = packageJson?.expo?.autolinking?.android?.buildFromSource;
+  if (
+    !Array.isArray(sourceBuild) ||
+    sourceBuild.filter((name) => name === 'expo-sharing').length !== 1
+  ) {
+    errors.push('Expo Android autolinking must build expo-sharing from source exactly once');
+  }
+
+  const patchHeaders =
+    typeof patchSource === 'string'
+      ? [...patchSource.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)]
+      : [];
+  if (
+    patchHeaders.length !== 1 ||
+    patchHeaders[0]?.[1] !== EXPO_SHARING_MODULE_PATH ||
+    patchHeaders[0]?.[2] !== EXPO_SHARING_MODULE_PATH
+  ) {
+    errors.push(`${EXPO_SHARING_PATCH_PATH} must patch only the reviewed sharing module`);
+  }
+  const patchMarkers = [
+    '+    OnNewIntent { _ ->',
+    '+      pendingPromise?.resolve(null)',
+    '+      pendingPromise = null',
+  ];
+  if (patchMarkers.some((marker) => !patchSource?.includes(marker))) {
+    errors.push(`${EXPO_SHARING_PATCH_PATH} must carry the reviewed self-share settlement`);
+  }
+
+  const installedSettlements =
+    typeof moduleSource === 'string'
+      ? (moduleSource.match(
+          /OnNewIntent \{ _ ->\s*pendingPromise\?\.resolve\(null\)\s*pendingPromise = null\s*\}/g,
+        ) ?? [])
+      : [];
+  if (installedSettlements.length !== 1) {
+    errors.push('installed expo-sharing must settle a pending share on a new intent exactly once');
+  }
   return errors;
 }
 
@@ -2473,6 +2545,14 @@ export function runAndroidBuildCheck({
       setupLayoutSource: readFileSync(resolve(root, 'app/(setup)/_layout.tsx'), 'utf8'),
       appLayoutSource: readFileSync(resolve(root, 'app/(app)/_layout.tsx'), 'utf8'),
     }).map((error) => `predictive Back bridge: ${error}`),
+  );
+  errors.push(
+    ...validateExpoSharingSelfShareSettlement({
+      packageJson,
+      packageLock,
+      patchSource: readFileSync(resolve(root, EXPO_SHARING_PATCH_PATH), 'utf8'),
+      moduleSource: readFileSync(resolve(root, EXPO_SHARING_MODULE_PATH), 'utf8'),
+    }).map((error) => `self-share settlement: ${error}`),
   );
 
   const mainActivityPath = resolve(root, DEFAULT_MAIN_ACTIVITY_SOURCE);

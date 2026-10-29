@@ -1,0 +1,18 @@
+diff --git a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
+--- a/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
++++ b/node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt
+@@ -83,6 +83,14 @@
+         pendingPromise = null
+       }
+     }
++
++    // Gator: when the chosen share target is this app's own singleTask activity, the share arrives
++    // here as a new intent and the chooser's result never comes back, so the pending share would
++    // stay "in progress" until the process dies. Settle it now.
++    OnNewIntent { _ ->
++      pendingPromise?.resolve(null)
++      pendingPromise = null
++    }
+   }
+ 
+   @Throws(InvalidArgumentException::class)

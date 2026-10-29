@@ -34,6 +34,7 @@ import {
   validateExpoFileSystemRedirectContainment,
   validateUploadFilenameBridge,
   validateExpoRouterPredictiveBackBridge,
+  validateExpoSharingSelfShareSettlement,
   validateExpoTaskManagerPreJsSettlement,
   validateHeadlessEntry,
   validatePackagedAndroidBundle,
@@ -337,6 +338,7 @@ const redirectContainmentPackageJson = {
     'expo-background-task': '57.0.21',
     'expo-file-system': '57.0.7',
     'expo-router': '~57.0.24',
+    'expo-sharing': '~57.0.24',
     'expo-task-manager': '57.0.21',
     'react-native-screens': '~4.26.0',
   },
@@ -347,6 +349,7 @@ const redirectContainmentPackageJson = {
         buildFromSource: [
           'expo-background-task',
           'expo-file-system',
+          'expo-sharing',
           'expo-task-manager',
           'unimodules-app-loader',
         ],
@@ -361,6 +364,7 @@ const redirectContainmentPackageLock = {
         'expo-background-task': '57.0.21',
         'expo-file-system': '57.0.7',
         'expo-router': '~57.0.24',
+        'expo-sharing': '~57.0.24',
         'expo-task-manager': '57.0.21',
         'react-native-screens': '~4.26.0',
       },
@@ -369,6 +373,7 @@ const redirectContainmentPackageLock = {
     'node_modules/expo-background-task': { version: '57.0.21' },
     'node_modules/expo-file-system': { version: '57.0.7' },
     'node_modules/expo-router': { version: '57.0.24' },
+    'node_modules/expo-sharing': { version: '57.0.24' },
     'node_modules/expo-task-manager': { version: '57.0.21' },
     'node_modules/react-native-screens': { version: '4.26.2' },
     'node_modules/unimodules-app-loader': { version: '57.0.2' },
@@ -743,6 +748,9 @@ function taskManagerSettlementInput(overrides = {}) {
   };
 }
 
+const EXPO_SHARING_MODULE_FIXTURE_PATH =
+  'node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt';
+
 function writeRedirectContainmentFixture(root) {
   const input = redirectContainmentInput();
   mkdirSync(join(root, 'patches'), { recursive: true });
@@ -823,6 +831,15 @@ function writeRedirectContainmentFixture(root) {
   writeFileSync(
     join(root, 'patches/expo-router+57.0.24.patch'),
     readFileSync(join(ROOT, 'patches/expo-router+57.0.24.patch'), 'utf8'),
+  );
+  writeFileSync(
+    join(root, 'patches/expo-sharing+57.0.24.patch'),
+    readFileSync(join(ROOT, 'patches/expo-sharing+57.0.24.patch'), 'utf8'),
+  );
+  mkdirSync(dirname(join(root, EXPO_SHARING_MODULE_FIXTURE_PATH)), { recursive: true });
+  writeFileSync(
+    join(root, EXPO_SHARING_MODULE_FIXTURE_PATH),
+    readFileSync(join(ROOT, EXPO_SHARING_MODULE_FIXTURE_PATH), 'utf8'),
   );
   writeFileSync(
     join(root, 'patches/react-native-screens+4.26.2.patch'),
@@ -1091,6 +1108,94 @@ test('generates and enforces the system-CA-only Android network policy', () => {
 
 test('accepts the pinned Expo file-system redirect containment chain', () => {
   assert.deepEqual(validateExpoFileSystemRedirectContainment(redirectContainmentInput()), []);
+});
+
+test('guards the expo-sharing self-share settlement against drift', () => {
+  const currentInput = () => ({
+    packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
+    packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-sharing+57.0.24.patch'), 'utf8'),
+    moduleSource: readFileSync(join(ROOT, EXPO_SHARING_MODULE_FIXTURE_PATH), 'utf8'),
+  });
+
+  assert.deepEqual(validateExpoSharingSelfShareSettlement(currentInput()), []);
+
+  const mutations = [
+    {
+      label: 'loose version range',
+      mutate(input) {
+        input.packageJson.dependencies['expo-sharing'] = '^57.0.24';
+      },
+      error: /expo-sharing must remain pinned to ~57\.0\.24/,
+    },
+    {
+      label: 'lock root range',
+      mutate(input) {
+        input.packageLock.packages[''].dependencies['expo-sharing'] = '~57.0.25';
+      },
+      error: /package-lock root must pin expo-sharing/,
+    },
+    {
+      label: 'resolved version moved past the patch',
+      mutate(input) {
+        input.packageLock.packages['node_modules/expo-sharing'].version = '57.0.25';
+      },
+      error: /package-lock must resolve expo-sharing 57\.0\.24/,
+    },
+    {
+      label: 'prebuilt AAR instead of the patched source',
+      mutate(input) {
+        input.packageJson.expo.autolinking.android.buildFromSource =
+          input.packageJson.expo.autolinking.android.buildFromSource.filter(
+            (name) => name !== 'expo-sharing',
+          );
+      },
+      error: /must build expo-sharing from source exactly once/,
+    },
+    {
+      label: 'patch touching another file',
+      mutate(input) {
+        input.patchSource +=
+          '\ndiff --git a/node_modules/expo-sharing/x b/node_modules/expo-sharing/x\n';
+      },
+      error: /must patch only the reviewed sharing module/,
+    },
+    {
+      label: 'patch without the settlement',
+      mutate(input) {
+        input.patchSource = input.patchSource.replace('+      pendingPromise?.resolve(null)', '');
+      },
+      error: /must carry the reviewed self-share settlement/,
+    },
+    {
+      label: 'installed source not patched',
+      mutate(input) {
+        input.moduleSource = input.moduleSource.replace(
+          'OnNewIntent { _ ->',
+          'OnNewIntent { intent ->',
+        );
+      },
+      error: /installed expo-sharing must settle a pending share on a new intent exactly once/,
+    },
+    {
+      label: 'installed settlement duplicated',
+      mutate(input) {
+        const block = input.moduleSource.match(/OnNewIntent \{[\s\S]*?\n {4}\}/)?.[0] ?? '';
+        assert.notEqual(block, '');
+        input.moduleSource = input.moduleSource.replace(block, `${block}\n    ${block}`);
+      },
+      error: /exactly once/,
+    },
+  ];
+  for (const { label, mutate, error } of mutations) {
+    const input = currentInput();
+    mutate(input);
+    const errors = validateExpoSharingSelfShareSettlement(input);
+    assert.ok(
+      errors.some((message) => error.test(message)),
+      `${label}: ${JSON.stringify(errors)}`,
+    );
+  }
 });
 
 test('guards the Expo Router predictive-Back bridge against drift', () => {
