@@ -140,11 +140,45 @@ export function chatUnreadCountSql(alias: string) {
   )`;
 }
 
+/**
+ * Whether Apple's Messages screening put this chat aside: Apple moved it out of its main list
+ * (`chats.apple_filtered`), or it holds a stored incoming message Apple flagged as spam
+ * (`messages.apple_spam`). Both are null (unknown) unless the server emits them, so this is false
+ * for every chat from a server without the capability.
+ */
+export function chatAppleScreenedSql(alias: string) {
+  const c = sql.raw(alias);
+  return sql`(
+    COALESCE(${c}.apple_filtered, 0) = 1
+    OR EXISTS(
+      SELECT 1 FROM messages asm
+       WHERE asm.chat_id = ${c}.id AND asm.apple_spam = 1
+         AND asm.is_from_me = 0 AND asm.date_deleted IS NULL
+    )
+  )`;
+}
+
+/**
+ * The known-sender test behind Filter Unknown Senders and the Unknown Senders list: some participant
+ * matched a device contact. With `appleScreening` (only while the Filter Unknown Senders setting is
+ * on) a chat Apple screened counts as unknown even when it has a contact.
+ */
+export function chatHasKnownSenderSql(alias: string, appleScreening = false) {
+  const c = sql.raw(alias);
+  const contact = sql`EXISTS(
+    SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
+     WHERE ck.chat_id = ${c}.id AND (hk.contact_id IS NOT NULL OR hk.contact_ambiguous = 1)
+  )`;
+  return appleScreening ? sql`(${contact} AND NOT ${chatAppleScreenedSql(alias)})` : contact;
+}
+
 /** Shared inbox filter fragments used by both paging queries and pinned-order commands. */
 export function inboxFilterSql(options: {
   archive: InboxArchiveFilter;
   sender: InboxSenderFilter;
   filters?: InboxFilters;
+  /** Treat Apple-screened chats as unknown senders (Filter Unknown Senders is on). */
+  appleScreening?: boolean;
 }) {
   const filters = normalizeInboxFilters(options.filters);
   const archive =
@@ -153,10 +187,7 @@ export function inboxFilterSql(options: {
       : options.archive === 'archived'
         ? sql`AND c.is_archived = 1`
         : sql`AND c.is_archived = 0`;
-  const known = sql`EXISTS(
-    SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
-     WHERE ck.chat_id = c.id AND (hk.contact_id IS NOT NULL OR hk.contact_ambiguous = 1)
-  )`;
+  const known = chatHasKnownSenderSql('c', options.appleScreening === true);
   // Fixed routes may supply a sender scope without a FEAT-01 filter object. When both exist, the
   // fixed route wins so Archived/Unknown Senders cannot accidentally become cross-filtered.
   const senderChoice = options.sender === 'any' ? filters.sender : options.sender;

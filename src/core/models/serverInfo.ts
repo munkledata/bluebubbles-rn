@@ -190,6 +190,12 @@ export const ServerInfo = z
     supports_error_log_upload: z.boolean().nullish(),
     /** Whether the server can retrieve bounded link text/images through its SSRF-safe proxy. */
     supports_url_preview_proxy: z.boolean().nullish(),
+    /**
+     * Whether the server emits Apple's Messages screening flags (`Chat.isFiltered`,
+     * `Message.isSpam`; config `exposeAppleScreening`, off by default). False/absent means the
+     * fields are never sent, so their absence must not be read as "not filtered".
+     */
+    supports_apple_screening: z.boolean().nullish(),
   })
   .transform((s) => ({
     ...s,

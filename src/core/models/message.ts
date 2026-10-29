@@ -263,6 +263,13 @@ const MessageWire = z.object({
    */
   isScheduled: z.boolean().nullish(),
 
+  /**
+   * Apple's `message.is_spam` flag (Gator server, opt-in). Sent only while the server advertises
+   * `supports_apple_screening`; an ABSENT key means "unknown", never "not spam", so ingestion keeps
+   * the stored value then (see `appleScreeningEmitted`).
+   */
+  isSpam: z.boolean().nullish(),
+
   /** Chats this message belongs to (message/query `with: ['chats']`). */
   chats: z.array(ChatSummary).nullish(),
 

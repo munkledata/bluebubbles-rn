@@ -10,6 +10,7 @@ import {
   type InboxSenderFilter,
 } from '@db/repositories';
 import { useReactiveQuery, type ReactiveState, type ReactiveSubscribe } from '@db/useReactiveQuery';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { createRowIdentityCache } from './rowIdentity';
 
 // Any write to these tables affects an inbox row, so we watch all four:
@@ -87,7 +88,13 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
         ? Math.max(1, Math.floor(options.pageSize))
         : 50;
   const source = options.source;
-  const queryKey = `${source?.key ?? 'production'}|${options.ownerGeneration ?? 'unscoped'}|${archive}|${queryFilters.read}|${queryFilters.sender}|${queryFilters.kind}|${queryFilters.mute}|${queryFilters.service}|${options.countUnknown ? 1 : 0}|${requestedPageSize ?? 'all'}`;
+  // Owner decision: Apple's screening flags join the known/unknown split only while "Filter Unknown
+  // Senders" is on. Then an Apple-screened chat leaves the main inbox for Unknown Senders even when
+  // it has a contact. With the setting off the queries are exactly as before. A DEV fixture source
+  // keeps its own rows.
+  const filterUnknownSetting = useFeatureSettingsStore((s) => s.filterUnknownSenders);
+  const appleScreening = filterUnknownSetting && source == null;
+  const queryKey = `${source?.key ?? 'production'}|${options.ownerGeneration ?? 'unscoped'}|${archive}|${queryFilters.read}|${queryFilters.sender}|${queryFilters.kind}|${queryFilters.mute}|${queryFilters.service}|${options.countUnknown ? 1 : 0}|${requestedPageSize ?? 'all'}|${appleScreening ? 'screened' : 'contacts'}`;
   const enabled = options.enabled !== false;
   const [pageRequest, setPageRequest] = useState(() => ({
     key: queryKey,
@@ -121,13 +128,23 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
         const db = getDatabase();
         [page, unknownCount] = await Promise.all([
           limit == null
-            ? listChatsForInbox(db, { includeArchived, filters: queryFilters }).then((rows) => ({
+            ? listChatsForInbox(db, {
+                includeArchived,
+                filters: queryFilters,
+                appleScreening,
+              }).then((rows) => ({
                 rows,
                 hasMore: false,
               }))
-            : listChatsForInboxPage(db, { limit, archive, sender, filters: queryFilters }),
+            : listChatsForInboxPage(db, {
+                limit,
+                archive,
+                sender,
+                filters: queryFilters,
+                appleScreening,
+              }),
           options.countUnknown
-            ? countChatsForInbox(db, { archive: 'active', sender: 'unknown' })
+            ? countChatsForInbox(db, { archive: 'active', sender: 'unknown', appleScreening })
             : Promise.resolve(0),
         ]);
       }
@@ -147,7 +164,7 @@ export function useChats(includeArchived = false, options: UseChatsOptions = {})
       };
     },
     TABLES,
-    [queryKey, limit, includeArchived, source],
+    [queryKey, limit, includeArchived, source, appleScreening],
     { enabled, subscribe: source?.subscribe },
   );
 

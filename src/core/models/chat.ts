@@ -40,5 +40,12 @@ export const Chat = z.object({
   backgroundChannelGuid: z.string().nullish(),
   /** A group's own photo id (server 2.0.39+); the version key for `GET /chat/:guid/icon`. */
   groupPhotoGuid: z.string().nullish(),
+  /**
+   * Apple's `chat.is_filtered` screening flag (Gator server, opt-in): true when Messages moved the
+   * chat out of its main list (unknown sender / filtered). Sent only while the server advertises
+   * `supports_apple_screening`; an ABSENT key means "unknown", never "not filtered", so ingestion
+   * keeps the stored value then (see `appleScreeningEmitted`).
+   */
+  isFiltered: z.boolean().nullish(),
 });
 export type Chat = z.infer<typeof Chat>;

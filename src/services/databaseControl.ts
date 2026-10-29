@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { logger } from '@core/secure';
 import { plainTextFromAttributedBody } from '@core/richtext';
+import { setAppleScreeningCapabilityReader } from '@db/appleScreeningCapability';
 import { getDatabase, getRawDatabase, initDatabase } from '@db/database';
 import { resolveDbKey, rotateDbKey } from '@db/key';
 import { kvGet, kvSetWithinTransaction } from '@db/repositories';
@@ -10,8 +11,17 @@ import {
   type DbTransactionContext,
 } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { sessionAccessors } from '@state/sessionStore';
 import { vault } from './clients';
 import { runTrackedRealtimeWork, type RealtimeDeliveryLease } from './realtime/deliveryCoordinator';
+
+// Server chat/message upserts store Apple's screening flags only while the connected server says it
+// emits them. Registered when this module loads, before any database open, and read live, so a
+// reconnect or account switch is honored on the next write. A killed-app push wake has no server
+// info yet, so it leaves the stored flags alone.
+setAppleScreeningCapabilityReader(
+  () => sessionAccessors.getServerInfo()?.supports_apple_screening === true,
+);
 
 /**
  * The in-flight FIRST open, shared by every concurrent caller (single-flight).

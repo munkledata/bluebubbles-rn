@@ -5,6 +5,7 @@ import { runInTransactionContext, type DbTransactionContext } from '../transacti
 import type { AppDatabase } from '../types';
 import {
   attachmentIsUserFileSql,
+  chatHasKnownSenderSql,
   chatUnreadCountSql,
   chatVisible,
   inboxFilterSql,
@@ -80,6 +81,8 @@ export interface InboxPageOptions {
   archive?: InboxArchiveFilter;
   sender?: InboxSenderFilter;
   filters?: InboxFilters;
+  /** Count Apple-screened chats as unknown senders (only while Filter Unknown Senders is on). */
+  appleScreening?: boolean;
 }
 
 export interface InboxPage {
@@ -551,6 +554,7 @@ async function queryChatsForInbox(
     limit?: number;
     folderId?: number;
     chatGuids?: readonly string[];
+    appleScreening?: boolean;
   },
 ): Promise<InboxRow[]> {
   const filters = inboxFilterSql(options);
@@ -630,9 +634,7 @@ async function queryChatsForInbox(
       -- The shared helper retains the last-read + local-deletion floor used by inbox filtering and
       -- folder unread badges. A re-synced pre-delete history must never become unread again.
       ${chatUnreadCountSql('c')} AS unreadCount,
-      EXISTS(SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
-              WHERE ck.chat_id = c.id
-                AND (hk.contact_id IS NOT NULL OR hk.contact_ambiguous = 1)) AS hasKnownSender
+      ${chatHasKnownSenderSql('c', options.appleScreening === true)} AS hasKnownSender
     FROM page p
     JOIN chats c ON c.id = p.id
     LEFT JOIN messages l ON l.id = (
@@ -652,13 +654,14 @@ async function queryChatsForInbox(
  */
 export async function listChatsForInbox(
   db: AppDatabase,
-  opts: { includeArchived?: boolean; filters?: InboxFilters } = {},
+  opts: { includeArchived?: boolean; filters?: InboxFilters; appleScreening?: boolean } = {},
 ): Promise<InboxRow[]> {
   const filters = normalizeInboxFilters(opts.filters);
   return queryChatsForInbox(db, {
     archive: opts.includeArchived ? 'all' : 'active',
     sender: filters.sender,
     filters,
+    appleScreening: opts.appleScreening,
   });
 }
 
@@ -674,6 +677,7 @@ export async function listChatsForInboxPage(
     sender: opts.sender ?? 'any',
     filters: opts.filters,
     limit: limit + 1,
+    appleScreening: opts.appleScreening,
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 }
@@ -1108,6 +1112,7 @@ export async function countChatsForInbox(
     archive: opts.archive ?? 'active',
     sender: opts.sender ?? 'any',
     filters: opts.filters,
+    appleScreening: opts.appleScreening,
   });
   const rows = await db.all<{ count: number }>(sql`
     SELECT COUNT(*) AS count FROM chats c
@@ -1117,16 +1122,16 @@ export async function countChatsForInbox(
 }
 
 /**
- * True when any participant of the chat matched a device contact. The "unknown senders"
- * feature treats contact-less chats as unknown (separate list + muted notifications).
+ * The notification-side twin of the Unknown Senders list. True when any participant of the chat
+ * matched a device contact AND Apple's screening did not put the chat aside (see
+ * `chatAppleScreenedSql`). Its only caller runs while "Filter Unknown Senders" is on, which is
+ * exactly when the list applies the same screening rule; an unknown sender notifies silently.
+ * A server without the screening capability leaves both flags null, so only contacts decide.
  */
 export async function chatHasKnownSender(db: AppDatabase, guid: string): Promise<boolean> {
   const rows = await db.all<{ known: number }>(sql`
-    SELECT EXISTS(
-      SELECT 1 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-       WHERE ch.chat_id = (SELECT id FROM chats WHERE guid = ${guid} LIMIT 1)
-         AND (h.contact_id IS NOT NULL OR h.contact_ambiguous = 1)
-    ) AS known
+    SELECT ${chatHasKnownSenderSql('c', true)} AS known
+      FROM chats c WHERE c.guid = ${guid} LIMIT 1
   `);
   return rows[0]?.known === 1;
 }

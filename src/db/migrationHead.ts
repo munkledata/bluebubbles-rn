@@ -6,5 +6,5 @@
  * It lives apart from migrations.ts because the DB-write guard requires database.ts to import
  * exactly one name, MIGRATIONS, from that module.
  */
-export const MIGRATION_HEAD = '0057_chat_group_photo' as const;
-export const MIGRATION_COUNT = 57 as const;
+export const MIGRATION_HEAD = '0058_apple_screening_flags' as const;
+export const MIGRATION_COUNT = 58 as const;
