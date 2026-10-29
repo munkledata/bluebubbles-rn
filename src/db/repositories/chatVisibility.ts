@@ -144,16 +144,23 @@ export function chatUnreadCountSql(alias: string) {
  * Whether Apple's Messages screening put this chat aside: Apple moved it out of its main list
  * (`chats.apple_filtered`), or it holds a stored incoming message Apple flagged as spam
  * (`messages.apple_spam`). Both are null (unknown) unless the server emits them, so this is false
- * for every chat from a server without the capability.
+ * for every chat from a server without the capability. Once the user has sent a message in the chat
+ * (one that isn't locally deleted), the chat is no longer screened: replying shows it isn't spam.
  */
 export function chatAppleScreenedSql(alias: string) {
   const c = sql.raw(alias);
   return sql`(
-    COALESCE(${c}.apple_filtered, 0) = 1
-    OR EXISTS(
-      SELECT 1 FROM messages asm
-       WHERE asm.chat_id = ${c}.id AND asm.apple_spam = 1
-         AND asm.is_from_me = 0 AND asm.date_deleted IS NULL
+    (
+      COALESCE(${c}.apple_filtered, 0) = 1
+      OR EXISTS(
+        SELECT 1 FROM messages asm
+         WHERE asm.chat_id = ${c}.id AND asm.apple_spam = 1
+           AND asm.is_from_me = 0 AND asm.date_deleted IS NULL
+      )
+    )
+    AND NOT EXISTS(
+      SELECT 1 FROM messages arm
+       WHERE arm.chat_id = ${c}.id AND arm.is_from_me = 1 AND arm.date_deleted IS NULL
     )
   )`;
 }

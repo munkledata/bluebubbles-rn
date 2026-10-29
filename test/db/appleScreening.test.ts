@@ -242,6 +242,49 @@ describe('Apple screening in the Unknown Senders split', () => {
     expect(await chatHasKnownSender(db, 'c-spam')).toBe(true);
   });
 
+  it('a reply from the user makes a screened chat known again', async () => {
+    const db = await seed();
+    const chatRows = await db.all<{ guid: string; id: number }>(
+      sql`SELECT guid, id FROM chats WHERE guid IN ('c-filtered', 'c-spam')`,
+    );
+    const ids = new Map<string, number>(
+      chatRows.map((row: { guid: string; id: number }) => [row.guid, row.id]),
+    );
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'm-reply-spam',
+          dateCreated: 60,
+          text: 'x',
+          isFromMe: true,
+          chats: [{ guid: 'c-spam' }],
+        }),
+        Message.parse({
+          guid: 'm-reply-filtered',
+          dateCreated: 61,
+          text: 'x',
+          isFromMe: true,
+          chats: [{ guid: 'c-filtered' }],
+        }),
+      ],
+      (m) => ids.get(m.chats?.[0]?.guid ?? ''),
+      new Map(),
+    );
+    expect(await chatHasKnownSender(db, 'c-spam')).toBe(true);
+    expect(await chatHasKnownSender(db, 'c-filtered')).toBe(true);
+    const unknown = await listChatsForInboxPage(db, {
+      sender: 'unknown',
+      limit: 50,
+      appleScreening: true,
+    });
+    expect(guids(unknown.rows)).toEqual(['c-stranger']);
+
+    // A reply the user deleted locally doesn't count.
+    await db.run(sql`UPDATE messages SET date_deleted = 99 WHERE guid = 'm-reply-spam'`);
+    expect(await chatHasKnownSender(db, 'c-spam')).toBe(false);
+  });
+
   it('capability missing: nothing is screened even with the setting ON', async () => {
     const { db } = await createTestDb();
     const handles = await upsertHandles(db, [{ address: 'friend@example.com' }]);
