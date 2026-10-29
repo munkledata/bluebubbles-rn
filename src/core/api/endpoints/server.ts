@@ -96,13 +96,19 @@ export interface StatTotals {
   videos: number;
 }
 
+// Mirrors the server's StatsSnapshotV1 field for field: every server with this route (2.0.15+)
+// sends all eleven. The schema stays strict, so a reply with any other field still fails closed.
 const StatisticsSnapshot = z
   .object({
     range: z.literal('all-time'),
     after: z.null(),
     messageCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    chatCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    handleCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    attachmentCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     imageCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     videoCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    locationCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     topGroup: z.string().max(2_048),
     bestFriend: z.string().max(2_048),
   })

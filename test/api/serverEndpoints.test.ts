@@ -114,18 +114,23 @@ describe('server-management support boundaries', () => {
 });
 
 describe('serverStatTotals uses the typed statistics route', () => {
+  // The server's StatsSnapshotV1 reply, field for field.
+  const allTimeSnapshot = {
+    range: 'all-time',
+    after: null,
+    messageCount: 1234,
+    chatCount: 56,
+    handleCount: 78,
+    attachmentCount: 90,
+    imageCount: 42,
+    videoCount: 7,
+    locationCount: 3,
+    topGroup: 'Family',
+    bestFriend: '+15555550123',
+  };
+
   it('maps only Messages, Photos, and Videos from an all-time snapshot', async () => {
-    mockKy.mockResolvedValueOnce(
-      envelope({
-        range: 'all-time',
-        after: null,
-        messageCount: 1234,
-        imageCount: 42,
-        videoCount: 7,
-        topGroup: 'Family',
-        bestFriend: '+15555550123',
-      }),
-    );
+    mockKy.mockResolvedValueOnce(envelope(allTimeSnapshot));
 
     const res = await serverApi.serverStatTotals(client());
     expect(res).toEqual({ messages: 1234, images: 42, videos: 7 });
@@ -135,6 +140,19 @@ describe('serverStatTotals uses the typed statistics route', () => {
     expect(url).toBe('https://x.test/api/v1/statistics/snapshot');
     expect(init.method).toBe('POST');
     expect(init.json).toEqual({ range: 'all-time' });
+  });
+
+  it('still refuses a snapshot with a field the server does not send', async () => {
+    mockKy.mockResolvedValueOnce(envelope({ ...allTimeSnapshot, unexpectedCount: 1 }));
+
+    const err = await serverApi.serverStatTotals(client()).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).kind).toBe('parse_error');
+    expect(mockKy).toHaveBeenCalledTimes(1);
   });
 
   it('maps a typed-route 404 without trying the retired dispatcher', async () => {
