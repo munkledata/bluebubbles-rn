@@ -97,7 +97,7 @@ jest.mock('@core/api', () => ({
 
 import { getDatabase } from '@db/database';
 import { ensureDatabase } from '@/services/databaseControl';
-import { markRead, markUnread, sendTyping } from '@/services/chatActions';
+import { markRead, markUnread, sendTyping, stopAllTyping } from '@/services/chatActions';
 import { getSocket } from '@/services/realtimeControl';
 import {
   captureRealtimeDeliveryLease,
@@ -294,6 +294,50 @@ describe('sendTyping', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('stops every still-typing chat on the open socket before a background pause', () => {
+    const emit = jest.fn();
+    const request = jest.fn().mockResolvedValue({
+      kind: 'ack',
+      response: { status: 200, data: { typing: false } },
+    });
+    (getSocket as jest.Mock).mockReturnValue({ connected: true, emit, request });
+    mockImessageTypingEnabled = true;
+
+    sendTyping('iMessage;-;+15550000010', true);
+    sendTyping('iMessage;-;+15550000011', true);
+    sendTyping('iMessage;-;+15550000012', true);
+    sendTyping('iMessage;-;+15550000012', false); // already stopped by the composer
+    request.mockClear();
+
+    stopAllTyping();
+
+    // Synchronous: both stops were handed to the socket before stopAllTyping returned, so a pause
+    // that closes the socket right after cannot swallow them.
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledWith('stop-typing', { guid: 'iMessage;-;+15550000010' });
+    expect(request).toHaveBeenCalledWith('stop-typing', { guid: 'iMessage;-;+15550000011' });
+
+    // The composer's late stop timer, and a second flush, have nothing left to send.
+    request.mockClear();
+    sendTyping('iMessage;-;+15550000010', false);
+    stopAllTyping();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('does not flush a stop for a typing chat whose account generation was retired', async () => {
+    const emit = jest.fn();
+    const request = jest.fn();
+    (getSocket as jest.Mock).mockReturnValue({ connected: true, emit, request });
+    mockImessageTypingEnabled = true;
+
+    sendTyping('iMessage;-;+15550000013', true);
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    stopAllTyping();
+
+    expect(request).not.toHaveBeenCalled();
   });
 });
 

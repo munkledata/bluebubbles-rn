@@ -26,6 +26,7 @@ import {
   pauseRealtime,
   resumeRealtime,
   retryRealtimeConnection,
+  stopAllTyping,
 } from '@/services';
 import { recoverOutgoing } from '@/services/send';
 import { drainPendingAttachmentMediaExports } from '@/services/download/attachmentMediaExportQueue';
@@ -132,6 +133,16 @@ function ConnectedAppLayout(): React.JSX.Element {
       if (accountLease.isCurrent()) secureLogger.warn(message, meta);
     },
   }));
+
+  // Stop typing on the still-open socket. Registered (and so run) BEFORE the listener below, whose
+  // background pause closes the socket at once: the composer's 3-second stop timer would then find
+  // no socket, and the other side would keep showing "typing…".
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (state === 'background' || state === 'inactive') stopAllTyping();
+    });
+    return () => sub.remove();
+  }, [AppState]);
 
   // Coordinate App Lock and realtime in ONE listener. Two separate listeners introduced a race:
   // the first locked the UI after a long background interval, then the second immediately

@@ -77,6 +77,7 @@ jest.mock('@/services', () => ({
   pauseRealtime: jest.fn(),
   resumeRealtime: jest.fn(() => Promise.resolve()),
   retryRealtimeConnection: jest.fn(() => true),
+  stopAllTyping: jest.fn(),
 }));
 jest.mock('@/services/send', () => ({
   recoverOutgoing: jest.fn(() => Promise.resolve({ eligible: 0, sent: 0 })),
@@ -150,6 +151,7 @@ import {
   pauseRealtime,
   resumeRealtime,
   retryRealtimeConnection,
+  stopAllTyping,
 } from '@/services';
 // eslint-disable-next-line import/first
 import { recoverOutgoing } from '@/services/send';
@@ -176,6 +178,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 
 const mockPauseRealtime = pauseRealtime as jest.MockedFunction<typeof pauseRealtime>;
+const mockStopAllTyping = stopAllTyping as jest.MockedFunction<typeof stopAllTyping>;
 const mockResumeRealtime = resumeRealtime as jest.MockedFunction<typeof resumeRealtime>;
 const mockRetryRealtime = retryRealtimeConnection as jest.MockedFunction<
   typeof retryRealtimeConnection
@@ -232,8 +235,9 @@ async function mountLayout(): Promise<void> {
   await renderWithTheme(<AppLayout />);
   expect(mockServerRotationApprovalHost).toHaveBeenCalledTimes(1);
   expect(mockShareIntentNavigator).toHaveBeenCalledTimes(1);
-  // One callback owns lock/realtime coordination; the other drains notification taps on resume.
-  expect(appStateHandlers).toHaveLength(2);
+  // The first stops typing on background before the second (lock/realtime coordination) pauses the
+  // socket; the third drains notification taps on resume.
+  expect(appStateHandlers).toHaveLength(3);
   expect(mockForegroundHandlers).toHaveLength(1);
   await waitFor(() => expect(mockDrainMediaExports).toHaveBeenCalledTimes(1));
 
@@ -311,6 +315,18 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockFlushErrorReports).toHaveBeenCalledTimes(1);
     expect(mockRecoverOutgoing).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(mockDrainMediaExports).toHaveBeenCalledTimes(1));
+  });
+
+  it('stops typing before the background pause closes the socket', async () => {
+    await mountLayout();
+
+    await emitAppState('background');
+
+    expect(mockStopAllTyping).toHaveBeenCalledTimes(1);
+    expect(mockPauseRealtime).toHaveBeenCalledTimes(1);
+    expect(mockStopAllTyping.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockPauseRealtime.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('clears the background time on an in-grace resume so live intake stays unlocked', async () => {
@@ -400,7 +416,7 @@ describe('AppLayout — active AppState lock gate', () => {
     mockRecoverOutgoing.mockReturnValueOnce(recoveryPending);
     useLockStore.setState({ lastBackgrounded: null });
     await mountLayout();
-    const oldRecovery = appStateHandlers[0]!;
+    const oldRecovery = appStateHandlers[1]!;
 
     await act(async () => {
       oldRecovery('active');
@@ -433,8 +449,9 @@ describe('AppLayout — active AppState lock gate', () => {
     useLockStore.setState({ lastBackgrounded: null });
     await mountLayout();
     const oldForeground = mockForegroundHandlers[0]!;
-    const oldRecovery = appStateHandlers[0]!;
-    const oldTapDrain = appStateHandlers[1]!;
+    const oldTypingStop = appStateHandlers[0]!;
+    const oldRecovery = appStateHandlers[1]!;
+    const oldTapDrain = appStateHandlers[2]!;
 
     await act(async () => {
       await pauseRealtimeDeliveries();
@@ -451,7 +468,7 @@ describe('AppLayout — active AppState lock gate', () => {
     });
     await waitFor(() => {
       expect(mockForegroundHandlers).toHaveLength(2);
-      expect(appStateHandlers).toHaveLength(4);
+      expect(appStateHandlers).toHaveLength(6);
     });
 
     mockHandleNotificationAction.mockClear();
@@ -461,8 +478,10 @@ describe('AppLayout — active AppState lock gate', () => {
     mockResumeRealtime.mockClear();
     mockFlushErrorReports.mockClear();
     mockRecoverOutgoing.mockClear();
+    mockStopAllTyping.mockClear();
 
     await act(async () => {
+      oldTypingStop('background');
       oldForeground({ type: EventType.ACTION_PRESS, detail: {} });
       oldForeground({ type: EventType.PRESS, detail: {} });
       oldRecovery('active');
@@ -479,9 +498,10 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockResumeRealtime).not.toHaveBeenCalled();
     expect(mockFlushErrorReports).not.toHaveBeenCalled();
     expect(mockRecoverOutgoing).not.toHaveBeenCalled();
+    expect(mockStopAllTyping).not.toHaveBeenCalled();
 
     const freshForeground = mockForegroundHandlers[1]!;
-    const freshTapDrain = appStateHandlers[3]!;
+    const freshTapDrain = appStateHandlers[5]!;
     await act(async () => {
       freshForeground({ type: EventType.ACTION_PRESS, detail: {} });
       freshForeground({ type: EventType.PRESS, detail: {} });

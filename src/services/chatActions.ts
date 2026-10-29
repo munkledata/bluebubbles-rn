@@ -806,6 +806,19 @@ export function sendTyping(chatGuid: string, isTyping: boolean): void {
   void stopImessageTyping(chatGuid, intent);
 }
 
+/**
+ * Send stop-typing for every chat whose START may have escaped. Going to the background closes the
+ * socket at once, so the composer's 3-second stop timer would find no socket and leave the other
+ * side showing "typing…". The app layout calls this on background BEFORE `pauseRealtime`: each stop's
+ * emit happens synchronously inside this call, on the still-open socket, and each one stays fenced
+ * by its START's account lease.
+ */
+export function stopAllTyping(): void {
+  for (const [chatGuid, intent] of [...latestTypingIntent]) {
+    if (intent.isTyping) sendTyping(chatGuid, false);
+  }
+}
+
 type FeatureSettings = ReturnType<typeof useFeatureSettingsStore.getState>;
 
 /**

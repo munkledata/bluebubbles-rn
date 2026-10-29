@@ -53,6 +53,7 @@ export {
   addTextToChatDraft,
   createNewChat,
   sendTyping,
+  stopAllTyping,
   markRead,
   markUnread,
   markAllChatsRead,
