@@ -49,12 +49,29 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.64` / version code `86` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.65` / version code `87` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-10-29 — not a checklist rebind:** **`0.1.64` / code `86`** was built
+**Latest live artifact, 2026-10-29 — not a checklist rebind:** **`0.1.65` / code `87`** was built
+from source `43a184e75fbb527daf0a4c608cfedf0a2a938309` (0.1.64 plus five fixes: Statistics reading the
+server snapshot's eleven fields, the self-share message pointing at Save to Photos, Forward wherever New
+Message can start a chat, unsized pictures sized from the image, and the RCS reminder message; CI run
+`40812035731` green) and promoted as release commit `21c5e61d7a01c0ea1d4dc3ab2729bc47b53f42df` on local
+branch `release/android-0.1.65`. Run `android-0.1.65-43a184e-20261029050500` produced
+`gator-release-0.1.65-v87-21c5e61.aab`, **58,435,938 bytes**, SHA-256
+`6829c44e13f158d5dc0803f628440daaeffc78cca2473c152ba068247894d36c`. The clean local production
+build, native path proof and expected upload certificate (`6E:18:F9:…:2F:43`) pass. Under owner
+decision 2026-10-20 (and the owner's request for this release on 2026-10-29) the agent submitted it
+with `--execute --confirm` and the exact phrase `SUBMIT 0.1.65 v87 6829c44e13f1 TO PLAY INTERNAL`
+after the server session released the test phone; the Maps key came from the login Keychain.
+Android Publisher readback after the 2026-10-29T05:44Z submission confirms Internal release `0.1.65`,
+code `87`, `completed`. `check:legal-inventory` passes on the release commit without regeneration.
+The device update and the pending rows in `docs/DEVICE_VERIFICATION_CHECKLIST.md` remain open. No
+task status or frozen v77 checklist row is changed by this Internal release.
+
+**Historical v86 artifact, 2026-10-29:** **`0.1.64` / code `86`** was built
 from source `6718eeccadece77d35f18ef0600f20a4ac7e122e` (New Message listing the existing iMessage
 chats with the chosen people and Start adding the message to the one it found, the share-intake App
 Logs, held-share recovery and before-upload refusal messages, the `.heif`/`.avif` label fix, the
