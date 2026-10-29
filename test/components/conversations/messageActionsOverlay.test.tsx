@@ -24,7 +24,7 @@
  * environment (an un-flushed press corrupts later renders — RNTL 14 / React 19 gotcha).
  */
 import React from 'react';
-import { AccessibilityInfo, Animated } from 'react-native';
+import { AccessibilityInfo, Animated, Dimensions, StyleSheet } from 'react-native';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 import {
   MessageActionsOverlay,
@@ -765,5 +765,35 @@ describe('MessageActionsOverlay — Reduce Motion opening lifecycle', () => {
     } finally {
       springs.restore();
     }
+  });
+});
+
+describe('MessageActionsOverlay — a bubble too tall for the menu beside it', () => {
+  it('moves the measured menu over the bubble so its last rows stay in view', async () => {
+    const { height } = Dimensions.get('window');
+    // A portrait video: the bar fits above it, but there's little room above and none below.
+    const anchorRect = { x: 24, y: 300, width: 220, height: height - 340 };
+    await renderOverlay(makeSelected({ anchorRect }));
+    const scroll = (): ReturnType<typeof screen.getByTestId> =>
+      screen.getByTestId('message-actions-menu-scroll');
+    const menuCard = (): Record<string, unknown> =>
+      StyleSheet.flatten(screen.getByTestId('message-actions-menu').props.style) as Record<
+        string,
+        unknown
+      >;
+    const maxHeight = (): number =>
+      (StyleSheet.flatten(scroll().props.style) as { maxHeight: number }).maxHeight;
+
+    // Before measuring: the old placement, stacked above the bar with only ~220 of room.
+    expect(menuCard().bottom).toBeDefined();
+    expect(maxHeight()).toBeLessThan(400);
+
+    // The menu measures taller than that room, so it moves just under the bar, over the bubble.
+    await act(async () => {
+      fireEvent(scroll(), 'contentSizeChange', 224, 400);
+    });
+    // barTop = 300 - 8 - 56 = 236 → menu top = 236 + 56 + 8 = 300
+    expect(menuCard().top).toBe(300);
+    expect(maxHeight()).toBeGreaterThanOrEqual(400);
   });
 });

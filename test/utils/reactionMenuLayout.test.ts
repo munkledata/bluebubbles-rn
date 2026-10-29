@@ -82,6 +82,59 @@ describe('placeReactionMenu — bubble near the BOTTOM', () => {
   });
 });
 
+describe('placeReactionMenu — bubble too tall for the menu beside it', () => {
+  // A portrait video: room for the bar above, but little above it and nothing below.
+  const tall = { x: 150, y: 330, width: 220, height: 440 };
+
+  it('without a measured menu height, keeps the old above-the-bar placement', () => {
+    const p = placeReactionMenu(baseInput({ isFromMe: true, bubble: tall }));
+    // barTop = 330 - 8 - 52 = 270; spaceBelow = 844 - 34 - 8 - 778 = 24 < 180 → above the bar.
+    expect(p.barTop).toBe(270);
+    expect(p.menu).toEqual({ anchor: 'bottom', value: 844 - 262 });
+    // 270 - 8 - 47 - 8 = 207
+    expect(p.menuMaxHeight).toBe(207);
+  });
+
+  it('covers the bubble, just under the bar, when the measured menu would not fit', () => {
+    const p = placeReactionMenu(baseInput({ isFromMe: true, bubble: tall, menuHeight: 350 }));
+    expect(p.barTop).toBe(270);
+    // menu top = barTop(270) + barHeight(52) + gap(8) = 330
+    expect(p.menu).toEqual({ anchor: 'top', value: 330 });
+    // 844 - 34 - 8 - 330 = 472, enough for all 350
+    expect(p.menuMaxHeight).toBe(472);
+    expect(p.menuMaxHeight).toBeGreaterThanOrEqual(350);
+  });
+
+  it('keeps the menu above the bar when the measured menu fits there', () => {
+    const p = placeReactionMenu(baseInput({ isFromMe: true, bubble: tall, menuHeight: 200 }));
+    expect(p.menu.anchor).toBe('bottom');
+    expect(p.menuMaxHeight).toBe(207);
+  });
+
+  it('prefers above the bar over covering when the menu fits there but not below', () => {
+    // A medium bubble: 200 free below (enough for the old rule), but the menu needs 300.
+    const p = placeReactionMenu(
+      baseInput({ bubble: { x: 12, y: 400, width: 220, height: 194 }, menuHeight: 300 }),
+    );
+    // spaceBelow = 844 - 34 - 8 - (594 + 8) = 200; spaceAbove = 340 - 8 - 47 - 8 = 277 < 300
+    // → neither fits, so it covers: top = 340 + 52 + 8 = 400, space = 844 - 34 - 8 - 400 = 402.
+    expect(p.menu).toEqual({ anchor: 'top', value: 400 });
+    expect(p.menuMaxHeight).toBe(402);
+    const q = placeReactionMenu(
+      baseInput({ bubble: { x: 12, y: 400, width: 220, height: 194 }, menuHeight: 250 }),
+    );
+    // 250 fits above (277) but not below (200) → above the bar.
+    expect(q.menu.anchor).toBe('bottom');
+    expect(q.menuMaxHeight).toBe(277);
+  });
+
+  it('leaves the common below-the-bubble layout alone', () => {
+    const p = placeReactionMenu(baseInput({ menuHeight: 300 }));
+    expect(p.menu).toEqual({ anchor: 'top', value: 468 });
+    expect(p.menuMaxHeight).toBe(334);
+  });
+});
+
 describe('placeReactionMenu — never returns a negative height', () => {
   it('clamps menuMaxHeight to 0 in a degenerate tiny screen', () => {
     const p = placeReactionMenu(

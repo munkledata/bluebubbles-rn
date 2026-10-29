@@ -162,6 +162,8 @@ export function MessageActionsOverlay({
   const myEmojis = selected?.myEmojis ?? [];
   const [emojiDraft, setEmojiDraft] = useState('');
   const [showEmojiInput, setShowEmojiInput] = useState(false);
+  // The action menu's measured full height; it decides whether the menu must cover a tall bubble.
+  const [menuHeight, setMenuHeight] = useState<number | null>(null);
   // A single retained spring drives the pop-in (scrim fade + bar/menu scale) of the anchored layout.
   const anim = useRef(new Animated.Value(1)).current;
   const activePop = useRef<Animated.CompositeAnimation | null>(null);
@@ -173,6 +175,7 @@ export function MessageActionsOverlay({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setEmojiDraft('');
     setShowEmojiInput(false);
+    setMenuHeight(null);
   }, [selectedGuid]);
 
   useLayoutEffect(() => {
@@ -422,6 +425,7 @@ export function MessageActionsOverlay({
       barHeight: canReactToServerMessage ? BAR_HEIGHT : 0,
       gap: GAP,
       sideInset: SIDE_INSET,
+      ...(menuHeight != null ? { menuHeight } : {}),
     });
     const holeTop = Math.max(0, rect.y - HOLE_PAD);
     const holeBottom = rect.y + rect.height + HOLE_PAD;
@@ -467,10 +471,16 @@ export function MessageActionsOverlay({
         ) : null}
         {/* Floating action menu card. */}
         <Animated.View
+          testID="message-actions-menu"
           style={[styles.floatMenu, sideStyle, menuVerticalStyle, { maxWidth }, popStyle]}
         >
           <View style={[styles.menuCard, { backgroundColor: theme.color.secondaryBackground }]}>
-            <ScrollView style={{ maxHeight: place.menuMaxHeight }} bounces={false}>
+            <ScrollView
+              testID="message-actions-menu-scroll"
+              style={{ maxHeight: place.menuMaxHeight }}
+              bounces={false}
+              onContentSizeChange={(_w, h) => setMenuHeight(h)}
+            >
               {actions.map(renderAction)}
             </ScrollView>
           </View>

@@ -5,8 +5,9 @@
  * it: a horizontal tapback BAR (hugging the bubble's near top corner) and a vertical action MENU
  * card. This module decides WHERE those two go given the bubble rect, the screen size, the safe-area
  * insets, and which side the bubble is on — handling the awkward edges (bubble near the top → bar
- * flips below; bubble near the bottom → menu stacks above the bar; long menu → it scrolls within
- * the space that's actually available).
+ * flips below; bubble near the bottom → menu stacks above the bar; a bubble so tall that the menu
+ * fits neither above nor below → the menu covers the bubble, just under the bar; long menu → it
+ * scrolls within the space that's actually available).
  *
  * The component (`MessageActionsOverlay`) feeds a measured `BubbleRect` through `placeReactionMenu`
  * and applies the returned absolute coordinates. Keeping the math here (not in the component) makes
@@ -36,6 +37,11 @@ export interface ReactionMenuInput {
   gap: number;
   /** Minimum horizontal margin the floating pieces keep from the screen's left/right edges. */
   sideInset: number;
+  /**
+   * The action menu's full height once measured. When it doesn't fit beside the bubble, the menu
+   * covers the bubble instead of hiding its last rows. Omitted before the first measurement.
+   */
+  menuHeight?: number;
 }
 
 export type MenuAnchor =
@@ -89,14 +95,29 @@ export function placeReactionMenu(input: ReactionMenuInput): ReactionMenuPlaceme
     // Preferred layout: menu directly BELOW the bubble.
     const menuTop = bubbleBottom + gap;
     const spaceBelow = screen.height - insets.bottom - gap - menuTop;
-    if (spaceBelow >= MENU_MIN_HEIGHT) {
-      menu = { anchor: 'top', value: menuTop };
-      menuMaxHeight = spaceBelow;
+    const menuBottom = screen.height - (barTop - gap);
+    const spaceAbove = barTop - gap - insets.top - gap;
+    const below: MenuAnchor = { anchor: 'top', value: menuTop };
+    const above: MenuAnchor = { anchor: 'bottom', value: menuBottom };
+    const { menuHeight } = input;
+    if (menuHeight == null) {
+      // Not measured yet: below unless that's too cramped, then stack ABOVE the bar.
+      [menu, menuMaxHeight] =
+        spaceBelow >= MENU_MIN_HEIGHT ? [below, spaceBelow] : [above, spaceAbove];
+    } else if (menuHeight <= spaceBelow) {
+      [menu, menuMaxHeight] = [below, spaceBelow];
+    } else if (menuHeight <= spaceAbove) {
+      [menu, menuMaxHeight] = [above, spaceAbove];
     } else {
-      // Bubble sits low on screen — stack the menu ABOVE the bar instead so it isn't crushed.
-      const menuBottom = screen.height - (barTop - gap);
-      menu = { anchor: 'bottom', value: menuBottom };
-      menuMaxHeight = barTop - gap - insets.top - gap;
+      // Fits on neither side (a very tall bubble such as a portrait video): cover the bubble, just
+      // under the bar, so no row is hidden out of sight in the menu's scroll area. This space
+      // contains the space below, so it is never smaller.
+      const coverTop = barTop + barHeight + gap;
+      const coverSpace = screen.height - insets.bottom - gap - coverTop;
+      [menu, menuMaxHeight] =
+        coverSpace >= spaceAbove
+          ? [{ anchor: 'top', value: coverTop }, coverSpace]
+          : [above, spaceAbove];
     }
   } else {
     // Bar had to go below the bubble (bubble near the top) — the menu follows below the bar.
