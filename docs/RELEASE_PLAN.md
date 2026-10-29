@@ -49,12 +49,32 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.65` / version code `87` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.66` / version code `88` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-10-29 — not a checklist rebind:** **`0.1.65` / code `87`** was built
+**Latest live artifact, 2026-10-29 — not a checklist rebind:** **`0.1.66` / code `88`** was built
+from source `8140beb8f761cf5a2d3a28f3b04181198ac5d6fd` (0.1.65 plus migration
+`0056_retire_doubled_rcs_local_copies`, which hides old doubled RCS texts left from before server
+2.0.38, and nine fixes from master: a server failure code cleared when the send later went through, an
+iMessage that failed after sending shown as failed, all seven statistics totals shown again,
+stopped-typing sent before backgrounding closes the socket, unsized videos sized from their poster, an
+RCS chat relayed from an iPhone shown as RCS, a chat's notifications cleared when the inbox marks it
+read, local-format numbers matched outside North America, and the contacts rewrite skipped when the
+address book hasn't changed; CI run `40854458983` green) and promoted as release commit
+`c0cad06e5e592c912ae9b076880006f1f2ce8342` on local branch `release/android-0.1.66`. Run
+`android-0.1.66-8140beb-20261029110750` produced `gator-release-0.1.66-v88-c0cad06.aab`,
+**58,440,304 bytes**, SHA-256 `4b8d1730f848e4ddbf7caffb445bec79c6e86089432fdbd6e66b17981feda60e`.
+The clean local production build, validation and expected upload certificate (`6E:18:F9:…:2F:43`)
+pass. The owner approved this release directly on 2026-10-29; the agent submitted it with
+`--execute --confirm` and the exact phrase `SUBMIT 0.1.66 v88 4b8d1730f848 TO PLAY INTERNAL`; the
+Maps key came from the login Keychain. Android Publisher readback after the 2026-10-29T11:23Z
+submission confirms Internal release `0.1.66`, code `88`, `completed`. The device update and the
+pending rows in `docs/DEVICE_VERIFICATION_CHECKLIST.md` remain open. No task status or frozen v77
+checklist row is changed by this Internal release.
+
+**Historical v87 artifact, 2026-10-29:** **`0.1.65` / code `87`** was built
 from source `43a184e75fbb527daf0a4c608cfedf0a2a938309` (0.1.64 plus five fixes: Statistics reading the
 server snapshot's eleven fields, the self-share message pointing at Save to Photos, Forward wherever New
 Message can start a chat, unsized pictures sized from the image, and the RCS reminder message; CI run
