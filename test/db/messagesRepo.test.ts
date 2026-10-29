@@ -1351,9 +1351,8 @@ describe('monotonic receipt/edit/unsend columns survive a STALE re-upsert', () =
     expect(marker(raw, 'p1', 'date_retracted')).toBe(700);
   });
 
-  // The v1 message DTO carries NO `error` field (send failures travel in the separate
-  // `message-send-error` envelope), so `excluded.error` could only ever be the hard-coded 0 seed —
-  // refreshing it on conflict erases rather than reflects.
+  // A message copy without a server failure carries `error` 0 (absent key, older server, RCS), so
+  // taking it on conflict would erase rather than reflect.
   it('a re-sync does not erase a stored send-error code or projected detail', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seed(db);
@@ -1398,6 +1397,36 @@ describe('monotonic receipt/edit/unsend columns survive a STALE re-upsert', () =
       errorMessage: 'Messages rejected this send.',
       sendState: 'error',
     });
+  });
+
+  // A newer server reports Apple's failure code on our own iMessage that was not delivered.
+  it('a server failure code marks our own message failed and a later copy without it keeps it', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seed(db);
+    const errorOf = (guid: string): number =>
+      (raw.prepare('SELECT error v FROM messages WHERE guid = ?').get(guid) as { v: number }).v;
+    const upsert = (fields: Record<string, unknown>) =>
+      upsertMessages(
+        db,
+        [Message.parse({ text: 'hi', dateCreated: 800, ...fields })],
+        () => chatId,
+        new Map(),
+      );
+
+    await upsert({ guid: 'f1', isFromMe: true });
+    expect(errorOf('f1')).toBe(0);
+    await upsert({ guid: 'f1', isFromMe: true, error: 22 });
+    expect(errorOf('f1')).toBe(22);
+    // A later receipt-shaped copy (no `error` key) or an explicit 0 must not hide the failure.
+    await upsert({ guid: 'f1', isFromMe: true, dateRead: 900 });
+    await upsert({ guid: 'f1', isFromMe: true, error: 0 });
+    expect(errorOf('f1')).toBe(22);
+
+    // A row first stored already failed keeps the code; incoming rows and client-range codes do not.
+    await upsert({ guid: 'f2', isFromMe: true, error: 4 });
+    await upsert({ guid: 'f3', isFromMe: false, error: 4, handle: { address: 'b@x.com' } });
+    await upsert({ guid: 'f4', isFromMe: true, error: 10_001 });
+    expect([errorOf('f2'), errorOf('f3'), errorOf('f4')]).toEqual([4, 0, 0]);
   });
 });
 
