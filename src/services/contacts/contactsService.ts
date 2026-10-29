@@ -120,6 +120,40 @@ interface ContactsSyncSlot {
 let inFlight: ContactsSyncSlot | null = null;
 
 /**
+ * Fingerprint of the address book the last complete run wrote, for one account generation.
+ *
+ * Every finished message sync calls `syncContacts()`, and a full run rewrites the whole contacts
+ * table and re-matches every handle even when nothing in the address book changed. When the device
+ * read hashes to the same value as the last complete run for this account, the DB rewrite and the
+ * re-match are skipped. Handles that arrive between runs are still linked when they are ingested
+ * (`linkHandlesToContacts`), so the full re-match only matters when the address book changes. It
+ * lives in memory only: a new process, or a new account generation, always does one full run.
+ */
+let lastWritten: { readonly generation: number; readonly fingerprint: string } | null = null;
+
+/** cyrb53, a small public-domain 53-bit string hash. Only compared for equality, never stored. */
+function cyrb53(input: string): number {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
+/** Hash of exactly what `upsertContacts` would write: ids, names, numbers, emails and photos. */
+function addressBookFingerprint(items: readonly DeviceContact[]): string {
+  const json = JSON.stringify(items);
+  return `${items.length}:${json.length}:${cyrb53(json)}`;
+}
+
+/**
  * How long a run may hold the coalescing slot before later callers stop waiting on it. A real run
  * is seconds of work, so past this the promise is one that will never settle — an Android
  * permission dialog the user escaped by backgrounding the app leaves `requestPermissionsAsync`
@@ -168,7 +202,8 @@ function settleWithin(p: Promise<unknown>, ms: number): Promise<void> {
  * missing and the dialog still reports success. So a forced call CHAINS instead of joining — it
  * still serializes behind whatever is running (overlapping generation swaps are exactly what the
  * coalescing exists to prevent) and only then does its own fresh read. The chain carries the
- * abandonment cap with it, so it can never be stranded behind a run that will not finish.
+ * abandonment cap with it, so it can never be stranded behind a run that will not finish. A forced
+ * run also never takes the unchanged-address-book shortcut (see `lastWritten`).
  */
 export function syncContacts(
   opts: { force?: boolean; accountLease?: RealtimeDeliveryLease } = {},
@@ -208,7 +243,7 @@ export function syncContacts(
     slot.startedAt = Date.now();
     // `force` is reserved for the explicit Settings button. Background startup sync may use an
     // existing grant, but must never surprise the user with a permission dialog.
-    return runContactsSync(accountLease, opts.force === true);
+    return runContactsSync(accountLease, opts.force === true, opts.force !== true);
   };
   const next = live
     ? settleWithin(
@@ -256,6 +291,7 @@ async function runContactDbTask<T>(
 async function runContactsSync(
   accountLease: RealtimeDeliveryLease,
   requestPermission: boolean,
+  skipIfUnchanged: boolean,
 ): Promise<ContactsSyncResult> {
   assertCurrentAccount(accountLease);
   const permission = requestPermission
@@ -289,14 +325,33 @@ async function runContactsSync(
     avatar: c.imageAvailable && c.image?.uri ? c.image.uri : null,
   }));
 
+  // An empty read is never skipped: it costs nothing to process, and it is also the "we don't
+  // know" case the match pass guards on its own.
+  const fingerprint = addressBookFingerprint(items);
+  const unchanged =
+    skipIfUnchanged &&
+    items.length > 0 &&
+    lastWritten?.generation === accountLease.generation &&
+    lastWritten.fingerprint === fingerprint;
+
   // Obtain the handle under the same short admission rule as every statement that uses it. If A
   // is revoked between statements, the next runner rejects before invoking its closure, so B can
   // never be mutated through A's captured handle.
   const db = await runContactDbTask(accountLease, async () => getDatabase());
-  const runDbTask: ContactDbTaskRunner = (task) => runContactDbTask(accountLease, task);
-  const contacts = await upsertContacts(db, items, runDbTask);
-  const matched = await matchContactsToHandles(db, runDbTask);
-  assertCurrentAccount(accountLease);
+  let contacts = items.length;
+  let matched = 0;
+  if (unchanged) {
+    logger.debug('[contacts] address book unchanged; skipping the contacts rewrite');
+  } else {
+    // Forget the old fingerprint BEFORE writing: a run that fails part-way must not leave a
+    // fingerprint that lets the next run skip over a half-written table.
+    lastWritten = null;
+    const runDbTask: ContactDbTaskRunner = (task) => runContactDbTask(accountLease, task);
+    contacts = await upsertContacts(db, items, runDbTask);
+    matched = await matchContactsToHandles(db, runDbTask);
+    assertCurrentAccount(accountLease);
+    lastWritten = { generation: accountLease.generation, fingerprint };
+  }
   // Best-effort: fill in avatars from the server for handles the device address book had no
   // photo for. Fully guarded — a failure here must NOT fail the (already-complete) device sync.
   try {

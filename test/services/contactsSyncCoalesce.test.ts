@@ -403,6 +403,101 @@ describe('syncContacts coalescing', () => {
     resumeRealtimeDeliveries();
   });
 
+  /**
+   * Every finished message sync calls `syncContacts()`. Rewriting the whole contacts table and
+   * re-matching every handle when the address book has not changed is wasted work, so an unforced
+   * run skips the DB phase when the device read matches the last complete run for this account.
+   */
+  describe('unchanged address book', () => {
+    const book = [
+      { id: 'c1', name: 'Ana', phoneNumbers: [{ number: '+15551234567' }] },
+      { id: 'c2', name: 'Ben', emails: [{ email: 'ben@example.com' }] },
+    ];
+
+    // A fresh account generation per test, so no fingerprint leaks in from an earlier test.
+    beforeEach(async () => {
+      await pauseRealtimeDeliveries();
+      resumeRealtimeDeliveries();
+      upsertContacts.mockImplementation(async (_db: unknown, items: unknown[]) => items.length);
+      matchContactsToHandles.mockResolvedValue(3);
+    });
+
+    it('skips the rewrite and the re-match when nothing changed since the last run', async () => {
+      getContactsAsync.mockResolvedValue({ data: book });
+
+      await expect(syncContacts()).resolves.toEqual({ contacts: 2, matched: 3 });
+      await expect(syncContacts()).resolves.toEqual({ contacts: 2, matched: 0 });
+
+      expect(getContactsAsync).toHaveBeenCalledTimes(2);
+      expect(upsertContacts).toHaveBeenCalledTimes(1);
+      expect(matchContactsToHandles).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs fully again when a name, number or photo changes', async () => {
+      getContactsAsync
+        .mockResolvedValueOnce({ data: book })
+        .mockResolvedValueOnce({ data: [{ ...book[0], name: 'Ana Lee' }, book[1]] })
+        .mockResolvedValueOnce({
+          data: [
+            { ...book[0], name: 'Ana Lee', phoneNumbers: [{ number: '+15550000000' }] },
+            book[1],
+          ],
+        })
+        .mockResolvedValueOnce({
+          data: [
+            {
+              ...book[0],
+              name: 'Ana Lee',
+              phoneNumbers: [{ number: '+15550000000' }],
+              imageAvailable: true,
+              image: { uri: 'content://photo/1' },
+            },
+            book[1],
+          ],
+        });
+
+      for (let i = 0; i < 4; i += 1) await syncContacts();
+
+      expect(upsertContacts).toHaveBeenCalledTimes(4);
+      expect(matchContactsToHandles).toHaveBeenCalledTimes(4);
+    });
+
+    it('always runs fully for the explicit Sync Contacts button', async () => {
+      getContactsAsync.mockResolvedValue({ data: book });
+
+      await syncContacts();
+      await expect(syncContacts({ force: true })).resolves.toEqual({ contacts: 2, matched: 3 });
+
+      expect(upsertContacts).toHaveBeenCalledTimes(2);
+      expect(matchContactsToHandles).toHaveBeenCalledTimes(2);
+    });
+
+    it('runs fully once for a new account generation', async () => {
+      getContactsAsync.mockResolvedValue({ data: book });
+
+      await syncContacts();
+      await pauseRealtimeDeliveries();
+      resumeRealtimeDeliveries();
+      await syncContacts();
+
+      expect(upsertContacts).toHaveBeenCalledTimes(2);
+      expect(matchContactsToHandles).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not skip after a run that failed part-way', async () => {
+      getContactsAsync.mockResolvedValue({ data: book });
+
+      await syncContacts();
+      // A forced run clears the fingerprint before writing, then fails in the match pass.
+      matchContactsToHandles.mockRejectedValueOnce(new Error('boom'));
+      await expect(syncContacts({ force: true })).rejects.toThrow('boom');
+      await syncContacts();
+
+      expect(upsertContacts).toHaveBeenCalledTimes(3);
+      expect(matchContactsToHandles).toHaveBeenCalledTimes(3);
+    });
+  });
+
   /** IPC-01 containment: contact sync must never republish persistent chat names/photos. */
   describe('disabled Direct Share publication', () => {
     afterEach(() => {
