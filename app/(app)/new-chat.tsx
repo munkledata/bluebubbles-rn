@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
+import { checkIMessageAvailability } from '@core/api/endpoints/handles';
 import { ApiError } from '@core/api/errors';
 import { MAX_RCS_ATTACHMENT_UPLOAD_BYTES } from '@core/models/serverInfo';
 import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';
@@ -17,7 +18,7 @@ import {
   type ShareIntakeManifestIdentity,
   type ShareIntakeNewChatPlan,
 } from '@db/repositories';
-import { addTextToChatDraft, createNewChat } from '@/services';
+import { addTextToChatDraft, createNewChat, http } from '@/services';
 import type { NewChatService } from '@/services/chatActions';
 import {
   consumeShareIntakeBatchIfComplete,
@@ -93,6 +94,9 @@ function existingChatLabel(match: ExistingChatMatch): string {
 
 const MAX_INITIAL_IMESSAGE_TEXT_BYTES = 64 * 1024;
 
+/** The SMS green the old app used for a recipient who isn't on iMessage. */
+const NOT_ON_IMESSAGE_GREEN = '#34C759';
+
 /** Leaving mid-send would abandon the send's result, so Back waits until the send settles. */
 const SEND_IN_PROGRESS = {
   title: 'Still starting the conversation',
@@ -166,6 +170,14 @@ export default function NewChatScreen(): React.JSX.Element {
   const exactIMessageTextSupported = useSessionStore(
     (s) => s.serverInfo?.supports_imessage_plain_text === true,
   );
+  // Advisory only: the server's read-only lookup colours an iMessage recipient blue (reachable) or
+  // green (not on iMessage). It never blocks Start or switches the service.
+  const availabilitySupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_availability === true,
+  );
+  const [availability, setAvailability] = useState<Record<string, boolean>>({});
+  // Each address is looked up at most once per mounted screen; a removed and re-added chip reuses it.
+  const probedRef = useRef(new Set<string>());
   const [requestedService, setRequestedService] = useState<NewChatService | null>(null);
   const selectedService: NewChatService | null =
     requestedService ?? (rcsEnabled ? 'RCS' : imessageEnabled ? 'iMessage' : null);
@@ -228,6 +240,27 @@ export default function NewChatScreen(): React.JSX.Element {
   const screenInteractionIsCurrent = (): boolean =>
     accountLease.isCurrent() && shareResumeReady && !submissionInFlightRef.current;
   const accountUnavailable = accountInvalidated || !accountLease.isCurrent();
+
+  useEffect(() => {
+    if (accountUnavailable || !availabilitySupported || selectedService !== 'iMessage') return;
+    if (!accountLease.isCurrent()) return;
+    for (const r of recipients) {
+      if (probedRef.current.has(r.address) || !looksLikeIMessageAddress(r.address)) continue;
+      probedRef.current.add(r.address);
+      void checkIMessageAvailability(http, r.address)
+        .then((available) => {
+          if (accountLease.isCurrent()) {
+            setAvailability((cur) => ({ ...cur, [r.address]: available }));
+          }
+        })
+        .catch(() => {
+          // Helper down, busy, or an older server: leave the chip neutral.
+        });
+    }
+  }, [accountLease, accountUnavailable, availabilitySupported, recipients, selectedService]);
+  const showAvailability = availabilitySupported && selectedService === 'iMessage';
+  const anyNotOnIMessage =
+    showAvailability && recipients.some((r) => availability[r.address] === false);
 
   // The synchronous subscription covers live retirement. This layout pass also dismisses an IME
   // when the route first commits with an already-retired account lease.
@@ -918,7 +951,14 @@ export default function NewChatScreen(): React.JSX.Element {
             <Text style={[styles.toLabel, { color: theme.color.secondaryLabel }]}>To:</Text>
             <View style={styles.chipsWrap}>
               {recipients.map((r) => {
-                const chipColor = theme.color.tertiaryLabel;
+                const avail = showAvailability ? availability[r.address] : undefined;
+                // Blue = on iMessage, green = not on iMessage, grey = unknown or not checked.
+                const chipColor =
+                  avail === true
+                    ? theme.color.tint
+                    : avail === false
+                      ? NOT_ON_IMESSAGE_GREEN
+                      : theme.color.tertiaryLabel;
                 return (
                   <Pressable
                     key={r.address}
@@ -926,7 +966,13 @@ export default function NewChatScreen(): React.JSX.Element {
                     disabled={busy || !shareResumeReady || sharePlanPrepared}
                     style={[styles.chip, { backgroundColor: chipColor }]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Remove ${r.name}`}
+                    accessibilityLabel={`Remove ${r.name}${
+                      avail === true
+                        ? ' (on iMessage)'
+                        : avail === false
+                          ? ' (not on iMessage)'
+                          : ''
+                    }`}
                   >
                     <Text style={[styles.chipText, { color: readableTextOn(chipColor) }]}>
                       {r.name} ✕
@@ -1061,6 +1107,14 @@ export default function NewChatScreen(): React.JSX.Element {
                 ? 'New conversations use RCS and support one recipient.'
                 : 'Starting a new conversation requires an available RCS bridge. Open an existing conversation to send a message.'}
           </Text>
+
+          {anyNotOnIMessage ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              {rcsEnabled
+                ? 'A green recipient isn’t on iMessage. Choose RCS to reach them.'
+                : 'A green recipient isn’t on iMessage, so an iMessage may not reach them.'}
+            </Text>
+          ) : null}
 
           {shareNewIMessageBlocked ? (
             <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>

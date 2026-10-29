@@ -130,6 +130,7 @@ jest.mock('@ui/hooks/useUnsavedChangesGuard', () => ({
     return { navigateWithoutPrompt: mockNavigateWithoutPrompt };
   },
 }));
+jest.mock('@core/api/endpoints/handles', () => ({ checkIMessageAvailability: jest.fn() }));
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
   searchContactAddresses: jest.fn(),
@@ -144,6 +145,8 @@ import * as Crypto from 'expo-crypto';
 import { addTextToChatDraft, createNewChat } from '@/services';
 // eslint-disable-next-line import/first
 import { send, sendImages } from '@/services/send';
+// eslint-disable-next-line import/first
+import { checkIMessageAvailability } from '@core/api/endpoints/handles';
 // eslint-disable-next-line import/first
 import {
   consumeShareIntakeBatchIfComplete,
@@ -176,6 +179,7 @@ import {
 } from '@features/conversations/forwardAttachmentHandoff';
 
 const mockCreateNewChat = createNewChat as jest.Mock;
+const mockCheckAvailability = checkIMessageAvailability as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockRandomUUID = Crypto.randomUUID as jest.Mock;
 const mockSendImages = sendImages as jest.Mock;
@@ -2250,5 +2254,67 @@ describe('NewChatScreen — RCS file size limit', () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/larger than RCS allows/)).toBeNull();
+  });
+});
+
+describe('NewChatScreen — iMessage availability', () => {
+  const imessageWithAvailability = ServerInfo.parse({
+    version: 'test',
+    supports_imessage_new_chat: true,
+    supports_imessage_availability: true,
+  });
+  beforeEach(() => {
+    mockCheckAvailability.mockReset();
+  });
+
+  it.each([
+    [true, 'on iMessage'],
+    [false, 'not on iMessage'],
+  ])('labels a recipient after the lookup says available=%s', async (available, label) => {
+    useSessionStore.setState({ serverInfo: imessageWithAvailability });
+    mockCheckAvailability.mockResolvedValue(available);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(PRIVATE_ADDRESS);
+
+    expect(
+      await screen.findByRole('button', { name: new RegExp(`\\(${label}\\)$`) }),
+    ).toBeOnTheScreen();
+    expect(mockCheckAvailability).toHaveBeenCalledTimes(1);
+    expect(mockCheckAvailability.mock.calls[0]?.[1]).toBe(PRIVATE_ADDRESS);
+    if (available) {
+      expect(screen.queryByText(/isn’t on iMessage/)).toBeNull();
+    } else {
+      expect(screen.getByText(/A green recipient isn’t on iMessage/)).toBeOnTheScreen();
+    }
+  });
+
+  it('leaves the chip neutral when the lookup fails', async () => {
+    useSessionStore.setState({ serverInfo: imessageWithAvailability });
+    mockCheckAvailability.mockRejectedValue(new Error('helper down'));
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await waitFor(() => expect(mockCheckAvailability).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('button', { name: /on iMessage\)$/ })).toBeNull();
+    expect(screen.queryByText(/isn’t on iMessage/)).toBeNull();
+  });
+
+  it('never looks up a recipient when the server lacks the lookup', async () => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+    });
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await screen.findByRole('button', { name: /^Remove / });
+    expect(mockCheckAvailability).not.toHaveBeenCalled();
+  });
+
+  it('never looks up a recipient for an RCS message', async () => {
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await screen.findByRole('button', { name: /^Remove / });
+    expect(mockCheckAvailability).not.toHaveBeenCalled();
   });
 });

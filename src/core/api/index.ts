@@ -1,6 +1,7 @@
 export * from './errors';
 export * from './http';
 export * as serverApi from './endpoints/server';
+export * as handlesApi from './endpoints/handles';
 export * as chatsApi from './endpoints/chats';
 export * as messagesApi from './endpoints/messages';
 export * as scheduledApi from './endpoints/scheduled';
