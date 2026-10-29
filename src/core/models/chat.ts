@@ -38,5 +38,7 @@ export const Chat = z.object({
   /** macOS 26 synced "transcript background": present (a channel GUID) only when the chat has a
    *  background set. Doubles as the version key — re-download the image when it changes. */
   backgroundChannelGuid: z.string().nullish(),
+  /** A group's own photo id (server 2.0.39+); the version key for `GET /chat/:guid/icon`. */
+  groupPhotoGuid: z.string().nullish(),
 });
 export type Chat = z.infer<typeof Chat>;

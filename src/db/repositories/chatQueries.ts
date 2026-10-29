@@ -59,6 +59,8 @@ export interface InboxRow {
   lastBalloonBundleId?: string | null;
   /** 1 when the latest message has an attachment the UI does not hide. */
   lastHasVisibleAttachments?: number;
+  /** A group's own downloaded photo (file:// uri), shown instead of the member pictures. */
+  groupPhotoUri?: string | null;
   participantCount: number;
   /** JSON string array ordered by handle id. */
   participantNames: string | null;
@@ -608,6 +610,7 @@ async function queryChatsForInbox(
       EXISTS(SELECT 1 FROM attachments a
                WHERE a.message_id = l.id AND a.hide_attachment = 0 AND a.is_retracted = 0
                  AND ${attachmentIsUserFileSql('a', 'l')}) AS lastHasVisibleAttachments,
+      c.group_photo_uri AS groupPhotoUri,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
       (SELECT json_group_array(participant.name)
          FROM (SELECT COALESCE(h.display_name, h.address) AS name
@@ -1144,6 +1147,8 @@ export interface ChatHeaderRow {
   customColor: string | null;
   muteType: string | null;
   style: number | null;
+  /** A group's own downloaded photo (file:// uri), shown instead of the member pictures. */
+  groupPhotoUri?: string | null;
   participantCount: number;
   /** JSON string array ordered by handle id. */
   participantNames: string | null;
@@ -1195,6 +1200,7 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
     SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier, c.display_name AS displayName,
       c.custom_name AS customName, c.custom_color AS customColor, c.mute_type AS muteType, c.style,
       c.deleted_at AS deletedAt,
+      c.group_photo_uri AS groupPhotoUri,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
       (SELECT json_group_array(participant.name)
          FROM (SELECT COALESCE(h.display_name, h.address) AS name

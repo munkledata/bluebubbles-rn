@@ -143,7 +143,12 @@ export const ConversationTile = React.memo(function ConversationTile({
               always the spacer (keeps avatars aligned across read/unread rows). */}
         <View style={styles.dotSpacer} />
         {group ? (
-          <GroupAvatar names={groupParts.names} uris={groupParts.uris} colors={groupParts.colors} />
+          <GroupAvatar
+            names={groupParts.names}
+            uris={groupParts.uris}
+            colors={groupParts.colors}
+            photoUri={row.groupPhotoUri}
+          />
         ) : (
           <Avatar
             name={avatarSeed(row)}

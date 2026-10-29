@@ -2066,6 +2066,7 @@ const WIPED_MEDIA_DIRS = [
   'attachments', // downloadService → expoFetcher
   'server-contact-avatars', // backfillServerAvatars
   'synced-backgrounds', // syncedBackground
+  'group-photos', // groupPhotos
   'chat-bg', // the user's own per-chat wallpaper picks — their chat rows go with the wipe
 ] as const;
 

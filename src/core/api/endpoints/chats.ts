@@ -691,4 +691,9 @@ export function chatBackgroundUrl(http: HttpUrlBuilder, guid: string): string {
   return http.buildUrl(`/chat/${encodeURIComponent(guid)}/background`);
 }
 
+/** A group's own photo as a small JPEG (server 2.0.39+), versioned by the chat's `groupPhotoGuid`. */
+export function chatGroupPhotoUrl(http: HttpUrlBuilder, guid: string): string {
+  return http.buildUrl(`/chat/${encodeURIComponent(guid)}/icon`);
+}
+
 export { SYNC_WITH_QUERY };

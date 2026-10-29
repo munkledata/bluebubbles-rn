@@ -86,6 +86,8 @@ export function upsertChatsWithinTransaction(
           // chat has no background. Refreshed on every sync (unlike the device-local columns below).
           syncedBackgroundChannel:
             ('backgroundChannelGuid' in c ? c.backgroundChannelGuid : null) ?? null,
+          // Server-owned like the background channel: the group photo's id, or null for none.
+          groupPhotoGuid: ('groupPhotoGuid' in c ? c.groupPhotoGuid : null) ?? null,
         })),
       )
       .onConflictDoUpdate({
@@ -99,6 +101,7 @@ export function upsertChatsWithinTransaction(
           style: sql`excluded.style`,
           // Server-owned → refreshed on re-sync (a changed/removed background propagates).
           syncedBackgroundChannel: sql`excluded.synced_background_channel`,
+          groupPhotoGuid: sql`excluded.group_photo_guid`,
           // is_pinned, pin_order, is_archived, mute_type, custom_name and custom_color are
           // device-local:
           // SEEDED on first insert from the server, but NOT overwritten on a re-sync — the

@@ -30,5 +30,7 @@ export const ChatSummary = z.object({
    * i.e. offline.
    */
   backgroundChannelGuid: z.string().nullish(),
+  /** A group's own photo id. Declared here for the same reason as `backgroundChannelGuid`. */
+  groupPhotoGuid: z.string().nullish(),
 });
 export type ChatSummary = z.infer<typeof ChatSummary>;

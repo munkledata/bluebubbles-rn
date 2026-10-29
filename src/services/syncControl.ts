@@ -1089,6 +1089,14 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
     if (!shouldAbort()) {
       void syncContacts().catch((e) => logger.debug('[contacts] auto-sync skipped', e));
     }
+    // Group photos: the chat rows just synced carry each group's photo id; download what changed.
+    // Best-effort and self-contained, like the contacts pass above.
+    // Imported on first use so this module's load graph keeps out the file and download natives.
+    if (outcome === 'completed' && !shouldAbort()) {
+      void import('./backgrounds/groupPhotos')
+        .then(({ syncGroupPhotos }) => syncGroupPhotos(accountLease))
+        .catch((e) => logger.debug('[group-photo] refresh skipped', e));
+    }
 
     // Never let an old account publish into a replacement account's global store. A same-epoch
     // lease retirement (for example a transport rotation) is still useful feedback to this account.

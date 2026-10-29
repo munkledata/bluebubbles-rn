@@ -54,6 +54,35 @@ describe('GroupAvatar', () => {
     });
   });
 
+  it("shows the group's own photo, full size, instead of the member pictures", async () => {
+    const view = await renderWithTheme(
+      <GroupAvatar
+        names={['Alice', 'Bob']}
+        uris={['file:///alice.jpg', 'file:///bob.jpg']}
+        photoUri="file:///doc/group-photos/generation-1/media-x.jpg"
+        size={64}
+      />,
+    );
+    // The photo is the whole avatar, so it is the rendered root itself.
+    const photo = view.root!;
+    expect(photo.type).toBe('Image');
+    expect(photo.props.source).toEqual({
+      uri: 'file:///doc/group-photos/generation-1/media-x.jpg',
+    });
+    expect(StyleSheet.flatten(photo.props.style)).toMatchObject({ width: 64, height: 64 });
+    expect(photo.queryAll((node) => node.type === 'Image')).toHaveLength(0);
+
+    // No photo (null): back to the two member pictures.
+    await view.rerender(
+      <GroupAvatar
+        names={['Alice', 'Bob']}
+        uris={['file:///alice.jpg', 'file:///bob.jpg']}
+        photoUri={null}
+      />,
+    );
+    expect(view.root!.queryAll((node) => node.type === 'Image')).toHaveLength(2);
+  });
+
   it('reuses the sole name for both tiles when only one participant is given', async () => {
     const view = await renderWithTheme(<GroupAvatar names={['Solo']} />);
     expect(screen.getAllByText('S')).toHaveLength(2); // back AND front fall back to names[0]

@@ -127,6 +127,7 @@ jest.mock('@/services', () => ({
   dispatchRealtimeEvent: jest.fn(),
   ensureChatSynced: jest.fn(),
   ensureSyncedBackgroundForChat: jest.fn(),
+  syncGroupPhotos: jest.fn(() => Promise.resolve(0)),
   http: {},
   markRead: jest.fn(),
   sendTyping: jest.fn(),

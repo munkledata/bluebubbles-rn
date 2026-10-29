@@ -31,6 +31,7 @@ export async function runDevPerf02InboxBenchmark(
 }
 
 export { ensureSyncedBackgroundForChat } from './backgrounds/syncedBackground';
+export { syncGroupPhotos } from './backgrounds/groupPhotos';
 export { computeBackgroundIsLight } from './backgrounds/luminance';
 export { startAppleFaceTimeCall } from './facetimeCallUiService';
 export { createAppleFaceTimeLink } from './facetimeLinkUiService';

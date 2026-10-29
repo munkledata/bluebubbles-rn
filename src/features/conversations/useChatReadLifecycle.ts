@@ -4,7 +4,12 @@ import { AppState } from 'react-native';
 import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import { getChatIdByGuid, getFirstUnreadInChat, isChatHiddenByDeletion } from '@db/repositories';
-import { ensureChatSynced, ensureSyncedBackgroundForChat, markRead } from '@/services';
+import {
+  ensureChatSynced,
+  ensureSyncedBackgroundForChat,
+  markRead,
+  syncGroupPhotos,
+} from '@/services';
 import { useLockStore } from '@state/lockStore';
 import { claimActiveChat, type ActiveChatClaim } from '@/services/notifications/activeChat';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
@@ -147,7 +152,11 @@ export function useChatReadLifecycle({
     void backfillChatUnlessDeleted(guid, accountLease);
     // Fetch this chat's synced (macOS 26) background if a participant set/changed one — the
     // reactive `chats` query repaints the background once the downloaded uri is written.
-    void ensureSyncedBackgroundForChat(guid, accountLease);
+    // That refresh also stores a group's current photo id; then fetch the photo if it changed.
+    void (async () => {
+      await ensureSyncedBackgroundForChat(guid, accountLease);
+      if (guid.includes(';+;')) await syncGroupPhotos(accountLease);
+    })();
   }, [accountLease, guid]);
 
   // Keep the read marker current while the thread STAYS open. The effect above fires exactly once

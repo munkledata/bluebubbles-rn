@@ -162,3 +162,67 @@ export function setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
     return rows.length > 0;
   });
 }
+
+/** One chat whose group photo may need downloading or clearing. */
+export interface GroupPhotoState {
+  guid: string;
+  /** Server version id; null once the photo was removed. */
+  photoGuid: string | null;
+  /** The downloaded file, if any. */
+  uri: string | null;
+}
+
+/**
+ * Chats whose stored photo file may not match the server's photo id: a photo id with no file or
+ * any file at all (the caller compares the exact expected name). Bounded; groups are few.
+ */
+export async function listGroupPhotoStates(
+  db: AppDatabase,
+  limit: number,
+): Promise<GroupPhotoState[]> {
+  const bounded = Math.min(Math.max(Math.floor(limit), 1), 500);
+  return db.all<GroupPhotoState>(sql`
+    SELECT guid, group_photo_guid AS photoGuid, group_photo_uri AS uri
+      FROM chats
+     WHERE group_photo_guid IS NOT NULL OR group_photo_uri IS NOT NULL
+     ORDER BY id
+     LIMIT ${bounded}
+  `);
+}
+
+/**
+ * Point a chat at a downloaded group photo (or clear it), only if the server's photo id and the
+ * stored file are still what the caller read. A sync that changed the photo meanwhile wins.
+ */
+export function setGroupPhotoUriIfCurrentWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  expectedPhotoGuid: string | null,
+  expectedUri: string | null,
+  nextUri: string | null,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db
+      .update(chats)
+      .set({ groupPhotoUri: nextUri })
+      .where(
+        and(
+          eq(chats.guid, guid),
+          expectedPhotoGuid == null
+            ? isNull(chats.groupPhotoGuid)
+            : eq(chats.groupPhotoGuid, expectedPhotoGuid),
+          expectedUri == null ? isNull(chats.groupPhotoUri) : eq(chats.groupPhotoUri, expectedUri),
+        ),
+      )
+      .returning({ guid: chats.guid });
+    return rows.length > 0;
+  });
+}
+
+/** True while any chat still shows this photo file (one file per chat today; checked anyway). */
+export async function isGroupPhotoUriReferenced(db: AppDatabase, uri: string): Promise<boolean> {
+  const rows = await db.all<{ known: number }>(
+    sql`SELECT 1 AS known FROM chats WHERE group_photo_uri = ${uri} LIMIT 1`,
+  );
+  return rows[0]?.known === 1;
+}

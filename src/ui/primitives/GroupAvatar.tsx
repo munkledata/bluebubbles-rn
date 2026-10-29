@@ -10,16 +10,27 @@ interface GroupAvatarProps {
   uris?: (string | null)[];
   /** Last-known handle colors positionally aligned with `names` (null = generated fallback). */
   colors?: (string | null)[];
+  /** The group's own downloaded photo. When set it replaces the two member pictures. */
+  photoUri?: string | null;
 }
 
-/** Two overlapped avatars for group chats (back top-left, front bottom-right). */
+/**
+ * The group's own photo when it has one; otherwise two overlapped member avatars (back top-left,
+ * front bottom-right).
+ */
 export function GroupAvatar({
   names,
   size = 40,
   uris,
   colors,
+  photoUri,
 }: GroupAvatarProps): React.JSX.Element {
   const theme = useTheme();
+  if (photoUri) {
+    return (
+      <Avatar name={names[0] ?? '?'} size={size} uri={photoUri} color={colors?.[0] ?? undefined} />
+    );
+  }
   const inner = Math.round(size * 0.66);
   const back = names[0] ?? '?';
   const front = names[1] ?? names[0] ?? '?';

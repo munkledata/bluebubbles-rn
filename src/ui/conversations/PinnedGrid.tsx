@@ -82,6 +82,7 @@ export function PinnedGrid({
                   names={parts.names}
                   uris={parts.uris}
                   colors={parts.colors}
+                  photoUri={row.groupPhotoUri}
                   size={64}
                 />
               ) : (

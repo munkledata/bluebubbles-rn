@@ -80,6 +80,10 @@ export const chats = sqliteTable(
     syncedBackgroundChannel: text('synced_background_channel'),
     /** macOS 26 synced background: local file downloaded for `syncedBackgroundChannel`. */
     syncedBackgroundUri: text('synced_background_uri'),
+    /** A group's own photo: server-owned attachment id (the version), refreshed on sync. */
+    groupPhotoGuid: text('group_photo_guid'),
+    /** A group's own photo: local file downloaded for `groupPhotoGuid`. */
+    groupPhotoUri: text('group_photo_uri'),
     /** Luminance of the effective wallpaper (true = light image → dark overlay text). Null = unknown. */
     backgroundIsLight: integer('background_is_light', { mode: 'boolean' }),
     lastReadMessageGuid: text('last_read_message_guid'),

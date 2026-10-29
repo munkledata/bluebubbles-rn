@@ -135,7 +135,13 @@ export function ConversationHeader({
         {data ? (
           <View style={translucent ? [styles.avatarBubble, { backgroundColor: chip }] : null}>
             {group ? (
-              <GroupAvatar names={parts.names} uris={parts.uris} colors={parts.colors} size={30} />
+              <GroupAvatar
+                names={parts.names}
+                uris={parts.uris}
+                colors={parts.colors}
+                photoUri={data.groupPhotoUri}
+                size={30}
+              />
             ) : (
               <Avatar
                 name={avatarSeed(data)}

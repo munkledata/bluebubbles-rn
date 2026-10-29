@@ -251,6 +251,7 @@ jest.mock('@db/repositories', () => ({
 jest.mock('@/services', () => ({
   ensureChatSynced: jest.fn(),
   ensureSyncedBackgroundForChat: jest.fn(),
+  syncGroupPhotos: jest.fn(() => Promise.resolve(0)),
   markRead: jest.fn(),
   saveChatDraft: jest.fn().mockResolvedValue(undefined),
   sendTyping: jest.fn(),

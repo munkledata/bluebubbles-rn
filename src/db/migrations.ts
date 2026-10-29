@@ -1291,4 +1291,13 @@ export const MIGRATIONS: Migration[] = [
       `DROP TABLE m0056_leftovers`,
     ],
   },
+  {
+    // A group's own photo: the server's version id plus the downloaded local file, mirroring the
+    // synced-background pair. Both nullable, so a downgrade simply ignores them.
+    name: '0057_chat_group_photo',
+    statements: [
+      `ALTER TABLE chats ADD COLUMN group_photo_guid TEXT`,
+      `ALTER TABLE chats ADD COLUMN group_photo_uri TEXT`,
+    ],
+  },
 ];

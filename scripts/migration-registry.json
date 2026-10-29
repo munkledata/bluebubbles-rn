@@ -295,6 +295,16 @@
       "upgradeTest": "test/db/migrations/0056_retire_doubled_rcs_local_copies.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 57,
+      "name": "0057_chat_group_photo",
+      "task": "M3-GROUP-PHOTO",
+      "branchPr": "m3-group-photo",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0057_chat_group_photo.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }
