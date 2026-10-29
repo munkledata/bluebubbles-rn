@@ -201,3 +201,24 @@ describe('narrow plain iMessage endpoint', () => {
     expect(isRetryableIMessagePlainTextUnavailable(wrapped)).toBe(false);
   });
 });
+
+describe('sendReaction acknowledgement id', () => {
+  const reactTo = (chatGuid: string, ackGuid: string) =>
+    sendReaction({ post: jest.fn(async () => ({ guid: ackGuid })) } as unknown as HttpClient, {
+      chatGuid,
+      selectedMessageGuid: 'target-1',
+      reaction: 'love',
+      partIndex: 0,
+    });
+
+  it("drops an RCS reply id that names the reacted-to message (it isn't the reaction's own)", async () => {
+    await expect(reactTo('RCS;-;chat-1', 'target-1')).resolves.toEqual({ guid: undefined });
+  });
+
+  it('keeps a distinct RCS id and never rewrites an iMessage id', async () => {
+    await expect(reactTo('RCS;-;chat-1', 'reaction-1')).resolves.toEqual({ guid: 'reaction-1' });
+    await expect(reactTo('iMessage;-;+15551234567', 'target-1')).resolves.toEqual({
+      guid: 'target-1',
+    });
+  });
+});
