@@ -204,6 +204,44 @@ describe('sendReactionMessage', () => {
     ).toHaveLength(1);
   });
 
+  it("keeps the reaction when the RCS reply names the TARGET message's id (R4)", async () => {
+    // The server's RCS reaction reply carries the reacted-to message's id, not a new one. Treating
+    // that as the reaction's own id made reconcile see a "duplicate", delete the pending reaction
+    // and copy its send-tracking fields onto the target message.
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    await sendReactionMessage(
+      db,
+      fakeHttp(async () => ({ guid: 'rcs-mt' })),
+      {
+        chatGuid: 'RCS;-;c1',
+        targetGuid: 'rcs-mt',
+        reaction: 'love',
+        partIndex: 0,
+        selectedMessageText: 'hi',
+      },
+    );
+
+    const reaction = one(
+      raw,
+      "SELECT guid, send_state s, associated_message_type t FROM messages WHERE associated_message_guid='rcs-mt'",
+    );
+    expect(reaction).toBeDefined();
+    expect(reaction.guid).not.toBe('rcs-mt');
+    expect(reaction.s).toBe('sent');
+    expect(reaction.t).toBe('love');
+    const target = one(
+      raw,
+      "SELECT text, associated_message_guid a, active_send_attempt_guid g FROM messages WHERE guid='rcs-mt'",
+    );
+    expect(target).toMatchObject({ text: 'hi', a: null, g: null });
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(2);
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+    expect(
+      (await listReactionsByMessageGuids(db, 'RCS;-;c1', ['rcs-mt'])).get('rcs-mt'),
+    ).toHaveLength(1);
+  });
+
   it('targets a confirmed RCS message as whole-message part zero without Apple topology', async () => {
     const { db, raw } = await createTestDb();
     await seedWholeMessageRcsTarget(db);

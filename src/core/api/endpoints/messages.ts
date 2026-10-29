@@ -1110,7 +1110,7 @@ export interface SendReactionParams {
  * `selectedMessage*`/`reaction` keys the older client sent (which the server dropped → no
  * tapback). We map our params onto the server's names here.
  */
-export function sendReaction(http: HttpClient, params: SendReactionParams): Promise<SendAck> {
+export async function sendReaction(http: HttpClient, params: SendReactionParams): Promise<SendAck> {
   if (
     !params.chatGuid.startsWith('RCS;-;') &&
     !params.chatGuid.startsWith('iMessage;-;') &&
@@ -1118,7 +1118,7 @@ export function sendReaction(http: HttpClient, params: SendReactionParams): Prom
   ) {
     throw new Error('This message action needs a supported conversation.');
   }
-  return http.post('/message/react', SendAck, {
+  const ack = await http.post('/message/react', SendAck, {
     captureErrorDetail: true,
     json: {
       chatGuid: params.chatGuid,
@@ -1130,6 +1130,13 @@ export function sendReaction(http: HttpClient, params: SendReactionParams): Prom
       partIndex: requireMessagePartIndex(params.partIndex),
     },
   });
+  // An RCS reaction reply names the REACTED-TO message, not a new reaction message. Passed on as
+  // the reaction's own id, reconcile would take it for an already-stored copy, delete the pending
+  // reaction and move its send state onto the target. Report it as an id-less success instead.
+  if (params.chatGuid.startsWith('RCS;-;') && ack.guid === params.selectedMessageGuid) {
+    return { ...ack, guid: undefined };
+  }
+  return ack;
 }
 
 export interface EditMessageParams {
