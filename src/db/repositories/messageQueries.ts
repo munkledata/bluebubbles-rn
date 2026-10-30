@@ -461,6 +461,42 @@ export async function getNewestReceivedGuid(
   return rows[0]?.guid ?? null;
 }
 
+/**
+ * Where a remote read of `readThroughGuid` should move this chat's read marker: that message's guid
+ * when it is a received, non-deleted message of this chat strictly newer than the current marker
+ * (the same monotonic rule as the Mac watermark reconcile), `'stale'` when the marker is already at
+ * or past it or the user marked the chat unread after `dateReadMs`, and `'missing'` when the message
+ * is not stored here yet. Read-only.
+ */
+export async function getReadThroughTarget(
+  db: AppDatabase,
+  chatId: number,
+  readThroughGuid: string,
+  dateReadMs: number | null,
+): Promise<string | 'stale' | 'missing'> {
+  const rows: Array<{
+    guid: string | null;
+    dateCreated: number | null;
+    markerDate: number;
+    markedUnreadAt: number | null;
+  }> = await db.all(sql`
+    SELECT m.guid AS guid, m.date_created AS dateCreated,
+           COALESCE((SELECT lm.date_created FROM messages lm
+                      WHERE lm.guid = c.last_read_message_guid), 0) AS markerDate,
+           c.marked_unread_at AS markedUnreadAt
+      FROM chats c
+      LEFT JOIN messages m ON m.chat_id = c.id AND m.guid = ${readThroughGuid}
+                          AND m.is_from_me = 0 AND m.date_deleted IS NULL
+     WHERE c.id = ${chatId}
+  `);
+  const row = rows[0];
+  if (!row?.guid) return 'missing';
+  if (row.dateCreated == null || row.dateCreated <= row.markerDate) return 'stale';
+  const readAt = dateReadMs ?? row.dateCreated;
+  if (row.markedUnreadAt != null && readAt <= row.markedUnreadAt) return 'stale';
+  return row.guid;
+}
+
 /** A message row enriched with its sender handle, ready to render a bubble. */
 /**
  * kv key prefix for this device's own unsend whose result is unknown (device-local, never backed

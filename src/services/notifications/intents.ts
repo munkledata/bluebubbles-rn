@@ -172,8 +172,18 @@ export async function buildMessageIntents(
         : [];
     }
     case 'chat-read-status-changed':
-      // Read elsewhere → clear any pending notification for this chat.
-      return [{ kind: 'cancel', chatGuid: event.payload.chatGuid }];
+      // Read elsewhere. With a read-through point, reconcile the shown notification against the
+      // DB, whose read marker the sink has just moved only that far: read lines go, newer unread
+      // lines stay. Without one (older servers), clear the chat's notification as before.
+      return event.payload.readThroughGuid
+        ? [
+            {
+              kind: 'message-withdraw',
+              chatGuid: event.payload.chatGuid,
+              messageGuid: event.payload.readThroughGuid,
+            },
+          ]
+        : [{ kind: 'cancel', chatGuid: event.payload.chatGuid }];
     case 'updated-message': {
       const m = event.message;
       // Guard: any OTHER update (an edit, a delivery/read receipt) must produce NO intent — it

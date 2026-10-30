@@ -21,6 +21,14 @@ export const ReadStatusPayload = z
     chatGuid: z.string().min(1),
     read: z.literal(true).nullish(),
     status: z.literal(true).nullish(),
+    /**
+     * Newer Gator servers name the newest incoming message the other device read. When present,
+     * the read marker and notifications move only up to it, so a delayed hint never marks a newer
+     * message read. Absent (older servers): the whole chat is marked read as before.
+     */
+    readThroughGuid: z.string().min(1).nullish(),
+    /** When that message was read elsewhere, Unix ms. */
+    dateRead: z.number().nullish(),
   })
   .loose();
 

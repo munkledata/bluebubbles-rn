@@ -637,6 +637,31 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     expect(intents).toEqual([{ kind: 'cancel', chatGuid: 'cC' }]);
   });
 
+  it('reconciles instead of cancelling when a remote read names its read-through message', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await deliverRaw(
+      router,
+      'new-message',
+      {
+        guid: 's1',
+        dateCreated: 1,
+        handle: { address: 'a@b.com' },
+        chats: [{ guid: 'cC', participants: [{ address: 'a@b.com' }] }],
+      },
+      'socket',
+    );
+    intents.length = 0;
+    await deliverRaw(
+      router,
+      'chat-read-status-changed',
+      { chatGuid: 'cC', read: true, readThroughGuid: 's1', dateRead: 5 },
+      'socket',
+    );
+    // A newer unread line must survive, so read lines are removed by DB truth, not a whole cancel.
+    expect(intents).toEqual([{ kind: 'message-withdraw', chatGuid: 'cC', messageGuid: 's1' }]);
+  });
+
   it('withdraws only the unsent message line (updated-message with dateRetracted)', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);

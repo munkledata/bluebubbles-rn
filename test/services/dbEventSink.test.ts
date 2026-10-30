@@ -8,6 +8,7 @@ import {
   upsertChats,
   upsertContacts,
   upsertHandles,
+  upsertMessages,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -766,6 +767,87 @@ describe('DbEventSink (live path)', () => {
 
     // The compatibility direct path has no durable receipt to retain; preserve its historical no-op.
     await expect(sink.onEvent(event, 'socket')).resolves.toBeUndefined();
+  });
+
+  it('a remote read with a read-through message moves the marker only that far, never back', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'rt@x.com' }]);
+    const chats = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cReadThrough', participants: [{ address: 'rt@x.com' }] })],
+      handles,
+    );
+    const chatId = chats.get('cReadThrough')!;
+    await upsertMessages(
+      db,
+      ['r1', 'r2', 'r3'].map((guid, index) =>
+        Message.parse({
+          guid,
+          text: guid,
+          dateCreated: (index + 1) * 100,
+          handle: { address: 'rt@x.com' },
+        }),
+      ),
+      () => chatId,
+      handles,
+    );
+    const sink = new DbEventSink(db);
+    const marker = (): string | null =>
+      (
+        raw
+          .prepare("SELECT last_read_message_guid v FROM chats WHERE guid = 'cReadThrough'")
+          .get() as { v: string | null }
+      ).v;
+    const read = (payload: { readThroughGuid?: string; dateRead?: number }) =>
+      sink.onEvent(
+        {
+          type: 'chat-read-status-changed',
+          payload: { chatGuid: 'cReadThrough', read: true, ...payload },
+        },
+        'socket',
+      );
+
+    await read({ readThroughGuid: 'r2', dateRead: 1_000 });
+    expect(marker()).toBe('r2');
+    // A late hint for an older message never moves the marker backwards.
+    await read({ readThroughGuid: 'r1', dateRead: 900 });
+    expect(marker()).toBe('r2');
+    // An older server names no message: the whole chat is read, as before.
+    await read({});
+    expect(marker()).toBe('r3');
+  });
+
+  it('keeps a durable read-through hint retryable until its message is stored', async () => {
+    const { db } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'rt2@x.com' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cReadLate', participants: [{ address: 'rt2@x.com' }] })],
+      handles,
+    );
+    const requestRecovery = jest.fn(async () => undefined);
+    const markDbAppliedWithinTransaction = jest.fn(async () => undefined);
+    const context: EventDeliveryContext = {
+      generation: 1,
+      isCurrent: () => true,
+      durableEvent: { dbAppliedAt: null, markDbAppliedWithinTransaction },
+    };
+    const sink = new DbEventSink(db, undefined, undefined, requestRecovery);
+    await expect(
+      sink.onEvent(
+        {
+          type: 'chat-read-status-changed',
+          payload: { chatGuid: 'cReadLate', read: true, readThroughGuid: 'not-yet', dateRead: 1 },
+        },
+        'fcm',
+        context,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<RealtimeReadStatusUnavailableError>>({
+        reason: 'message-unavailable',
+      }),
+    );
+    expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
   });
 
   it('requests targeted recovery until a durable read has a received message to mark', async () => {

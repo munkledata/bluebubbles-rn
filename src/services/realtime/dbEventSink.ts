@@ -18,6 +18,7 @@ import {
   getChatGuidByMessageGuid,
   getMessageTextByGuid,
   getNewestReceivedGuid,
+  getReadThroughTarget,
   linkHandlesToContacts,
   markMessageDeletedWithinTransaction,
   reconcileEchoByContent,
@@ -584,18 +585,35 @@ export class DbEventSink implements EventSink {
         break;
       }
       case 'chat-read-status-changed': {
-        // Remote read (e.g. on the Mac/another device): advance the local read
-        // marker to the newest received message so the unread badge clears.
+        // Remote read (e.g. on the Mac/another device). A newer server names the newest message
+        // read there: advance the local read marker only up to it (never backwards), so a delayed
+        // hint cannot mark a newer message read. An older server names none: advance to the newest
+        // received message so the unread badge clears, as before.
         const chatGuid = event.payload.chatGuid;
+        const readThroughGuid = event.payload.readThroughGuid ?? null;
         const result = await withCurrentDeliveryTransaction(
           this.db,
           context,
           async (transactionContext) => {
             const chatId = await getChatIdByGuid(this.db, chatGuid);
             if (chatId == null) return 'chat-unavailable' as const;
-            const newest = await getNewestReceivedGuid(this.db, chatId);
-            if (!newest) return 'message-unavailable' as const;
-            await setLastReadMessageGuidWithinTransaction(transactionContext, chatGuid, newest);
+            let target: string | null;
+            if (readThroughGuid) {
+              const readThrough = await getReadThroughTarget(
+                this.db,
+                chatId,
+                readThroughGuid,
+                event.payload.dateRead ?? null,
+              );
+              if (readThrough === 'missing') return 'message-unavailable' as const;
+              target = readThrough === 'stale' ? null : readThrough;
+            } else {
+              target = await getNewestReceivedGuid(this.db, chatId);
+              if (!target) return 'message-unavailable' as const;
+            }
+            if (target) {
+              await setLastReadMessageGuidWithinTransaction(transactionContext, chatGuid, target);
+            }
             await markDurableDbPhase(transactionContext, context);
             return 'applied' as const;
           },
