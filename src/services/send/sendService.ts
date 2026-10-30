@@ -21,7 +21,15 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils/chat';
+import {
+  isProvenIMessageGroupChat,
+  isProvenOneToOneIMessageChat,
+  isRcsChatGuid,
+} from '@utils/chat';
+import {
+  canSendRestoredIMessageReply,
+  restoredChatKind,
+} from '@core/models/imessageRestoredFeatures';
 import { utf8Decode, utf8Encode } from '@utils/bytes';
 import {
   RcsCapabilityUnavailableError,
@@ -121,7 +129,16 @@ export async function sendTextMessage(
   if (target && isRcsChatGuid(args.chatGuid)) {
     throw new Error('This server cannot send an RCS threaded reply.');
   }
-  if (target && target.partIndex !== 0) {
+  // FP-006: a part > 0 reply is admitted only while the caller's capability already proves the
+  // restored part-reply switch; the resolved capability is checked again below.
+  if (
+    target &&
+    target.partIndex !== 0 &&
+    !canSendRestoredIMessageReply(capabilitySource?.serverInfo, {
+      chatGuid: args.chatGuid,
+      partIndex: target.partIndex,
+    })
+  ) {
     throw new Error('An iMessage reply needs exact message part zero.');
   }
   if (
@@ -169,14 +186,35 @@ export async function sendTextMessage(
     ? Object.freeze({ allowsLegacyPartZero: false, isCurrent: capabilityGuard })
     : undefined;
   const authorizedTarget = target ? { ...target, serverAuthorization: targetAuthorization } : null;
+  // FP-006: a group and/or part > 0 reply goes to the restored command only while every switch it
+  // needs is on. A one-to-one part-zero reply needs none and stays on the reviewed path.
+  const restoredReply =
+    target != null &&
+    canSendRestoredIMessageReply(capability.serverInfo, {
+      chatGuid: args.chatGuid,
+      partIndex: target.partIndex,
+    });
   if (authorizedTarget) {
-    if (capability.serverInfo?.supports_imessage_replies !== true) {
+    if (
+      !restoredReply &&
+      (capability.serverInfo?.supports_imessage_replies !== true ||
+        authorizedTarget.partIndex !== 0)
+    ) {
       throw new Error('This server cannot send iMessage replies.');
     }
     const header = await getChatHeader(db, args.chatGuid);
     if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
-    if (!isProvenOneToOneIMessageChat(header)) {
-      throw new Error('A proven existing one-to-one iMessage chat is required.');
+    const provenReplyChat =
+      restoredReply && restoredChatKind(args.chatGuid) === 'group'
+        ? header?.guid === args.chatGuid &&
+          isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true })
+        : isProvenOneToOneIMessageChat(header);
+    if (!provenReplyChat) {
+      throw new Error(
+        restoredReply && restoredChatKind(args.chatGuid) === 'group'
+          ? 'A proven existing iMessage group is required.'
+          : 'A proven existing one-to-one iMessage chat is required.',
+      );
     }
   }
   const useIMessagePlainText =
@@ -257,15 +295,19 @@ export async function sendTextMessage(
           tempGuid,
           message: args.text,
         })
-      : await sendText(transport.http, {
-          chatGuid: args.chatGuid,
-          tempGuid,
-          clientAttemptGeneration: attemptOwnerToken?.generation,
-          message: args.text,
-          selectedMessageGuid: finalTarget?.messageGuid,
-          partIndex: finalTarget?.partIndex,
-          method,
-        });
+      : await sendText(
+          transport.http,
+          {
+            chatGuid: args.chatGuid,
+            tempGuid,
+            clientAttemptGeneration: attemptOwnerToken?.generation,
+            message: args.text,
+            selectedMessageGuid: finalTarget?.messageGuid,
+            partIndex: finalTarget?.partIndex,
+            method,
+          },
+          restoredReply ? { restoredReply: true } : undefined,
+        );
     if (
       target &&
       (typeof server.guid !== 'string' ||

@@ -45,7 +45,8 @@ export interface ChatComposerSendOptions {
     | 'imessageMentionsAvailable'
     | 'mentionParticipants'
     | 'imessageFormattedAvailable'
-  >;
+  > &
+    Partial<Pick<ChatCapabilities, 'imessagePartRepliesAvailable'>>;
   editing: ComposerEditTarget | null;
   setEditing: Dispatch<SetStateAction<ComposerEditTarget | null>>;
   replyTo: MessagePreview | null;
@@ -70,6 +71,7 @@ export function useChatComposerSends({
     imessageScheduledAttachmentsAvailable,
     imessageEditsAvailable,
     imessageRepliesAvailable,
+    imessagePartRepliesAvailable = false,
     imessageEffectsAvailable,
     imessageMentionsAvailable,
     mentionParticipants,
@@ -183,7 +185,13 @@ export function useChatComposerSends({
       };
       const target = replyTo;
       if (target) {
-        if (!imessageRepliesAvailable || target.targetPartIndex !== 0) {
+        // Part 0 is the reviewed target; a higher part only while restored part replies are on.
+        const replyToPartIndex = target.targetPartIndex;
+        if (
+          !imessageRepliesAvailable ||
+          replyToPartIndex === undefined ||
+          (replyToPartIndex !== 0 && !imessagePartRepliesAvailable)
+        ) {
           return Promise.resolve(false);
         }
         return observeQueueAdmission(
@@ -193,7 +201,7 @@ export function useChatComposerSends({
                 chatGuid: guid,
                 text,
                 replyToGuid: target.guid,
-                replyToPartIndex: 0,
+                replyToPartIndex,
               },
               accountLease,
               reportIssue,
@@ -247,6 +255,7 @@ export function useChatComposerSends({
       editing,
       guid,
       imessageEditsAvailable,
+      imessagePartRepliesAvailable,
       imessageRepliesAvailable,
       replyTo,
       setEditing,

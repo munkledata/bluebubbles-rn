@@ -179,7 +179,10 @@ function isMarkedImessageAttachment(row: QueueRowShape): boolean {
   }
 }
 
-/** A narrow plain-text iMessage reply is one-shot and may never be replayed after interruption. */
+/**
+ * A narrow plain-text iMessage reply is one-shot and may never be replayed after interruption. An
+ * FP-006 restored reply may target a part up to 63; it is the same one-shot kind.
+ */
 function isNarrowImessageReply(row: QueueRowShape): boolean {
   if (row.kind !== 'text' || isRcsChatGuid(row.chatGuid)) return false;
   try {
@@ -187,7 +190,10 @@ function isNarrowImessageReply(row: QueueRowShape): boolean {
     return (
       typeof payload.selectedMessageGuid === 'string' &&
       payload.selectedMessageGuid.length > 0 &&
-      payload.partIndex === 0 &&
+      typeof payload.partIndex === 'number' &&
+      Number.isSafeInteger(payload.partIndex) &&
+      payload.partIndex >= 0 &&
+      payload.partIndex <= 63 &&
       payload.effectId === undefined &&
       payload.subject === undefined &&
       payload.mentions === undefined &&

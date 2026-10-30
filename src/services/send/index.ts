@@ -4,6 +4,10 @@ import {
   MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES,
   isSupportedImessageAttachmentType,
 } from '@core/models/serverInfo';
+import {
+  canSendRestoredIMessageReply,
+  canSendRestoredIMessageTapback,
+} from '@core/models/imessageRestoredFeatures';
 import { logger } from '@core/secure';
 import {
   currentRcsProviderEpoch,
@@ -66,6 +70,7 @@ import {
   type AttachmentTextService,
   type PickedImage,
 } from './sendAttachmentService';
+import { sendRestoredIMessageReactionMessage } from './sendRestoredReactionService';
 import { sendContactMessage, hasContactContent, type ContactCard } from './sendContactService';
 import {
   sendCurrentLocationMessage,
@@ -852,10 +857,22 @@ export function react(
         ) {
           throw new SendCapabilityUnavailableError();
         }
-      } else {
-        if (capability?.serverInfo?.supports_imessage_reactions !== true) {
-          throw new SendCapabilityUnavailableError();
-        }
+      }
+      // FP-006: a group, emoji or part > 0 tapback needs every matching restored switch; anything
+      // else stays on the reviewed one-to-one, classic, part-zero path below.
+      const restoredTapback =
+        !isRcsChatGuid(snapshot.chatGuid) &&
+        canSendRestoredIMessageTapback(capability?.serverInfo, {
+          chatGuid: snapshot.chatGuid,
+          reaction: snapshot.reaction,
+          partIndex: snapshot.partIndex ?? 0,
+        });
+      if (
+        !isRcsChatGuid(snapshot.chatGuid) &&
+        !restoredTapback &&
+        capability?.serverInfo?.supports_imessage_reactions !== true
+      ) {
+        throw new SendCapabilityUnavailableError();
       }
       const serverAuthorization = messageTargetServerAuthorization(
         capability?.serverInfo,
@@ -869,6 +886,19 @@ export function react(
           Date.now(),
           () => accountLease.isCurrent(),
           serverAuthorization,
+        );
+      }
+      if (restoredTapback) {
+        return sendRestoredIMessageReactionMessage(
+          getDatabase(),
+          accountHttp(accountLease),
+          snapshot,
+          () => accountLease.isCurrent(),
+          serverAuthorization,
+          () =>
+            accountLease.isCurrent() && capability?.isCurrent() === true
+              ? capability.serverInfo
+              : null,
         );
       }
       return sendIMessageReactionMessage(
@@ -894,8 +924,11 @@ export function reply(
     chatGuid: string;
     text: string;
     replyToGuid: string;
-    /** Part of the selected message that this reply targets. */
-    replyToPartIndex: 0;
+    /**
+     * Part of the selected message that this reply targets: 0 on the reviewed path, or any part
+     * the restored part-reply switch admits (FP-006).
+     */
+    replyToPartIndex: number;
     /** Retained only to reject stale callers; effects are not part of the narrow reply command. */
     effectId?: string;
   },
@@ -910,12 +943,21 @@ export function reply(
     accountLease,
     () => {
       const capability = captureSessionRcsCapabilityLease();
+      // FP-006: a group or part > 0 reply needs its restored switches; otherwise the reviewed
+      // one-to-one part-zero reply rule applies unchanged.
+      const restoredReply =
+        !isRcsChatGuid(snapshot.chatGuid) &&
+        canSendRestoredIMessageReply(capability?.serverInfo, {
+          chatGuid: snapshot.chatGuid,
+          partIndex: snapshot.replyToPartIndex,
+        });
       if (
         snapshot.effectId !== undefined ||
-        snapshot.replyToPartIndex !== 0 ||
         isRcsChatGuid(snapshot.chatGuid) ||
-        capability?.serverInfo?.supports_imessage_replies !== true ||
-        !capability.isCurrent()
+        !capability?.isCurrent() ||
+        (!restoredReply &&
+          (snapshot.replyToPartIndex !== 0 ||
+            capability.serverInfo?.supports_imessage_replies !== true))
       ) {
         throw new SendCapabilityUnavailableError();
       }
@@ -926,7 +968,7 @@ export function reply(
           chatGuid: snapshot.chatGuid,
           text: snapshot.text,
           selectedMessageGuid: snapshot.replyToGuid,
-          partIndex: 0,
+          partIndex: snapshot.replyToPartIndex,
         },
         Date.now(),
         (tempGuid) => {

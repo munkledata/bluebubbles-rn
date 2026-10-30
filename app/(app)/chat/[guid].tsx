@@ -141,7 +141,10 @@ function ChatScreenInner({
     imessageAttachmentFeaturesAvailable,
     imessageScheduledAttachmentsAvailable,
     imessageReactionsAvailable,
+    imessageEmojiReactionsAvailable,
+    imessagePartReactionsAvailable,
     imessageRepliesAvailable,
+    imessagePartRepliesAvailable,
     imessageEditsAvailable,
     imessageUnsendsAvailable,
     imessageRemoteDeleteAvailable,
@@ -218,6 +221,7 @@ function ChatScreenInner({
   const cancelReply = useCallback((): void => setReplyTo(null), []);
   const cancelEdit = useCallback((): void => setEditing(null), []);
   const replyTargetGuid = replyTo?.guid ?? null;
+  const replyTargetPartIndex = replyTo?.targetPartIndex ?? 0;
   const replyTargetRow = replyTargetGuid
     ? messages.find((message) => message.guid === replyTargetGuid)
     : undefined;
@@ -229,7 +233,11 @@ function ChatScreenInner({
         replyTargetRow.messagePartTopology,
       ])
     : null;
-  if (replyTo !== null && !imessageRepliesAvailable) {
+  if (
+    replyTo !== null &&
+    (!imessageRepliesAvailable ||
+      ((replyTo.targetPartIndex ?? 0) !== 0 && !imessagePartRepliesAvailable))
+  ) {
     // A live capability/header change revokes the composer target immediately.
     setReplyTo(null);
   }
@@ -237,11 +245,12 @@ function ChatScreenInner({
     if (!replyTargetGuid || !imessageRepliesAvailable) return;
     let alive = true;
     void runTrackedRealtimeWork(accountLease, async () => {
-      const preview = await readMessagePreview(guid, replyTargetGuid, 0);
+      const preview = await readMessagePreview(guid, replyTargetGuid, replyTargetPartIndex);
       if (!alive || !accountLease.isCurrent()) return;
       setReplyTo((current) => {
         if (current?.guid !== replyTargetGuid) return current;
-        return preview ? { ...preview, targetPartIndex: 0 } : null;
+        if ((current.targetPartIndex ?? 0) !== replyTargetPartIndex) return current;
+        return preview ? { ...preview, targetPartIndex: replyTargetPartIndex } : null;
       });
     }).catch((error) => {
       if (alive && accountLease.isCurrent()) {
@@ -251,7 +260,14 @@ function ChatScreenInner({
     return () => {
       alive = false;
     };
-  }, [accountLease, guid, imessageRepliesAvailable, replyTargetGuid, replyTargetProof]);
+  }, [
+    accountLease,
+    guid,
+    imessageRepliesAvailable,
+    replyTargetGuid,
+    replyTargetPartIndex,
+    replyTargetProof,
+  ]);
   const editTargetGuid = editing?.guid ?? null;
   const editTargetRow = editTargetGuid
     ? messages.find((message) => message.guid === editTargetGuid)
@@ -343,7 +359,10 @@ function ChatScreenInner({
     messages,
     accountLease,
     imessageReactionsAvailable,
+    imessageEmojiReactionsAvailable,
+    imessagePartReactionsAvailable,
     imessageRepliesAvailable,
+    imessagePartRepliesAvailable,
     imessageEditsAvailable,
     imessageUnsendsAvailable,
     imessageRemoteDeleteAvailable,
@@ -359,7 +378,11 @@ function ChatScreenInner({
         selected.canReact === true &&
         (rcsInteractiveFeaturesAvailable || imessageReactionsAvailable),
       replyPartIndex:
-        imessageRepliesAvailable && selected.replyPartIndex === 0 ? (0 as const) : undefined,
+        imessageRepliesAvailable &&
+        (selected.replyPartIndex === 0 ||
+          (imessagePartRepliesAvailable && selected.replyPartIndex !== undefined))
+          ? selected.replyPartIndex
+          : undefined,
       editPartIndex:
         imessageEditsAvailable && selected.editPartIndex === 0 ? (0 as const) : undefined,
       unsendPartIndex:
@@ -370,6 +393,7 @@ function ChatScreenInner({
   }, [
     imessageReactionsAvailable,
     imessageRepliesAvailable,
+    imessagePartRepliesAvailable,
     imessageRemoteDeleteAvailable,
     imessageEditsAvailable,
     imessageUnsendsAvailable,

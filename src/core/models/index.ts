@@ -5,5 +5,6 @@ export * from './chatSummary';
 export * from './message';
 export * from './chat';
 export * from './serverInfo';
+export * from './imessageRestoredFeatures';
 export * from './reminder';
 export * from './inboxFilters';

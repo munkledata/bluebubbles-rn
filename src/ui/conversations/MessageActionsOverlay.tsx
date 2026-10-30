@@ -41,15 +41,21 @@ export interface SelectedMessage {
   myEmojis?: string[];
   /** A confirmed RCS message or narrowly admitted iMessage can receive a reaction. */
   canReact?: boolean;
-  /** Exact reply target admitted by the live narrow helper capability. */
-  replyPartIndex?: 0;
+  /**
+   * Exact reply target admitted by the live narrow helper capability: part 0, or (FP-006 restored
+   * part replies) the message's one remaining part above 0.
+   */
+  replyPartIndex?: number;
   /** Exact plain-text edit target admitted by the live narrow helper capability. */
   editPartIndex?: 0;
   /** Exact plain-text unsend target admitted by the live narrow helper capability. */
   unsendPartIndex?: 0;
   /** Whole-message Mac deletion admitted by its separate live capability and chat proof. */
   canRemoteDeleteFromMac?: boolean;
-  /** Arbitrary emoji remains RCS-only while the narrow iMessage path admits classic tapbacks. */
+  /**
+   * Arbitrary emoji: RCS, or an iMessage chat whose server has the FP-006 emoji-tapback switch on.
+   * The reviewed narrow iMessage path admits classic tapbacks only.
+   */
   canUseEmojiReactions?: boolean;
   dateCreated: number | null;
   /** Delivery/read/edit timestamps + per-message service — surfaced by the "Details" sheet.
@@ -313,9 +319,14 @@ export function MessageActionsOverlay({
     ) : null;
 
   // Assemble local actions once. Server-targeted reply is present only when the caller provides
-  // the separately capability-gated callback and this snapshot names exact part zero.
+  // the separately capability-gated callback and this snapshot names an exact part.
   const actions: ActionDef[] = [];
-  if (onReply && !selected?.isTemp && !selected?.isRetracted && selected?.replyPartIndex === 0) {
+  if (
+    onReply &&
+    !selected?.isTemp &&
+    !selected?.isRetracted &&
+    selected?.replyPartIndex !== undefined
+  ) {
     actions.push({ key: 'reply', label: 'Reply', onPress: onReply });
   }
   if (hasText) actions.push({ key: 'copy', label: 'Copy', onPress: onCopy });

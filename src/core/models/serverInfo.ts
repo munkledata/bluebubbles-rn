@@ -1,5 +1,6 @@
 import { z } from 'zod/v4';
 import { currentRcsProviderEpoch, isRcsProviderEpoch } from '../rcs/providerIdentity';
+import { IMESSAGE_RESTORED_FEATURES } from './imessageRestoredFeatures';
 
 /** Hard client ceiling even if a malformed server advertises a larger caption allowance. */
 export const MAX_SEND_ATTACHMENT_TEXT_BYTES = 65_536;
@@ -169,6 +170,25 @@ export const ServerInfo = z
     supports_imessage_location: z.boolean().nullish(),
     /** One small, one-time server-owned iMessage attachment schedule. */
     supports_imessage_scheduled_attachment: z.boolean().nullish(),
+    /**
+     * FP-006 restored iMessage features (additive, default false). Each is true only while the
+     * server runs a listed FP-006 Messages helper AND its owner turned the features on. See
+     * `imessageRestoredFeatures.ts` for the request each one admits.
+     */
+    supports_imessage_group_reactions: z.boolean().nullish(),
+    supports_imessage_emoji_reactions: z.boolean().nullish(),
+    supports_imessage_part_reactions: z.boolean().nullish(),
+    supports_imessage_group_replies: z.boolean().nullish(),
+    supports_imessage_part_replies: z.boolean().nullish(),
+    supports_imessage_group_edit: z.boolean().nullish(),
+    supports_imessage_group_unsend: z.boolean().nullish(),
+    supports_imessage_group_effects: z.boolean().nullish(),
+    supports_imessage_group_read_state: z.boolean().nullish(),
+    supports_imessage_group_contact: z.boolean().nullish(),
+    supports_imessage_group_location: z.boolean().nullish(),
+    supports_imessage_attachments_v2: z.boolean().nullish(),
+    supports_imessage_group_attachment_upload: z.boolean().nullish(),
+    supports_imessage_subject: z.boolean().nullish(),
     /** Whether message payloads can carry bounded, exact Apple multipart topology. */
     supports_message_part_topology: z.boolean().nullish(),
     /** Retired broad iCloud account/alias-control flag; never enables the read-only status screen. */
@@ -243,6 +263,7 @@ export function serverSendCapabilityKey(info: ServerInfo | null | undefined): st
     info.supports_imessage_scheduled_attachment === true,
     info.supports_imessage_voice_upload === true,
     info.supports_send_contact === true,
+    ...IMESSAGE_RESTORED_FEATURES.map((feature) => info[feature] === true),
   ]
     .map(Number)
     .join('');

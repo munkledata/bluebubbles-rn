@@ -25,7 +25,7 @@ const REVIEWED_RESERVE_SCHEDULED_RUN_BODY_HASH =
 const REVIEWED_ENSURE_SCHEDULED_RECOVERY_BODY_HASH =
   '4b623fa83b24c1602c60e02c1a226e3b2cfd7e5b06bde9e947dc5b35a7a851fb';
 const REVIEWED_SEND_TEXT_BODY_HASH =
-  '33950c7af484ca93fef9e28814e6852016203c5c7f2b1a19c852043fc1bb2c2e';
+  '2e75145ba086aee399f2792e0abb61e96d48b1345141949d08b5691ee17c41db';
 const HOME_PATH = 'app/(app)/home.tsx';
 const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
@@ -49,7 +49,7 @@ const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
     BACKGROUND_SYNC_ORCHESTRATOR_PATH,
     'a05fc3df6a131940ff9ed2eccdc2464387c83e135ead8080681577eef35e2f6d',
   ],
-  [OUTGOING_QUEUE_SERVICE_PATH, 'a6fb287885b76040bce45f91f9f914ddef62d451774affea5c95fa12e2ef59d2'],
+  [OUTGOING_QUEUE_SERVICE_PATH, '10eed61933e4e2203cc37d0480acccada92222d1286b4b625ff8430ebd20df50'],
   [ATTACHMENT_UPLOAD_PATH, '5b8f32ca1c0a9ffaa16c073ad5859a9fe63056b82503685a229f47ac2728a8ab'],
   [
     'src/utils/uploadFilename.ts',
@@ -965,6 +965,9 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     ['requireIMessagePlainTextRequest', '@core/api/endpoints/messages'],
     ['sendIMessagePlainText', '@core/api/endpoints/messages'],
     ['isProvenOneToOneIMessageChat', '@utils/chat'],
+    ['isProvenIMessageGroupChat', '@utils/chat'],
+    ['canSendRestoredIMessageReply', '@core/models/imessageRestoredFeatures'],
+    ['restoredChatKind', '@core/models/imessageRestoredFeatures'],
   ]) {
     let shadowedOrMutated = bindingDeclarationsNamed(sourceFile, name).length !== 0;
     let imports = 0;
@@ -1046,6 +1049,9 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     }),
     ...bindingIntegrityErrors(declaration.body, 'authorizedTarget', {
       label: 'authorized reply target',
+    }),
+    ...bindingIntegrityErrors(declaration.body, 'restoredReply', {
+      label: 'restored reply admission',
     }),
     ...bindingIntegrityErrors(declaration.body, 'resolvedTarget', {
       label: 'admission-time reply target',
@@ -1149,12 +1155,17 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !isExactThrowGuard(
       exactPartStatement,
       sourceFile,
-      'target&&target.partIndex!==0',
+      // FP-006: a part above zero is admitted only while the caller's capability proves the
+      // restored part-reply switch for this exact reply; the resolved capability is checked again
+      // by the reply proof below.
+      'target&&target.partIndex!==0&&!canSendRestoredIMessageReply(capabilitySource?.serverInfo,{chatGuid:args.chatGuid,partIndex:target.partIndex,})',
       'Error',
       'An iMessage reply needs exact message part zero.',
     )
   ) {
-    errors.push('an iMessage reply must require exact message part zero before durable admission');
+    errors.push(
+      'an iMessage reply must require exact message part zero, or the restored part-reply capability, before durable admission',
+    );
   }
   if (
     !isExactThrowGuard(
@@ -1405,8 +1416,11 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   const authorizedTargetIndex = authorizedTargetStatement
     ? bodyStatements.indexOf(authorizedTargetStatement)
     : -1;
-  const replyProofStatement =
+  // FP-006: the restored-reply decision sits between the authorized target and the reply proof.
+  const restoredReplyStatement =
     authorizedTargetIndex >= 0 ? bodyStatements[authorizedTargetIndex + 1] : undefined;
+  const replyProofStatement =
+    authorizedTargetIndex >= 0 ? bodyStatements[authorizedTargetIndex + 2] : undefined;
   const replyProofBlock =
     replyProofStatement && ts.isIfStatement(replyProofStatement)
       ? replyProofStatement.thenStatement
@@ -1417,8 +1431,10 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     replyProofBlock && ts.isBlock(replyProofBlock) ? replyProofBlock.statements[1] : undefined;
   const headerCurrentStatement =
     replyProofBlock && ts.isBlock(replyProofBlock) ? replyProofBlock.statements[2] : undefined;
-  const oneToOneStatement =
+  const provenReplyChatStatement =
     replyProofBlock && ts.isBlock(replyProofBlock) ? replyProofBlock.statements[3] : undefined;
+  const oneToOneStatement =
+    replyProofBlock && ts.isBlock(replyProofBlock) ? replyProofBlock.statements[4] : undefined;
   const headerCalls = callsNamed(declaration.body, new Set(['getChatHeader']));
   const oneToOneCalls = callsNamed(declaration.body, new Set(['isProvenOneToOneIMessageChat']));
   if (
@@ -1456,11 +1472,21 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     replyProofStatement.expression.text !== 'authorizedTarget' ||
     !replyProofBlock ||
     !ts.isBlock(replyProofBlock) ||
-    replyProofBlock.statements.length !== 4 ||
+    replyProofBlock.statements.length !== 5 ||
+    !hasExactCompactText(
+      restoredReplyStatement,
+      sourceFile,
+      `const restoredReply =
+        target != null &&
+        canSendRestoredIMessageReply(capability.serverInfo, {
+          chatGuid: args.chatGuid,
+          partIndex: target.partIndex,
+        });`,
+    ) ||
     !isExactThrowGuard(
       replyCapabilityStatement,
       sourceFile,
-      'capability.serverInfo?.supports_imessage_replies!==true',
+      '!restoredReply&&(capability.serverInfo?.supports_imessage_replies!==true||authorizedTarget.partIndex!==0)',
       'Error',
       'This server cannot send iMessage replies.',
     ) ||
@@ -1476,16 +1502,30 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
       'if (!capabilityGuard()) throw new DbCommitGuardRejectedError();',
     ) ||
     oneToOneCalls.length !== 2 ||
-    !isExactThrowGuard(
+    callsNamed(declaration.body, new Set(['isProvenIMessageGroupChat'])).length !== 1 ||
+    !hasExactCompactText(
+      provenReplyChatStatement,
+      sourceFile,
+      `const provenReplyChat =
+        restoredReply && restoredChatKind(args.chatGuid) === 'group'
+          ? header?.guid === args.chatGuid &&
+            isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true })
+          : isProvenOneToOneIMessageChat(header);`,
+    ) ||
+    !hasExactCompactText(
       oneToOneStatement,
       sourceFile,
-      '!isProvenOneToOneIMessageChat(header)',
-      'Error',
-      'A proven existing one-to-one iMessage chat is required.',
+      `if (!provenReplyChat) {
+        throw new Error(
+          restoredReply && restoredChatKind(args.chatGuid) === 'group'
+            ? 'A proven existing iMessage group is required.'
+            : 'A proven existing one-to-one iMessage chat is required.',
+        );
+      }`,
     )
   ) {
     errors.push(
-      'reply admission must require the exact reply capability, its current lease, and a proven existing one-to-one iMessage header',
+      'reply admission must require the exact reply capability (or the restored reply capability), its current lease, and a proven existing one-to-one iMessage header (or, for a restored group reply, this exact proven iMessage group)',
     );
   }
 
@@ -1764,11 +1804,12 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     bodyStatements[16] !== rcsSupportStatement ||
     bodyStatements[17] !== targetAuthorizationStatement ||
     bodyStatements[18] !== authorizedTargetStatement ||
-    bodyStatements[19] !== replyProofStatement ||
-    plainRouteIndex !== 20 ||
-    bodyStatements[21] !== plainValidationStatement ||
-    outgoingIndex !== 22 ||
-    ownershipIndex !== 23
+    bodyStatements[19] !== restoredReplyStatement ||
+    bodyStatements[20] !== replyProofStatement ||
+    plainRouteIndex !== 21 ||
+    bodyStatements[22] !== plainValidationStatement ||
+    outgoingIndex !== 23 ||
+    ownershipIndex !== 24
   ) {
     errors.push(
       'reply rejection, rich-field retirement, guards, capabilities, topology proof, outgoing payload, and ownership handoff must remain in reviewed order',
@@ -1882,8 +1923,14 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   if (
     networkCalls.length !== 1 ||
     !networkCall ||
-    networkCall.arguments.length !== 2 ||
+    // FP-006: the third argument opens the restored reply route only for a restored reply.
+    networkCall.arguments.length !== 3 ||
     !isDirectPropertyAccess(networkCall.arguments[0], 'transport', 'http') ||
+    !hasExactCompactText(
+      networkCall.arguments[2],
+      sourceFile,
+      'restoredReply ? { restoredReply: true } : undefined',
+    ) ||
     !guardStatement ||
     networkCall.getStart(sourceFile) <= guardStatement.getEnd() ||
     !networkAwait ||

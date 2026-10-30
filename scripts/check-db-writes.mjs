@@ -130,6 +130,7 @@ export const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/send/sendMentionService.ts',
   'src/services/send/sendOutcome.ts',
   'src/services/send/sendReactionService.ts',
+  'src/services/send/sendRestoredReactionService.ts',
   'src/services/send/sendService.ts',
   'src/services/send/index.ts',
   'src/services/share/shareIntake.ts',

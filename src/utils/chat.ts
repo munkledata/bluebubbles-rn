@@ -169,7 +169,14 @@ export function isProvenOneToOneIMessageChat(
   return services.length > 0 && services.every((service) => service === 'iMessage');
 }
 
-/** A loaded, exact iMessage group whose complete participant set is explicitly iMessage. */
+/**
+ * A loaded, exact iMessage group whose complete participant set is explicitly iMessage.
+ *
+ * `allowAnyGroupPrefix` also admits `any;+;X`: macOS 26+ stores iMessage, SMS and RCS groups alike
+ * under that prefix, so it proves nothing by itself and the explicit all-iMessage participant set
+ * stays the proof. Pass it only for a feature whose FP-006 server switch is on (the restored helper
+ * resolves `any;+;`); every other caller keeps the reviewed `iMessage;+;` rule.
+ */
 export function isProvenIMessageGroupChat(
   chat:
     | {
@@ -180,8 +187,12 @@ export function isProvenIMessageGroupChat(
       }
     | null
     | undefined,
+  options: { allowAnyGroupPrefix?: boolean } = {},
 ): boolean {
-  if (!chat || !/^iMessage;\+;.+$/su.test(chat.guid)) return false;
+  if (!chat) return false;
+  const groupPrefix =
+    options.allowAnyGroupPrefix === true ? /^(?:iMessage|any);\+;.+$/su : /^iMessage;\+;.+$/su;
+  if (!groupPrefix.test(chat.guid)) return false;
   if (chat.style !== 43 || chat.participantCount < 2) return false;
   const services = (chat.handleServices ?? '')
     .split(',')

@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import { Message } from '@core/models';
+import { isValidRestoredSubject, Message } from '@core/models';
 import { MessageDeletedPayload } from '@core/realtime/events';
 import { SYNC_WITH_QUERY } from '@core/config/constants';
 import { utf8Decode, utf8Encode } from '@utils/bytes';
@@ -185,9 +185,19 @@ function requireWellFormedBoundedUtf8(value: string, maxBytes: number, label: st
   return value;
 }
 
-function requireNarrowReply(params: SendTextParams): void {
+/** FP-006 group chat addressing, admitted only by a caller whose restored switch is on. */
+const RESTORED_IMESSAGE_CHAT_GUID = /^(?:iMessage|any);[+-];.+$/u;
+const DIRECT_IMESSAGE_CHAT_GUID = /^(?:iMessage|any);-;.+$/u;
+/** The helper's part-index cap for restored tapbacks and replies. */
+const RESTORED_PART_INDEX_MAX = 63;
+/** Restored text/reply/caption: tab and newline only, no other control, no U+FFFC. */
+const RESTORED_TEXT_DISALLOWED_CHARACTER = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\ufffc]/u;
+
+function requireNarrowReply(params: SendTextParams, restoredReply = false): void {
   if (
-    !/^(?:iMessage|any);-;.+$/u.test(params.chatGuid) ||
+    !(restoredReply ? RESTORED_IMESSAGE_CHAT_GUID : DIRECT_IMESSAGE_CHAT_GUID).test(
+      params.chatGuid,
+    ) ||
     CONTROL_CHARACTER.test(params.chatGuid)
   ) {
     throw new Error('An iMessage reply needs an existing iMessage conversation.');
@@ -198,17 +208,61 @@ function requireNarrowReply(params: SendTextParams): void {
     throw new Error('An iMessage reply needs an exact message target.');
   }
   requireWellFormedBoundedUtf8(target, IMESSAGE_REPLY_ID_MAX_BYTES, 'selectedMessageGuid');
-  if (params.partIndex !== 0) {
+  if (
+    restoredReply
+      ? !Number.isSafeInteger(params.partIndex) ||
+        params.partIndex! < 0 ||
+        params.partIndex! > RESTORED_PART_INDEX_MAX
+      : params.partIndex !== 0
+  ) {
     throw new Error('An iMessage reply needs exact message part zero.');
   }
   if (params.message.trim().length === 0 || params.message.includes('\u0000')) {
     throw new Error('An iMessage reply cannot be blank or contain NUL.');
+  }
+  if (restoredReply && RESTORED_TEXT_DISALLOWED_CHARACTER.test(params.message)) {
+    throw new Error('An iMessage reply cannot contain control or inline-attachment characters.');
   }
   requireWellFormedBoundedUtf8(params.message, IMESSAGE_REPLY_TEXT_MAX_BYTES, 'reply text');
   requireWellFormedBoundedUtf8(
     params.tempGuid,
     IMESSAGE_REPLY_TEMP_GUID_MAX_BYTES,
     'reply tempGuid',
+  );
+}
+
+function requireRestoredSubjectText(params: SendTextParams): void {
+  if (
+    !RESTORED_IMESSAGE_CHAT_GUID.test(params.chatGuid) ||
+    params.chatGuid.trim() !== params.chatGuid ||
+    CONTROL_CHARACTER.test(params.chatGuid)
+  ) {
+    throw new Error('A subject line needs an existing iMessage conversation.');
+  }
+  requireWellFormedBoundedUtf8(params.chatGuid, IMESSAGE_REPLY_ID_MAX_BYTES, 'chatGuid');
+  if (
+    params.method !== undefined ||
+    params.clientAttemptGeneration !== undefined ||
+    params.effectId !== undefined ||
+    params.mentions !== undefined ||
+    params.partIndex !== undefined
+  ) {
+    throw new Error('A subject line cannot be combined with other rich-message fields.');
+  }
+  if (!isValidRestoredSubject(params.subject ?? '')) {
+    throw new Error('A subject must be one nonblank line of at most 1 KiB.');
+  }
+  if (
+    params.message.trim().length === 0 ||
+    RESTORED_TEXT_DISALLOWED_CHARACTER.test(params.message)
+  ) {
+    throw new Error('A message with a subject needs nonblank text without control characters.');
+  }
+  requireWellFormedBoundedUtf8(params.message, IMESSAGE_REPLY_TEXT_MAX_BYTES, 'subject text');
+  requireWellFormedBoundedUtf8(
+    params.tempGuid,
+    IMESSAGE_REPLY_TEMP_GUID_MAX_BYTES,
+    'subject tempGuid',
   );
 }
 
@@ -369,7 +423,21 @@ export interface SendTextParams {
  * Server contract: it reads the body under `text` (NOT `message`, which it ignores → a
  * blank send). We keep `message` on the params and map it to `text` on the wire here.
  */
-export function sendText(http: HttpClient, params: SendTextParams): Promise<SendAck> {
+export interface SendTextRestoredOptions {
+  /**
+   * FP-006: the caller proved `supports_imessage_group_replies` / `supports_imessage_part_replies`
+   * for this exact reply, so a group chat and a part index up to 63 are admitted.
+   */
+  restoredReply?: boolean;
+  /** FP-006: the caller proved `supports_imessage_subject` for this exact iMessage chat. */
+  restoredSubject?: boolean;
+}
+
+export function sendText(
+  http: HttpClient,
+  params: SendTextParams,
+  restored: SendTextRestoredOptions = {},
+): Promise<SendAck> {
   const hasReplyGuid = params.selectedMessageGuid !== undefined;
   const hasReplyPart = params.partIndex !== undefined;
   if (hasReplyGuid !== hasReplyPart) {
@@ -385,7 +453,7 @@ export function sendText(http: HttpClient, params: SendTextParams): Promise<Send
     ) {
       throw new Error('iMessage text replies do not support other rich-message fields.');
     }
-    requireNarrowReply(params);
+    requireNarrowReply(params, restored.restoredReply === true);
     return http.post('/message/text', SendAck, {
       captureErrorDetail: true,
       json: {
@@ -393,7 +461,21 @@ export function sendText(http: HttpClient, params: SendTextParams): Promise<Send
         tempGuid: params.tempGuid,
         text: params.message,
         selectedMessageGuid: params.selectedMessageGuid,
-        partIndex: 0,
+        partIndex: restored.restoredReply === true ? params.partIndex : 0,
+      },
+    });
+  }
+  if (params.subject !== undefined && restored.restoredSubject === true) {
+    requireRestoredSubjectText(params);
+    // The server's subject branch refuses every other rich field, `method` included.
+    return http.post('/message/text', SendAck, {
+      captureErrorDetail: true,
+      retry: false,
+      json: {
+        chatGuid: params.chatGuid,
+        tempGuid: params.tempGuid,
+        text: params.message,
+        subject: params.subject,
       },
     });
   }
@@ -733,9 +815,16 @@ function effectOutcomeUnknown(cause: unknown): ApiError {
 }
 
 /** POST one allowlisted text effect through the separately gated, one-shot helper command. */
-export async function sendEffect(http: HttpClient, params: SendEffectParams): Promise<SendAck> {
+export async function sendEffect(
+  http: HttpClient,
+  params: SendEffectParams,
+  /** FP-006: the caller proved `supports_imessage_group_effects` for this exact group. */
+  restored: { restoredGroup?: boolean } = {},
+): Promise<SendAck> {
   if (
-    !/^(?:iMessage|any);-;.+$/u.test(params.chatGuid) ||
+    !(
+      restored.restoredGroup === true ? RESTORED_IMESSAGE_CHAT_GUID : DIRECT_IMESSAGE_CHAT_GUID
+    ).test(params.chatGuid) ||
     params.chatGuid.trim() !== params.chatGuid ||
     CONTROL_CHARACTER.test(params.chatGuid)
   ) {
@@ -834,9 +923,17 @@ export interface SendContactParams {
  * Empty phone/email arrays are omitted so the server's "a contact needs at least a name, org,
  * phone, or email" refinement isn't tripped by an all-empty body.
  */
-export function sendContact(http: HttpClient, params: SendContactParams): Promise<SendAck> {
+export function sendContact(
+  http: HttpClient,
+  params: SendContactParams,
+  /** FP-006: the caller proved `supports_imessage_group_contact` for this exact iMessage group. */
+  restored: { restoredGroup?: boolean } = {},
+): Promise<SendAck> {
   if (
-    !/^(?:RCS|iMessage|any);-;.+$/s.test(params.chatGuid) ||
+    !(
+      /^(?:RCS|iMessage|any);-;.+$/s.test(params.chatGuid) ||
+      (restored.restoredGroup === true && /^(?:iMessage|any);\+;.+$/s.test(params.chatGuid))
+    ) ||
     /[\u0000\r\n]/.test(params.chatGuid)
   ) {
     throw new Error('This contact card needs a supported conversation.');
@@ -887,9 +984,16 @@ function locationOutcomeUnknown(cause: unknown): ApiError {
   );
 }
 
-export async function sendLocation(http: HttpClient, params: SendLocationParams): Promise<SendAck> {
+export async function sendLocation(
+  http: HttpClient,
+  params: SendLocationParams,
+  /** FP-006: the caller proved `supports_imessage_group_location` for this exact group. */
+  restored: { restoredGroup?: boolean } = {},
+): Promise<SendAck> {
   if (
-    !/^(?:iMessage|any);-;.+$/u.test(params.chatGuid) ||
+    !(
+      restored.restoredGroup === true ? RESTORED_IMESSAGE_CHAT_GUID : DIRECT_IMESSAGE_CHAT_GUID
+    ).test(params.chatGuid) ||
     CONTROL_CHARACTER.test(params.chatGuid) ||
     params.chatGuid.trim() !== params.chatGuid
   ) {
@@ -1110,11 +1214,24 @@ export interface SendReactionParams {
  * `selectedMessage*`/`reaction` keys the older client sent (which the server dropped → no
  * tapback). We map our params onto the server's names here.
  */
-export async function sendReaction(http: HttpClient, params: SendReactionParams): Promise<SendAck> {
+export async function sendReaction(
+  http: HttpClient,
+  params: SendReactionParams,
+  /**
+   * FP-006: the caller proved every restored switch this tapback needs (group, emoji, part > 0),
+   * so an iMessage group chat is admitted. RCS and the reviewed one-to-one path ignore it.
+   */
+  restored: { restoredTapback?: boolean } = {},
+): Promise<SendAck> {
   if (
     !params.chatGuid.startsWith('RCS;-;') &&
     !params.chatGuid.startsWith('iMessage;-;') &&
-    !params.chatGuid.startsWith('any;-;')
+    !params.chatGuid.startsWith('any;-;') &&
+    !(
+      restored.restoredTapback === true &&
+      RESTORED_IMESSAGE_CHAT_GUID.test(params.chatGuid) &&
+      !CONTROL_CHARACTER.test(params.chatGuid)
+    )
   ) {
     throw new Error('This message action needs a supported conversation.');
   }
@@ -1154,8 +1271,18 @@ export interface EditMessageParams {
  * helper command. This does not restore the broad Private API surface.
  * Returns the sender's send ack `{ guid? }`, NOT a Message — see {@link SendAck}.
  */
-export function editMessage(http: HttpClient, p: EditMessageParams): Promise<SendAck> {
-  if (!/^(?:iMessage|any);-;.+$/u.test(p.chatGuid) || CONTROL_CHARACTER.test(p.chatGuid)) {
+export function editMessage(
+  http: HttpClient,
+  p: EditMessageParams,
+  /** FP-006: the caller proved `supports_imessage_group_edit` for this exact group. */
+  restored: { restoredGroup?: boolean } = {},
+): Promise<SendAck> {
+  if (
+    !(
+      restored.restoredGroup === true ? RESTORED_IMESSAGE_CHAT_GUID : DIRECT_IMESSAGE_CHAT_GUID
+    ).test(p.chatGuid) ||
+    CONTROL_CHARACTER.test(p.chatGuid)
+  ) {
     throw new Error('An iMessage edit needs an existing iMessage conversation.');
   }
   requireWellFormedBoundedUtf8(p.chatGuid, IMESSAGE_REPLY_ID_MAX_BYTES, 'chatGuid');
@@ -1194,8 +1321,18 @@ export interface UnsendMessageParams {
  * POST /api/v1/message/{guid}/unsend — retract exact text part zero through the separately gated
  * helper command. This does not restore the broad Private API surface.
  */
-export function unsendMessage(http: HttpClient, p: UnsendMessageParams): Promise<UnsendAck> {
-  if (!/^(?:iMessage|any);-;.+$/u.test(p.chatGuid) || CONTROL_CHARACTER.test(p.chatGuid)) {
+export function unsendMessage(
+  http: HttpClient,
+  p: UnsendMessageParams,
+  /** FP-006: the caller proved `supports_imessage_group_unsend` for this exact group. */
+  restored: { restoredGroup?: boolean } = {},
+): Promise<UnsendAck> {
+  if (
+    !(
+      restored.restoredGroup === true ? RESTORED_IMESSAGE_CHAT_GUID : DIRECT_IMESSAGE_CHAT_GUID
+    ).test(p.chatGuid) ||
+    CONTROL_CHARACTER.test(p.chatGuid)
+  ) {
     throw new Error('An iMessage unsend needs an existing iMessage conversation.');
   }
   requireWellFormedBoundedUtf8(p.chatGuid, IMESSAGE_REPLY_ID_MAX_BYTES, 'chatGuid');

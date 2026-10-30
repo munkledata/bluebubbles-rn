@@ -3089,7 +3089,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 13);
-  assert.equal(intentionalBoundaries.length, 46);
+  assert.equal(intentionalBoundaries.length, 47);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -3148,6 +3148,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
       'src/services/send/sendReactionService.ts#sendIMessageReactionMessage:mutator-call:c5ee7e399fbe',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
+      'src/services/send/sendRestoredReactionService.ts#sendRestoredIMessageReactionMessage:mutator-call:60af848d3d1a',
       'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
       'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:3f22a481036f',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4',
@@ -3496,10 +3497,11 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:0eac966d5fef',
       'src/services/send/index.ts#fireDueScheduled.<callback:e7099757f6>:mutator-call:26c372898fda',
       'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:9f76132482>:mutator-call:cec9577e2e0d',
-      'src/services/send/index.ts#react.<callback:ce78d92795>:mutator-call:c5a800fcb97b',
-      'src/services/send/index.ts#react.<callback:ce78d92795>:mutator-call:cd884835a9a8',
+      'src/services/send/index.ts#react.<callback:25ab509d93>:mutator-call:162c3f7a9471',
+      'src/services/send/index.ts#react.<callback:25ab509d93>:mutator-call:aa31f8180a8c',
+      'src/services/send/index.ts#react.<callback:25ab509d93>:mutator-call:b269f0f26717',
       'src/services/send/index.ts#recoverOutgoing:mutator-call:4536e59c3756',
-      'src/services/send/index.ts#reply.<callback:844d9c693f>:mutator-call:5054d34c3fee',
+      'src/services/send/index.ts#reply.<callback:f38f2a6876>:mutator-call:4d3abd6da46d',
       'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:0f717475dd2f',
       'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:092d6ec9e2b2',
       'src/services/send/index.ts#schedule.<callback:dd8870d856>:mutator-call:dce9e26a3293',
@@ -3560,7 +3562,25 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch:mutator-call:9caef164c0df',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 45);
+  assert.equal(sendFrontDoorFindings.length, 46);
+});
+
+// FP-006: the restored tapback sender has exactly one DB edge, its guarded exact-target read.
+test('certifies exactly the reviewed FP-006 restored tapback target read', () => {
+  const findings = scanProjectDbWrites().filter(
+    (finding) => finding.path === 'src/services/send/sendRestoredReactionService.ts',
+  );
+
+  assert.deepEqual(
+    findings.map(({ id, target, detectedContext }) => ({ id, target, detectedContext })),
+    [
+      {
+        id: 'src/services/send/sendRestoredReactionService.ts#sendRestoredIMessageReactionMessage:mutator-call:60af848d3d1a',
+        target: 'src/db/repositories/messageTargets.ts#resolveMessageTarget',
+        detectedContext: 'coordinated-delegation',
+      },
+    ],
+  );
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -7434,7 +7454,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
     [
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>:mutator-call:ecf46f2d08d9',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:8ad712352d>.<callback:60008a07b1>:mutator-call:61c25c93f19c',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>:mutator-call:3e3d348f4c24',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',

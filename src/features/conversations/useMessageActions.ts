@@ -43,7 +43,7 @@ import { isLocalFileUri, isRcsChatGuid, isUserFileAttachment, type BubbleRect } 
 import { devSendFakeReaction } from './devSeed';
 import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
-import { canTargetReplyPartZero } from './messageActionEligibility';
+import { imessageReactionPartIndex, replyTargetPartIndex } from './messageActionEligibility';
 import type { EnrichedMessage } from './useMessages';
 
 function actionContentOf(msg: EnrichedMessage) {
@@ -151,7 +151,7 @@ function canRemoteDeleteWholeMessage(msg: EnrichedMessage): boolean {
   );
 }
 
-function replyPreviewOf(msg: EnrichedMessage): MessagePreview {
+function replyPreviewOf(msg: EnrichedMessage, targetPartIndex: number): MessagePreview {
   const content = actionContentOf(msg);
   return {
     guid: msg.guid,
@@ -163,7 +163,7 @@ function replyPreviewOf(msg: EnrichedMessage): MessagePreview {
     attachmentDescription: msg.attachmentDescription,
     balloonBundleId: msg.balloonBundleId,
     partCount: msg.partCount,
-    targetPartIndex: 0,
+    targetPartIndex,
     hasVisibleAttachments: content.visibleAttachmentCount > 0 ? 1 : 0,
     isRetracted: false,
   };
@@ -186,8 +186,14 @@ export interface MessageActionsArgs {
   accountLease?: RealtimeDeliveryLease;
   /** Proven existing one-to-one chat plus live narrow helper reaction capability. */
   imessageReactionsAvailable?: boolean;
+  /** FP-006: emoji tapbacks in an iMessage chat whose tapbacks are available. */
+  imessageEmojiReactionsAvailable?: boolean;
+  /** FP-006: a tapback may target the message's one remaining part above part 0. */
+  imessagePartReactionsAvailable?: boolean;
   /** Proven existing one-to-one chat plus live narrow helper reply capability. */
   imessageRepliesAvailable?: boolean;
+  /** FP-006: a reply may target the message's one remaining part above part 0. */
+  imessagePartRepliesAvailable?: boolean;
   /** Proven existing one-to-one chat plus live narrow helper edit capability. */
   imessageEditsAvailable?: boolean;
   /** Proven existing one-to-one chat plus live narrow helper unsend capability. */
@@ -215,7 +221,10 @@ export function useMessageActions({
   messages,
   accountLease,
   imessageReactionsAvailable = false,
+  imessageEmojiReactionsAvailable = false,
+  imessagePartReactionsAvailable = false,
   imessageRepliesAvailable = false,
+  imessagePartRepliesAvailable = false,
   imessageEditsAvailable = false,
   imessageUnsendsAvailable = false,
   imessageRemoteDeleteAvailable = false,
@@ -261,15 +270,13 @@ export function useMessageActions({
         rcsEnabled &&
         rcsProviderEpoch !== null &&
         parseRcsMessageGuid(msg.guid)?.providerEpoch === rcsProviderEpoch;
-      const topology = parseMessagePartTopology(msg.messagePartTopology);
       const imessageReaction =
         imessageReactionsAvailable &&
         !isRcsChatGuid(guid) &&
-        !msg.guid.startsWith('temp-') &&
-        isExactMessagePartTopology(topology) &&
-        topology.currentParts.length === 1 &&
-        topology.currentParts[0]?.index === 0;
-      const imessageReply = imessageRepliesAvailable && canTargetReplyPartZero(msg);
+        imessageReactionPartIndex(msg, imessagePartReactionsAvailable) !== undefined;
+      const replyPartIndex = imessageRepliesAvailable
+        ? replyTargetPartIndex(msg, imessagePartRepliesAvailable)
+        : undefined;
       const imessageEdit = imessageEditsAvailable && canEditExactPlainTextPartZero(msg, Date.now());
       const imessageUnsend =
         imessageUnsendsAvailable && canUnsendExactPlainTextPartZero(msg, Date.now());
@@ -282,7 +289,8 @@ export function useMessageActions({
             .map((r) => r.baseType)
             .filter((t): t is ReactionBaseType => !!parseReactionType(t))
         : [];
-      const myEmojis = rcsReaction
+      const emojiReactions = rcsReaction || (imessageReaction && imessageEmojiReactionsAvailable);
+      const myEmojis = emojiReactions
         ? msg.reactions
             .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji)
             .map((r) => r.emoji as string)
@@ -303,8 +311,8 @@ export function useMessageActions({
         mine,
         myEmojis,
         canReact,
-        canUseEmojiReactions: rcsReaction,
-        replyPartIndex: imessageReply ? 0 : undefined,
+        canUseEmojiReactions: emojiReactions,
+        replyPartIndex,
         editPartIndex: imessageEdit ? 0 : undefined,
         unsendPartIndex: imessageUnsend ? 0 : undefined,
         canRemoteDeleteFromMac: imessageRemoteDelete,
@@ -341,6 +349,9 @@ export function useMessageActions({
     [
       guid,
       imessageEditsAvailable,
+      imessageEmojiReactionsAvailable,
+      imessagePartReactionsAvailable,
+      imessagePartRepliesAvailable,
       imessageReactionsAvailable,
       imessageRepliesAvailable,
       imessageRemoteDeleteAvailable,
@@ -352,10 +363,12 @@ export function useMessageActions({
 
   const onSwipeReply = useCallback(
     (msg: EnrichedMessage): void => {
-      if (!imessageRepliesAvailable || !setReplyTo || !canTargetReplyPartZero(msg)) return;
-      setReplyTo(replyPreviewOf(msg));
+      if (!imessageRepliesAvailable || !setReplyTo) return;
+      const partIndex = replyTargetPartIndex(msg, imessagePartRepliesAvailable);
+      if (partIndex === undefined) return;
+      setReplyTo(replyPreviewOf(msg, partIndex));
     },
-    [imessageRepliesAvailable, setReplyTo],
+    [imessagePartRepliesAvailable, imessageRepliesAvailable, setReplyTo],
   );
 
   const onReplyToSelected = (): void => {
@@ -363,13 +376,13 @@ export function useMessageActions({
     if (
       !imessageRepliesAvailable ||
       !setReplyTo ||
-      selected?.replyPartIndex !== 0 ||
+      selected?.replyPartIndex === undefined ||
       !current ||
-      !canTargetReplyPartZero(current)
+      replyTargetPartIndex(current, imessagePartRepliesAvailable) !== selected.replyPartIndex
     ) {
       return;
     }
-    setReplyTo(replyPreviewOf(current));
+    setReplyTo(replyPreviewOf(current, selected.replyPartIndex));
   };
 
   const onEditSelected = (): void => {
@@ -733,22 +746,26 @@ export function useMessageActions({
       rcsEnabled &&
       rcsProviderEpoch !== null &&
       parseRcsMessageGuid(current?.guid)?.providerEpoch === rcsProviderEpoch;
-    const topology = current ? parseMessagePartTopology(current.messagePartTopology) : null;
+    const imessagePartIndex =
+      current != null
+        ? imessageReactionPartIndex(current, imessagePartReactionsAvailable)
+        : undefined;
+    // An emoji tapback is an iMessage option only while the restored emoji switch is on.
+    const imessageEmoji = parsed?.baseType === 'emoji' || emoji !== undefined;
     const imessageReaction =
       imessageReactionsAvailable &&
       current != null &&
       !isRcsChatGuid(guid) &&
-      isExactMessagePartTopology(topology) &&
-      topology.currentParts.length === 1 &&
-      topology.currentParts[0]?.index === 0 &&
-      parsed?.baseType !== 'emoji' &&
-      emoji === undefined;
+      imessagePartIndex !== undefined &&
+      (imessageEmoji
+        ? imessageEmojiReactionsAvailable && parsed?.baseType === 'emoji' && emoji !== undefined
+        : emoji === undefined);
     if (!current || !parsed || (!rcsReaction && !imessageReaction)) {
       return;
     }
     if (imessageReaction && imessageReactionInFlight.current) return;
     const { bodyText } = actionContentOf(current);
-    const partIndex = 0;
+    const partIndex = imessageReaction && imessagePartIndex !== undefined ? imessagePartIndex : 0;
     const args = {
       chatGuid: guid,
       targetGuid: current.guid,

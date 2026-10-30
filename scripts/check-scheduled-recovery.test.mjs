@@ -328,11 +328,47 @@ test('admits only exact part-zero, bounded, well-formed, unscheduled iMessage re
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
-        '  if (target && target.partIndex !== 0) {',
-        '  if (target && target.partIndex < 0) {',
+        '    target.partIndex !== 0 &&\n    !canSendRestoredIMessageReply(capabilitySource?.serverInfo, {',
+        '    target.partIndex < 0 &&\n    !canSendRestoredIMessageReply(capabilitySource?.serverInfo, {',
       ),
     ),
     /exact message part zero/,
+  );
+  // FP-006: a part above zero needs the restored part-reply capability, never just any capability.
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        '    !canSendRestoredIMessageReply(capabilitySource?.serverInfo, {',
+        '    canSendRestoredIMessageReply(capabilitySource?.serverInfo, {',
+      ),
+    ),
+    /exact message part zero, or the restored part-reply capability/,
+  );
+  // Without the restored switch, the reviewed reply path still demands exact part zero.
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(validSendServiceSource, ' ||\n        authorizedTarget.partIndex !== 0)', ')'),
+    ),
+    /reply admission must require the exact reply capability/,
+  );
+  // A restored group reply must still prove this exact chat's own header.
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(validSendServiceSource, 'header?.guid === args.chatGuid &&', 'true &&'),
+    ),
+    /this exact proven iMessage group/,
+  );
+  // The restored reply route opens only for a restored reply.
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        'restoredReply ? { restoredReply: true } : undefined,',
+        '{ restoredReply: true },',
+      ),
+    ),
+    /the one sendText call must follow/,
   );
   assertErrors(
     scheduledHandoffSourceErrors(
@@ -587,8 +623,8 @@ test('keeps the exact canonical network payload and guarded settlement', () => {
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
-        '          clientAttemptGeneration: attemptOwnerToken?.generation,\n          message: args.text,',
-        '          clientAttemptGeneration: attemptOwnerToken?.generation,\n          message: args.chatGuid,',
+        '            clientAttemptGeneration: attemptOwnerToken?.generation,\n            message: args.text,',
+        '            clientAttemptGeneration: attemptOwnerToken?.generation,\n            message: args.chatGuid,',
       ),
     ),
     /canonical chat, temp id, attempt generation, message, exact resolved reply target/,
