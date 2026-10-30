@@ -175,6 +175,10 @@ const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<s
     'imessage_contact_invalid_target',
     'imessage_location_invalid_target',
     'imessage_plain_text_invalid_target',
+    // The reviewed tapback route's typed refusal, and the FP-006 restored tapback/reply refusal
+    // (retryable:false): the target is not a chat this command can address, and nothing was sent.
+    'imessage_reaction_invalid_target',
+    'imessage_restored_send_invalid_target',
     'malformed_multipart',
     'multipart_field_too_large',
   ]),
@@ -198,7 +202,7 @@ const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<s
 };
 
 /** Only reviewed machine types prove that a response predates a one-shot helper dispatch. */
-function isPreDispatchOneShotRejection(err: unknown): boolean {
+export function isPreDispatchOneShotRejection(err: unknown): boolean {
   return (
     err instanceof ApiError &&
     err.status !== undefined &&

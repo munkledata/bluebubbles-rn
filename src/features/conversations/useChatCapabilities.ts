@@ -53,13 +53,6 @@ export interface ChatCapabilities {
   /** Group members a mention can name; empty unless every member has a unique, clean address. */
   mentionParticipants: MentionParticipant[];
   imessageVoiceAvailable: boolean;
-  /**
-   * FP-006: several files of the wider allowlist through the multi-file route
-   * (`supports_imessage_attachments_v2`, plus `supports_imessage_group_attachment_upload` in a group).
-   */
-  imessageMultiAttachmentAvailable: boolean;
-  /** FP-006: an optional subject line on iMessage text sends. */
-  imessageSubjectAvailable: boolean;
   typingFeaturesAvailable: boolean;
   voiceFeaturesAvailable: boolean;
   attachmentFeaturesAvailable: boolean;
@@ -77,8 +70,10 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
  *
  * A server flag alone is not enough for an iMessage feature. The chat's own header, loaded for this
  * exact chat, must also prove an iMessage chat of the right shape: one-to-one for most features, a
- * group for mentions, either for Mac remote delete. An FP-006 restored switch (all false on older
- * servers) also opens its feature in a proven iMessage group, `iMessage;+;` or `any;+;`. RCS features need the server's current RCS
+ * group for mentions, either for Mac remote delete. FP-006 part 1 adds only group tapbacks and group
+ * replies in a proven iMessage group (`iMessage;+;` or `any;+;`), plus emoji and part > 0 targets
+ * on top of an available tapback or reply; other restored switches are ignored until the app can
+ * send them. All are false on older servers. RCS features need the server's current RCS
  * provider to own this chat. Every value follows the live session and header, so a capability lost
  * while the chat is open turns its feature off at the next render.
  */
@@ -115,16 +110,9 @@ export function useChatCapabilities(
   const partReactionsSupported = useServerSupports('supports_imessage_part_reactions');
   const groupRepliesSupported = useServerSupports('supports_imessage_group_replies');
   const partRepliesSupported = useServerSupports('supports_imessage_part_replies');
-  const groupEditSupported = useServerSupports('supports_imessage_group_edit');
-  const groupUnsendSupported = useServerSupports('supports_imessage_group_unsend');
-  const groupEffectsSupported = useServerSupports('supports_imessage_group_effects');
-  const groupContactSupported = useServerSupports('supports_imessage_group_contact');
-  const groupLocationSupported = useServerSupports('supports_imessage_group_location');
-  const attachmentsV2Supported = useServerSupports('supports_imessage_attachments_v2');
-  const groupAttachmentUploadSupported = useServerSupports(
-    'supports_imessage_group_attachment_upload',
-  );
-  const subjectSupported = useServerSupports('supports_imessage_subject');
+  // FP-006 part 1 sends only these restored features. Group edit, unsend, effects, read state,
+  // contact, location, subject and multi-file switches are deliberately NOT read here, even when a
+  // server advertises them: this app cannot send them yet, so it must not offer them.
   const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
 
   // The header must be this chat's own row, so a recycled screen never borrows another chat's proof.
@@ -139,8 +127,6 @@ export function useChatCapabilities(
     (reactionSupported && oneToOne) || (groupReactionsSupported && restoredGroup);
   const imessageRepliesAvailable =
     (replySupported && oneToOne) || (groupRepliesSupported && restoredGroup);
-  const imessageMultiAttachmentAvailable =
-    attachmentsV2Supported && (oneToOne || (groupAttachmentUploadSupported && restoredGroup));
   const rcsInteractiveFeaturesAvailable = rcsAvailable && chatService === 'RCS';
 
   const imessageAttachmentFeaturesAvailable = attachmentSupported && oneToOne;
@@ -177,12 +163,8 @@ export function useChatCapabilities(
     newChatAvailable,
     serverInfoLoaded,
     rcsInteractiveFeaturesAvailable,
-    contactCardAvailable:
-      rcsInteractiveFeaturesAvailable ||
-      (contactSupported && oneToOne) ||
-      (groupContactSupported && restoredGroup),
-    currentLocationAvailable:
-      (locationSupported && oneToOne) || (groupLocationSupported && restoredGroup),
+    contactCardAvailable: rcsInteractiveFeaturesAvailable || (contactSupported && oneToOne),
+    currentLocationAvailable: locationSupported && oneToOne,
     supportsSendAttachmentText,
     imessageAttachmentFeaturesAvailable,
     imessagePdfFeaturesAvailable: imessageAttachmentFeaturesAvailable && pdfSupported,
@@ -195,19 +177,14 @@ export function useChatCapabilities(
     imessagePartReactionsAvailable: imessageReactionsAvailable && partReactionsSupported,
     imessageRepliesAvailable,
     imessagePartRepliesAvailable: imessageRepliesAvailable && partRepliesSupported,
-    imessageEditsAvailable: (editSupported && oneToOne) || (groupEditSupported && restoredGroup),
-    imessageUnsendsAvailable:
-      (unsendSupported && oneToOne) || (groupUnsendSupported && restoredGroup),
+    imessageEditsAvailable: editSupported && oneToOne,
+    imessageUnsendsAvailable: unsendSupported && oneToOne,
     imessageRemoteDeleteAvailable: remoteDeleteSupported && (oneToOne || group),
-    imessageEffectsAvailable:
-      (effectsSupported && oneToOne && header?.participantCount === 1) ||
-      (groupEffectsSupported && restoredGroup),
+    imessageEffectsAvailable: effectsSupported && oneToOne && header?.participantCount === 1,
     imessageFormattedAvailable: formattedSupported && oneToOne,
     imessageMentionsAvailable,
     mentionParticipants,
     imessageVoiceAvailable,
-    imessageMultiAttachmentAvailable,
-    imessageSubjectAvailable: subjectSupported && (oneToOne || restoredGroup),
     typingFeaturesAvailable: rcsInteractiveFeaturesAvailable || (typingSupported && oneToOne),
     voiceFeaturesAvailable: rcsInteractiveFeaturesAvailable || imessageVoiceAvailable,
     attachmentFeaturesAvailable:

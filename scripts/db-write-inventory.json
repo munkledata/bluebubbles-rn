@@ -24561,7 +24561,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#retireUnavailableMessageTarget:mutator-call:11809b34a662",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 219,
+      "line": 223,
       "symbol": "retireUnavailableMessageTarget",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#retireUnavailableMessageTarget.<callback:593c789d89>",
@@ -24574,7 +24574,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#retireUnavailableMessageTarget:mutator-call:8a99473da7bd",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 219,
+      "line": 223,
       "symbol": "retireUnavailableMessageTarget",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24587,7 +24587,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#retireUnavailableMessageTarget.<callback:593c789d89>:mutator-call:4804567ad3f6",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 221,
+      "line": 225,
       "symbol": "retireUnavailableMessageTarget.<callback:593c789d89>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction",
@@ -24600,7 +24600,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:898de1af1bad",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 267,
+      "line": 271,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:c197b89327>",
@@ -24613,7 +24613,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:fd4bf486ed0c",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 267,
+      "line": 271,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24626,7 +24626,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:c197b89327>:mutator-call:955c597d7cd5",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 270,
+      "line": 274,
       "symbol": "reconcileSendOutcome.<callback:c197b89327>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingAttemptAckWithinTransaction",
@@ -24639,7 +24639,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:28acf1761550",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 281,
+      "line": 285,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24652,7 +24652,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c6a829231b06",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 281,
+      "line": 285,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:6c7fde92e0>",
@@ -24665,7 +24665,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:6c7fde92e0>:mutator-call:a542211f86f4",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 284,
+      "line": 288,
       "symbol": "reconcileSendOutcome.<callback:6c7fde92e0>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction",
@@ -24678,7 +24678,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:337ad594df75",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 298,
+      "line": 302,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24691,7 +24691,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c1122a9108a5",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 298,
+      "line": 302,
       "symbol": "reconcileSendOutcome",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:a142c06cb1>",
@@ -24704,7 +24704,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:a142c06cb1>:mutator-call:83fb7347f21a",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 300,
+      "line": 304,
       "symbol": "reconcileSendOutcome.<callback:a142c06cb1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction",
@@ -24717,7 +24717,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:30e7fe128762",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 368,
+      "line": 372,
       "symbol": "handleSendFailure",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#handleSendFailure.<callback:3ed81732b5>",
@@ -24730,7 +24730,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:7b62f333993f",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 368,
+      "line": 372,
       "symbol": "handleSendFailure",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24743,7 +24743,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#handleSendFailure.<callback:3ed81732b5>:mutator-call:668eaaf4df49",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 372,
+      "line": 376,
       "symbol": "handleSendFailure.<callback:3ed81732b5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#retireUncertainOutgoingWithinTransaction",
@@ -24756,7 +24756,7 @@
     {
       "id": "src/services/send/sendOutcome.ts#handleSendFailure.<callback:3ed81732b5>:mutator-call:07a7f0f0afe0",
       "path": "src/services/send/sendOutcome.ts",
-      "line": 379,
+      "line": 383,
       "symbol": "handleSendFailure.<callback:3ed81732b5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoingRetry.ts#reconcileOutgoingErrorWithinTransaction",

@@ -1064,6 +1064,76 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
   });
 });
 
+describe('ChatScreen — FP-006 part 1 offers only what it can send', () => {
+  const RESTORED_GROUP = 'any;+;chat-restored';
+  /** Every FP-006 switch a server can advertise, as the owner's single server switch may. */
+  const EVERY_RESTORED_FLAG = {
+    supports_imessage_group_reactions: true,
+    supports_imessage_emoji_reactions: true,
+    supports_imessage_part_reactions: true,
+    supports_imessage_group_replies: true,
+    supports_imessage_part_replies: true,
+    supports_imessage_group_edit: true,
+    supports_imessage_group_unsend: true,
+    supports_imessage_group_effects: true,
+    supports_imessage_group_read_state: true,
+    supports_imessage_group_contact: true,
+    supports_imessage_group_location: true,
+    supports_imessage_attachments_v2: true,
+    supports_imessage_group_attachment_upload: true,
+    supports_imessage_subject: true,
+  };
+
+  it('in a group with every restored flag on, offers tapbacks and Reply but no other restored action', async () => {
+    mockGuid = RESTORED_GROUP;
+    useSessionStore.setState({
+      serverInfo: { version: 'test', ...EVERY_RESTORED_FLAG } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 1,
+        guid: RESTORED_GROUP,
+        style: 43,
+        participantCount: 2,
+        handleServices: 'iMessage,iMessage',
+      },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+    await longPressMessage(
+      makeMsg({
+        guid: 'm-own-restored',
+        isFromMe: 1,
+        text: 'hello',
+        senderService: 'iMessage',
+        messagePartTopology: JSON.stringify({
+          complete: true,
+          originalPartIndexes: [0],
+          currentParts: [{ index: 0, kind: 'text' }],
+          attachmentOwnership: [],
+        }),
+      } as Partial<EnrichedMessage>),
+    );
+
+    // Part 1 sends these: group/emoji tapbacks and a group reply.
+    const overlay = mockCaptured.overlay!;
+    expect(overlay.selected.canReact).toBe(true);
+    expect(overlay.selected.canUseEmojiReactions).toBe(true);
+    expect(overlay.selected.replyPartIndex).toBe(0);
+    expect(overlay.onReply).toEqual(expect.any(Function));
+    // Advertised but not sendable yet: no Edit or Unsend in the action sheet.
+    expect(overlay.selected.editPartIndex).toBeUndefined();
+    expect(overlay.selected.unsendPartIndex).toBeUndefined();
+    expect(overlay.onEdit).toBeUndefined();
+    expect(overlay.onUnsend).toBeUndefined();
+    // ...and no group effect, contact card or location in the composer.
+    const composer = mockCaptured.composer!;
+    expect(composer.onSendEffect).toBeUndefined();
+    expect(composer.onPickContact).toBeUndefined();
+    expect(composer.onShareLocation).toBeUndefined();
+  });
+});
+
 describe('ChatScreen — RCS reaction routing', () => {
   it('routes a classic reaction to react() with no emoji', async () => {
     configureRcsChat();

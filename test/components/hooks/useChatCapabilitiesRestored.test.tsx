@@ -93,20 +93,25 @@ const RESTORED_ON = {
 
 const ANY_GROUP_HEADER = { ...GROUP_HEADER, guid: ANY_GROUP };
 
-const GROUP_RESTORED_KEYS = [
+/** The restored features FP-006 part 1 can actually send: tapbacks and replies. */
+const PART_ONE_KEYS = [
   'imessageReactionsAvailable',
   'imessageEmojiReactionsAvailable',
   'imessagePartReactionsAvailable',
   'imessageRepliesAvailable',
   'imessagePartRepliesAvailable',
+] as const;
+
+/** Group features whose restored switches part 1 ignores, because it cannot send them yet. */
+const NOT_YET_SENDABLE_KEYS = [
   'imessageEditsAvailable',
   'imessageUnsendsAvailable',
   'imessageEffectsAvailable',
   'contactCardAvailable',
   'currentLocationAvailable',
-  'imessageMultiAttachmentAvailable',
-  'imessageSubjectAvailable',
 ] as const;
+
+const GROUP_RESTORED_KEYS = [...PART_ONE_KEYS, ...NOT_YET_SENDABLE_KEYS] as const;
 
 describe('useChatCapabilities FP-006 restored flags', () => {
   it('keeps every group feature off in a group when the restored flags are absent', async () => {
@@ -122,50 +127,47 @@ describe('useChatCapabilities FP-006 restored flags', () => {
     }
   });
 
-  it('opens each group feature in an iMessage;+; and any;+; group when its flag is on', async () => {
+  it('opens only the part-1 group features in an iMessage;+; and any;+; group with every flag on', async () => {
     await serverInfo(RESTORED_ON);
     for (const [guid, row] of [
       [GROUP, GROUP_HEADER],
       [ANY_GROUP, ANY_GROUP_HEADER],
     ] as const) {
       const caps = await capabilitiesFor(guid, row);
-      for (const key of GROUP_RESTORED_KEYS) expect([key, caps[key]]).toEqual([key, true]);
+      for (const key of PART_ONE_KEYS) expect([key, caps[key]]).toEqual([key, true]);
+      // Advertised but not yet sendable by this app: never offered.
+      for (const key of NOT_YET_SENDABLE_KEYS) expect([key, caps[key]]).toEqual([key, false]);
       // Mentions and remote delete keep their reviewed iMessage;+; proof.
       expect(caps.imessageMentionsAvailable).toBe(false);
     }
   });
 
-  it('opens one group feature per flag', async () => {
-    const pairs: [keyof typeof RESTORED_ON, (typeof GROUP_RESTORED_KEYS)[number]][] = [
-      ['supports_imessage_group_reactions', 'imessageReactionsAvailable'],
-      ['supports_imessage_group_replies', 'imessageRepliesAvailable'],
-      ['supports_imessage_group_edit', 'imessageEditsAvailable'],
-      ['supports_imessage_group_unsend', 'imessageUnsendsAvailable'],
-      ['supports_imessage_group_effects', 'imessageEffectsAvailable'],
-      ['supports_imessage_group_contact', 'contactCardAvailable'],
-      ['supports_imessage_group_location', 'currentLocationAvailable'],
-      ['supports_imessage_subject', 'imessageSubjectAvailable'],
+  it('opens one part-1 group feature per flag and nothing for the other restored flags', async () => {
+    const pairs: [keyof typeof RESTORED_ON, (typeof GROUP_RESTORED_KEYS)[number][]][] = [
+      ['supports_imessage_group_reactions', ['imessageReactionsAvailable']],
+      ['supports_imessage_group_replies', ['imessageRepliesAvailable']],
+      ['supports_imessage_group_edit', []],
+      ['supports_imessage_group_unsend', []],
+      ['supports_imessage_group_effects', []],
+      ['supports_imessage_group_read_state', []],
+      ['supports_imessage_group_contact', []],
+      ['supports_imessage_group_location', []],
+      ['supports_imessage_attachments_v2', []],
+      ['supports_imessage_group_attachment_upload', []],
+      ['supports_imessage_subject', []],
     ];
-    for (const [flag, key] of pairs) {
+    for (const [flag, keys] of pairs) {
       await serverInfo({ [flag]: true });
       const caps = await capabilitiesFor(ANY_GROUP, ANY_GROUP_HEADER);
       const on = GROUP_RESTORED_KEYS.filter((candidate) => caps[candidate]);
-      expect([flag, on]).toEqual([flag, [key]]);
+      expect([flag, on]).toEqual([flag, keys]);
     }
   });
 
-  it('needs both attachment flags in a group and only v2 one-to-one', async () => {
-    await serverInfo({ supports_imessage_attachments_v2: true });
-    expect(
-      (await capabilitiesFor(ANY_GROUP, ANY_GROUP_HEADER)).imessageMultiAttachmentAvailable,
-    ).toBe(false);
-    expect((await capabilitiesFor(ONE_TO_ONE, header())).imessageMultiAttachmentAvailable).toBe(
-      true,
-    );
-    await serverInfo({ supports_imessage_group_attachment_upload: true });
-    expect(
-      (await capabilitiesFor(ANY_GROUP, ANY_GROUP_HEADER)).imessageMultiAttachmentAvailable,
-    ).toBe(false);
+  it('leaves one-to-one features on their reviewed flags when every restored flag is on', async () => {
+    await serverInfo(RESTORED_ON);
+    const caps = await capabilitiesFor(ONE_TO_ONE, header());
+    for (const key of GROUP_RESTORED_KEYS) expect([key, caps[key]]).toEqual([key, false]);
   });
 
   it('never proves an any;+; group whose members are not all iMessage', async () => {

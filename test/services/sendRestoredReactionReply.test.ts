@@ -345,7 +345,7 @@ describe('FP-006 restored replies', () => {
     expect(post).not.toHaveBeenCalled();
   });
 
-  it.each(RESTORED_SEND_FAILURES)(
+  it.each(RESTORED_SEND_FAILURES.filter(([, status]) => status !== 400))(
     'a group part-1 reply answered %s is recorded as failed and never retried',
     async (_label, status, type) => {
       const { db, raw } = await createTestDb();
@@ -384,6 +384,48 @@ describe('FP-006 restored replies', () => {
       expect(post).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('a group part-1 reply refused as an invalid target says it was not sent, and is never retried', async () => {
+    const { db, raw } = await createTestDb();
+    await seedGroupTarget(db);
+    const { http, post } = fakeHttp(async () => {
+      throw ApiError.fromStatus(
+        400,
+        'restored send refused',
+        undefined,
+        'imessage_restored_send_invalid_target',
+      );
+    });
+
+    const result = await sendTextMessage(
+      db,
+      http,
+      replyArgs,
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      fixedRcsCapabilitySource(
+        info({ supports_imessage_group_replies: true, supports_imessage_part_replies: true }),
+      ),
+    );
+
+    // The server proved nothing was sent, so the row says "rejected", not "may have been delivered".
+    expect(
+      one(
+        raw,
+        'SELECT error AS code, error_message AS detail, attempts FROM messages JOIN outgoing_queue ON temp_guid=guid',
+      ),
+    ).toEqual({
+      code: 400,
+      detail: 'The server rejected this reply before dispatch. This attempt was not sent.',
+      attempts: OUTGOING_MAX_ATTEMPTS,
+    });
+    await expect(claimFailedOutgoingForRetry(db, result.tempGuid)).resolves.toMatchObject({
+      claim: 'unsendable',
+    });
+    expect(post).toHaveBeenCalledTimes(1);
+  });
 
   it('the endpoint keeps the reviewed one-to-one part-zero reply unless restored', () => {
     const { http, post } = fakeHttp(async () => ({ guid: 'g' }));

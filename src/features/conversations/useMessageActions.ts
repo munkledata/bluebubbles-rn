@@ -28,6 +28,7 @@ import {
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import { checkUnsend, discardMessage, react, unsend } from '@/services/send';
+import { isPreDispatchOneShotRejection } from '@/services/send/sendOutcome';
 import { useRcsMutationEnabled } from '@state/sessionStore';
 import type { SelectedMessage } from '@ui';
 import { pickReminderTime, reminderTimeLabel } from '@ui/conversations/pickReminderTime';
@@ -779,8 +780,14 @@ export function useMessageActions({
     else {
       if (imessageReaction) imessageReactionInFlight.current = true;
       void react(args, screenLease, presentSendIssue)
-        .catch(() => {
+        .catch((error: unknown) => {
           if (!screenLease.isCurrent()) return;
+          // Only a typed server refusal proves nothing was sent; any other iMessage failure may
+          // have reached Messages, so it is reported as unconfirmed and never sent again.
+          if (imessageReaction && isPreDispatchOneShotRejection(error)) {
+            showDialog('Reaction not sent', 'The server refused this reaction. It was not sent.');
+            return;
+          }
           showDialog(
             'Reaction not confirmed',
             imessageReaction

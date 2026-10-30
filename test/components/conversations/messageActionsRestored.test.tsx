@@ -4,6 +4,7 @@
  * must behave exactly as before (part 0 only, classic only).
  */
 import { useState } from 'react';
+import { ApiError } from '@core/api/errors';
 import { useTransportHealthStore } from '@state/transportHealthStore';
 import { renderHook, act, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
@@ -197,4 +198,46 @@ describe('useMessageActions FP-006 restored actions', () => {
       expect.anything(),
     );
   });
+
+  it.each([
+    [
+      'a restored invalid target',
+      400,
+      'imessage_restored_send_invalid_target',
+      'Reaction not sent',
+    ],
+    ['a reviewed invalid target', 400, 'imessage_reaction_invalid_target', 'Reaction not sent'],
+    [
+      'a helper outcome unknown',
+      409,
+      'imessage_restored_send_outcome_unknown',
+      'Reaction not confirmed',
+    ],
+    [
+      'a retry-ledger outcome unknown',
+      500,
+      'idempotency_outcome_unknown',
+      'Reaction not confirmed',
+    ],
+  ])(
+    'a group tapback answered with %s says so and is not sent again',
+    async (_label, status, type, title) => {
+      (react as jest.Mock).mockRejectedValueOnce(
+        ApiError.fromStatus(status, 'tapback failed', undefined, type),
+      );
+      const target = partMessage(0);
+      const hook = await mount([target], { reactions: true });
+      await act(async () => hook.result.current.onLongPressMessage(target, rect));
+      await act(async () => hook.result.current.onReact('love'));
+
+      await waitFor(() => expect(dialogs).toHaveLength(1));
+      expect(dialogs[0]?.title).toBe(title);
+      expect(dialogs[0]?.body).toBe(
+        title === 'Reaction not sent'
+          ? 'The server refused this reaction. It was not sent.'
+          : 'It may have sent. Check the conversation before trying again.',
+      );
+      expect(react).toHaveBeenCalledTimes(1);
+    },
+  );
 });
