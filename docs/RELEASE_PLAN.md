@@ -49,12 +49,31 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.67` / version code `89` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.68` / version code `91` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-10-29 — not a checklist rebind:** **`0.1.67` / code `89`** was built
+**Latest live artifact, 2026-10-30 — not a checklist rebind:** **`0.1.68` / code `91`** was built
+from source `28132a00abbcd1d0b6b1a5362d6e613f1788df36` (0.1.67 plus a sent RCS reaction kept when the
+reply names its target, a captioned RCS picture's caption shown once on the sending phone, and the
+master fixes since 0.1.67: share-out after a self-share, the decode-uri-component advisory backport,
+reminder times across DST, the Messages per Chat stepper, Reminder set saying when it fires, Not Now
+remembered on the photo-access explanation, and Scheduled rows naming their chat; CI run
+`40963080910` green, all jobs) and promoted as release commit
+`6fdeefacef19499e386caa31e54e3dee60f50404` on local branch `release/android-0.1.68`. Run
+`android-0.1.68-28132a0-20261030160709` produced `gator-release-0.1.68-v91-6fdeefa.aab`,
+**58,448,383 bytes**, SHA-256 `79beda593e1b9967dbc2588e85693883f833546db6f6c89ec6ad2cd0f9287cb6`.
+Code `90` was consumed by run `android-0.1.68-28132a0-20261030032239`, whose local Gradle build lost
+network while the Mac slept (`dl.google.com` did not resolve); it produced no artifact and nothing was
+submitted. The clean local production build and validation pass. The owner approved shipping these
+fixes on 2026-10-29; the agent submitted with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.68 v91 79beda593e1b TO PLAY INTERNAL`; the Maps key came from the login Keychain. Android
+Publisher readback after the 2026-10-30 submission confirms Internal release `0.1.68`, code `91`,
+`completed`. The device update and the pending rows in `docs/DEVICE_VERIFICATION_CHECKLIST.md`
+remain open. No task status or frozen v77 checklist row is changed by this Internal release.
+
+**Historical v89 artifact, 2026-10-29:** **`0.1.67` / code `89`** was built
 from source `c510df6ff226c9261c8dad8b91cd703e1ba6dff2` (0.1.66 plus migration `0057_chat_group_photo`,
 which brings back group chat photos, a server availability chip on New Message, the app side of RCS
 find-or-create (it stays off until the server reports `supports_rcs_find_or_create_chat`), and the
