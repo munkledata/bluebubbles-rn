@@ -1,8 +1,8 @@
 diff --git a/node_modules/node-forge/lib/rsa.js b/node_modules/node-forge/lib/rsa.js
-index a426482..ceeb0eb 100644
+index 65f6e84..fad1923 100644
 --- a/node_modules/node-forge/lib/rsa.js
 +++ b/node_modules/node-forge/lib/rsa.js
-@@ -1168,11 +1168,16 @@ pki.setRsaPublicKey = pki.rsa.setPublicKey = function(n, e) {
+@@ -1197,11 +1197,16 @@ pki.setRsaPublicKey = pki.rsa.setPublicKey = function(n, e) {
              parseAllBytes: options._parseAllDigestBytes
            });
  
