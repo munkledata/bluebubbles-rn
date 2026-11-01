@@ -315,6 +315,16 @@
       "upgradeTest": "test/db/migrations/0058_apple_screening_flags.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 59,
+      "name": "0059_retire_doubled_text_local_copies",
+      "task": "OWNER-IMESSAGE-GROUP-DOUBLES",
+      "branchPr": "fix/imessage-send-double",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0059_retire_doubled_text_local_copies.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

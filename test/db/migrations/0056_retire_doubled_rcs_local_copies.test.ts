@@ -163,9 +163,10 @@ describe(`migration ${MIGRATION_NAME}`, () => {
       insert({ guid: 'imsg-server', text: 'blue', at: 12_000 * MINUTE, chat: iMessage });
     });
     try {
-      expect(hidden).toEqual([]);
+      // 0056 itself leaves the iMessage pair alone; the later 0059 hides that iMessage leftover.
+      expect(hidden).toEqual(['temp-imsg']);
       expect(raw.prepare('SELECT COUNT(*) AS n FROM message_deletion_ledger').get()).toEqual({
-        n: 0,
+        n: 1,
       });
     } finally {
       raw.close();
