@@ -24873,7 +24873,7 @@
     {
       "id": "src/services/send/sendRestoredReactionService.ts#sendRestoredIMessageReactionMessage:mutator-call:60af848d3d1a",
       "path": "src/services/send/sendRestoredReactionService.ts",
-      "line": 64,
+      "line": 66,
       "symbol": "sendRestoredIMessageReactionMessage",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageTargets.ts#resolveMessageTarget",

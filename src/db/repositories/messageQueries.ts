@@ -466,7 +466,8 @@ export async function getNewestReceivedGuid(
  * when it is a received, non-deleted message of this chat strictly newer than the current marker
  * (the same monotonic rule as the Mac watermark reconcile), `'stale'` when the marker is already at
  * or past it or the user marked the chat unread after `dateReadMs`, and `'missing'` when the message
- * is not stored here yet. Read-only.
+ * is not stored here yet. A target deleted on this phone falls back to the newest kept received
+ * message at or before it, so a local delete cannot hold the marker back. Read-only.
  */
 export async function getReadThroughTarget(
   db: AppDatabase,
@@ -475,23 +476,32 @@ export async function getReadThroughTarget(
   dateReadMs: number | null,
 ): Promise<string | 'stale' | 'missing'> {
   const rows: Array<{
+    targetId: number | null;
     guid: string | null;
     dateCreated: number | null;
     markerDate: number;
     markedUnreadAt: number | null;
   }> = await db.all(sql`
-    SELECT m.guid AS guid, m.date_created AS dateCreated,
+    SELECT t.id AS targetId,
+           (SELECT k.guid FROM messages k
+             WHERE k.chat_id = c.id AND k.is_from_me = 0 AND k.date_deleted IS NULL
+               AND k.date_created <= t.date_created
+             ORDER BY k.id = t.id DESC, k.date_created DESC, k.id DESC LIMIT 1) AS guid,
+           (SELECT k.date_created FROM messages k
+             WHERE k.chat_id = c.id AND k.is_from_me = 0 AND k.date_deleted IS NULL
+               AND k.date_created <= t.date_created
+             ORDER BY k.id = t.id DESC, k.date_created DESC, k.id DESC LIMIT 1) AS dateCreated,
            COALESCE((SELECT lm.date_created FROM messages lm
                       WHERE lm.guid = c.last_read_message_guid), 0) AS markerDate,
            c.marked_unread_at AS markedUnreadAt
       FROM chats c
-      LEFT JOIN messages m ON m.chat_id = c.id AND m.guid = ${readThroughGuid}
-                          AND m.is_from_me = 0 AND m.date_deleted IS NULL
+      LEFT JOIN messages t ON t.chat_id = c.id AND t.guid = ${readThroughGuid}
+                          AND t.is_from_me = 0
      WHERE c.id = ${chatId}
   `);
   const row = rows[0];
-  if (!row?.guid) return 'missing';
-  if (row.dateCreated == null || row.dateCreated <= row.markerDate) return 'stale';
+  if (row?.targetId == null) return 'missing';
+  if (!row.guid || row.dateCreated == null || row.dateCreated <= row.markerDate) return 'stale';
   const readAt = dateReadMs ?? row.dateCreated;
   if (row.markedUnreadAt != null && readAt <= row.markedUnreadAt) return 'stale';
   return row.guid;

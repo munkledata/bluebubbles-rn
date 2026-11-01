@@ -43,10 +43,14 @@ const one = (raw: Database.Database, sql: string) =>
   raw.prepare(sql).get() as Record<string, unknown>;
 
 /** A proven any;+; iMessage group whose target's only remaining part is part 1. */
-async function seedGroupTarget(db: AppDatabase, chatGuid = GROUP): Promise<void> {
+async function seedGroupTarget(
+  db: AppDatabase,
+  chatGuid = GROUP,
+  secondService = 'iMessage',
+): Promise<void> {
   const participants = [
     { address: 'ann@example.com', service: 'iMessage' },
-    { address: 'ben@example.com', service: 'iMessage' },
+    { address: 'ben@example.com', service: secondService },
   ];
   const handles = await upsertHandles(db, participants);
   const chats = await upsertChats(
@@ -130,6 +134,23 @@ describe('FP-006 restored tapbacks', () => {
     });
     // Like the reviewed iMessage tapback: no optimistic row and no retry queue.
     expect(one(raw, 'SELECT COUNT(*) AS count FROM outgoing_queue')).toEqual({ count: 0 });
+  });
+
+  it('refuses an any;+; group that is not proven all-iMessage before any request', async () => {
+    const { db } = await createTestDb();
+    await seedGroupTarget(db, GROUP, 'SMS');
+    const { http, post } = fakeHttp(async () => ({ guid: 'must-not-send' }));
+    await expect(
+      sendRestoredIMessageReactionMessage(
+        db,
+        http,
+        { chatGuid: GROUP, targetGuid: 'group-target', reaction: 'love', partIndex: 1 },
+        () => true,
+        undefined,
+        () => info(ALL_TAPBACK),
+      ),
+    ).rejects.toThrow('This iMessage reaction is unavailable.');
+    expect(post).not.toHaveBeenCalled();
   });
 
   it('refuses before any request while one needed switch is off', async () => {
@@ -224,15 +245,15 @@ describe('FP-006 restored tapbacks', () => {
     },
   );
 
-  it('the endpoint refuses a group tapback unless the caller proved the restored switches', () => {
+  it('the endpoint refuses a group tapback unless the caller proved the restored switches', async () => {
     const { http, post } = fakeHttp(async () => ({ guid: 'g' }));
     const params = { chatGuid: GROUP, selectedMessageGuid: 'm', reaction: 'love', partIndex: 0 };
-    expect(() => sendReaction(http, params)).toThrow('supported conversation');
-    expect(() =>
+    await expect(sendReaction(http, params)).rejects.toThrow('supported conversation');
+    await expect(
       sendReaction(http, { ...params, chatGuid: 'SMS;+;g' }, { restoredTapback: true }),
-    ).toThrow('supported conversation');
+    ).rejects.toThrow('supported conversation');
     expect(post).not.toHaveBeenCalled();
-    void sendReaction(http, params, { restoredTapback: true });
+    await sendReaction(http, params, { restoredTapback: true });
     expect(post).toHaveBeenCalledTimes(1);
   });
 });

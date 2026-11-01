@@ -817,6 +817,88 @@ describe('DbEventSink (live path)', () => {
     expect(marker()).toBe('r3');
   });
 
+  it('a read-through message deleted here falls back to the newest kept message before it', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'rtd@x.com' }]);
+    const chats = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cReadDeleted', participants: [{ address: 'rtd@x.com' }] })],
+      handles,
+    );
+    const chatId = chats.get('cReadDeleted')!;
+    await upsertMessages(
+      db,
+      ['d1', 'd2', 'd3'].map((guid, index) =>
+        Message.parse({
+          guid,
+          text: guid,
+          dateCreated: (index + 1) * 100,
+          handle: { address: 'rtd@x.com' },
+        }),
+      ),
+      () => chatId,
+      handles,
+    );
+    raw.prepare("UPDATE messages SET date_deleted = 1 WHERE guid = 'd2'").run();
+    const sink = new DbEventSink(db);
+
+    await sink.onEvent(
+      {
+        type: 'chat-read-status-changed',
+        payload: { chatGuid: 'cReadDeleted', read: true, readThroughGuid: 'd2', dateRead: 1_000 },
+      },
+      'socket',
+    );
+
+    // Not stuck waiting for d2, and not past it: d3 stays unread.
+    expect(
+      raw.prepare("SELECT last_read_message_guid v FROM chats WHERE guid = 'cReadDeleted'").get(),
+    ).toEqual({ v: 'd1' });
+  });
+
+  it('a chat marked unread after the remote read keeps its unread state', async () => {
+    const { db, raw } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: 'rtu@x.com' }]);
+    const chats = await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cReadUnread', participants: [{ address: 'rtu@x.com' }] })],
+      handles,
+    );
+    const chatId = chats.get('cReadUnread')!;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'u1',
+          text: 'u1',
+          dateCreated: 100,
+          handle: { address: 'rtu@x.com' },
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    raw.prepare("UPDATE chats SET marked_unread_at = 2000 WHERE guid = 'cReadUnread'").run();
+    const sink = new DbEventSink(db);
+    const read = (dateRead: number) =>
+      sink.onEvent(
+        {
+          type: 'chat-read-status-changed',
+          payload: { chatGuid: 'cReadUnread', read: true, readThroughGuid: 'u1', dateRead },
+        },
+        'socket',
+      );
+    const marker = () =>
+      raw.prepare("SELECT last_read_message_guid v FROM chats WHERE guid = 'cReadUnread'").get();
+
+    // Read at 1500, marked unread at 2000: the later "unread" wins.
+    await read(1_500);
+    expect(marker()).toEqual({ v: null });
+    // A read after the mark-unread moves the marker.
+    await read(2_500);
+    expect(marker()).toEqual({ v: 'u1' });
+  });
+
   it('keeps a durable read-through hint retryable until its message is stored', async () => {
     const { db } = await createTestDb();
     const handles = await upsertHandles(db, [{ address: 'rt2@x.com' }]);

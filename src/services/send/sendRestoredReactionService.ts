@@ -5,12 +5,14 @@ import type { ServerInfo } from '@core/models';
 import { parseReactionType } from '@core/reactions/reactionType';
 import {
   explicitMessageTargetPart,
+  getChatHeader,
   MessageTargetUnavailableError,
   resolveMessageTarget,
   type MessageTargetServerAuthorization,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { isProvenIMessageGroupChat, isProvenOneToOneIMessageChat } from '@utils';
 import { utf8Encode } from '@utils/bytes';
 import { graphemeBoundaries } from '@utils/grapheme';
 import { messageTargetCommitGuard } from './rcsAttemptCapability';
@@ -74,6 +76,15 @@ export async function sendRestoredIMessageReactionMessage(
   if (!finalTarget || finalTarget.basis !== 'exact-topology') {
     throw new MessageTargetUnavailableError();
   }
+  // Re-prove the chat itself, as the restored reply does: an `any;+;` guid alone fits SMS and RCS
+  // groups too, so only the stored all-iMessage participant set admits a group tapback.
+  const header = await getChatHeader(db, args.chatGuid);
+  const provenChat =
+    restoredChatKind(args.chatGuid) === 'group'
+      ? header?.guid === args.chatGuid &&
+        isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true })
+      : isProvenOneToOneIMessageChat(header);
+  if (!provenChat) throw new Error('This iMessage reaction is unavailable.');
   if (!canSendRestoredIMessageTapback(currentServerInfo(), request) || !commitGuard()) {
     throw new DbCommitGuardRejectedError();
   }
