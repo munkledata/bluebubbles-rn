@@ -81,6 +81,7 @@ function upload(
     clientAttemptGeneration?: number;
     service?: 'iMessage' | 'RCS';
     voice?: true;
+    restored?: true;
     text?: string;
     totalBytes?: number;
     name?: string;
@@ -97,6 +98,7 @@ function upload(
     clientAttemptGeneration: options.clientAttemptGeneration,
     service: options.service,
     voice: options.voice,
+    restored: options.restored,
     text: options.text,
     assertNetworkStart: options.assertNetworkStart,
     attachmentGuid: `att-${options.tempGuid ?? '1'}`,
@@ -183,6 +185,65 @@ describe('native attachment upload account scope', () => {
       uploadKind: 'imessage_voice',
       chatGuid: 'any;-;+15551234567',
     });
+  });
+
+  it.each([
+    ['one-to-one HEIC', 'any;-;+15551234567', 'IMG_0001.heic', 'image/heic'],
+    ['group video', 'any;+;chat-5678', 'clip.mov', 'video/quicktime'],
+  ])(
+    'streams a restored %s to the multi-file route with only its fields',
+    async (_kind, chatGuid, name, mimeType) => {
+      mockUploadAsync.mockResolvedValueOnce({
+        status: 200,
+        body: JSON.stringify({ status: 200, data: { guid: 'restored-guid', viaPrivateApi: true } }),
+      });
+      const http = new HttpClient({
+        getOrigin: () => 'https://old.example',
+        getPassword: () => 'old-password',
+      });
+      const run = upload(http, {
+        chatGuid,
+        service: 'iMessage',
+        restored: true,
+        assertNetworkStart: () => undefined,
+        text: 'Look',
+        totalBytes: 20 * 1024 * 1024,
+        name,
+        uri: `file:///cache/${name}`,
+        mimeType,
+      });
+      finishFileCheck({ exists: true, size: 20 * 1024 * 1024 });
+      await expect(run).resolves.toMatchObject({ guid: 'restored-guid' });
+      const [url, , options] = mockCreateUploadTask.mock.calls[0]!;
+      expect(url).toBe('https://old.example/api/v1/message/attachments/upload');
+      expect(options.gatorFileName).toBe(name);
+      expect(options.mimeType).toBe(mimeType);
+      expect(options.parameters).toEqual({ chatGuid, tempGuid: 'temp-1', text: 'Look' });
+    },
+  );
+
+  it('refuses a restored upload over 100 MiB or of a type outside its allowlist before native work', async () => {
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+    const base = {
+      chatGuid: 'any;-;+15551234567',
+      service: 'iMessage' as const,
+      restored: true as const,
+      assertNetworkStart: () => undefined,
+    };
+    await expect(
+      upload(http, { ...base, name: 'IMG.heic', totalBytes: 100 * 1024 * 1024 + 1 }),
+    ).rejects.toThrow('can’t be sent to this iMessage chat');
+    await expect(upload(http, { ...base, name: 'run.exe', totalBytes: 42 })).rejects.toThrow(
+      'can’t be sent to this iMessage chat',
+    );
+    await expect(
+      upload(http, { ...base, voice: true, name: 'voice.m4a', totalBytes: 42 }),
+    ).rejects.toThrow('one non-voice iMessage file');
+    expect(mockGetInfoAsync).not.toHaveBeenCalled();
+    expect(mockCreateUploadTask).not.toHaveBeenCalled();
   });
 
   it('preserves the original multipart filename for an iMessage Files-picker cache copy', async () => {

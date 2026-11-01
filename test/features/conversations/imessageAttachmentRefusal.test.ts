@@ -73,3 +73,57 @@ describe('why a one-to-one iMessage chat cannot send staged files', () => {
     expect(checked).toBe(names.length * types.length * sizes.length * 2);
   });
 });
+
+describe('the FP-006 restored route in the refusal check', () => {
+  const HEIC = { uri: 'file:///a.heic', name: 'IMG_0001.HEIC', mimeType: 'image/heic', size: 42 };
+  const both = { narrow: true, restored: true };
+  const groupOnly = { narrow: false, restored: true };
+
+  it('lets a HEIC, a video and a large picture through once the restored route is on', () => {
+    expect(imessageAttachmentRefusal([HEIC], false, both)).toBeNull();
+    expect(
+      imessageAttachmentRefusal(
+        [{ ...JPEG, name: 'clip.mov', mimeType: 'video/quicktime', size: 50 * 1024 * 1024 }],
+        false,
+        both,
+      ),
+    ).toBeNull();
+    expect(
+      imessageAttachmentRefusal(
+        [{ ...JPEG, size: MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES + 1 }],
+        false,
+        both,
+      ),
+    ).toBeNull();
+  });
+
+  it('in a group with only the restored route, a JPEG still goes and the reasons name its caps', () => {
+    expect(imessageAttachmentRefusal([JPEG], false, groupOnly)).toBeNull();
+    expect(imessageAttachmentRefusal([JPEG, HEIC], false, groupOnly)).toBe(
+      'This iMessage chat sends one file at a time. Remove the others, then send.',
+    );
+    expect(
+      imessageAttachmentRefusal(
+        [{ ...JPEG, name: 'setup.exe', mimeType: 'application/octet-stream' }],
+        false,
+        groupOnly,
+      ),
+    ).toBe('This iMessage chat can’t send this kind of file.');
+    expect(
+      imessageAttachmentRefusal([{ ...HEIC, size: 100 * 1024 * 1024 + 1 }], false, groupOnly),
+    ).toBe('This iMessage chat can send files up to 100 MiB. Choose a smaller file.');
+    expect(
+      imessageAttachmentRefusal(
+        [{ ...JPEG, name: 'notes.txt', mimeType: 'text/plain', size: 2 * 1024 * 1024 }],
+        false,
+        groupOnly,
+      ),
+    ).toBe('This iMessage chat can send text files up to 1 MiB. Choose a smaller file.');
+  });
+
+  it('keeps the old HEIC message when only the narrow route exists', () => {
+    expect(imessageAttachmentRefusal([HEIC], false, { narrow: true, restored: false })).toBe(
+      'This iMessage chat can’t send HEIC photos yet. Send a JPEG or PNG instead.',
+    );
+  });
+});

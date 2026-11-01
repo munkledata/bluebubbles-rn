@@ -36,6 +36,8 @@ const RECORDING = 'file:///cache/recordings/rec-1.m4a';
 const VOICE: ChatAttachmentSendOptions['capabilities'] = {
   attachmentFeaturesAvailable: true,
   imessageAttachmentFeaturesAvailable: true,
+  imessageNarrowAttachmentsAvailable: true,
+  imessageRestoredAttachmentsAvailable: false,
   imessagePdfFeaturesAvailable: false,
   imessageCaptionFeaturesAvailable: false,
   voiceFeaturesAvailable: true,

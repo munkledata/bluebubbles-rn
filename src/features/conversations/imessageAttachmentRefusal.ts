@@ -1,4 +1,9 @@
 import {
+  IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES,
+  isRestoredAttachmentFile,
+  restoredAttachmentExtension,
+} from '@core/models/imessageRestoredFeatures';
+import {
   MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
   isSupportedImessageAttachmentType,
 } from '@core/models/serverInfo';
@@ -10,14 +15,24 @@ interface StagedFile {
   readonly size: number;
 }
 
+/** Which iMessage file routes this chat has right now. */
+export interface IMessageAttachmentRoutes {
+  /** The one-to-one route for one JPEG, PNG, or PDF up to 10 MiB. */
+  readonly narrow: boolean;
+  /** The FP-006 restored route for one file of its wider allowlist up to 100 MiB. */
+  readonly restored: boolean;
+}
+
 /**
- * Why a one-to-one iMessage chat cannot send these files, or null when it can. It refuses exactly
- * what the send service's isSupportedImessageAttachmentFile refuses, plus a PDF without the PDF
- * capability, and names the reason, so a share that cannot go here says what to do.
+ * Why an iMessage chat cannot send these files, or null when it can. It refuses exactly what the
+ * send service refuses (the narrow route's isSupportedImessageAttachmentFile, plus a PDF without
+ * the PDF capability, or else the restored route's own caps), and names the reason, so a share that
+ * cannot go here says what to do.
  */
 export function imessageAttachmentRefusal(
   items: readonly StagedFile[],
   pdfAvailable: boolean,
+  routes: IMessageAttachmentRoutes = { narrow: true, restored: false },
 ): string | null {
   if (items.length !== 1) {
     return 'This iMessage chat sends one file at a time. Remove the others, then send.';
@@ -32,7 +47,17 @@ export function imessageAttachmentRefusal(
     item.size > 0 &&
     item.size <= MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES;
   const pdf = item.mimeType === 'application/pdf';
-  if (supportedType && supportedSize && (!pdf || pdfAvailable)) return null;
+  if (routes.narrow && supportedType && supportedSize && (!pdf || pdfAvailable)) return null;
+  if (routes.restored) {
+    if (isRestoredAttachmentFile(item)) return null;
+    if (typeof item.name !== 'string' || restoredAttachmentExtension(item.name) === undefined) {
+      return 'This iMessage chat can’t send this kind of file.';
+    }
+    const maxMiB = IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024);
+    return /\.(?:txt|csv)$/i.test(item.name)
+      ? 'This iMessage chat can send text files up to 1 MiB. Choose a smaller file.'
+      : `This iMessage chat can send files up to ${maxMiB} MiB. Choose a smaller file.`;
+  }
   if (/^image\/hei[cf]/i.test(String(item.mimeType)) || /\.hei[cf]$/i.test(String(item.name))) {
     return 'This iMessage chat can’t send HEIC photos yet. Send a JPEG or PNG instead.';
   }

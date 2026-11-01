@@ -121,7 +121,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:8ad712352d>.<callback:60008a07b1>:mutator-call:61c25c93f19c",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 248,
+      "line": 249,
       "symbol": "ChatScreenInner.<callback:8ad712352d>.<callback:60008a07b1>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
@@ -134,7 +134,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>:mutator-call:3e3d348f4c24",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 287,
+      "line": 288,
       "symbol": "ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
@@ -23326,7 +23326,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:deaa886e3e28",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 375,
+      "line": 419,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -23339,7 +23339,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:fe1d164cbb31",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 375,
+      "line": 419,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>",
@@ -23352,7 +23352,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:9bce367171d2",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 379,
+      "line": 423,
       "symbol": "sendImageMessage.<callback:13c0e413a1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/shareIntakeReceipts.ts#claimShareIntakeFileWithinTransaction",
@@ -23365,7 +23365,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:fcf1a0b94dee",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 391,
+      "line": 435,
       "symbol": "sendImageMessage.<callback:13c0e413a1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#commitAttachmentCacheReservation",
@@ -23378,7 +23378,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:218fa7a8a023",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 401,
+      "line": 445,
       "symbol": "sendImageMessage.<callback:13c0e413a1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction",
@@ -23391,7 +23391,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:7b145a63f68d",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 484,
+      "line": 529,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome",
@@ -23404,7 +23404,7 @@
     {
       "id": "src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:605604c1644f",
       "path": "src/services/send/sendAttachmentService.ts",
-      "line": 490,
+      "line": 535,
       "symbol": "sendImageMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#handleSendFailure",

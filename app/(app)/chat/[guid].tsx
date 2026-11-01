@@ -139,6 +139,7 @@ function ChatScreenInner({
     currentLocationAvailable,
     supportsSendAttachmentText,
     imessageAttachmentFeaturesAvailable,
+    imessageRestoredAttachmentsAvailable,
     imessageScheduledAttachmentsAvailable,
     imessageReactionsAvailable,
     imessageEmojiReactionsAvailable,
@@ -836,7 +837,10 @@ function ChatScreenInner({
             !replyTo && !editing && attachmentFeaturesAvailable ? onSendAttachments : undefined
           }
           onSendTextAttachment={
-            !replyTo && !editing && attachmentFeaturesAvailable && supportsSendAttachmentText
+            !replyTo &&
+            !editing &&
+            attachmentFeaturesAvailable &&
+            (supportsSendAttachmentText || imessageRestoredAttachmentsAvailable)
               ? onSendTextAttachment
               : undefined
           }
@@ -845,6 +849,7 @@ function ChatScreenInner({
           onPickFiles={!replyTo && !editing && attachmentFeaturesAvailable ? pickFiles : undefined}
           onRemoveAttachment={ownedShareBatchId ? onRemoveSharedAttachment : undefined}
           imessageImageOnly={imessageAttachmentFeaturesAvailable}
+          imessageVideoAllowed={imessageRestoredAttachmentsAvailable}
           onPickContact={!replyTo && !editing && contactCardAvailable ? onPickContact : undefined}
           onShareLocation={
             !replyTo && !editing && currentLocationAvailable ? onShareCurrentLocation : undefined

@@ -264,3 +264,27 @@ export function isValidRestoredSubject(value: string): boolean {
     utf8ByteLength(value) <= IMESSAGE_RESTORED_SUBJECT_MAX_UTF8_BYTES
   );
 }
+
+/** The server's longest restored caption or message text (bbd `IMESSAGE_RESTORED_TEXT_MAX_UTF8_BYTES`). */
+export const IMESSAGE_RESTORED_TEXT_MAX_UTF8_BYTES = 64 * 1024;
+
+/**
+ * The server's caption rule for a restored upload: nonblank, no control characters except tab and
+ * newline, no U+FFFC, at most 64 KiB UTF-8 (bbd `isValidRestoredText`).
+ */
+export function isValidRestoredText(value: string): boolean {
+  return (
+    value.trim().length > 0 &&
+    !/[\u0000-\u0008\u000b-\u001f\u007f-\u009f￼]/u.test(value) &&
+    !hasLoneSurrogate(value) &&
+    utf8ByteLength(value) <= IMESSAGE_RESTORED_TEXT_MAX_UTF8_BYTES
+  );
+}
+
+/** One file the restored route accepts when sent on its own: an allowlisted name within its caps. */
+export function isRestoredAttachmentFile(file: { name: string; size: number }): boolean {
+  return (
+    typeof file.name === 'string' &&
+    restoredAttachmentBatchRefusal([{ name: file.name, size: file.size }]) === null
+  );
+}
