@@ -5,7 +5,7 @@
     "exactAab": false
   },
   "inputs": {
-    "dependencyLockSha256": "0d773edd998d58eab48632a4efbb66b5eb319de68d4485622ac304c9159d45b5",
+    "dependencyLockSha256": "87151d0104d291e508ca5a978c49ffaeaba5464c893d81259685f6a574f39d20",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "9faa6b47f887c55528bc18f511a4c99aad5c66150aa22542fa4a7ce096fb5134"
@@ -16,7 +16,7 @@
     "assetFiles": 14,
     "pendingAssetProvenance": 14,
     "localComponents": 14,
-    "dependencyLockSha256": "0d773edd998d58eab48632a4efbb66b5eb319de68d4485622ac304c9159d45b5",
+    "dependencyLockSha256": "87151d0104d291e508ca5a978c49ffaeaba5464c893d81259685f6a574f39d20",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },
@@ -12258,10 +12258,10 @@
     {
       "installPath": "node_modules/node-forge",
       "name": "node-forge",
-      "version": "1.4.0",
+      "version": "1.4.2",
       "spdx": "(BSD-3-Clause OR GPL-2.0)",
-      "resolved": "https://registry.npmjs.org/node-forge/-/node-forge-1.4.0.tgz",
-      "integrity": "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==",
+      "resolved": "https://registry.npmjs.org/node-forge/-/node-forge-1.4.2.tgz",
+      "integrity": "sha512-rRtAR5XLJ8gCKd9du4qrKAsgCG1ObGP4gLeNJMa4vYSeq4bmBMOJk5IHkrviBV0q7uoAJlVd8HEQYQSVUb4FGQ==",
       "optional": false,
       "legalDocuments": [
         {

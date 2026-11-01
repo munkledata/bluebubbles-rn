@@ -2,7 +2,7 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Dependency lock SHA-256 (package-lock.json without the app's own version): `0d773edd998d58eab48632a4efbb66b5eb319de68d4485622ac304c9159d45b5`
+- Dependency lock SHA-256 (package-lock.json without the app's own version): `87151d0104d291e508ca5a978c49ffaeaba5464c893d81259685f6a574f39d20`
 - Production package records: 1014
 - Unique package versions: 922
 - Source assets: 14
@@ -794,7 +794,7 @@
 | `tr46` | `0.0.3` | MIT | no | none | no legal text file found |
 | `webidl-conversions` | `3.0.1` | BSD-2-Clause | no | `a889cc4dbee2ae172c179856b25d75b0b7a5a136e1b97109b9b590b2ff1a879c` | none |
 | `whatwg-url` | `5.0.0` | MIT | no | `6b7a1792144374d84dc5ed3655b8bbe2754d06f4f1f64a9fb8b9de2d6f448b85` | none |
-| `node-forge` | `1.4.0` | (BSD-3-Clause OR GPL-2.0) | no | `f63ff0e4e239244aa79280da2dd4811a0469e5e201caf5cbc0d97c3a1dff8e82` | license choice requires review |
+| `node-forge` | `1.4.2` | (BSD-3-Clause OR GPL-2.0) | no | `f63ff0e4e239244aa79280da2dd4811a0469e5e201caf5cbc0d97c3a1dff8e82` | license choice requires review |
 | `node-int64` | `0.4.0` | MIT | no | `8f85aab053e268546014761da47630a09886626afbd0d8d440cb2c69611bb8d3` | none |
 | `node-releases` | `2.0.54` | MIT | no | `3706296ed611888111ceccc1dff4712844dea4bde0b185c82d718c3b69895abe` | none |
 | `node-vibrant` | `4.0.4` | MIT | no | `e3da62d8ddc88b503bfc908f8a8921fd73076a49e524d2c9ab8d1299dfcac5f4` | none |
