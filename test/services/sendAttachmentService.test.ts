@@ -1907,4 +1907,142 @@ describe('sendImageMessage', () => {
     );
     warn.mockRestore();
   });
+
+  describe('FP-006 restored upload (one file per send)', () => {
+    const HEIC = {
+      uri: 'file:///cache/IMG_0001.heic',
+      name: 'IMG_0001.heic',
+      mimeType: 'image/heic',
+      size: 3_000_000,
+    };
+    const GROUP = 'any;+;chat-5678';
+    const restoredCapability = (switches: { v2?: boolean; group?: boolean; narrow?: boolean }) =>
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({
+          version: '2.0.42-bbd',
+          private_api: true,
+          supports_imessage_attachment_upload: switches.narrow ?? true,
+          supports_imessage_attachments_v2: switches.v2 ?? false,
+          supports_imessage_group_attachment_upload: switches.group ?? false,
+        }),
+      );
+    async function seedGroup(db: AppDatabase, secondService = 'iMessage'): Promise<void> {
+      const participants = [
+        { address: 'ann@example.com', service: 'iMessage' },
+        { address: 'ben@example.com', service: secondService },
+      ];
+      const handles = await upsertHandles(db, participants);
+      await upsertChats(db, [Chat.parse({ guid: GROUP, style: 43, participants })], handles);
+    }
+    const send = (
+      db: AppDatabase,
+      chatGuid: string,
+      image: typeof IMG | typeof HEIC,
+      upload: AttachmentUploader,
+      capability: ReturnType<typeof restoredCapability>,
+      text?: string,
+    ) =>
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid, image, service: 'iMessage', ...(text === undefined ? {} : { text }) },
+        upload,
+        1_000,
+        undefined,
+        { failureNoticeMode: 'suppressed' },
+        undefined,
+        undefined,
+        capability,
+      );
+
+    it('sends a one-to-one HEIC through the restored route, one-shot like the narrow one', async () => {
+      const { db, raw } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => {
+        expect(
+          JSON.parse(String(one(raw, 'SELECT payload FROM outgoing_queue').payload)),
+        ).toMatchObject({ imessageAttachmentV1: true });
+        return { guid: 'heic-guid', viaPrivateApi: true };
+      });
+
+      await send(db, chatGuid, HEIC, up.upload, restoredCapability({ v2: true }), 'Look');
+
+      expect(up.captured).toMatchObject({
+        chatGuid,
+        service: 'iMessage',
+        restored: true,
+        text: 'Look',
+        name: 'IMG_0001.heic',
+      });
+      expect(one(raw, 'SELECT guid FROM messages').guid).toBe('heic-guid');
+    });
+
+    it('keeps a JPEG the narrow route can take on the narrow route even with the switch on', async () => {
+      const { db } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => ({ guid: 'jpeg-guid', viaPrivateApi: true }));
+
+      await send(db, chatGuid, IMG, up.upload, restoredCapability({ v2: true }));
+
+      expect(up.captured?.service).toBe('iMessage');
+      expect(up.captured?.restored).toBeUndefined();
+    });
+
+    it('refuses a HEIC with no restored switch before any row or upload', async () => {
+      const { db, raw } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+      await expect(send(db, chatGuid, HEIC, up.upload, restoredCapability({}))).rejects.toThrow(
+        'Choose one JPEG, PNG, or PDF file no larger than 10 MiB.',
+      );
+      expect(up.captured).toBeUndefined();
+      expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+    });
+
+    it('sends a picture to a proven group only when both group switches are on', async () => {
+      const { db, raw } = await createTestDb();
+      await seedGroup(db);
+      const refused = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+      await expect(
+        send(db, GROUP, IMG, refused.upload, restoredCapability({ v2: true })),
+      ).rejects.toThrow('proven existing one-to-one iMessage chat');
+      expect(refused.captured).toBeUndefined();
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+
+      const up = fakeUploader(async () => ({ guid: 'group-picture-guid', viaPrivateApi: true }));
+      await send(db, GROUP, IMG, up.upload, restoredCapability({ v2: true, group: true }));
+      expect(up.captured).toMatchObject({ chatGuid: GROUP, service: 'iMessage', restored: true });
+    });
+
+    it('refuses a group with a non-iMessage member even with both switches on', async () => {
+      const { db, raw } = await createTestDb();
+      await seedGroup(db, 'SMS');
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+      await expect(
+        send(db, GROUP, HEIC, up.upload, restoredCapability({ v2: true, group: true })),
+      ).rejects.toThrow('proven existing one-to-one iMessage chat');
+      expect(up.captured).toBeUndefined();
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+    });
+
+    it('refuses a restored file over 100 MiB and a caption with a control character', async () => {
+      const { db } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+      const capability = restoredCapability({ v2: true });
+
+      await expect(
+        send(db, chatGuid, { ...HEIC, size: 100 * 1024 * 1024 + 1 }, up.upload, capability),
+      ).rejects.toThrow();
+      await expect(send(db, chatGuid, HEIC, up.upload, capability, 'bad\u0007')).rejects.toThrow();
+      expect(up.captured).toBeUndefined();
+    });
+  });
 });

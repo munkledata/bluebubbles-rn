@@ -164,6 +164,41 @@ describe('useChatCapabilities FP-006 restored flags', () => {
     }
   });
 
+  it('opens restored file sends (part 2): one-to-one with the v2 switch, groups with both', async () => {
+    const keys = [
+      'imessageRestoredAttachmentsAvailable',
+      'imessageAttachmentFeaturesAvailable',
+      'attachmentFeaturesAvailable',
+      'imessageCaptionFeaturesAvailable',
+    ] as const;
+    const cases: [Record<string, boolean>, string, ChatHeaderRow, boolean][] = [
+      [{ supports_imessage_attachments_v2: true }, ONE_TO_ONE, header(), true],
+      [{ supports_imessage_attachments_v2: true }, ANY_GROUP, ANY_GROUP_HEADER, false],
+      [{ supports_imessage_group_attachment_upload: true }, ANY_GROUP, ANY_GROUP_HEADER, false],
+      [
+        { supports_imessage_attachments_v2: true, supports_imessage_group_attachment_upload: true },
+        ANY_GROUP,
+        ANY_GROUP_HEADER,
+        true,
+      ],
+      [
+        { supports_imessage_attachments_v2: true, supports_imessage_group_attachment_upload: true },
+        ANY_GROUP,
+        { ...ANY_GROUP_HEADER, handleServices: 'iMessage,SMS' },
+        false,
+      ],
+    ];
+    for (const [flags, guid, row, expected] of cases) {
+      await serverInfo(flags);
+      const caps = await capabilitiesFor(guid, row);
+      for (const key of keys)
+        expect([flags, guid, key, caps[key]]).toEqual([flags, guid, key, expected]);
+      // The narrow route and scheduled files keep their own reviewed switches.
+      expect(caps.imessageNarrowAttachmentsAvailable).toBe(false);
+      expect(caps.imessageScheduledAttachmentsAvailable).toBe(false);
+    }
+  });
+
   it('leaves one-to-one features on their reviewed flags when every restored flag is on', async () => {
     await serverInfo(RESTORED_ON);
     const caps = await capabilitiesFor(ONE_TO_ONE, header());

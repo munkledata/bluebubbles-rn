@@ -98,9 +98,11 @@ export async function pendingFromCameraAsset(
   a: ImagePicker.ImagePickerAsset,
   imessageImageOnly: boolean,
   isCurrent: () => boolean,
+  /** The FP-006 restored iMessage route also takes a video (its bytes are still measured). */
+  imessageVideoAllowed = false,
 ): Promise<PendingAttachment | null> {
   const isVideo = a.type === 'video';
-  if (imessageImageOnly && isVideo) return null;
+  if (imessageImageOnly && !imessageVideoAllowed && isVideo) return null;
   const size =
     imessageImageOnly && !(a.fileSize && a.fileSize > 0)
       ? await readableImageSize(a.uri, isCurrent)
@@ -130,6 +132,8 @@ interface AttachmentTrayProps {
   mediaEnabled?: boolean;
   /** The first iMessage upload slice accepts a single bounded still image with known bytes. */
   imessageImageOnly?: boolean;
+  /** With imessageImageOnly: the FP-006 restored route also takes a video with known bytes. */
+  imessageVideoAllowed?: boolean;
   /** The chat this tray belongs to, recorded before the camera opens so a photo taken while
    *  Android killed Gator can be put back into this chat's composer (see pendingCameraCapture). */
   cameraChatGuid?: string;
@@ -148,6 +152,7 @@ export function AttachmentTray({
   onShareLocation,
   mediaEnabled = true,
   imessageImageOnly = false,
+  imessageVideoAllowed = false,
   cameraChatGuid,
 }: AttachmentTrayProps): React.JSX.Element {
   const theme = useTheme();
@@ -171,9 +176,10 @@ export function AttachmentTray({
     try {
       const result = await MediaLibrary.getAssetsAsync({
         first: 40,
-        mediaType: imessageImageOnly
-          ? [MediaLibrary.MediaType.photo]
-          : [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        mediaType:
+          imessageImageOnly && !imessageVideoAllowed
+            ? [MediaLibrary.MediaType.photo]
+            : [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
         sortBy: [[MediaLibrary.SortBy.creationTime, false]],
       });
       if (!isCurrent()) return;
@@ -186,7 +192,7 @@ export function AttachmentTray({
       setMediaPermission('unavailable');
       setPermissionDialogVisible(true);
     }
-  }, [imessageImageOnly, isCurrent]);
+  }, [imessageImageOnly, imessageVideoAllowed, isCurrent]);
 
   const inspectMediaPermission = useCallback(async (): Promise<void> => {
     if (!isCurrent()) return;
@@ -334,7 +340,12 @@ export function AttachmentTray({
       if (!isCurrent()) return;
       const a = res.assets?.[0];
       if (res.canceled || !a) return;
-      const item = await pendingFromCameraAsset(a, imessageImageOnly, isCurrent);
+      const item = await pendingFromCameraAsset(
+        a,
+        imessageImageOnly,
+        isCurrent,
+        imessageVideoAllowed,
+      );
       if (item) onPick(item);
     } catch (e) {
       if (!isCurrent()) return;
@@ -352,7 +363,7 @@ export function AttachmentTray({
   const pick = async (asset: MediaLibrary.Asset): Promise<void> => {
     if (!isCurrent()) return;
     const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
-    if (imessageImageOnly && isVideo) return;
+    if (imessageImageOnly && !imessageVideoAllowed && isVideo) return;
     // getAssetInfoAsync resolves a readable file:// localUri (the raw asset uri can be a
     // non-readable content/ph reference). It can THROW under Android scoped storage / limited
     // photo access — if it does, fall back to the asset's own uri so the pick STILL stages

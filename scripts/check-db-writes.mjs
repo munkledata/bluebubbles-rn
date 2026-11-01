@@ -2607,7 +2607,7 @@ function dbProcessRelaunchCertificateCandidate({
   const runtimeProductionCalleeFingerprints = new Map([
     [syncAllChats, 'c020fac074e1490f98ec8d53ae0ccde29ba6c827abbdb302ead4a5990fc5beda'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
-    [sendImageMessage, '1b6a139d97678a048cef2e099e4e13653e1c987898e0a9f04fe85807398f3316'],
+    [sendImageMessage, '1d070c83dd2294fe779d0f1da8cc8662080d8f4b992dbef4c68303ccf0135567'],
     [sendVoice, 'c94cf97a65429ce60798d506291cc654f46685aad419e8f9c19b1cbe8d9781ce'],
     [
       sendCurrentLocationMessage,

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { canSendRestoredIMessageAttachments } from '@core/models/imessageRestoredFeatures';
 import { currentRcsProviderEpoch, isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import type { ChatHeaderRow } from '@db/repositories';
 import type { ServerCapabilityFlag } from '@/services/capabilityGatedAction';
@@ -33,6 +34,10 @@ export interface ChatCapabilities {
   currentLocationAvailable: boolean;
   supportsSendAttachmentText: boolean;
   imessageAttachmentFeaturesAvailable: boolean;
+  /** The live-tested one-to-one route: one JPEG, PNG or PDF up to 10 MiB. */
+  imessageNarrowAttachmentsAvailable: boolean;
+  /** FP-006 restored upload: one file of the wider allowlist, one-to-one or in a proven group. */
+  imessageRestoredAttachmentsAvailable: boolean;
   imessagePdfFeaturesAvailable: boolean;
   imessageScheduledAttachmentsAvailable: boolean;
   imessageCaptionFeaturesAvailable: boolean;
@@ -110,9 +115,13 @@ export function useChatCapabilities(
   const partReactionsSupported = useServerSupports('supports_imessage_part_reactions');
   const groupRepliesSupported = useServerSupports('supports_imessage_group_replies');
   const partRepliesSupported = useServerSupports('supports_imessage_part_replies');
-  // FP-006 part 1 sends only these restored features. Group edit, unsend, effects, read state,
-  // contact, location, subject and multi-file switches are deliberately NOT read here, even when a
-  // server advertises them: this app cannot send them yet, so it must not offer them.
+  // FP-006 part 2: one restored file per send (HEIC, video, GIF, documents, group pictures).
+  const restoredAttachmentsSupported = useSessionStore((s) =>
+    canSendRestoredIMessageAttachments(s.serverInfo, guid),
+  );
+  // Group edit, unsend, effects, read state, contact, location and subject switches are
+  // deliberately NOT read here, even when a server advertises them: this app cannot send them yet,
+  // so it must not offer them.
   const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
 
   // The header must be this chat's own row, so a recycled screen never borrows another chat's proof.
@@ -129,7 +138,11 @@ export function useChatCapabilities(
     (replySupported && oneToOne) || (groupRepliesSupported && restoredGroup);
   const rcsInteractiveFeaturesAvailable = rcsAvailable && chatService === 'RCS';
 
-  const imessageAttachmentFeaturesAvailable = attachmentSupported && oneToOne;
+  const imessageNarrowAttachmentsAvailable = attachmentSupported && oneToOne;
+  const imessageRestoredAttachmentsAvailable =
+    restoredAttachmentsSupported && (oneToOne || restoredGroup);
+  const imessageAttachmentFeaturesAvailable =
+    imessageNarrowAttachmentsAvailable || imessageRestoredAttachmentsAvailable;
   const imessageMentionsAvailable = mentionsSupported && group;
   const mentionParticipants = useMemo((): MentionParticipant[] => {
     if (!imessageMentionsAvailable || !header) return [];
@@ -167,11 +180,16 @@ export function useChatCapabilities(
     currentLocationAvailable: locationSupported && oneToOne,
     supportsSendAttachmentText,
     imessageAttachmentFeaturesAvailable,
-    imessagePdfFeaturesAvailable: imessageAttachmentFeaturesAvailable && pdfSupported,
+    imessageNarrowAttachmentsAvailable,
+    imessageRestoredAttachmentsAvailable,
+    imessagePdfFeaturesAvailable:
+      (imessageNarrowAttachmentsAvailable && pdfSupported) || imessageRestoredAttachmentsAvailable,
     imessageScheduledAttachmentsAvailable:
-      imessageAttachmentFeaturesAvailable && scheduledAttachmentSupported,
+      imessageNarrowAttachmentsAvailable && scheduledAttachmentSupported,
+    // The restored route always takes a caption.
     imessageCaptionFeaturesAvailable:
-      imessageAttachmentFeaturesAvailable && supportsSendAttachmentText,
+      (imessageNarrowAttachmentsAvailable && supportsSendAttachmentText) ||
+      imessageRestoredAttachmentsAvailable,
     imessageReactionsAvailable,
     imessageEmojiReactionsAvailable: imessageReactionsAvailable && emojiReactionsSupported,
     imessagePartReactionsAvailable: imessageReactionsAvailable && partReactionsSupported,

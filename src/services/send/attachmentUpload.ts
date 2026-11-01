@@ -4,6 +4,11 @@ import { ApiError } from '@core/api/errors';
 import { parseServerErrorBody } from '@core/api/serverErrorDetail';
 import { apiResponse } from '@core/models/common';
 import {
+  IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES,
+  isRestoredAttachmentFile,
+  isValidRestoredText,
+} from '@core/models/imessageRestoredFeatures';
+import {
   MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
   MAX_IMESSAGE_VOICE_UPLOAD_BYTES,
   MAX_SEND_ATTACHMENT_TEXT_BYTES,
@@ -100,6 +105,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   text,
   service,
   voice,
+  restored,
   assertNetworkStart,
   attachmentGuid,
   name,
@@ -122,10 +128,28 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   // existing RCS uploader remains unchanged, and a stale queue row cannot infer this mode.
   const imessageAttachment = service === 'iMessage';
   const imessageVoice = imessageAttachment && voice === true;
+  // FP-006 restored upload: one-to-one or group, wider types, never a voice note.
+  const imessageRestored = imessageAttachment && restored === true;
   if (voice === true && !imessageAttachment) {
     throw new Error('Voice mode requires the narrow iMessage upload path.');
   }
-  if (imessageAttachment) {
+  if (restored === true && (!imessageAttachment || imessageVoice)) {
+    throw new Error('The restored upload carries one non-voice iMessage file.');
+  }
+  if (imessageRestored) {
+    if (text !== undefined && !isValidRestoredText(text)) {
+      throw new Error('iMessage attachment caption is blank, too long, or has control characters.');
+    }
+    if (
+      !/^(?:any|iMessage);[-+];.+$/.test(chatGuid) ||
+      clientAttemptGeneration !== undefined ||
+      assertNetworkStart === undefined ||
+      !Number.isSafeInteger(totalBytes) ||
+      !isRestoredAttachmentFile({ name, size: totalBytes! })
+    ) {
+      throw new Error('This file can’t be sent to this iMessage chat.');
+    }
+  } else if (imessageAttachment) {
     if (
       text !== undefined &&
       (text.trim().length === 0 || utf8Encode(text).byteLength > MAX_SEND_ATTACHMENT_TEXT_BYTES)
@@ -172,7 +196,9 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   // native request for minutes; reading live headers there could pair this old URL with a newly
   // connected account's password.
   const transport = http.snapshotTransport();
-  const url = transport.buildUrl('/message/attachment/upload');
+  const url = transport.buildUrl(
+    imessageRestored ? '/message/attachments/upload' : '/message/attachment/upload',
+  );
 
   let task: FileSystem.UploadTask | null = null;
   const nativeTransfer: {
@@ -248,7 +274,19 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       throw new ApiError('local_file', 'Attachment file is no longer available');
     }
     if (
+      imessageRestored &&
+      (!Number.isSafeInteger(fileInfo.size) ||
+        fileInfo.size <= 0 ||
+        !isRestoredAttachmentFile({ name, size: fileInfo.size }))
+    ) {
+      throw new ApiError(
+        'local_file',
+        `Choose a file no larger than ${IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024)} MiB`,
+      );
+    }
+    if (
       imessageAttachment &&
+      !imessageRestored &&
       (!Number.isSafeInteger(fileInfo.size) ||
         fileInfo.size <= 0 ||
         fileInfo.size >

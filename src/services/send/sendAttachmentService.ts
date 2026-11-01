@@ -10,6 +10,11 @@ import {
   isSupportedImessageVoiceType,
 } from '@core/models/serverInfo';
 import {
+  canSendRestoredIMessageAttachments,
+  isRestoredAttachmentFile,
+  isValidRestoredText,
+} from '@core/models/imessageRestoredFeatures';
+import {
   commitAttachmentCacheReservation,
   claimShareIntakeFileWithinTransaction,
   getChatHeader,
@@ -20,7 +25,11 @@ import {
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { utf8Encode } from '@utils/bytes';
-import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils/chat';
+import {
+  isProvenIMessageGroupChat,
+  isProvenOneToOneIMessageChat,
+  isRcsChatGuid,
+} from '@utils/chat';
 import { assertSafeUploadFilename } from '@utils/uploadFilename';
 import {
   attachmentCacheCoordinator,
@@ -86,6 +95,11 @@ export type AttachmentUploader = (args: {
   service?: AttachmentTextService;
   /** Exact audio-only upload mode; the server requires a matching multipart uploadKind. */
   voice?: true;
+  /**
+   * FP-006 restored upload (`/message/attachments/upload`): one file the narrow route cannot take,
+   * or any file in a proven group. Only with `service: 'iMessage'`, never with `voice`.
+   */
+  restored?: true;
   /**
    * The ATTACHMENT row's guid — the key byte progress is published under. It is not the message
    * temp guid because the attachment components render under `att.guid`, so this is what lets the
@@ -208,9 +222,10 @@ export async function sendImageMessage(
     throw new UnsendableAttachmentNameError();
   }
   if (imessageAttachment) {
+    // The restored route's own caps are checked again once the server's switches are known.
     const supportedFile = imessageVoice
       ? isSupportedImessageVoiceFile(args.image)
-      : isSupportedImessageAttachmentFile(args.image);
+      : isSupportedImessageAttachmentFile(args.image) || isRestoredAttachmentFile(args.image);
     if (!supportedFile) {
       throw new Error(
         imessageVoice
@@ -263,10 +278,34 @@ export async function sendImageMessage(
     { requireServerInfo: true },
   );
   const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
+  // Which iMessage route carries this file: the live-tested narrow one-to-one route when it can,
+  // otherwise the FP-006 restored route when its switches are on for this exact chat.
+  let restoredRoute = false;
+  let oneToOne = false;
+  if (imessageAttachment) {
+    const serverInfo = capability.serverInfo;
+    const header = await getChatHeader(db, args.chatGuid);
+    if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
+    oneToOne = isProvenOneToOneIMessageChat(header);
+    const narrowUsable =
+      oneToOne &&
+      serverInfo?.supports_imessage_attachment_upload === true &&
+      isSupportedImessageAttachmentFile(image) &&
+      (image.mimeType !== 'application/pdf' ||
+        serverInfo.supports_imessage_pdf_attachment_upload === true) &&
+      (args.text === undefined || serverInfo.supports_imessage_attachment_caption_upload === true);
+    restoredRoute =
+      !imessageVoice &&
+      !narrowUsable &&
+      (oneToOne || isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true })) &&
+      canSendRestoredIMessageAttachments(serverInfo, args.chatGuid) &&
+      isRestoredAttachmentFile(image) &&
+      (args.text === undefined || isValidRestoredText(args.text));
+  }
   // Reject false/missing service capability before cache ownership or durable queue admission.
   // The retired helper was the only iMessage attachment transport; RCS remains independent but
   // still requires its own live bridge rather than inheriting authority from `private_api`.
-  if (imessageAttachment) {
+  if (imessageAttachment && !restoredRoute) {
     const serverInfo = capability.serverInfo;
     if (
       !serverInfo ||
@@ -292,12 +331,14 @@ export async function sendImageMessage(
     ) {
       throw new Error('This server cannot send text with an iMessage attachment.');
     }
-    const header = await getChatHeader(db, args.chatGuid);
-    if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
-    if (!isProvenOneToOneIMessageChat(header)) {
+    if (!oneToOne) {
       throw new Error('A proven existing one-to-one iMessage chat is required.');
     }
-  } else if (capability.serverInfo?.rcs !== true) {
+    // A file let in early only for the restored route cannot fall back to the narrow one.
+    if (!imessageVoice && !isSupportedImessageAttachmentFile(image)) {
+      throw new Error('Choose one JPEG, PNG, or PDF file no larger than 10 MiB.');
+    }
+  } else if (!imessageAttachment && capability.serverInfo?.rcs !== true) {
     throw new Error('This server cannot send RCS attachments without RCS support.');
   }
   if (!imessageAttachment && args.text !== undefined) {
@@ -307,7 +348,7 @@ export async function sendImageMessage(
     ) {
       throw new Error('Attachment text is empty or exceeds the 65,536-byte limit.');
     }
-    const supported = capability.serverInfo.supports_rcs_text_with_attachment === true;
+    const supported = capability.serverInfo?.supports_rcs_text_with_attachment === true;
     if (!supported) {
       throw new Error('This server cannot send text with an attachment for this chat service.');
     }
@@ -333,7 +374,9 @@ export async function sendImageMessage(
       !imessageAttachment ||
       (imessageVoice
         ? isSupportedImessageVoiceFile(image)
-        : isSupportedImessageAttachmentFile(image));
+        : restoredRoute
+          ? isRestoredAttachmentFile(image)
+          : isSupportedImessageAttachmentFile(image));
     if (!preparedFileSupported) {
       await cacheReservation.release().catch(() => undefined);
       throw new Error(
@@ -344,6 +387,7 @@ export async function sendImageMessage(
     }
     if (
       imessageAttachment &&
+      !restoredRoute &&
       image.mimeType === 'application/pdf' &&
       capability.serverInfo?.supports_imessage_pdf_attachment_upload !== true
     ) {
@@ -457,6 +501,7 @@ export async function sendImageMessage(
       text: args.text,
       ...(imessageAttachment ? { service: 'iMessage' as const } : {}),
       ...(imessageVoice ? { voice: true as const } : {}),
+      ...(restoredRoute ? { restored: true as const } : {}),
       attachmentGuid,
       name: image.name,
       uri: image.uri,

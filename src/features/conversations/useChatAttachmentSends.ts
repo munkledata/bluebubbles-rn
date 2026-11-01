@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { logger } from '@core/secure';
 import { MAX_IMESSAGE_VOICE_UPLOAD_BYTES } from '@core/models/serverInfo';
 import type { ShareIntakeManifestIdentity } from '@db/repositories';
@@ -49,6 +49,8 @@ export async function pickDocumentFilesForLease(
   loadPicker: DocumentPickerLoader = () => import('expo-document-picker'),
   imessageAttachmentOnly = false,
   imessagePdfAvailable = false,
+  /** The FP-006 restored route takes any file of its allowlist; the send re-checks each one. */
+  imessageRestoredAvailable = false,
 ): Promise<PendingAttachment[]> {
   try {
     const DocumentPicker = await loadPicker();
@@ -56,7 +58,7 @@ export async function pickDocumentFilesForLease(
     const res = await DocumentPicker.getDocumentAsync({
       multiple: !imessageAttachmentOnly,
       copyToCacheDirectory: true,
-      ...(imessageAttachmentOnly
+      ...(imessageAttachmentOnly && !imessageRestoredAvailable
         ? {
             type: ['image/jpeg', 'image/png', ...(imessagePdfAvailable ? ['application/pdf'] : [])],
           }
@@ -85,6 +87,8 @@ export interface ChatAttachmentSendOptions {
     ChatCapabilities,
     | 'attachmentFeaturesAvailable'
     | 'imessageAttachmentFeaturesAvailable'
+    | 'imessageNarrowAttachmentsAvailable'
+    | 'imessageRestoredAttachmentsAvailable'
     | 'imessagePdfFeaturesAvailable'
     | 'imessageCaptionFeaturesAvailable'
     | 'voiceFeaturesAvailable'
@@ -110,11 +114,20 @@ export function useChatAttachmentSends({
   const {
     attachmentFeaturesAvailable,
     imessageAttachmentFeaturesAvailable,
+    imessageNarrowAttachmentsAvailable,
+    imessageRestoredAttachmentsAvailable,
     imessagePdfFeaturesAvailable,
     imessageCaptionFeaturesAvailable,
     voiceFeaturesAvailable,
     imessageVoiceAvailable,
   } = capabilities;
+  const imessageRoutes = useMemo(
+    () => ({
+      narrow: imessageNarrowAttachmentsAvailable,
+      restored: imessageRestoredAttachmentsAvailable,
+    }),
+    [imessageNarrowAttachmentsAvailable, imessageRestoredAttachmentsAvailable],
+  );
 
   // The inline tray's "Files" button — pick documents and return them to STAGE as pending
   // previews (the tray handles photos/videos itself; this covers PDFs/other files). No popup
@@ -127,6 +140,7 @@ export function useChatAttachmentSends({
             undefined,
             imessageAttachmentFeaturesAvailable,
             imessagePdfFeaturesAvailable,
+            imessageRestoredAttachmentsAvailable,
           )
         : Promise.resolve([]),
     [
@@ -134,6 +148,7 @@ export function useChatAttachmentSends({
       attachmentFeaturesAvailable,
       imessageAttachmentFeaturesAvailable,
       imessagePdfFeaturesAvailable,
+      imessageRestoredAttachmentsAvailable,
     ],
   );
 
@@ -142,7 +157,11 @@ export function useChatAttachmentSends({
     (items: PendingAttachment[]): Promise<readonly string[]> => {
       if (!attachmentFeaturesAvailable) return Promise.resolve([]);
       if (imessageAttachmentFeaturesAvailable) {
-        const refusal = imessageAttachmentRefusal(items, imessagePdfFeaturesAvailable);
+        const refusal = imessageAttachmentRefusal(
+          items,
+          imessagePdfFeaturesAvailable,
+          imessageRoutes,
+        );
         if (refusal !== null) {
           showToast(refusal);
           return Promise.resolve([]);
@@ -226,6 +245,7 @@ export function useChatAttachmentSends({
       guid,
       imessageAttachmentFeaturesAvailable,
       imessagePdfFeaturesAvailable,
+      imessageRoutes,
       ownedShareIdentity,
     ],
   );
@@ -234,7 +254,11 @@ export function useChatAttachmentSends({
       if (!attachmentFeaturesAvailable) return false;
       if (chatService === 'iMessage') {
         if (!imessageCaptionFeaturesAvailable) return false;
-        const refusal = imessageAttachmentRefusal([item], imessagePdfFeaturesAvailable);
+        const refusal = imessageAttachmentRefusal(
+          [item],
+          imessagePdfFeaturesAvailable,
+          imessageRoutes,
+        );
         if (refusal !== null) {
           showToast(refusal);
           return false;
@@ -276,6 +300,7 @@ export function useChatAttachmentSends({
       guid,
       imessageCaptionFeaturesAvailable,
       imessagePdfFeaturesAvailable,
+      imessageRoutes,
       ownedShareIdentity,
     ],
   );

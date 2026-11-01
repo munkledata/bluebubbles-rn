@@ -140,6 +140,8 @@ interface ComposerProps {
   onRemoveAttachment?: (item: PendingAttachment) => void | boolean | Promise<void | boolean>;
   /** This chat's narrow iMessage path needs a real photo byte count before staging. */
   imessageImageOnly?: boolean;
+  /** With imessageImageOnly: the FP-006 restored route also takes a video with known bytes. */
+  imessageVideoAllowed?: boolean;
   /** Pick a device contact and send it as a card (tray's "Contact" button). Provided only when the
    *  current RCS chat can send interactive attachments, so the button is capability-gated. */
   onPickContact?: () => void;
@@ -239,6 +241,7 @@ export const Composer = React.memo(function Composer({
   onPickFiles,
   onRemoveAttachment,
   imessageImageOnly,
+  imessageVideoAllowed,
   onPickContact,
   onShareLocation,
   onSchedule,
@@ -435,14 +438,26 @@ export const Composer = React.memo(function Composer({
     void (async () => {
       const asset = await takePendingCameraCapture(cameraChatGuid, accountLease);
       if (!asset || !isCurrent()) return;
-      const item = await pendingFromCameraAsset(asset, imessageImageOnly ?? false, isCurrent);
+      const item = await pendingFromCameraAsset(
+        asset,
+        imessageImageOnly ?? false,
+        isCurrent,
+        imessageVideoAllowed ?? false,
+      );
       if (!item || !isCurrent()) return;
       addPendingRef.current(item);
       setTrayOpen(true);
     })().catch((error: unknown) => {
       logger.warn('[composer] could not recover a camera photo', error);
     });
-  }, [accountLease, active, attachmentsEnabled, cameraChatGuid, imessageImageOnly]);
+  }, [
+    accountLease,
+    active,
+    attachmentsEnabled,
+    cameraChatGuid,
+    imessageImageOnly,
+    imessageVideoAllowed,
+  ]);
 
   /**
    * Pasted pictures/files (long-press Paste, a keyboard image/GIF/sticker commit, or a drop).
@@ -1234,6 +1249,7 @@ export const Composer = React.memo(function Composer({
           onPickFiles={handlePickFiles}
           mediaEnabled={attachmentsEnabled}
           imessageImageOnly={imessageImageOnly}
+          imessageVideoAllowed={imessageVideoAllowed}
           cameraChatGuid={cameraChatGuid}
           onPickContact={
             onPickContact
