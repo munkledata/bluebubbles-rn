@@ -2759,7 +2759,7 @@ describe('reconcileOutgoingAttachmentByContent — sync-safe promote', () => {
     expect(msgState(raw, 'rcs-real-queued')?.s).toBe('sent');
   });
 
-  it('does NOT match a text-only pending send (no local attachment to protect)', async () => {
+  it('matches a text-only pending send only to a copy with a known nearby time', async () => {
     const { db } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     await insertOutgoingText(db, {
@@ -2769,13 +2769,20 @@ describe('reconcileOutgoingAttachmentByContent — sync-safe promote', () => {
       text: 'hi',
       now: 100,
     });
+    // A copy with no time could be any old identical message, so a plain text never matches it.
+    await reconcileOutgoingAttachmentByContent(
+      db,
+      { guid: 'rcs-real-undated', isFromMe: true, text: 'hi' },
+      chatId,
+    );
+    expect(((await listMessages(db, chatId)) as { guid: string }[])[0]!.guid).toBe('temp-txt');
+    // A group iMessage text's reply has no guid, so a sync-read copy near the send must merge it.
     await reconcileOutgoingAttachmentByContent(
       db,
       { guid: 'rcs-real-2', isFromMe: true, text: 'hi', dateCreated: 100 },
       chatId,
     );
-    // temp text row is NOT hijacked by the attachment reconcile.
-    expect(((await listMessages(db, chatId)) as Array<{ guid: string }>)[0]!.guid).toBe('temp-txt');
+    expect(((await listMessages(db, chatId)) as { guid: string }[])[0]!.guid).toBe('rcs-real-2');
   });
 
   it('no-ops for a received message and for an already-materialized guid', async () => {

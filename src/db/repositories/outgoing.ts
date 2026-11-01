@@ -2311,6 +2311,21 @@ export async function reconcileOutgoingAttachmentByContent(
         echoDate != null
           ? sql`AND mm.date_created >= ${echoDate - ECHO_MATCH_WINDOW_MS} AND mm.date_created <= ${echoDate + ECHO_MATCH_WINDOW_MS}`
           : sql``;
+      // A group iMessage text is sent by the Mac's AppleScript fallback, whose reply has no guid, so
+      // its temp row waits for a copy. When an open chat's refresh or a reconnect reads that copy
+      // before the live echo does, it must be matched here too, or the late echo finds the real guid
+      // stored and the temp bubble stays beside it as a duplicate. A plain text has no pending file
+      // to prove it is fresh, so it needs a known copy time and exact text, and never matches a
+      // reply, a reaction, or a row that has files. Sync is the catch-up path after being offline, so
+      // a copy may also be another device's identical text: the copy must not predate the bubble
+      // (beyond clock skew), and a cancelled or failed bubble is never matched, so a mistake leaves a
+      // double instead of marking an unsent text as sent or hiding a real message.
+      const plainTextCopy =
+        echoDate != null &&
+        !!m.text &&
+        m.associatedMessageType == null &&
+        m.threadOriginatorGuid == null &&
+        !(Array.isArray(m.attachments) && m.attachments.length > 0);
       // Match a pending optimistic outgoing message that STILL OWNS a local (on-disk) attachment — that
       // pending-local-`-att` gate is what makes this sync-safe. Match text too (a caption-less picture
       // and its echo both carry NULL text) so a text send can never claim a picture row. Prefer an
@@ -2325,9 +2340,19 @@ export async function reconcileOutgoingAttachmentByContent(
           -- server tuple; otherwise an old identical sync row could steal the optimistic bubble.
           AND mm.attempt_owner_generation = 0
           AND mm.associated_message_type IS NULL AND mm.text IS ${m.text ?? null}
-          AND EXISTS (
-            SELECT 1 FROM attachments a
-            WHERE a.message_id = mm.id AND a.guid LIKE '%-att' AND a.local_path IS NOT NULL
+          AND (
+            EXISTS (
+              SELECT 1 FROM attachments a
+              WHERE a.message_id = mm.id AND a.guid LIKE '%-att' AND a.local_path IS NOT NULL
+            )
+            ${
+              plainTextCopy
+                ? sql`OR (mm.thread_originator_guid IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = mm.id)
+                        AND mm.send_state IN ('sending', 'sent') AND mm.date_deleted IS NULL
+                        AND mm.date_created <= ${(echoDate ?? 0) + UNMARKED_COPY_CLOCK_SKEW_MS})`
+                : sql``
+            }
           )
           ${window}
         ORDER BY (mm.date_deleted IS NULL) DESC, (mm.send_state = 'sending') DESC,

@@ -11572,20 +11572,7 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/outgoingBranches.test.ts; test/db/outgoingUserActions.test.ts; test/services/discardMessage.test.ts; test/services/sendAttachmentService.test.ts; test/services/dbEventSink.test.ts"
     },
     {
-      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:mutator-call:9582d0d7da1a",
-      "path": "src/db/repositories/outgoing.ts",
-      "line": 2270,
-      "symbol": "reconcileOutgoingAttachmentByContent",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>",
-      "detectedContext": "withDbTransaction",
-      "owner": "reconcileOutgoingAttachmentByContent",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/syncEngineBranches.test.ts; test/services/discardMessage.test.ts"
-    },
-    {
-      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:mutator-call:b8612645f0bb",
+      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:mutator-call:aabeb2b46744",
       "path": "src/db/repositories/outgoing.ts",
       "line": 2270,
       "symbol": "reconcileOutgoingAttachmentByContent",
@@ -11598,10 +11585,23 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/syncEngineBranches.test.ts; test/services/discardMessage.test.ts"
     },
     {
-      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>:mutator-call:f566a62bb98e",
+      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:mutator-call:f4beff556cac",
+      "path": "src/db/repositories/outgoing.ts",
+      "line": 2270,
+      "symbol": "reconcileOutgoingAttachmentByContent",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>",
+      "detectedContext": "withDbTransaction",
+      "owner": "reconcileOutgoingAttachmentByContent",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/syncEngineBranches.test.ts; test/services/discardMessage.test.ts"
+    },
+    {
+      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>:mutator-call:6588abd5345b",
       "path": "src/db/repositories/outgoing.ts",
       "line": 2279,
-      "symbol": "reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>",
+      "symbol": "reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -11611,10 +11611,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/rcsAttemptOwnership.test.ts; test/db/withDbTransaction.test.ts; test/db/outgoingBranches.test.ts; test/db/outgoingUserActions.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts"
     },
     {
-      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>:mutator-call:fa70c2c9a25d",
+      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>:mutator-call:05fd9ed00b68",
       "path": "src/db/repositories/outgoing.ts",
       "line": 2288,
-      "symbol": "reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>",
+      "symbol": "reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#dropSplitRcsCaptionWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -11624,10 +11624,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/rcsAttemptOwnership.test.ts; test/db/withDbTransaction.test.ts; test/db/outgoingBranches.test.ts; test/db/outgoingUserActions.test.ts; test/services/sendOutcome.test.ts; test/services/outgoingQueueService.test.ts; test/db/rcsAttemptOwnership.test.ts"
     },
     {
-      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>:mutator-call:62a2616b12a2",
+      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>:mutator-call:7b6571f61070",
       "path": "src/db/repositories/outgoing.ts",
       "line": 2294,
-      "symbol": "reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>",
+      "symbol": "reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileModernCopyThroughOwnerWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -11637,10 +11637,10 @@
       "evidence": "test/services/sendAttachmentService.test.ts; test/db/rcsAttemptOwnership.test.ts"
     },
     {
-      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>:mutator-call:61403aa7459b",
+      "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>:mutator-call:60b647b361c7",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2354,
-      "symbol": "reconcileOutgoingAttachmentByContent.<callback:7e4efec82b>",
+      "line": 2379,
+      "symbol": "reconcileOutgoingAttachmentByContent.<callback:4dc7ce27b1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#handoverOutgoingIdentityWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -11652,7 +11652,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:drizzle-delete:c99168cb464c",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2355,
+      "line": 2380,
       "symbol": "reconcileOutgoingAttachmentByContent",
       "operation": "drizzle-delete",
       "target": "outgoingQueue",
@@ -11665,7 +11665,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#reconcileOutgoingAttachmentByContent:drizzle-update:33d442635256",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2356,
+      "line": 2381,
       "symbol": "reconcileOutgoingAttachmentByContent",
       "operation": "drizzle-update",
       "target": "messages",
@@ -11678,7 +11678,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:235ea7732450",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2386,
+      "line": 2411,
       "symbol": "retireOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "outgoingQueue",
@@ -11691,7 +11691,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2392,
+      "line": 2417,
       "symbol": "retireOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -11704,7 +11704,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7:2",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2396,
+      "line": 2421,
       "symbol": "retireOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -11717,7 +11717,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireUncertainOutgoingWithinTransaction:drizzle-update:98c22dc4c6a9",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2412,
+      "line": 2437,
       "symbol": "retireUncertainOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "outgoingQueue",
@@ -11730,7 +11730,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireUncertainOutgoingWithinTransaction:drizzle-update:fbdbbd19969f",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2419,
+      "line": 2444,
       "symbol": "retireUncertainOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -11743,7 +11743,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireUncertainOutgoingWithinTransaction:drizzle-update:fbdbbd19969f:2",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2424,
+      "line": 2449,
       "symbol": "retireUncertainOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",

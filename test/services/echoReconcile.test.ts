@@ -6,6 +6,7 @@ import {
   getChatIdByGuid,
   insertOutgoingText,
   listAttachmentsByMessageIds,
+  reconcileOutgoingAttachmentByContent,
   reconcileOutgoingSuccess,
   upsertChats,
   upsertHandles,
@@ -323,5 +324,142 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
     expect(msgs).toHaveLength(1);
     // Failure is sticky: the late ack does not mask it back to 'sent'.
     expect(msgs[0]!.sendState).toBe('error');
+  });
+});
+
+// A GROUP iMessage text goes out through the Mac's AppleScript fallback: the send reply carries no
+// guid, so the temp row stays `temp-…` until a copy of the real message is matched to it. When the
+// first copy to arrive is a SYNC read (an open chat's refresh, a reconnect), not the live echo, the
+// sync path must match it too — otherwise the real row is inserted beside the temp row, and the
+// late live echo finds the real guid already stored and leaves the temp bubble as a duplicate.
+describe('sync-first copy of a no-guid text send', () => {
+  async function pendingNoGuidText(db: AppDatabase, chatGuid: string, tempGuid: string) {
+    const chatId = await seedChat(db, chatGuid);
+    await insertOutgoingText(db, { tempGuid, chatId, chatGuid, text: 'hello', now: 1000 });
+    await markOutgoingSentNoGuid(db, tempGuid);
+    return chatId;
+  }
+
+  async function syncCopy(db: AppDatabase, chatId: number, fields: Record<string, unknown>) {
+    const copy = Message.parse({
+      guid: 'real-sync-1',
+      text: 'hello',
+      isFromMe: true,
+      dateCreated: 1500,
+      ...fields,
+    });
+    // The sync engine's order: content reconcile, then the upsert.
+    await reconcileOutgoingAttachmentByContent(db, copy, chatId);
+    await upsertMessages(db, [copy], () => chatId, new Map());
+    return copy;
+  }
+
+  it('merges the temp bubble into a sync-read copy, and a later live echo adds nothing', async () => {
+    const { db, raw } = await createTestDb();
+    const router = new EventRouter(new DbEventSink(db));
+    const chatId = await pendingNoGuidText(db, 'cSync', 'temp-sync0001');
+
+    const copy = await syncCopy(db, chatId, {});
+    await deliverRaw(
+      router,
+      'new-message',
+      JSON.stringify({ ...copy, chats: [{ guid: 'cSync' }] }),
+      'socket',
+    );
+
+    const msgs = (await listMessages(db, chatId)) as { guid: string; sendState: string }[];
+    expect(msgs.map((m) => [m.guid, m.sendState])).toEqual([['real-sync-1', 'sent']]);
+    expect(count(raw, 'outgoing_queue', 'temp_guid = ?', 'temp-sync0001')).toBe(0);
+  });
+
+  it('merges a sync-read copy that lands before the no-guid reply, and the reply adds nothing', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'cSyncEarly');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-sync0004',
+      chatId,
+      chatGuid: 'cSyncEarly',
+      text: 'hello',
+      now: 1000,
+    });
+
+    await syncCopy(db, chatId, {});
+    await markOutgoingSentNoGuid(db, 'temp-sync0004');
+
+    const msgs = (await listMessages(db, chatId)) as { guid: string; sendState: string }[];
+    expect(msgs.map((m) => [m.guid, m.sendState])).toEqual([['real-sync-1', 'sent']]);
+    expect(count(raw, 'outgoing_queue', 'temp_guid = ?', 'temp-sync0004')).toBe(0);
+  });
+
+  it('leaves the temp bubble alone for a copy outside the time window, or with other text', async () => {
+    const { db } = await createTestDb();
+    const chatId = await pendingNoGuidText(db, 'cSyncGuard', 'temp-sync0002');
+
+    await syncCopy(db, chatId, { guid: 'real-far', dateCreated: 100_000_000 });
+    await syncCopy(db, chatId, { guid: 'real-other', text: 'hello!' });
+
+    const guids = ((await listMessages(db, chatId)) as { guid: string }[])
+      .map((m) => m.guid)
+      .sort();
+    expect(guids).toEqual(['real-far', 'real-other', 'temp-sync0002']);
+  });
+
+  it('never lets another device’s earlier identical text consume a queued, unsent bubble', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'cSyncEarlier');
+    // Queued while offline: still 'sending', its queue row waiting to be posted.
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-sync0005',
+      chatId,
+      chatGuid: 'cSyncEarlier',
+      text: 'hello',
+      now: 200_000,
+    });
+
+    // The Mac sent the same words two minutes earlier.
+    await syncCopy(db, chatId, { guid: 'real-other-device', dateCreated: 80_000 });
+
+    const msgs = (await listMessages(db, chatId)) as { guid: string; sendState: string }[];
+    expect(msgs.map((m) => m.guid).sort()).toEqual(['real-other-device', 'temp-sync0005']);
+    expect(count(raw, 'outgoing_queue', 'temp_guid = ?', 'temp-sync0005')).toBe(1);
+  });
+
+  it('never matches a failed text bubble from sync', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await pendingNoGuidText(db, 'cSyncState', 'temp-sync0006');
+    await markMessageSendError(db, 'temp-sync0006');
+    expect(
+      raw.prepare('SELECT send_state AS s FROM messages WHERE guid = ?').get('temp-sync0006'),
+    ).toEqual({
+      s: 'error',
+    });
+
+    await syncCopy(db, chatId, {});
+
+    const guids = ((await listMessages(db, chatId)) as { guid: string }[])
+      .map((m) => m.guid)
+      .sort();
+    expect(guids).toEqual(['real-sync-1', 'temp-sync0006']);
+  });
+
+  it('never lets a reply or reaction copy claim a plain text bubble', async () => {
+    const { db } = await createTestDb();
+    const chatId = await pendingNoGuidText(db, 'cSyncKind', 'temp-sync0003');
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'target-1', text: 'earlier', isFromMe: false, dateCreated: 10 })],
+      () => chatId,
+      new Map(),
+    );
+
+    await syncCopy(db, chatId, { guid: 'real-reply', threadOriginatorGuid: 'target-1' });
+    await syncCopy(db, chatId, {
+      guid: 'real-reaction',
+      associatedMessageGuid: 'target-1',
+      associatedMessageType: 'like',
+    });
+
+    const guids = ((await listMessages(db, chatId)) as { guid: string }[]).map((m) => m.guid);
+    expect(guids).toContain('temp-sync0003');
   });
 });
