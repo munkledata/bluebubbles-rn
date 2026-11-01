@@ -16,6 +16,8 @@ import {
   sendIMessageReactionMessage,
   sendReactionMessage,
 } from '@/services/send/sendReactionService';
+import { sendReaction } from '@core/api/endpoints/messages';
+import { isPreDispatchOneShotRejection } from '@/services/send/sendOutcome';
 import {
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -147,6 +149,106 @@ describe('sendIMessageReactionMessage', () => {
     });
     expect(one(raw, 'SELECT COUNT(*) AS count FROM outgoing_queue')).toEqual({ count: 0 });
     expect(one(raw, 'SELECT COUNT(*) AS count FROM messages')).toEqual({ count: 1 });
+  });
+});
+
+describe('iMessage tapback retry key', () => {
+  const args = {
+    chatGuid: 'iMessage;-;c1',
+    targetGuid: 'im-target',
+    reaction: 'like',
+    partIndex: 0,
+  };
+  const dropped = () => new ApiError('no_connection', 'connection dropped');
+  const keyed = async (post: jest.Mock, keySupported = true) => {
+    const { db } = await createTestDb();
+    await seedExactIMessageTarget(db);
+    return sendIMessageReactionMessage(
+      db,
+      fakeHttp(post),
+      args,
+      () => true,
+      undefined,
+      () => true,
+      () => keySupported,
+    );
+  };
+  const keysOf = (post: jest.Mock) =>
+    post.mock.calls.map((call) => (call[0] as { tempGuid?: string }).tempGuid);
+
+  it('sends a one-time key only while the server supports it', async () => {
+    const post = jest.fn(async () => ({ guid: 'im-reaction' }));
+    await expect(keyed(post)).resolves.toEqual({ guid: 'im-reaction' });
+    await expect(keyed(post)).resolves.toEqual({ guid: 'im-reaction' });
+    const [first, second] = keysOf(post);
+    expect(first).toMatch(/^temp-[0-9a-f]{16}$/);
+    // A fresh key per tap: a second tap is a new tapback, never a replay of the first.
+    expect(second).not.toBe(first);
+
+    const unkeyed = jest.fn(async (_json?: unknown) => ({ guid: 'im-reaction' }));
+    await keyed(unkeyed, false);
+    expect(unkeyed.mock.calls[0]?.[0]).not.toHaveProperty('tempGuid');
+  });
+
+  it('retries a dropped request once with the same key', async () => {
+    const post = jest
+      .fn()
+      .mockRejectedValueOnce(dropped())
+      .mockResolvedValueOnce({ guid: 'im-reaction' });
+    await expect(keyed(post)).resolves.toEqual({ guid: 'im-reaction' });
+    const [first, second] = keysOf(post);
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(second).toBe(first);
+  });
+
+  it('reports a failed retry as unconfirmed, never as not sent', async () => {
+    // The retry's refusal would read as "not sent", but the first request may have gone through.
+    const notDispatched = new ApiError(
+      'server_error',
+      'ledger unavailable',
+      503,
+      undefined,
+      undefined,
+      'idempotency_persistence_unavailable',
+    );
+    expect(isPreDispatchOneShotRejection(notDispatched)).toBe(true);
+    const post = jest.fn().mockRejectedValueOnce(dropped()).mockRejectedValueOnce(notDispatched);
+    const error = await keyed(post).catch((e: unknown) => e);
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(isPreDispatchOneShotRejection(error)).toBe(false);
+  });
+
+  it('never retries an unknown outcome or an unkeyed request', async () => {
+    const unknown = new ApiError(
+      'server_error',
+      'outcome unknown',
+      500,
+      undefined,
+      undefined,
+      'idempotency_outcome_unknown',
+    );
+    const post = jest.fn().mockRejectedValue(unknown);
+    await expect(keyed(post)).rejects.toBe(unknown);
+    expect(post).toHaveBeenCalledTimes(1);
+
+    const unkeyed = jest.fn().mockRejectedValue(dropped());
+    await expect(keyed(unkeyed, false)).rejects.toBeInstanceOf(ApiError);
+    expect(unkeyed).toHaveBeenCalledTimes(1);
+  });
+
+  it('the endpoint refuses a key on an RCS chat before any request', async () => {
+    const post = jest.fn(async () => ({ guid: 'x' }));
+    await expect(
+      sendReaction(fakeHttp(post), {
+        chatGuid: 'RCS;-;c1',
+        selectedMessageGuid: 'm',
+        reaction: 'like',
+        partIndex: 0,
+        tempGuid: 'temp-0123456789abcdef',
+      }),
+    ).rejects.toThrow('retry key');
+    expect(post).not.toHaveBeenCalled();
   });
 });
 

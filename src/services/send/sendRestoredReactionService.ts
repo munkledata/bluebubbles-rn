@@ -17,6 +17,7 @@ import { utf8Encode } from '@utils/bytes';
 import { graphemeBoundaries } from '@utils/grapheme';
 import { messageTargetCommitGuard } from './rcsAttemptCapability';
 import type { SendReactionArgs } from './sendReactionService';
+import { generateTempGuid } from './sendService';
 
 /** One emoji tapback glyph: one grapheme cluster, at most 64 UTF-8 bytes, no controls. */
 function isSingleTapbackEmoji(value: string | undefined): value is string {
@@ -96,6 +97,9 @@ export async function sendRestoredIMessageReactionMessage(
       reaction: args.reaction,
       ...(emoji ? { emoji: args.emoji } : {}),
       partIndex: finalTarget.partIndex,
+      ...(currentServerInfo()?.supports_imessage_reaction_temp_guid === true
+        ? { tempGuid: generateTempGuid() }
+        : {}),
     },
     { restoredTapback: true },
   );

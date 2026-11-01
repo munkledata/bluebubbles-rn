@@ -134,6 +134,8 @@ export const ServerInfo = z
     supports_imessage_plain_text: z.boolean().nullish(),
     /** Classic tapbacks on a proven existing one-to-one iMessage, independent of broad Private API. */
     supports_imessage_reactions: z.boolean().nullish(),
+    /** `/message/react` takes an optional one-time `tempGuid` on iMessage tapbacks (2.0.42+). */
+    supports_imessage_reaction_temp_guid: z.boolean().nullish(),
     /** Plain-text reply to exact part zero in a proven existing one-to-one iMessage chat. */
     supports_imessage_replies: z.boolean().nullish(),
     /** Plain-text edit of exact part zero in a proven existing one-to-one iMessage chat. */

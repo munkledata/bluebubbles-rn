@@ -911,6 +911,10 @@ export function react(
           accountLease.isCurrent() &&
           capability?.isCurrent() === true &&
           capability?.serverInfo?.supports_imessage_reactions === true,
+        () =>
+          accountLease.isCurrent() &&
+          capability?.isCurrent() === true &&
+          capability?.serverInfo?.supports_imessage_reaction_temp_guid === true,
       );
     },
     { logicalSendChat: snapshot.chatGuid },

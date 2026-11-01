@@ -1203,6 +1203,17 @@ export interface SendReactionParams {
   emoji?: string;
   /** Exact target part for multipart messages, including an explicit 0 on legacy servers. */
   partIndex: number;
+  /**
+   * iMessage only, and only while server-info `supports_imessage_reaction_temp_guid` is true: a
+   * fresh one-time key for this tap. The server replays its first answer for a repeated key, so a
+   * request whose connection dropped is retried once with the same key instead of failing.
+   */
+  tempGuid?: string;
+}
+
+/** A dropped connection or a timeout: the request may or may not have reached the server. */
+function isLostTapbackRequest(error: unknown): boolean {
+  return error instanceof ApiError && (error.kind === 'no_connection' || error.kind === 'timeout');
 }
 
 /**
@@ -1235,18 +1246,47 @@ export async function sendReaction(
   ) {
     throw new Error('This message action needs a supported conversation.');
   }
-  const ack = await http.post('/message/react', SendAck, {
-    captureErrorDetail: true,
-    json: {
-      chatGuid: params.chatGuid,
-      messageGuid: params.selectedMessageGuid,
-      reactionType: params.reaction,
-      // The server REJECTS reactionEmoji on classic tapbacks (and requires it on
-      // 'emoji'/'-emoji'), so the key must be ABSENT — not null — unless a glyph is given.
-      ...(params.emoji ? { reactionEmoji: params.emoji } : {}),
-      partIndex: requireMessagePartIndex(params.partIndex),
-    },
-  });
+  const tempGuid = params.tempGuid;
+  if (tempGuid !== undefined) {
+    // The server refuses a key on an RCS chat: RCS reaction outcomes are owned elsewhere.
+    if (params.chatGuid.startsWith('RCS;-;') || tempGuid.length === 0) {
+      throw new Error('A tapback retry key needs a nonempty key on an iMessage chat.');
+    }
+    requireWellFormedBoundedUtf8(tempGuid, IMESSAGE_REPLY_TEMP_GUID_MAX_BYTES, 'tapback tempGuid');
+  }
+  const post = (): Promise<SendAck> =>
+    http.post('/message/react', SendAck, {
+      captureErrorDetail: true,
+      json: {
+        chatGuid: params.chatGuid,
+        messageGuid: params.selectedMessageGuid,
+        reactionType: params.reaction,
+        // The server REJECTS reactionEmoji on classic tapbacks (and requires it on
+        // 'emoji'/'-emoji'), so the key must be ABSENT — not null — unless a glyph is given.
+        ...(params.emoji ? { reactionEmoji: params.emoji } : {}),
+        partIndex: requireMessagePartIndex(params.partIndex),
+        ...(tempGuid !== undefined ? { tempGuid } : {}),
+      },
+    });
+  let ack: SendAck;
+  try {
+    ack = await post();
+  } catch (error) {
+    if (tempGuid === undefined || !isLostTapbackRequest(error)) throw error;
+    // One retry with the same key: if the first request reached the Mac, the server replays its
+    // answer instead of sending (or toggling) the tapback again. The first request may have been
+    // sent, so no failure of the retry can prove "not sent"; report it as unconfirmed.
+    try {
+      ack = await post();
+    } catch (retryError) {
+      throw new ApiError(
+        'parse_error',
+        'The iMessage reaction outcome is unknown',
+        undefined,
+        retryError,
+      );
+    }
+  }
   // An RCS reaction reply names the REACTED-TO message, not a new reaction message. Passed on as
   // the reaction's own id, reconcile would take it for an already-stored copy, delete the pending
   // reaction and move its send state onto the target. Report it as an id-less success instead.

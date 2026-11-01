@@ -136,6 +136,28 @@ describe('FP-006 restored tapbacks', () => {
     expect(one(raw, 'SELECT COUNT(*) AS count FROM outgoing_queue')).toEqual({ count: 0 });
   });
 
+  it('sends a one-time retry key only while the server supports it', async () => {
+    const { db } = await createTestDb();
+    await seedGroupTarget(db);
+    const { http, post } = fakeHttp(async () => ({ guid: 'tapback-guid' }));
+    const send = (fields: Record<string, unknown>) =>
+      sendRestoredIMessageReactionMessage(
+        db,
+        http,
+        { chatGuid: GROUP, targetGuid: 'group-target', reaction: 'love', partIndex: 1 },
+        () => true,
+        undefined,
+        () => info({ ...ALL_TAPBACK, ...fields }),
+      );
+
+    await send({ supports_imessage_reaction_temp_guid: true });
+    await send({});
+    expect(post.mock.calls[0]?.[2]).toMatchObject({
+      json: { tempGuid: expect.stringMatching(/^temp-[0-9a-f]{16}$/) },
+    });
+    expect((post.mock.calls[1]?.[2] as { json: object }).json).not.toHaveProperty('tempGuid');
+  });
+
   it('refuses an any;+; group that is not proven all-iMessage before any request', async () => {
     const { db } = await createTestDb();
     await seedGroupTarget(db, GROUP, 'SMS');

@@ -130,6 +130,8 @@ export async function sendIMessageReactionMessage(
   commitGuard: DbCommitGuard,
   serverAuthorization: MessageTargetServerAuthorization | undefined,
   allowIMessageReaction: () => boolean,
+  /** Live server-info `supports_imessage_reaction_temp_guid`: send a one-time retry key. */
+  retryKeySupported: () => boolean = () => false,
 ): Promise<{ guid: string }> {
   const parsed = parseReactionType(args.reaction);
   if (
@@ -164,6 +166,7 @@ export async function sendIMessageReactionMessage(
     selectedMessageGuid: finalTarget.messageGuid,
     reaction: args.reaction,
     partIndex: 0,
+    ...(retryKeySupported() ? { tempGuid: generateTempGuid() } : {}),
   });
   if (!ack.guid)
     throw new Error('Reaction delivery could not be confirmed. Check the conversation.');

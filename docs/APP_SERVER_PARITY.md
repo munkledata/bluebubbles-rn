@@ -204,7 +204,11 @@ one-to-one chat, with no retry after an uncertain handoff. New iMessage chat is 
 reactions may
 target a proven `rcs-*` message as the whole message at part zero; that exception does not enable RCS
 reply threading. Separately, `supports_imessage_reactions` permits only the reviewed classic
-part-zero reaction path in a proven one-to-one iMessage chat. Separately gated
+part-zero reaction path in a proven one-to-one iMessage chat. When server-info
+`supports_imessage_reaction_temp_guid` is true (bbd 2.0.42+), each iMessage tapback carries a fresh
+one-time `tempGuid`; only a dropped or timed-out request is retried, once, with that same key (the
+server replays its first answer), any failed retry stays unconfirmed, and
+`500 idempotency_outcome_unknown` is never retried. Separately gated
 `supports_imessage_edit` and `supports_imessage_unsend` paths permit only a nonblank plain-text edit
 or retraction of exact text part zero in that same proven chat. Each uses one non-retried request,
 requires exact acknowledgement, and preserves an uncertain outcome rather than replaying it.
