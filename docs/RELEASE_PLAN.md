@@ -64,8 +64,9 @@ Health screen's RCS row wording; push CI run `41380907285` green) and promoted a
 Run `android-0.1.70-98389d4-20261102040839` produced `gator-release-0.1.70-v93-23cca29.aab`,
 **58,461,481 bytes**, SHA-256 `67a3ca2e91e4e828f44f3f1d51f85aac6f50a4b2eac7dad882326727019940cc`.
 Before upload, the manually run emulator DB lane failed twice on this source (a different death lane
-each time) and passed on its third attempt; the pre-patch source passed it once. The upload went ahead
-on that green attempt, so the camera patch's device proof is still owed. The owner approved this
+each time), then passed on its third attempt and on a fresh dispatch (run `41388163687`); the pre-patch
+source passed it once. The upload went ahead on the first green attempt, and the camera patch's device
+proof is still owed. The owner approved this
 release on 2026-11-02; the agent submitted with `--execute --confirm` and the exact phrase
 `SUBMIT 0.1.70 v93 67a3ca2e91e4 TO PLAY INTERNAL`; the Maps key came from the login Keychain.
 Android Publisher readback after the submission confirms Internal release `0.1.70`, code `93`,
