@@ -1,0 +1,67 @@
+diff --git a/node_modules/expo/android/src/main/java/expo/modules/ReactActivityDelegateWrapper.kt b/node_modules/expo/android/src/main/java/expo/modules/ReactActivityDelegateWrapper.kt
+index 74f9d8a..2fdec9a 100644
+--- a/node_modules/expo/android/src/main/java/expo/modules/ReactActivityDelegateWrapper.kt
++++ b/node_modules/expo/android/src/main/java/expo/modules/ReactActivityDelegateWrapper.kt
+@@ -19,7 +19,9 @@ import com.facebook.react.ReactActivity
+ import com.facebook.react.ReactActivityDelegate
+ import com.facebook.react.ReactDelegate
+ import com.facebook.react.ReactHost
++import com.facebook.react.ReactInstanceEventListener
+ import com.facebook.react.ReactInstanceManager
++import com.facebook.react.bridge.ReactContext
+ import com.facebook.react.ReactRootView
+ import com.facebook.react.modules.core.PermissionListener
+ import expo.modules.core.interfaces.ReactActivityHandler.DelayLoadAppHandler
+@@ -115,6 +117,8 @@ class ReactActivityDelegateWrapper(
+ 
+   @SuppressLint("DiscouragedPrivateApi")
+   override fun onCreate(savedInstanceState: Bundle?) {
++    // Gator patch: start watching before loadApp can create the React instance.
++    watchReactInstanceReady()
+     // Give handlers a chance as early as possible to replace the wrapped delegate object.
+     // If they do, we call the new wrapped delegate's `onCreate` instead of overriding it here.
+     val newDelegate = reactActivityHandlers.asSequence()
+@@ -253,12 +257,41 @@ class ReactActivityDelegateWrapper(
+      *
+      * TODO (@bbarthec): fix it upstream?
+      */
+-    launchLifecycleScopeWithLock {
+-      loadAppReady.await()
++    // Gator patch: loadAppReady completes when React starts loading, but the bridgeless
++    // ReactHost builds its ReactContext and Expo's AppContext later, on a background thread. A
++    // result that arrives first (Android restarted the process to deliver it) is lost without a
++    // log: ReactHostImpl has no context yet, or the context has no Expo listener yet. Also wait
++    // for the React instance to finish starting, outside the lock so onResume is not held up.
++    activity.lifecycleScope.launch {
++      mutex.withLock {
++        loadAppReady.await()
++      }
++      reactInstanceReady.await()
+       delegate.onActivityResult(requestCode, resultCode, data)
+     }
+   }
+ 
++  /**
++   * Gator patch: completes once the bridgeless ReactHost has run its ReactInstanceEventListeners,
++   * which happens after Expo's AppContext (and its activity-result listener) exists. A non-null
++   * currentReactContext is not enough: it appears before AppContext is created.
++   */
++  private val reactInstanceReady = CompletableDeferred<Unit>()
++
++  private fun watchReactInstanceReady() {
++    val host = _reactHost
++    if (host == null || host.currentReactContext?.hasActiveReactInstance() == true) {
++      reactInstanceReady.complete(Unit)
++      return
++    }
++    host.addReactInstanceEventListener(object : ReactInstanceEventListener {
++      override fun onReactContextInitialized(context: ReactContext) {
++        host.removeReactInstanceEventListener(this)
++        reactInstanceReady.complete(Unit)
++      }
++    })
++  }
++
+   override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+     if (!loadAppReady.isCompleted) {
+       return false

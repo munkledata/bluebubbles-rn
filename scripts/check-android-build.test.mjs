@@ -34,6 +34,7 @@ import {
   validateExpoFileSystemRedirectContainment,
   validateUploadFilenameBridge,
   validateExpoRouterPredictiveBackBridge,
+  validateExpoActivityResultWait,
   validateExpoModulesCoreLaunchState,
   validateExpoSharingSelfShareSettlement,
   validateExpoTaskManagerPreJsSettlement,
@@ -375,6 +376,7 @@ const redirectContainmentPackageLock = {
     'node_modules/expo-file-system': { version: '57.0.7' },
     'node_modules/expo-router': { version: '57.0.24' },
     'node_modules/expo-sharing': { version: '57.0.24' },
+    'node_modules/expo': { version: '57.0.31' },
     'node_modules/expo-modules-core': { version: '57.0.24' },
     'node_modules/expo-task-manager': { version: '57.0.21' },
     'node_modules/react-native-screens': { version: '4.26.2' },
@@ -712,6 +714,52 @@ test('camera launch-state guard requires the reviewed expo-modules-core patch', 
   assert.ok(validateExpoModulesCoreLaunchState(upgraded).some((m) => m.includes('must resolve')));
 });
 
+const PATCHED_WRAPPER_EXCERPT = `
+  override fun onCreate(savedInstanceState: Bundle?) {
+    // Gator patch: start watching before loadApp can create the React instance.
+    watchReactInstanceReady()
+    activity.lifecycleScope.launch {
+      mutex.withLock {
+        loadAppReady.await()
+      }
+      reactInstanceReady.await()
+      delegate.onActivityResult(requestCode, resultCode, data)
+    }
+`;
+
+function resultWaitInput() {
+  return {
+    packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
+    patchSource: readFileSync(join(ROOT, 'patches/expo+57.0.31.patch'), 'utf8'),
+    wrapperSource: PATCHED_WRAPPER_EXCERPT,
+  };
+}
+
+test('camera result-wait guard requires the reviewed expo patch', () => {
+  assert.deepEqual(validateExpoActivityResultWait(resultWaitInput()), []);
+
+  const unpatched = resultWaitInput();
+  unpatched.wrapperSource = `
+  override fun onCreate(savedInstanceState: Bundle?) {
+    launchLifecycleScopeWithLock {
+      loadAppReady.await()
+      delegate.onActivityResult(requestCode, resultCode, data)
+    }
+`;
+  assert.equal(validateExpoActivityResultWait(unpatched).length, 2);
+
+  const emptyPatch = resultWaitInput();
+  emptyPatch.patchSource = '';
+  assert.deepEqual(
+    validateExpoActivityResultWait(emptyPatch).map((m) => m.split(' must ')[1]),
+    ['patch only the React activity delegate wrapper', 'carry the reviewed React-instance wait'],
+  );
+
+  const upgraded = resultWaitInput();
+  upgraded.packageLock = { packages: { 'node_modules/expo': { version: '57.0.99' } } };
+  assert.ok(validateExpoActivityResultWait(upgraded).some((m) => m.includes('must resolve')));
+});
+
 test('upload filename guard rejects missing native wiring, types, validation, or durable patch', () => {
   assert.deepEqual(validateUploadFilenameBridge(uploadFilenameInput()), []);
   for (const field of [
@@ -793,6 +841,9 @@ function taskManagerSettlementInput(overrides = {}) {
 
 const EXPO_SHARING_MODULE_FIXTURE_PATH =
   'node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt';
+
+const EXPO_DELEGATE_WRAPPER_FIXTURE_PATH =
+  'node_modules/expo/android/src/main/java/expo/modules/ReactActivityDelegateWrapper.kt';
 
 const EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH =
   'node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt';
@@ -893,6 +944,12 @@ function writeRedirectContainmentFixture(root) {
   );
   mkdirSync(dirname(join(root, EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH)), { recursive: true });
   writeFileSync(join(root, EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH), PATCHED_REGISTRY_EXCERPT);
+  writeFileSync(
+    join(root, 'patches/expo+57.0.31.patch'),
+    readFileSync(join(ROOT, 'patches/expo+57.0.31.patch'), 'utf8'),
+  );
+  mkdirSync(dirname(join(root, EXPO_DELEGATE_WRAPPER_FIXTURE_PATH)), { recursive: true });
+  writeFileSync(join(root, EXPO_DELEGATE_WRAPPER_FIXTURE_PATH), PATCHED_WRAPPER_EXCERPT);
   writeFileSync(
     join(root, 'patches/react-native-screens+4.26.2.patch'),
     readFileSync(join(ROOT, 'patches/react-native-screens+4.26.2.patch'), 'utf8'),

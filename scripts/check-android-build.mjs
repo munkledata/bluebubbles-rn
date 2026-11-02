@@ -66,6 +66,7 @@ const EXPO_ROUTER_VERSION = '57.0.24';
 const EXPO_SHARING_VERSION = '57.0.24';
 const REACT_NATIVE_SCREENS_VERSION = '4.26.2';
 const EXPO_MODULES_CORE_VERSION = '57.0.24';
+const EXPO_VERSION = '57.0.31';
 const REACT_NATIVE_SCREENS_RANGE = '~4.26.0';
 const PATCH_PACKAGE_VERSION = '8.0.1';
 const EXPO_BACKGROUND_TASK_PATCH_PATH = `patches/expo-background-task+${EXPO_BACKGROUND_TASK_VERSION}.patch`;
@@ -129,6 +130,9 @@ const EXPO_SHARING_MODULE_PATH =
 const EXPO_MODULES_CORE_PATCH_PATH = `patches/expo-modules-core+${EXPO_MODULES_CORE_VERSION}.patch`;
 const EXPO_MODULES_CORE_REGISTRY_PATH =
   'node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt';
+const EXPO_PATCH_PATH = `patches/expo+${EXPO_VERSION}.patch`;
+const EXPO_DELEGATE_WRAPPER_PATH =
+  'node_modules/expo/android/src/main/java/expo/modules/ReactActivityDelegateWrapper.kt';
 const REACT_NATIVE_SCREENS_PATCH_PATH = `patches/react-native-screens+${REACT_NATIVE_SCREENS_VERSION}.patch`;
 export const REACT_NATIVE_SCREENS_SOURCE_PATHS = {
   stackContainerSource:
@@ -1181,6 +1185,56 @@ export function validateExpoModulesCoreLaunchState({ packageLock, patchSource, r
   }
   if (count(/restoredOnDemand = true\s*try \{\s*restoreInstanceState\(activity\)/g) !== 1) {
     errors.push('installed expo-modules-core must restore a saved launch before dropping a result');
+  }
+  return errors;
+}
+
+/**
+ * The second half of camera recovery after a process death. When Android restarts Gator to deliver
+ * the camera result, Expo's ReactActivityDelegateWrapper forwarded it as soon as React started
+ * loading. The bridgeless ReactContext and Expo's AppContext (which listens for results) are built
+ * later, so the result was lost without a log. The patch also waits for the React instance to
+ * finish starting. The expo package has no Android prebuild, so the patched source is compiled.
+ */
+export function validateExpoActivityResultWait({ packageLock, patchSource, wrapperSource }) {
+  const errors = [];
+  if (packageLock?.packages?.['node_modules/expo']?.version !== EXPO_VERSION) {
+    errors.push(`package-lock must resolve expo ${EXPO_VERSION}`);
+  }
+  const patchHeaders =
+    typeof patchSource === 'string'
+      ? [...patchSource.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)]
+      : [];
+  if (
+    patchHeaders.length !== 1 ||
+    patchHeaders[0]?.[1] !== EXPO_DELEGATE_WRAPPER_PATH ||
+    patchHeaders[0]?.[2] !== EXPO_DELEGATE_WRAPPER_PATH
+  ) {
+    errors.push(`${EXPO_PATCH_PATH} must patch only the React activity delegate wrapper`);
+  }
+  const patchMarkers = [
+    '+    watchReactInstanceReady()',
+    '+    host.addReactInstanceEventListener(object : ReactInstanceEventListener {',
+    '+      reactInstanceReady.await()',
+  ];
+  if (patchMarkers.some((marker) => !patchSource?.includes(marker))) {
+    errors.push(`${EXPO_PATCH_PATH} must carry the reviewed React-instance wait`);
+  }
+  const count = (pattern) =>
+    typeof wrapperSource === 'string' ? (wrapperSource.match(pattern) ?? []).length : 0;
+  if (
+    count(
+      /override fun onCreate\(savedInstanceState: Bundle\?\) \{\s*(?:\/\/[^\n]*\n\s*)*watchReactInstanceReady\(\)/g,
+    ) !== 1
+  ) {
+    errors.push('installed expo must watch for the React instance before loading the app');
+  }
+  if (
+    count(
+      /mutex\.withLock \{\s*loadAppReady\.await\(\)\s*\}\s*reactInstanceReady\.await\(\)\s*delegate\.onActivityResult\(requestCode, resultCode, data\)/g,
+    ) !== 1
+  ) {
+    errors.push('installed expo must wait for the React instance before forwarding a result');
   }
   return errors;
 }
@@ -2605,6 +2659,13 @@ export function runAndroidBuildCheck({
       patchSource: readFileSync(resolve(root, EXPO_MODULES_CORE_PATCH_PATH), 'utf8'),
       registrySource: readFileSync(resolve(root, EXPO_MODULES_CORE_REGISTRY_PATH), 'utf8'),
     }).map((error) => `camera launch state: ${error}`),
+  );
+  errors.push(
+    ...validateExpoActivityResultWait({
+      packageLock,
+      patchSource: readFileSync(resolve(root, EXPO_PATCH_PATH), 'utf8'),
+      wrapperSource: readFileSync(resolve(root, EXPO_DELEGATE_WRAPPER_PATH), 'utf8'),
+    }).map((error) => `camera result wait: ${error}`),
   );
   errors.push(
     ...validateExpoSharingSelfShareSettlement({
