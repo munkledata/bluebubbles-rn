@@ -54,7 +54,22 @@ The table below deliberately remains frozen to v77 because the operational relea
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.70` / code `93`** was built
+**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.71` / code `94`** was built
+from source `0d3d7f3646080ab19fa39cb2e8f1d84a0c875648` (0.1.70 plus camera fix part 2: Expo now waits
+for React before handing back a camera result after Android kills Gator, through `patches/expo+57.0.31.patch`
+and a check-android-build guard; proven in a separate probe app before landing; push CI run
+`41398335532` green) and promoted as release commit `8ab1ff50ced190cd900554e55c6bf81a572b4a4b` on
+local branch `release/android-0.1.71`. Run `android-0.1.71-0d3d7f3-20261102070608` produced
+`gator-release-0.1.71-v94-8ab1ff5.aab`, **58,462,743 bytes**, SHA-256
+`94553f42e75194672d7fd953650dd85e8e9d7093aeebb315f80ff100ad732f2b`. The owner approved this release
+directly on 2026-11-02; the agent submitted with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.71 v94 94553f42e751 TO PLAY INTERNAL`; the Maps key came from the login Keychain. Android
+Publisher readback after the submission confirms Internal release `0.1.71`, code `94`, `completed`.
+The phones are left to update without early Update taps (see the 0.1.70 Samsung reinstall), and the
+camera device proof in Gator remains open. No task status or frozen v77 checklist row is changed by
+this Internal release.
+
+**Historical v93 artifact, 2026-11-02:** **`0.1.70` / code `93`** was built
 from source `98389d45324c40760420e374da5c709cbe74d0e7` (0.1.69 plus FP-006 part 2: one restored
 iMessage file per send, so HEIC/HEIF as-is, video, GIF, documents up to 100 MiB and pictures in a
 proven group, only while the server's restored switches are on; the camera launch kept across Android
