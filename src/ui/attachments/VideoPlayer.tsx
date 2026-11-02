@@ -12,6 +12,7 @@ import { readableTextOn, useTheme } from '../theme';
 import { downloadFailureText } from './downloadFailureText';
 import { ProgressRing } from './ProgressRing';
 import { UploadProgressOverlay } from './UploadProgressOverlay';
+import { cachedVideoPoster, requestVideoPoster } from './videoPoster';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface VideoPlayerProps {
@@ -23,9 +24,10 @@ interface VideoPlayerProps {
 }
 
 /**
- * In-bubble video: a first-frame poster (generated from the local file) with a play badge that
- * lazily mounts a native VideoView on first tap. Downloads-then-plays when no local file yet;
- * pauses on blur so a recycled/backgrounded row doesn't keep audio running.
+ * In-bubble video: a first-frame poster (made one at a time by `requestVideoPoster`) with a play
+ * badge. The native player exists only after a tap (`InlineVideo`), so a chat full of videos never
+ * holds one player per bubble. Downloads-then-plays when no local file yet; pauses on blur so a
+ * recycled/backgrounded row doesn't keep audio running.
  */
 export function VideoPlayer({
   att,
@@ -42,35 +44,15 @@ export function VideoPlayer({
   // attempt and is removed when it settles, so its presence is the whole condition.
   const upload = useUploadStore((s) => s.byGuid[att.guid]);
   const [playing, setPlaying] = useState(false);
-  const [thumb, setThumb] = useState<VideoThumbnail | null>(null);
+  const [thumb, setThumb] = useState<VideoThumbnail | null>(
+    () => cachedVideoPoster(att.guid) ?? null,
+  );
   const [measuredAspect, setMeasuredAspect] = useState<{ guid: string; aspect: number } | null>(
     null,
   );
 
-  const player = useVideoPlayer(att.localPath ?? null, (p) => {
-    p.loop = false;
-  });
-
-  // Pause when the screen loses focus (e.g. opening the fullscreen viewer over a
-  // playing video). Guarded: on unmount expo-video may already have released the
-  // player, and calling a method on a released shared object throws.
-  useFocusEffect(
-    useCallback(
-      () => () => {
-        try {
-          player.pause();
-        } catch {
-          // player already released on unmount — expo-video handles that case.
-        }
-      },
-      [player],
-    ),
-  );
-
   // Real poster: once the file is local, pull its first frame so the bubble shows the video's
-  // content instead of a gray box. expo-video's native generator returns an image the <Image>
-  // below renders directly (no new dependency). Guarded like player.pause() above — the player may
-  // be released on a recycled FlashList row and the call throws on a released/not-yet-loaded asset;
+  // content instead of a gray box. The queue makes posters one at a time with a short-lived player;
   // cancel-on-unmount so a late resolve doesn't setState on a recycled row.
   useEffect(() => {
     if (!att.localPath) return;
@@ -78,8 +60,7 @@ export function VideoPlayer({
     let cancelled = false;
     void (async () => {
       try {
-        const thumbs = await player.generateThumbnailsAsync([0], { maxWidth: 600 });
-        const first = thumbs[0];
+        const first = await requestVideoPoster(guid, att.localPath!);
         if (cancelled || !first) return;
         setThumb(first);
         // The poster is the video's first frame at its own shape, so it sizes a video that has no
@@ -99,7 +80,7 @@ export function VideoPlayer({
     return () => {
       cancelled = true;
     };
-  }, [player, att.localPath, att.guid]);
+  }, [att.localPath, att.guid]);
 
   const win = Dimensions.get('window');
   const maxW = win.width * 0.6;
@@ -128,13 +109,12 @@ export function VideoPlayer({
       return;
     }
     setPlaying(true);
-    player.play();
   };
 
   if (playing && att.localPath) {
     return (
       <View style={[styles.wrap, box]}>
-        <VideoView player={player} nativeControls contentFit="contain" style={styles.fill} />
+        <InlineVideo uri={att.localPath} />
       </View>
     );
   }
@@ -199,6 +179,32 @@ export function VideoPlayer({
       )}
     </Pressable>
   );
+}
+
+/** The bubble's only native player, created on the tap that starts playback and released on unmount. */
+function InlineVideo({ uri }: { uri: string }): React.JSX.Element {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = false;
+    p.play();
+  });
+
+  // Pause when the screen loses focus (e.g. opening the fullscreen viewer over a
+  // playing video). Guarded: on unmount expo-video may already have released the
+  // player, and calling a method on a released shared object throws.
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        try {
+          player.pause();
+        } catch {
+          // player already released on unmount — expo-video handles that case.
+        }
+      },
+      [player],
+    ),
+  );
+
+  return <VideoView player={player} nativeControls contentFit="contain" style={styles.fill} />;
 }
 
 const styles = StyleSheet.create({

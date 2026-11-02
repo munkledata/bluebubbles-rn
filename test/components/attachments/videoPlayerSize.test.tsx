@@ -21,6 +21,20 @@ const mockPosterRequests: Array<(poster: { width: number; height: number } | nul
 // poster effect forever.
 const mockPlayers = new Map<string | null, object>();
 jest.mock('expo-video', () => ({
+  // Posters come from a short-lived player per request (src/ui/attachments/videoPoster.ts).
+  createVideoPlayer: () => ({
+    release: jest.fn(),
+    generateThumbnailsAsync: jest.fn(
+      () =>
+        new Promise((resolve, reject) => {
+          mockPosterRequests.push((poster) =>
+            poster
+              ? resolve([{ ...poster, requestedTime: 0, actualTime: 0 }])
+              : reject(new Error('no poster')),
+          );
+        }),
+    ),
+  }),
   useVideoPlayer: (source: string | null) => {
     let player = mockPlayers.get(source);
     if (!player) {
@@ -118,7 +132,10 @@ describe('VideoPlayer — size when the record has none', () => {
   });
 
   it('keeps the recorded size even when the poster reports another shape', async () => {
-    await renderWithTheme(<VideoPlayer att={vid({ width: 200, height: 200 })} isFromMe showTail />);
+    // Its own guid: posters are cached per attachment, so reusing v-1 would reuse an earlier test's.
+    await renderWithTheme(
+      <VideoPlayer att={vid({ guid: 'v-sized', width: 200, height: 200 })} isFromMe showTail />,
+    );
     const before = box();
 
     await givePoster({ width: 600, height: 338 });

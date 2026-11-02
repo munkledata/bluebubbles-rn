@@ -22,11 +22,22 @@ import { fireEvent, renderWithTheme, screen, userEvent } from '../support/render
 import { useDownloadStore } from '@state/downloadStore';
 import type { AttachmentRow } from '@db/repositories';
 
-jest.mock('expo-video', () => ({
-  useVideoPlayer: () => ({
+// Playback players are counted: a chat full of videos must not hold one per bubble.
+const mockUseVideoPlayer = jest.fn((_source: string | null, setup?: (p: object) => void) => {
+  const player = {
     loop: false,
     play: jest.fn(),
     pause: jest.fn(),
+    generateThumbnailsAsync: jest.fn().mockRejectedValue(new Error('no thumbs in jest')),
+  };
+  setup?.(player);
+  return player;
+});
+jest.mock('expo-video', () => ({
+  useVideoPlayer: (source: string | null, setup?: (p: object) => void) =>
+    mockUseVideoPlayer(source, setup),
+  createVideoPlayer: () => ({
+    release: jest.fn(),
     generateThumbnailsAsync: jest.fn().mockRejectedValue(new Error('no thumbs in jest')),
   }),
   VideoView: () => null,
@@ -85,6 +96,26 @@ beforeEach(() => {
     .mockReset()
     .mockReturnValueOnce(mockAccountLease)
     .mockReturnValue(mockNextAccountLease);
+});
+
+describe('VideoPlayer — no playback player until a tap', () => {
+  it('shows several local videos without creating any player, then one on tap', async () => {
+    mockUseVideoPlayer.mockClear();
+    await renderWithTheme(
+      <>
+        <VideoPlayer att={vid({ guid: 'p-1', localPath: '/data/1.mp4' })} isFromMe showTail />
+        <VideoPlayer att={vid({ guid: 'p-2', localPath: '/data/2.mov' })} isFromMe showTail />
+        <VideoPlayer att={vid({ guid: 'p-3', localPath: '/data/3.mp4' })} isFromMe showTail />
+      </>,
+    );
+    expect(mockUseVideoPlayer).not.toHaveBeenCalled();
+
+    await fireEvent.press(screen.getAllByLabelText('Video, tap to play')[1]!);
+
+    expect(new Set(mockUseVideoPlayer.mock.calls.map(([source]) => source))).toEqual(
+      new Set(['/data/2.mov']),
+    );
+  });
 });
 
 describe('VideoPlayer — accessibility label tracks what the tap will do (F20)', () => {
