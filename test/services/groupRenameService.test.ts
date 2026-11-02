@@ -282,4 +282,64 @@ describe('renameExactIMessageGroup', () => {
     });
     expect(transport.post).toHaveBeenCalledTimes(1);
   });
+
+  describe('a native any;+; group (how the Mac names its groups)', () => {
+    const ANY_GUID = 'any;+;chat987654321';
+
+    beforeEach(() => {
+      const chat = raw.prepare('INSERT INTO chats(guid, style) VALUES (?, 43)').run(ANY_GUID);
+      for (const address of ['+15551110000', '+15552220000']) {
+        const handle = raw
+          .prepare('INSERT INTO handles(address, service) VALUES (?, ?)')
+          .run(address, 'iMessage');
+        raw
+          .prepare('INSERT INTO chat_handles(chat_id, handle_id) VALUES (?, ?)')
+          .run(Number(chat.lastInsertRowid), Number(handle.lastInsertRowid));
+      }
+    });
+
+    const gate = (open: boolean) =>
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({
+          version: 'test',
+          supports_imessage_group_rename: true,
+          // bbd reports every restored switch from its FP-006 gate, which also governs any;+;.
+          supports_imessage_group_reactions: open,
+        }),
+      );
+
+    it('renames it while the server reports its FP-006 gate open', async () => {
+      const transport = fakeHttp(async (options) => ({
+        renamed: true,
+        guid: ANY_GUID,
+        displayName: (options.json as { displayName: string }).displayName,
+      }));
+
+      const result = await renameExactIMessageGroup(
+        db,
+        transport.http,
+        { chatGuid: ANY_GUID, displayName: 'Cousins' },
+        undefined,
+        gate(true),
+      );
+
+      expect(result).toMatchObject({ status: 'accepted', guid: ANY_GUID, displayName: 'Cousins' });
+      expect(transport.post.mock.calls[0]?.[0]).toBe('/chat/any%3B%2B%3Bchat987654321/rename');
+    });
+
+    it('refuses it before HTTP while the gate is closed', async () => {
+      const transport = fakeHttp(async () => ({ renamed: true, guid: ANY_GUID, displayName: 'x' }));
+
+      const result = await renameExactIMessageGroup(
+        db,
+        transport.http,
+        { chatGuid: ANY_GUID, displayName: 'Cousins' },
+        undefined,
+        gate(false),
+      );
+
+      expect(result).toEqual({ status: 'rejected' });
+      expect(transport.post).not.toHaveBeenCalled();
+    });
+  });
 });

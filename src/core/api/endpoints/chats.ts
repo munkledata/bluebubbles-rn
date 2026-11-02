@@ -267,7 +267,8 @@ function requireRoundTripUtf8(value: string, maxBytes: number, label: string): v
 export function isValidIMessageGroupGuid(value: string): boolean {
   const bytes = utf8Encode(value);
   return (
-    /^iMessage;\+;.+$/su.test(value) &&
+    // The server proves the exact group again and refuses `any;+;` unless its FP-006 gate is open.
+    /^(?:iMessage|any);\+;.+$/su.test(value) &&
     !UNICODE_CONTROL_CHARACTER.test(value) &&
     bytes.byteLength <= IMESSAGE_GROUP_GUID_MAX_BYTES &&
     utf8Decode(bytes) === value

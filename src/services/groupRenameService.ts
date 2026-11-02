@@ -3,6 +3,7 @@ import {
   isValidIMessageGroupName,
   renameIMessageGroup as postIMessageGroupRename,
 } from '@core/api/endpoints/chats';
+import { restoredGroupCommandsAcceptAnyPrefix } from '@core/models/imessageRestoredFeatures';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { getChatHeader } from '@db/repositories';
@@ -61,8 +62,9 @@ function releaseGroupRename(db: AppDatabase, chatGuid: string): void {
 function isExactEligibleGroup(
   header: Awaited<ReturnType<typeof getChatHeader>>,
   chatGuid: string,
+  allowAnyGroupPrefix: boolean,
 ): boolean {
-  return header?.guid === chatGuid && isProvenIMessageGroupChat(header);
+  return header?.guid === chatGuid && isProvenIMessageGroupChat(header, { allowAnyGroupPrefix });
 }
 
 function isDefiniteGroupRenameFailure(error: unknown): boolean {
@@ -118,7 +120,10 @@ export async function renameExactIMessageGroup(
       return { status: 'rejected' };
     }
     if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
-    if (!isExactEligibleGroup(header, args.chatGuid)) return { status: 'rejected' };
+    const allowAnyGroupPrefix = restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo);
+    if (!isExactEligibleGroup(header, args.chatGuid, allowAnyGroupPrefix)) {
+      return { status: 'rejected' };
+    }
 
     const tempGuid = generateTempGuid();
     try {

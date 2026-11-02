@@ -11,6 +11,7 @@ import {
   restoredAttachmentBatchRefusal,
   restoredAttachmentExtension,
   restoredChatKind,
+  restoredGroupCommandsAcceptAnyPrefix,
   serverSendCapabilityKey,
   ServerInfo,
 } from '@core/models';
@@ -268,5 +269,22 @@ describe('isValidRestoredSubject', () => {
     expect(isValidRestoredSubject('tab\there')).toBe(false);
     expect(isValidRestoredSubject('obj￼')).toBe(false);
     expect(isValidRestoredSubject('half\ud800')).toBe(false);
+  });
+});
+
+describe('restoredGroupCommandsAcceptAnyPrefix', () => {
+  it('is true only when the server reports at least one restored switch on', () => {
+    expect(restoredGroupCommandsAcceptAnyPrefix(null)).toBe(false);
+    expect(restoredGroupCommandsAcceptAnyPrefix(ServerInfo.parse({ version: 't' }))).toBe(false);
+    expect(
+      restoredGroupCommandsAcceptAnyPrefix(
+        ServerInfo.parse({ version: 't', supports_imessage_group_rename: true }),
+      ),
+    ).toBe(false);
+    expect(
+      restoredGroupCommandsAcceptAnyPrefix(
+        ServerInfo.parse({ version: 't', supports_imessage_attachments_v2: true }),
+      ),
+    ).toBe(true);
   });
 });

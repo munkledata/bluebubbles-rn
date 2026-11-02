@@ -9,6 +9,7 @@ import {
   MAX_IMESSAGE_GROUP_PHOTO_BYTES,
   isSupportedImessageGroupPhotoType,
 } from '@core/models/serverInfo';
+import { restoredGroupCommandsAcceptAnyPrefix } from '@core/models/imessageRestoredFeatures';
 import { getChatHeader } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -101,8 +102,9 @@ function releaseGroupPhotoOperation(db: AppDatabase, chatGuid: string): void {
 function isExactEligibleGroup(
   header: Awaited<ReturnType<typeof getChatHeader>>,
   chatGuid: string,
+  allowAnyGroupPrefix: boolean,
 ): boolean {
-  return header?.guid === chatGuid && isProvenIMessageGroupChat(header);
+  return header?.guid === chatGuid && isProvenIMessageGroupChat(header, { allowAnyGroupPrefix });
 }
 
 function isDefiniteGroupPhotoFailure(error: unknown): boolean {
@@ -192,6 +194,8 @@ async function proveGroupPhotoTarget(
 ): Promise<{
   readonly transport: ReturnType<typeof pinSendTransport>;
   readonly capabilityGuard: DbCommitGuard;
+  /** The server accepted native `any;+;` groups when this proof was taken. */
+  readonly allowAnyGroupPrefix: boolean;
 }> {
   const transport = pinSendTransport(http, accountGuard);
   const capability = await resolveRcsAttemptOwnership(
@@ -207,12 +211,13 @@ async function proveGroupPhotoTarget(
     throw new ApiError('bad_request', 'This server cannot change Apple group photos.');
   }
 
+  const allowAnyGroupPrefix = restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo);
   const header = await getChatHeader(db, chatGuid);
   assertPreDispatchCurrent(signal, accountGuard, capabilityGuard);
-  if (!isExactEligibleGroup(header, chatGuid)) {
+  if (!isExactEligibleGroup(header, chatGuid, allowAnyGroupPrefix)) {
     throw new ApiError('bad_request', 'A proven existing Apple group is required.');
   }
-  return { transport, capabilityGuard };
+  return { transport, capabilityGuard, allowAnyGroupPrefix };
 }
 
 export interface PreparedIMessageGroupPhotoSet {
@@ -296,7 +301,7 @@ export async function prepareExactIMessageGroupPhotoSet(
         // under the same pinned owner immediately before any native/network effect starts.
         const currentHeader = await getChatHeader(db, chatGuid);
         assertPreDispatchCurrent(attempt.signal, accountGuard, proof.capabilityGuard);
-        if (!isExactEligibleGroup(currentHeader, chatGuid)) {
+        if (!isExactEligibleGroup(currentHeader, chatGuid, proof.allowAnyGroupPrefix)) {
           return { status: 'rejected', operation, tempGuid: attempt.tempGuid };
         }
         proof.transport.assertNetworkCurrent();

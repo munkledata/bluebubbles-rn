@@ -390,15 +390,19 @@ jest.mock('@features/conversations/useSharedDocuments', () => ({
 
 jest.mock('@utils', () => ({
   isGroupRow: (row: { style?: number }) => row.style === 43,
-  isProvenIMessageGroupChat: (row: {
-    guid?: string;
-    style?: number;
-    participantCount?: number;
-    handleServices?: string | null;
-  }) => {
+  isProvenIMessageGroupChat: (
+    row: {
+      guid?: string;
+      style?: number;
+      participantCount?: number;
+      handleServices?: string | null;
+    },
+    options: { allowAnyGroupPrefix?: boolean } = {},
+  ) => {
     const services = (row.handleServices ?? '').split(',').filter(Boolean);
     return (
-      !!row.guid?.startsWith('iMessage;+;') &&
+      (!!row.guid?.startsWith('iMessage;+;') ||
+        (options.allowAnyGroupPrefix === true && !!row.guid?.startsWith('any;+;'))) &&
       row.style === 43 &&
       (row.participantCount ?? 0) >= 2 &&
       services.length === row.participantCount &&
@@ -856,6 +860,28 @@ describe('ChatSettingsScreen Apple group rename', () => {
       } as any,
     });
   }
+
+  it.each([
+    [true, 'shows'],
+    [false, 'hides'],
+  ])('with the FP-006 gate open=%s, %s Apple rename for a native any;+; group', async (open) => {
+    mockGuid = 'any;+;chat-native';
+    mockChatStyle = 43;
+    mockParticipantCount = 2;
+    mockHandleServices = 'iMessage,iMessage';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_group_rename: true,
+        supports_imessage_group_reactions: open,
+      } as any,
+    });
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    expect(screen.queryByText('APPLE GROUP NAME') !== null).toBe(open);
+    expect(screen.queryByRole('button', { name: 'Rename in Apple Messages' }) !== null).toBe(open);
+  });
 
   it('keeps the phone-local nickname separate and submits the exact Apple group name once', async () => {
     configureEligibleGroup();

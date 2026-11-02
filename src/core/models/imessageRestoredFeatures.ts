@@ -288,3 +288,13 @@ export function isRestoredAttachmentFile(file: { name: string; size: number }): 
     restoredAttachmentBatchRefusal([{ name: file.name, size: file.size }]) === null
   );
 }
+
+/**
+ * Whether the server's reviewed group commands (rename, photo, add/remove member, leave) accept a
+ * native `any;+;` group right now. bbd has no separate flag: it accepts that prefix exactly when its
+ * FP-006 gate is open (listed helper, owner setting on, helper connected), and it reports every
+ * restored switch from that same gate, so any restored switch being on means the gate is open.
+ */
+export function restoredGroupCommandsAcceptAnyPrefix(info: ServerInfo | null | undefined): boolean {
+  return IMESSAGE_RESTORED_FEATURES.some((feature) => info?.[feature] === true);
+}

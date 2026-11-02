@@ -1,4 +1,5 @@
 import { Directory, File, Paths } from 'expo-file-system';
+import { restoredGroupCommandsAcceptAnyPrefix } from '@core/models/imessageRestoredFeatures';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -307,19 +308,32 @@ function ChatSettingsScreen({
     appleGroupName ?? acceptedAppleGroupNameOverlay?.displayName ?? data?.displayName ?? '';
   const appleGroupNameBaseline =
     acceptedAppleGroupNameOverlay?.displayName ?? data?.displayName ?? '';
+  // The Mac's own groups are `any;+;`; the server accepts them for these commands only while its
+  // FP-006 gate is open, which every restored switch reflects.
+  const allowAnyGroupPrefix = useSessionStore((state) =>
+    restoredGroupCommandsAcceptAnyPrefix(state.serverInfo),
+  );
   const appleGroupRenameAvailable =
-    appleGroupRenameSupported && data?.guid === guid && isProvenIMessageGroupChat(data);
+    appleGroupRenameSupported &&
+    data?.guid === guid &&
+    isProvenIMessageGroupChat(data, { allowAnyGroupPrefix });
   const appleGroupPhotoAvailable =
-    appleGroupPhotoSupported && data?.guid === guid && isProvenIMessageGroupChat(data);
+    appleGroupPhotoSupported &&
+    data?.guid === guid &&
+    isProvenIMessageGroupChat(data, { allowAnyGroupPrefix });
   const appleGroupParticipantAddAvailable =
-    appleGroupParticipantAddSupported && data?.guid === guid && isProvenIMessageGroupChat(data);
+    appleGroupParticipantAddSupported &&
+    data?.guid === guid &&
+    isProvenIMessageGroupChat(data, { allowAnyGroupPrefix });
   const appleGroupParticipantRemoveAvailable =
     appleGroupParticipantRemoveSupported &&
     data?.guid === guid &&
-    isProvenIMessageGroupChat(data) &&
+    isProvenIMessageGroupChat(data, { allowAnyGroupPrefix }) &&
     data.participantCount >= 3;
   const appleGroupLeaveAvailable =
-    appleGroupLeaveSupported && data?.guid === guid && isProvenIMessageGroupChat(data);
+    appleGroupLeaveSupported &&
+    data?.guid === guid &&
+    isProvenIMessageGroupChat(data, { allowAnyGroupPrefix });
   const appleGroupNameChanged =
     appleGroupNameValue.trim().length > 0 && appleGroupNameValue !== appleGroupNameBaseline;
   const muted = data?.muteType === 'mute';

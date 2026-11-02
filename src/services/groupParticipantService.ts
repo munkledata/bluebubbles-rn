@@ -10,6 +10,7 @@ import type { HttpClient } from '@core/api/http';
 import { getChatHeader, type ChatHeaderRow } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { restoredGroupCommandsAcceptAnyPrefix } from '@core/models/imessageRestoredFeatures';
 import { isProvenIMessageGroupChat } from '@utils';
 import {
   resolveRcsAttemptOwnership,
@@ -123,10 +124,11 @@ function literalAddressCompare(left: string, right: string): number {
 export function exactSortedIMessageGroupRoster(
   header: ChatHeaderRow | null,
   chatGuid: string,
+  allowAnyGroupPrefix = false,
 ): readonly string[] | null {
   if (
     header?.guid !== chatGuid ||
-    !isProvenIMessageGroupChat(header) ||
+    !isProvenIMessageGroupChat(header, { allowAnyGroupPrefix }) ||
     header.participantCount > MAX_IMESSAGE_GROUP_PARTICIPANTS ||
     !header.participantAddresses
   ) {
@@ -218,7 +220,11 @@ export async function addExactIMessageGroupParticipant(
       return { status: 'rejected' };
     }
     if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
-    const roster = exactSortedIMessageGroupRoster(header, args.chatGuid);
+    const roster = exactSortedIMessageGroupRoster(
+      header,
+      args.chatGuid,
+      restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo),
+    );
     if (
       !roster ||
       roster.some((address) => participantIdentity(address) === participantIdentity(args.address))
@@ -313,7 +319,11 @@ export async function removeExactIMessageGroupParticipant(
       return { status: 'rejected' };
     }
     if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
-    const roster = exactSortedIMessageGroupRoster(header, args.chatGuid);
+    const roster = exactSortedIMessageGroupRoster(
+      header,
+      args.chatGuid,
+      restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo),
+    );
     if (
       !roster ||
       roster.length < 3 ||
@@ -402,7 +412,11 @@ export async function leaveExactIMessageGroup(
       return { status: 'rejected' };
     }
     if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
-    const roster = exactSortedIMessageGroupRoster(header, args.chatGuid);
+    const roster = exactSortedIMessageGroupRoster(
+      header,
+      args.chatGuid,
+      restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo),
+    );
     if (!roster || roster.length < 2 || roster.length > MAX_IMESSAGE_GROUP_PARTICIPANTS) {
       return { status: 'rejected' };
     }
