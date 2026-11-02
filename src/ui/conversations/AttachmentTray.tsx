@@ -9,6 +9,7 @@ import {
   AppState,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -39,6 +40,20 @@ export interface PendingAttachment {
 
 export const ATTACHMENT_TRAY_HEIGHT = 104;
 const THUMB = 84;
+
+/**
+ * The tray thumbnail's source. On Android a numeric asset id is the MediaStore row, so the strip
+ * loads `content://media/external/{images|video}/media/<id>`: Android serves it through its own
+ * media permission and small cached thumbnails. The asset's file path left some tiles blank on the
+ * owner's Samsung (the same tiles every time, across formats) while sending those photos worked.
+ */
+export function trayThumbnailUri(
+  asset: Pick<MediaLibrary.Asset, 'id' | 'uri' | 'mediaType'>,
+): string {
+  if (Platform.OS !== 'android' || !/^\d+$/.test(asset.id)) return asset.uri;
+  const kind = asset.mediaType === MediaLibrary.MediaType.video ? 'video' : 'images';
+  return `content://media/external/${kind}/media/${asset.id}`;
+}
 type MediaPermissionState =
   'checking' | 'rationale' | 'requesting' | 'granted' | 'retry' | 'settings' | 'unavailable';
 
@@ -507,7 +522,11 @@ export function AttachmentTray({
                 a.mediaType === MediaLibrary.MediaType.video ? 'Attach video' : 'Attach photo'
               }
             >
-              <Image source={{ uri: a.uri }} style={styles.thumb} contentFit="cover" />
+              <Image
+                source={{ uri: trayThumbnailUri(a) }}
+                style={styles.thumb}
+                contentFit="cover"
+              />
               {a.mediaType === MediaLibrary.MediaType.video ? (
                 <View style={styles.videoBadge}>
                   <Icon name="videocam" size={12} color="#fff" />

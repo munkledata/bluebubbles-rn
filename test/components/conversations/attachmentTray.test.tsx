@@ -18,7 +18,7 @@
  * is stubbed to a plain host View.
  */
 import React from 'react';
-import { AppState, Linking, StyleSheet, type AppStateStatus } from 'react-native';
+import { AppState, Linking, Platform, StyleSheet, type AppStateStatus } from 'react-native';
 import { act, renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { logger } from '@core/secure';
 import { readableTextOn } from '@ui/theme';
@@ -74,7 +74,11 @@ jest.mock('@/services/cameraCapture', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import { AttachmentTray, forgetPhotoPromptDismissal } from '@ui/conversations/AttachmentTray';
+import {
+  AttachmentTray,
+  forgetPhotoPromptDismissal,
+  trayThumbnailUri,
+} from '@ui/conversations/AttachmentTray';
 // eslint-disable-next-line import/first
 import * as MediaLibrary from 'expo-media-library/legacy';
 // eslint-disable-next-line import/first
@@ -658,5 +662,34 @@ describe('AttachmentTray — camera capture', () => {
     await fireEvent.press(screen.getByLabelText('Take a photo'));
     await waitFor(() => expect(launchCamera).toHaveBeenCalled());
     expect(onPick).not.toHaveBeenCalled();
+  });
+});
+
+describe('trayThumbnailUri', () => {
+  const asAndroid = (os: 'android' | 'ios') => jest.replaceProperty(Platform, 'OS', os);
+
+  it('loads an Android media-library asset from its MediaStore row, not its file path', () => {
+    asAndroid('android');
+    const photo = {
+      id: '1000008315',
+      uri: 'file:///storage/emulated/0/DCIM/a.heic',
+      mediaType: 'photo',
+    };
+    const video = { id: '42', uri: 'file:///storage/emulated/0/DCIM/b.mp4', mediaType: 'video' };
+    expect(trayThumbnailUri(photo as never)).toBe(
+      'content://media/external/images/media/1000008315',
+    );
+    expect(trayThumbnailUri(video as never)).toBe('content://media/external/video/media/42');
+  });
+
+  it('keeps the asset uri for a non-numeric id or another platform', () => {
+    asAndroid('android');
+    expect(trayThumbnailUri({ id: 'ph://abc', uri: 'ph://abc', mediaType: 'photo' } as never)).toBe(
+      'ph://abc',
+    );
+    asAndroid('ios');
+    expect(trayThumbnailUri({ id: '7', uri: 'file:///x.jpg', mediaType: 'photo' } as never)).toBe(
+      'file:///x.jpg',
+    );
   });
 });

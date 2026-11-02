@@ -555,14 +555,14 @@ export function sendImages(
     () => isAttachmentCacheRecoveryReady(accountLease),
   );
   // One multi-file share: its RCS files take turns instead of uploading at once.
-  const shareUploader = createRcsShareUploader(expoAttachmentUploader);
+  const rcsShareUploader = createRcsShareUploader(expoAttachmentUploader);
   // The iMessage files of one pick upload one at a time in pick order: each is its own message, and
   // two large videos at once only compete for the network.
   const imessageLane = createConcurrencyGate(1);
-  const batchUploader: AttachmentUploader = (args) =>
+  const shareUploader: AttachmentUploader = (args) =>
     args.service === 'iMessage'
-      ? imessageLane.run(() => shareUploader(args), args.signal)
-      : shareUploader(args);
+      ? imessageLane.run(() => rcsShareUploader(args), args.signal)
+      : rcsShareUploader(args);
   return runUiAccountOperation(
     accountLease,
     async () => {
@@ -583,7 +583,7 @@ export function sendImages(
                 service: snapshot.service,
                 shareIntake: image.origin === 'share' ? snapshot.shareIntake : undefined,
               },
-              batchUploader,
+              shareUploader,
               Date.now(),
               () => accountLease.isCurrent(),
               undefined,
