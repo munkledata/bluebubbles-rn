@@ -54,7 +54,27 @@ The table below deliberately remains frozen to v77 because the operational relea
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-10-30 — not a checklist rebind:** **`0.1.68` / code `91`** was built
+**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.69` / code `92`** was built
+from source `88d26c5827186939a522e12fced3c1633398d5a2` (0.1.68 plus the group-text double fix: a
+group iMessage text's own bubble now merges when a sync read stores its copy before the live echo,
+and migration `0059_retire_doubled_text_local_copies` hides the doubles already left on phones;
+Apple's screening flags under Filter Unknown Senders with migration `0058_apple_screening_flags`, and
+a reply making a screened chat known again; FP-006 part 1 group, emoji and part tapbacks and replies
+with their review follow-ups; every action-menu row kept in view on a very tall bubble; Mac-relayed
+RCS chats labelled "RCS"; a chat marked read only up to the message read elsewhere; a photo taken
+while Android closed Gator behind the camera put back; and the node-forge 1.4.2 security update with
+its legal-notice refresh; CI run `41361692284` green) and promoted as
+release commit `ba4b6b01de0d5d54fb0fe271d4343a23341f2558` on local branch `release/android-0.1.69`.
+Run `android-0.1.69-88d26c5-20261102004256` produced `gator-release-0.1.69-v92-ba4b6b0.aab`,
+**58,459,707 bytes**, SHA-256 `4072b843f1beb4b5571b7804fc63c307c8f8e789934a5a73f6a47264a09a5d32`.
+The clean local production build and validation pass. The owner approved this release on
+2026-11-01; the agent submitted with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.69 v92 4072b843f1be TO PLAY INTERNAL`; the Maps key came from the login Keychain.
+Android Publisher readback after the submission confirms Internal release `0.1.69`, code `92`,
+`completed`. The device update (the owner's Pixel doubles should disappear) remains open. No task
+status or frozen v77 checklist row is changed by this Internal release.
+
+**Historical v91 artifact, 2026-10-30:** **`0.1.68` / code `91`** was built
 from source `28132a00abbcd1d0b6b1a5362d6e613f1788df36` (0.1.67 plus a sent RCS reaction kept when the
 reply names its target, a captioned RCS picture's caption shown once on the sending phone, and the
 master fixes since 0.1.67: share-out after a self-share, the decode-uri-component advisory backport,
