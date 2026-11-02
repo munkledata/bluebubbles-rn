@@ -1,5 +1,6 @@
 import {
   IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES,
+  IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
   isRestoredAttachmentFile,
   restoredAttachmentExtension,
 } from '@core/models/imessageRestoredFeatures';
@@ -34,6 +35,18 @@ export function imessageAttachmentRefusal(
   pdfAvailable: boolean,
   routes: IMessageAttachmentRoutes = { narrow: true, restored: false },
 ): string | null {
+  // With the restored route each file goes as its own message, one after another, so several can
+  // be picked at once; the narrow route alone still takes one file per send.
+  if (routes.restored && items.length > 1) {
+    if (items.length > IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES) {
+      return `This iMessage chat sends up to ${IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES} files at a time. Remove some, then send.`;
+    }
+    for (const item of items) {
+      const refusal = imessageAttachmentRefusal([item], pdfAvailable, routes);
+      if (refusal !== null) return refusal;
+    }
+    return null;
+  }
   if (items.length !== 1) {
     return 'This iMessage chat sends one file at a time. Remove the others, then send.';
   }

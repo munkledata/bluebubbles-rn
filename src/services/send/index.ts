@@ -7,6 +7,7 @@ import {
 import {
   canSendRestoredIMessageReply,
   canSendRestoredIMessageTapback,
+  IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
 } from '@core/models/imessageRestoredFeatures';
 import { logger } from '@core/secure';
 import {
@@ -68,6 +69,7 @@ import {
   sendImageMessage,
   UnsendableAttachmentNameError,
   type AttachmentTextService,
+  type AttachmentUploader,
   type PickedImage,
 } from './sendAttachmentService';
 import { sendRestoredIMessageReactionMessage } from './sendRestoredReactionService';
@@ -103,7 +105,7 @@ import {
 import { runAccountOperation } from '../realtime/accountOperation';
 import { expoAttachmentUploader, expoFileExists, expoFileSize } from './attachmentUpload';
 import { createRcsPacedUploader, createRcsShareUploader } from './rcsUploadPacing';
-import { uploadRegistry } from './uploadControl';
+import { createConcurrencyGate, uploadRegistry } from './uploadControl';
 import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
 import { createAttachmentCacheAccountScope } from '../download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
@@ -537,8 +539,16 @@ export function sendImages(
     service: args.service,
     shareIntake: args.shareIntake,
   };
-  if (snapshot.service === 'iMessage' && snapshot.images.length !== 1) {
-    return Promise.reject(new Error('Send one iMessage attachment at a time.'));
+  // Each iMessage file is its own one-shot message; the route decides per file whether it may go.
+  if (
+    snapshot.service === 'iMessage' &&
+    (snapshot.images.length < 1 || snapshot.images.length > IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES)
+  ) {
+    return Promise.reject(
+      new Error(
+        `Send one to ${IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES} iMessage attachments at a time.`,
+      ),
+    );
   }
   const pasteOwnership = createOutgoingPasteOwnershipPreparer(
     createAttachmentCacheAccountScope(accountLease),
@@ -546,6 +556,13 @@ export function sendImages(
   );
   // One multi-file share: its RCS files take turns instead of uploading at once.
   const shareUploader = createRcsShareUploader(expoAttachmentUploader);
+  // The iMessage files of one pick upload one at a time in pick order: each is its own message, and
+  // two large videos at once only compete for the network.
+  const imessageLane = createConcurrencyGate(1);
+  const batchUploader: AttachmentUploader = (args) =>
+    args.service === 'iMessage'
+      ? imessageLane.run(() => shareUploader(args), args.signal)
+      : shareUploader(args);
   return runUiAccountOperation(
     accountLease,
     async () => {
@@ -566,7 +583,7 @@ export function sendImages(
                 service: snapshot.service,
                 shareIntake: image.origin === 'share' ? snapshot.shareIntake : undefined,
               },
-              shareUploader,
+              batchUploader,
               Date.now(),
               () => accountLease.isCurrent(),
               undefined,

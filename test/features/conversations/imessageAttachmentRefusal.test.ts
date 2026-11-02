@@ -99,9 +99,27 @@ describe('the FP-006 restored route in the refusal check', () => {
 
   it('in a group with only the restored route, a JPEG still goes and the reasons name its caps', () => {
     expect(imessageAttachmentRefusal([JPEG], false, groupOnly)).toBeNull();
-    expect(imessageAttachmentRefusal([JPEG, HEIC], false, groupOnly)).toBe(
-      'This iMessage chat sends one file at a time. Remove the others, then send.',
+    // Several files go as separate messages, one after another.
+    expect(imessageAttachmentRefusal([JPEG, HEIC], false, groupOnly)).toBeNull();
+    const eleven = Array.from({ length: 11 }, (_, i) => ({ ...HEIC, name: `IMG_${i}.heic` }));
+    expect(imessageAttachmentRefusal(eleven, false, groupOnly)).toBe(
+      'This iMessage chat sends up to 10 files at a time. Remove some, then send.',
     );
+    // One bad file in a batch names that file's problem.
+    expect(
+      imessageAttachmentRefusal(
+        [JPEG, { ...JPEG, name: 'setup.exe', mimeType: 'application/octet-stream' }],
+        false,
+        groupOnly,
+      ),
+    ).toBe('This iMessage chat can’t send this kind of file.');
+    // The narrow route alone still takes one file per send.
+    expect(
+      imessageAttachmentRefusal([JPEG, { ...JPEG, uri: 'file:///b.jpg' }], false, {
+        narrow: true,
+        restored: false,
+      }),
+    ).toBe('This iMessage chat sends one file at a time. Remove the others, then send.');
     expect(
       imessageAttachmentRefusal(
         [{ ...JPEG, name: 'setup.exe', mimeType: 'application/octet-stream' }],

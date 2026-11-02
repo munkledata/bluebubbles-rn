@@ -949,6 +949,70 @@ describe('UI send account lease', () => {
     ]);
   });
 
+  it('uploads several iMessage files of one pick one at a time, in pick order', async () => {
+    const uploads: Array<{ name: string; finish: Deferred<{ guid: string }> }> = [];
+    const mockUploader = jest.requireMock('@/services/send/attachmentUpload')
+      .expoAttachmentUploader as jest.Mock;
+    mockUploader.mockImplementation(({ name }: { name: string }) => {
+      const finish = deferred<{ guid: string }>();
+      uploads.push({ name, finish });
+      return finish.promise;
+    });
+    // Each queued file runs its upload through the uploader sendImages hands it.
+    mockSendImage.mockImplementation(
+      async (_db: unknown, http: unknown, args: { image: { name: string } }, upload: Function) => {
+        await upload({
+          http,
+          service: 'iMessage',
+          name: args.image.name,
+          tempGuid: args.image.name,
+        });
+        return { tempGuid: `temp-${args.image.name}` };
+      },
+    );
+
+    const images = sendImages({
+      chatGuid: 'any;+;chat-group',
+      service: 'iMessage',
+      images: ['a.mov', 'b.mov', 'c.mov'].map((name) => ({
+        uri: `file:///${name}`,
+        name,
+        mimeType: 'video/quicktime',
+        size: 1,
+      })),
+    });
+
+    await waitUntil(() => uploads.length === 1);
+    expect(uploads.map((u) => u.name)).toEqual(['a.mov']);
+    uploads[0]!.finish.resolve({ guid: 'g-a' });
+    await waitUntil(() => uploads.length === 2);
+    expect(uploads.map((u) => u.name)).toEqual(['a.mov', 'b.mov']);
+    uploads[1]!.finish.resolve({ guid: 'g-b' });
+    await waitUntil(() => uploads.length === 3);
+    uploads[2]!.finish.resolve({ guid: 'g-c' });
+
+    await expect(images).resolves.toEqual([
+      { tempGuid: 'temp-a.mov' },
+      { tempGuid: 'temp-b.mov' },
+      { tempGuid: 'temp-c.mov' },
+    ]);
+    mockUploader.mockReset();
+  });
+
+  it('refuses more than ten iMessage files in one pick before any send', async () => {
+    mockSendImage.mockClear();
+    const images = Array.from({ length: 11 }, (_, i) => ({
+      uri: `file:///${i}.mov`,
+      name: `${i}.mov`,
+      mimeType: 'video/quicktime',
+      size: 1,
+    }));
+    await expect(
+      sendImages({ chatGuid: 'any;+;chat-group', service: 'iMessage', images }),
+    ).rejects.toThrow('Send one to 10 iMessage attachments at a time.');
+    expect(mockSendImage).not.toHaveBeenCalled();
+  });
+
   it('fails closed before the send queue when narrow edit and unsend flags are absent', async () => {
     const sendResult = deferred<{ tempGuid: string }>();
     mockSendText.mockReturnValueOnce(sendResult.promise);

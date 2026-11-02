@@ -56,7 +56,7 @@ export async function pickDocumentFilesForLease(
     const DocumentPicker = await loadPicker();
     if (!accountLease.isCurrent()) return [];
     const res = await DocumentPicker.getDocumentAsync({
-      multiple: !imessageAttachmentOnly,
+      multiple: !imessageAttachmentOnly || imessageRestoredAvailable,
       copyToCacheDirectory: true,
       ...(imessageAttachmentOnly && !imessageRestoredAvailable
         ? {
