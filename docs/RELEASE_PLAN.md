@@ -70,8 +70,12 @@ proof is still owed. The owner approved this
 release on 2026-11-02; the agent submitted with `--execute --confirm` and the exact phrase
 `SUBMIT 0.1.70 v93 67a3ca2e91e4 TO PLAY INTERNAL`; the Maps key came from the login Keychain.
 Android Publisher readback after the submission confirms Internal release `0.1.70`, code `93`,
-`completed`. The phone updates, the HEIC check and the camera proof remain open. No task status or
-frozen v77 checklist row is changed by this Internal release.
+`completed`. Both phones run v93: the Pixel updated in place, but the Samsung was uninstalled by Play
+after repeated propagation-window update failures (error 1010) and needs re-onboarding. **Camera device
+proof on 0.1.70: FAIL.** On the Pixel, a photo taken after `am kill` while Google Camera was in front
+did not come back to the composer, although the patch is present in the installed APK; rn-c1 owns a new
+diagnosis. The HEIC check waits for the server's restored-features switch. No task status or frozen v77
+checklist row is changed by this Internal release.
 
 **Historical v92 artifact, 2026-11-02:** **`0.1.69` / code `92`** was built
 from source `88d26c5827186939a522e12fced3c1633398d5a2` (0.1.68 plus the group-text double fix: a
