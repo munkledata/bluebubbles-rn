@@ -65,6 +65,7 @@ const EXPO_FILE_SYSTEM_VERSION = '57.0.7';
 const EXPO_ROUTER_VERSION = '57.0.24';
 const EXPO_SHARING_VERSION = '57.0.24';
 const REACT_NATIVE_SCREENS_VERSION = '4.26.2';
+const EXPO_MODULES_CORE_VERSION = '57.0.24';
 const REACT_NATIVE_SCREENS_RANGE = '~4.26.0';
 const PATCH_PACKAGE_VERSION = '8.0.1';
 const EXPO_BACKGROUND_TASK_PATCH_PATH = `patches/expo-background-task+${EXPO_BACKGROUND_TASK_VERSION}.patch`;
@@ -125,6 +126,9 @@ const EXPO_ROUTER_EXPERIMENTAL_STACK_PATH =
 const EXPO_SHARING_PATCH_PATH = `patches/expo-sharing+${EXPO_SHARING_VERSION}.patch`;
 const EXPO_SHARING_MODULE_PATH =
   'node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt';
+const EXPO_MODULES_CORE_PATCH_PATH = `patches/expo-modules-core+${EXPO_MODULES_CORE_VERSION}.patch`;
+const EXPO_MODULES_CORE_REGISTRY_PATH =
+  'node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt';
 const REACT_NATIVE_SCREENS_PATCH_PATH = `patches/react-native-screens+${REACT_NATIVE_SCREENS_VERSION}.patch`;
 export const REACT_NATIVE_SCREENS_SOURCE_PATHS = {
   stackContainerSource:
@@ -1129,6 +1133,55 @@ export function validateExpoRouterPredictiveBackBridge({
     }
   }
 
+  return errors;
+}
+
+/**
+ * Android can kill Gator's whole process while the system camera (or another launched app) is in
+ * front. Expo's activity-result registry saved its launch state only in onHostDestroy, which never
+ * runs then, so the photo was dropped on restart. The patch saves the launch when it starts and,
+ * once per process, restores it when a result arrives before the scheduled restore has run.
+ * expo-modules-core has no Android prebuild, so the patched source is what is compiled.
+ */
+export function validateExpoModulesCoreLaunchState({ packageLock, patchSource, registrySource }) {
+  const errors = [];
+  if (
+    packageLock?.packages?.['node_modules/expo-modules-core']?.version !== EXPO_MODULES_CORE_VERSION
+  ) {
+    errors.push(`package-lock must resolve expo-modules-core ${EXPO_MODULES_CORE_VERSION}`);
+  }
+  const patchHeaders =
+    typeof patchSource === 'string'
+      ? [...patchSource.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)]
+      : [];
+  if (
+    patchHeaders.length !== 1 ||
+    patchHeaders[0]?.[1] !== EXPO_MODULES_CORE_REGISTRY_PATH ||
+    patchHeaders[0]?.[2] !== EXPO_MODULES_CORE_REGISTRY_PATH
+  ) {
+    errors.push(`${EXPO_MODULES_CORE_PATCH_PATH} must patch only the activity-result registry`);
+  }
+  const patchMarkers = [
+    '+        persistLaunchState()',
+    '+      persistInstanceState(activity)',
+    '+        if (restoredOnDemand) return false',
+    '+          restoreInstanceState(activity)',
+  ];
+  if (patchMarkers.some((marker) => !patchSource?.includes(marker))) {
+    errors.push(`${EXPO_MODULES_CORE_PATCH_PATH} must carry the reviewed launch-state save`);
+  }
+  const count = (pattern) =>
+    typeof registrySource === 'string' ? (registrySource.match(pattern) ?? []).length : 0;
+  if (
+    count(
+      /launchedKeys\.add\(key\)\s*\/\/[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*persistLaunchState\(\)/g,
+    ) !== 1
+  ) {
+    errors.push('installed expo-modules-core must save the launch state right after a launch');
+  }
+  if (count(/restoredOnDemand = true\s*try \{\s*restoreInstanceState\(activity\)/g) !== 1) {
+    errors.push('installed expo-modules-core must restore a saved launch before dropping a result');
+  }
   return errors;
 }
 
@@ -2545,6 +2598,13 @@ export function runAndroidBuildCheck({
       setupLayoutSource: readFileSync(resolve(root, 'app/(setup)/_layout.tsx'), 'utf8'),
       appLayoutSource: readFileSync(resolve(root, 'app/(app)/_layout.tsx'), 'utf8'),
     }).map((error) => `predictive Back bridge: ${error}`),
+  );
+  errors.push(
+    ...validateExpoModulesCoreLaunchState({
+      packageLock,
+      patchSource: readFileSync(resolve(root, EXPO_MODULES_CORE_PATCH_PATH), 'utf8'),
+      registrySource: readFileSync(resolve(root, EXPO_MODULES_CORE_REGISTRY_PATH), 'utf8'),
+    }).map((error) => `camera launch state: ${error}`),
   );
   errors.push(
     ...validateExpoSharingSelfShareSettlement({

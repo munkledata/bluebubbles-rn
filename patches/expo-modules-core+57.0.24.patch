@@ -1,0 +1,65 @@
+diff --git a/node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt b/node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt
+index a5b971e..15b9147 100644
+--- a/node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt
++++ b/node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt
+@@ -86,6 +86,9 @@ class AppContextActivityResultRegistry(
+ 
+   private val pendingResults = Bundle/*<String, ActivityResult>*/()
+ 
++  /** Gator patch: [dispatchResult] restores the saved launch at most once per process. */
++  private var restoredOnDemand = false
++
+   private val activity: AppCompatActivity
+     get() = requireNotNull(currentActivityProvider.currentActivity as? AppCompatActivity) { "Current Activity is not available at the moment" }
+ 
+@@ -227,6 +230,10 @@ class AppContextActivityResultRegistry(
+         keyToCallbacksAndContract[key] = CallbacksAndContract(fallbackCallback, callback, contract)
+         keyToInputParam[key] = input
+         launchedKeys.add(key)
++        // Gator patch: Android can kill the whole process (not just the Activity) while the
++        // launched app is in front. onHostDestroy never runs then, so save the launch now; the
++        // restarted registry restores it and delivers the result through the fallback callback.
++        persistLaunchState()
+ 
+         try {
+           onLaunch(requestCode, contract, input)
+@@ -240,6 +247,17 @@ class AppContextActivityResultRegistry(
+     }
+   }
+ 
++  /**
++   * Gator patch: best-effort save at launch time, see [register]. Never fails the launch.
++   */
++  private fun persistLaunchState() {
++    try {
++      persistInstanceState(activity)
++    } catch (e: Exception) {
++      Log.w(TAG, "Could not persist the launch state", e)
++    }
++  }
++
+   /**
+    * Persist the state of the registry.
+    */
+@@ -298,7 +316,20 @@ class AppContextActivityResultRegistry(
+    */
+   @MainThread
+   fun dispatchResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+-    val key = requestCodeToKey[requestCode] ?: return false
++    // Gator patch: after a process death the result can arrive before the scheduled
++    // restoreInstanceState has run, so restore the saved launch first (reading it clears it).
++    val key = requestCodeToKey[requestCode]
++      ?: run {
++        if (restoredOnDemand) return false
++        restoredOnDemand = true
++        try {
++          restoreInstanceState(activity)
++        } catch (e: Exception) {
++          Log.w(TAG, "Could not restore the launch state", e)
++        }
++        requestCodeToKey[requestCode]
++      }
++      ?: return false
+     val callbacksAndContract = keyToCallbacksAndContract[key]
+     doDispatch(key, resultCode, data, callbacksAndContract)
+     return true

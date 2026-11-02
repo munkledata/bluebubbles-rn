@@ -34,6 +34,7 @@ import {
   validateExpoFileSystemRedirectContainment,
   validateUploadFilenameBridge,
   validateExpoRouterPredictiveBackBridge,
+  validateExpoModulesCoreLaunchState,
   validateExpoSharingSelfShareSettlement,
   validateExpoTaskManagerPreJsSettlement,
   validateHeadlessEntry,
@@ -374,6 +375,7 @@ const redirectContainmentPackageLock = {
     'node_modules/expo-file-system': { version: '57.0.7' },
     'node_modules/expo-router': { version: '57.0.24' },
     'node_modules/expo-sharing': { version: '57.0.24' },
+    'node_modules/expo-modules-core': { version: '57.0.24' },
     'node_modules/expo-task-manager': { version: '57.0.21' },
     'node_modules/react-native-screens': { version: '4.26.2' },
     'node_modules/unimodules-app-loader': { version: '57.0.2' },
@@ -669,6 +671,47 @@ function uploadFilenameInput() {
   };
 }
 
+const PATCHED_REGISTRY_EXCERPT = `
+        launchedKeys.add(key)
+        // Gator patch: save the launch now.
+        persistLaunchState()
+    val key = requestCodeToKey[requestCode]
+      ?: run {
+        if (restoredOnDemand) return false
+        restoredOnDemand = true
+        try {
+          restoreInstanceState(activity)
+        } catch (e: Exception) {}
+`;
+
+function launchStateInput() {
+  return {
+    packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-modules-core+57.0.24.patch'), 'utf8'),
+    registrySource: PATCHED_REGISTRY_EXCERPT,
+  };
+}
+
+test('camera launch-state guard requires the reviewed expo-modules-core patch', () => {
+  assert.deepEqual(validateExpoModulesCoreLaunchState(launchStateInput()), []);
+
+  const unpatched = launchStateInput();
+  unpatched.registrySource = 'launchedKeys.add(key)\n        try {';
+  assert.equal(validateExpoModulesCoreLaunchState(unpatched).length, 2);
+
+  const emptyPatch = launchStateInput();
+  emptyPatch.patchSource = '';
+  assert.ok(
+    validateExpoModulesCoreLaunchState(emptyPatch).some((m) => m.includes('only the activity')),
+  );
+
+  const upgraded = launchStateInput();
+  upgraded.packageLock = {
+    packages: { 'node_modules/expo-modules-core': { version: '57.0.99' } },
+  };
+  assert.ok(validateExpoModulesCoreLaunchState(upgraded).some((m) => m.includes('must resolve')));
+});
+
 test('upload filename guard rejects missing native wiring, types, validation, or durable patch', () => {
   assert.deepEqual(validateUploadFilenameBridge(uploadFilenameInput()), []);
   for (const field of [
@@ -750,6 +793,9 @@ function taskManagerSettlementInput(overrides = {}) {
 
 const EXPO_SHARING_MODULE_FIXTURE_PATH =
   'node_modules/expo-sharing/android/src/main/java/expo/modules/sharing/SharingModule.kt';
+
+const EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH =
+  'node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt';
 
 function writeRedirectContainmentFixture(root) {
   const input = redirectContainmentInput();
@@ -841,6 +887,12 @@ function writeRedirectContainmentFixture(root) {
     join(root, EXPO_SHARING_MODULE_FIXTURE_PATH),
     readFileSync(join(ROOT, EXPO_SHARING_MODULE_FIXTURE_PATH), 'utf8'),
   );
+  writeFileSync(
+    join(root, 'patches/expo-modules-core+57.0.24.patch'),
+    readFileSync(join(ROOT, 'patches/expo-modules-core+57.0.24.patch'), 'utf8'),
+  );
+  mkdirSync(dirname(join(root, EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH)), { recursive: true });
+  writeFileSync(join(root, EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH), PATCHED_REGISTRY_EXCERPT);
   writeFileSync(
     join(root, 'patches/react-native-screens+4.26.2.patch'),
     readFileSync(join(ROOT, 'patches/react-native-screens+4.26.2.patch'), 'utf8'),
