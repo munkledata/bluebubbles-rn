@@ -54,7 +54,22 @@ The table below deliberately remains frozen to v77 because the operational relea
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.71` / code `94`** was built
+**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.72` / code `95`** was built
+from source `fe8b2448a1109eb856286203e20b1132b2197491` (0.1.71 plus New Message finding the existing
+chat for a number typed but never committed, and Apple group rename, photo, add/remove member and leave
+for the Mac's `any;+;` groups while the server's FP-006 gate is open; push CI run `41474568410` green)
+and promoted as release commit `0cad0d362bb5d6ad8e7951240acdc761d6eb0a10` on local branch
+`release/android-0.1.72`. Run `android-0.1.72-fe8b244-20261102165950` produced
+`gator-release-0.1.72-v95-0cad0d3.aab`, **58,463,897 bytes**, SHA-256
+`39efb1f55f735a9dbcd21f6d299d43940e9742d099c37fb4d663fbb388d40570`. The owner approved this release
+directly on 2026-11-02; the agent submitted with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.72 v95 39efb1f55f73 TO PLAY INTERNAL` (submitted 18:06:07Z); the Maps key came from the
+login Keychain. Android Publisher readback after the submission confirms Internal release `0.1.72`,
+code `95`, `completed`. Known before release and fixed after it: in-bubble video players can run a
+chat with several large videos out of memory (owner's Pixel on 0.1.70). No task status or frozen v77
+checklist row is changed by this Internal release.
+
+**Historical v94 artifact, 2026-11-02:** **`0.1.71` / code `94`** was built
 from source `0d3d7f3646080ab19fa39cb2e8f1d84a0c875648` (0.1.70 plus camera fix part 2: Expo now waits
 for React before handing back a camera result after Android kills Gator, through `patches/expo+57.0.31.patch`
 and a check-android-build guard; proven in a separate probe app before landing; push CI run
