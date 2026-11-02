@@ -54,7 +54,25 @@ The table below deliberately remains frozen to v77 because the operational relea
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.69` / code `92`** was built
+**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.70` / code `93`** was built
+from source `98389d45324c40760420e374da5c709cbe74d0e7` (0.1.69 plus FP-006 part 2: one restored
+iMessage file per send, so HEIC/HEIF as-is, video, GIF, documents up to 100 MiB and pictures in a
+proven group, only while the server's restored switches are on; the camera launch kept across Android
+killing Gator, through an expo-modules-core patch; a one-time retry key on iMessage tapbacks; and the
+Health screen's RCS row wording; push CI run `41380907285` green) and promoted as release commit
+`23cca29452afb1642f9e8b64683474d878ba4b41` on local branch `release/android-0.1.70`.
+Run `android-0.1.70-98389d4-20261102040839` produced `gator-release-0.1.70-v93-23cca29.aab`,
+**58,461,481 bytes**, SHA-256 `67a3ca2e91e4e828f44f3f1d51f85aac6f50a4b2eac7dad882326727019940cc`.
+Before upload, the manually run emulator DB lane failed twice on this source (a different death lane
+each time) and passed on its third attempt; the pre-patch source passed it once. The upload went ahead
+on that green attempt, so the camera patch's device proof is still owed. The owner approved this
+release on 2026-11-02; the agent submitted with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.70 v93 67a3ca2e91e4 TO PLAY INTERNAL`; the Maps key came from the login Keychain.
+Android Publisher readback after the submission confirms Internal release `0.1.70`, code `93`,
+`completed`. The phone updates, the HEIC check and the camera proof remain open. No task status or
+frozen v77 checklist row is changed by this Internal release.
+
+**Historical v92 artifact, 2026-11-02:** **`0.1.69` / code `92`** was built
 from source `88d26c5827186939a522e12fced3c1633398d5a2` (0.1.68 plus the group-text double fix: a
 group iMessage text's own bubble now merges when a sync read stores its copy before the live echo,
 and migration `0059_retire_doubled_text_local_copies` hides the doubles already left on phones;
