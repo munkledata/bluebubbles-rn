@@ -65,7 +65,7 @@ local branch `release/android-0.1.71`. Run `android-0.1.71-0d3d7f3-2026110207060
 directly on 2026-11-02; the agent submitted with `--execute --confirm` and the exact phrase
 `SUBMIT 0.1.71 v94 94553f42e751 TO PLAY INTERNAL`; the Maps key came from the login Keychain. Android
 Publisher readback after the submission confirms Internal release `0.1.71`, code `94`, `completed`.
-The phones are left to update without early Update taps (see the 0.1.70 Samsung reinstall), and the
+The phones are left to update without early Update taps (Play refuses with error 1010 for a while after an upload), and the
 camera device proof in Gator remains open. No task status or frozen v77 checklist row is changed by
 this Internal release.
 
@@ -85,8 +85,9 @@ proof is still owed. The owner approved this
 release on 2026-11-02; the agent submitted with `--execute --confirm` and the exact phrase
 `SUBMIT 0.1.70 v93 67a3ca2e91e4 TO PLAY INTERNAL`; the Maps key came from the login Keychain.
 Android Publisher readback after the submission confirms Internal release `0.1.70`, code `93`,
-`completed`. Both phones run v93: the Pixel updated in place, but the Samsung was uninstalled by Play
-after repeated propagation-window update failures (error 1010) and needs re-onboarding. **Camera device
+`completed`. Both phones run v93: the Pixel updated in place; on the Samsung, after repeated
+propagation-window update failures (error 1010), Gator was uninstalled by hand to get the update
+faster, so it reinstalled fresh and needed re-onboarding. **Camera device
 proof on 0.1.70: FAIL.** On the Pixel, a photo taken after `am kill` while Google Camera was in front
 did not come back to the composer, although the patch is present in the installed APK; rn-c1 owns a new
 diagnosis. The HEIC check waits for the server's restored-features switch. No task status or frozen v77
