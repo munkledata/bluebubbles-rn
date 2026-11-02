@@ -780,8 +780,12 @@ describe('ServerHealthScreen — ordinary presentation and account ownership', (
     }
     expect(screen.getByRole('text', { name: PRIVATE_ENV_VERSION })).toBeTruthy();
     expect(screen.getByRole('text', { name: PRIVATE_FCM_PROJECT })).toBeTruthy();
-    expect(screen.getByRole('text', { name: 'RCS bridge Unknown' })).toBeTruthy();
-    expect(screen.getByText('Could not read RCS bridge status from the server.')).toBeTruthy();
+    expect(screen.getByRole('text', { name: 'RCS bridge No alerts' })).toBeTruthy();
+    expect(
+      screen.getByText(
+        'No RCS problems reported. Gator can’t check the bridge directly, so if RCS messages stop arriving, tap Re-authenticate below.',
+      ),
+    ).toBeTruthy();
 
     const healthKey = client
       .getQueryCache()

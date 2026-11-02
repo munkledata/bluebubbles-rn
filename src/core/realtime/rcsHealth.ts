@@ -39,8 +39,8 @@ export const RCS_ALERT_TYPES = {
 
 /**
  * Derive the Server Health RCS row from the capability flag + the most-recent `rcs-alert`.
- * This is the DEGRADED path — used only when the rich `get-rcs-status` block is unavailable
- * (older server, or the fetch failed).
+ * This is the app's only RCS health source: the rich status block is admin-only, so the app
+ * never fetches it.
  *
  * - `enabled=false` → `off` ("RCS bridge: off").
  * - auth expired → `error`, pointing at the in-app server-owned re-auth action.
@@ -51,13 +51,14 @@ export const RCS_ALERT_TYPES = {
  *   future alert, …) → `ok`. An alert ARRIVING is itself evidence the bridge's event stream is
  *   alive, so this is information, not an assumption. Latest-alert-wins: a recovery alert
  *   naturally clears a prior warning.
- * - NO alert at all → `Unknown`, NOT "Connected".
+ * - NO alert at all → a caution "No alerts", NOT "Connected", and the note says the app cannot
+ *   check the bridge itself and points at Re-authenticate if RCS messages stop.
  *
  * That last case is the fix for a real false-green: the row used to render a confident green
- * "Connected" in the exact situation where the app knows NOTHING — the status fetch failed and
- * no alert has ever arrived. During the 2026-07-23 outage the bridge was stone dead for four
- * days while this surface said Connected, because the alert that would have corrected it is
- * delivered over the very stream that was down. Absence of bad news is not good news.
+ * "Connected" in the exact situation where the app knows NOTHING — no alert has ever arrived.
+ * During the 2026-07-23 outage the bridge was stone dead for four days while this surface said
+ * Connected, because the alert that would have corrected it is delivered over the very stream
+ * that was down. Absence of bad news is not good news.
  */
 export function deriveRcsHealth(
   enabled: boolean,
@@ -70,8 +71,9 @@ export function deriveRcsHealth(
   if (lastAlertType) return { severity: 'ok', status: 'Connected' };
   return {
     severity: 'warn',
-    status: 'Unknown',
-    detail: 'Could not read RCS bridge status from the server.',
+    status: 'No alerts',
+    detail:
+      'No RCS problems reported. Gator can’t check the bridge directly, so if RCS messages stop arriving, tap Re-authenticate below.',
   };
 }
 

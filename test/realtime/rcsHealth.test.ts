@@ -13,11 +13,13 @@ describe('deriveRcsHealth', () => {
   // alert either the app knows literally nothing about the bridge. It used to render a
   // confident green "Connected" there — and did so for the four days of the 2026-07-23 outage,
   // because the alert that would have corrected it travels over the stream that was down.
-  it('reports Unknown — NOT Connected — when enabled with no information at all', () => {
+  it('reports a caution "No alerts" — NOT Connected — when enabled with no information at all', () => {
     const h = deriveRcsHealth(true, null);
     expect(h.severity).toBe('warn');
-    expect(h.status).toBe('Unknown');
-    expect(h.detail).toMatch(/could not read/i);
+    expect(h.status).toBe('No alerts');
+    // Says the app cannot check the bridge itself, and what to do if RCS stops working.
+    expect(h.detail).toMatch(/can’t check the bridge directly/);
+    expect(h.detail).toMatch(/Re-authenticate/);
   });
 
   it('still reports Connected when a benign alert proves the stream is alive', () => {
