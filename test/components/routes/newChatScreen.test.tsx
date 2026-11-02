@@ -591,6 +591,35 @@ describe('NewChatScreen — Start adds to an existing conversation', () => {
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent('any;-;+15559999999')}`);
   });
 
+  it('finds the existing chat for a number typed but never committed, and Start sends into it', async () => {
+    mockFindChat.mockImplementation(async (_db: unknown, addresses: string[]) =>
+      addresses.length === 1 && addresses[0] === '+15559999999'
+        ? [existing('any;-;+15559999999', { latestMessageDate: 1 })]
+        : [],
+    );
+    await renderWithTheme(<NewChatScreen />);
+    // Typed like a person would: ten digits, no country code, no return key, no comma.
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), '5559999999');
+    });
+    await typeMessage('hello');
+    expect(
+      await screen.findByText('Start sends your message to the existing conversation.'),
+    ).toBeTruthy();
+    expect(mockFindChat.mock.calls.at(-1)?.slice(1)).toEqual([['+15559999999'], 'iMessage']);
+
+    await pressStart();
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledTimes(1));
+    expect(mockSend).toHaveBeenCalledWith(
+      { chatGuid: 'any;-;+15559999999', text: 'hello' },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
   it('sends to a group through Open it, which keeps the message as the group’s draft', async () => {
     const now = Date.now();
     mockFindChat.mockResolvedValue([

@@ -316,7 +316,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3",
       "path": "app/(app)/new-chat.tsx",
-      "line": 526,
+      "line": 545,
       "symbol": "NewChatScreen.removeStaged.<callback:381edc2f98>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#discardShareIntakeItem",
@@ -329,7 +329,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.startInFoundRcsChat:mutator-call:3ac19249078d",
       "path": "app/(app)/new-chat.tsx",
-      "line": 758,
+      "line": 763,
       "symbol": "NewChatScreen.startInFoundRcsChat",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#findOrCreateRcsChat",
@@ -342,7 +342,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:c822d7410122",
       "path": "app/(app)/new-chat.tsx",
-      "line": 800,
+      "line": 805,
       "symbol": "NewChatScreen.onStart",
       "operation": "mutator-call",
       "target": "app/(app)/new-chat.tsx#NewChatScreen.startInFoundRcsChat",
@@ -355,7 +355,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart.<callback:aa379435cb>:mutator-call:f07a3220abc4",
       "path": "app/(app)/new-chat.tsx",
-      "line": 843,
+      "line": 848,
       "symbol": "NewChatScreen.onStart.<callback:aa379435cb>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan",
@@ -368,7 +368,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6c241088f98",
       "path": "app/(app)/new-chat.tsx",
-      "line": 882,
+      "line": 887,
       "symbol": "NewChatScreen.onStart",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#createNewChat",
@@ -381,7 +381,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:a5c83a9ee95e",
       "path": "app/(app)/new-chat.tsx",
-      "line": 886,
+      "line": 891,
       "symbol": "NewChatScreen.onStart",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#createNewChat",
@@ -394,7 +394,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345",
       "path": "app/(app)/new-chat.tsx",
-      "line": 957,
+      "line": 962,
       "symbol": "NewChatScreen.<callback:6cde4fbfd5>",
       "operation": "mutator-call",
       "target": "app/(app)/new-chat.tsx#NewChatScreen.onStart",

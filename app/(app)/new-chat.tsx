@@ -454,26 +454,45 @@ export default function NewChatScreen(): React.JSX.Element {
     (c) => !chosen.has(recipientAddressFor(c.address).toLowerCase()),
   );
 
+  // The typed-but-uncommitted address, if it looks like one. Tapping "Start" must honour this:
+  // commitRaw() is only wired to a trailing comma and onSubmitEditing, so a user who types a
+  // number that ISN'T a saved contact and taps Start would otherwise hit `recipients.length > 0`
+  // and get a silent no-op — no navigation, no error. Treating it as a pending recipient makes
+  // Start work for an unsaved number, which is the whole point of a free-text "To:" field.
+  // Raw text → recipient, or null when it isn't addressable / is already chosen. Shared by the
+  // pending-recipient derivation and the comma handler so both agree on what counts.
+  const rawToRecipient = (text: string): Recipient | null => {
+    const raw = text.trim().replace(/,$/, '').trim();
+    if (!looksLikeAddress(raw)) return null;
+    const address = recipientAddressFor(raw);
+    if (chosen.has(address.toLowerCase())) return null;
+    // The chip shows the address Start will use, so a +1 the app assumed is visible.
+    return { address, name: address };
+  };
+
   // Offer local existing chats only where the stored participant is authoritative. Cached RCS
   // participant strings are presentation data (display name, formatted number, or opaque id), so
   // they can never choose a Google conversation; Start uses Google's find/create route.
   // Effect cleanup plus the exact recipient key prevent an older iMessage set from publishing its
   // matches, and the captured account lease prevents a retired route from adopting a result.
-  const recipientKey = JSON.stringify([selectedService, recipients.map((r) => r.address)]);
+  // A single address typed but never committed is looked up too, because typing a number and
+  // tapping Start is the common path; beside committed chips a half-typed address never is.
+  const typedOnlyRecipient = recipients.length === 0 ? rawToRecipient(query) : null;
+  const lookupAddresses = typedOnlyRecipient
+    ? [typedOnlyRecipient.address]
+    : recipients.map((r) => r.address);
+  const recipientKey = JSON.stringify([selectedService, lookupAddresses]);
   useEffect(() => {
     let active = true;
+    const addresses = (JSON.parse(recipientKey) as [string, string[]])[1];
     if (
-      recipients.length === 0 ||
+      addresses.length === 0 ||
       selectedService !== 'iMessage' ||
       accountUnavailable ||
       !accountLease.isCurrent()
     )
       return;
-    void findChatsByParticipantAddresses(
-      getDatabase(),
-      recipients.map((r) => r.address),
-      selectedService,
-    )
+    void findChatsByParticipantAddresses(getDatabase(), addresses, selectedService)
       .then((matches) => {
         if (active && accountLease.isCurrent()) {
           setExistingMatches({ recipientKey, matches });
@@ -487,7 +506,7 @@ export default function NewChatScreen(): React.JSX.Element {
     return () => {
       active = false;
     };
-  }, [accountLease, accountUnavailable, recipients, recipientKey, selectedService]);
+  }, [accountLease, accountUnavailable, recipientKey, selectedService]);
   const matches =
     !accountUnavailable &&
     shareResumeReady &&
@@ -553,22 +572,6 @@ export default function NewChatScreen(): React.JSX.Element {
     }
   };
 
-  // The typed-but-uncommitted address, if it looks like one. Tapping "Start" must honour this:
-  // commitRaw() is only wired to a trailing comma and onSubmitEditing, so a user who types a
-  // number that ISN'T a saved contact and taps Start would otherwise hit `recipients.length > 0`
-  // and get a silent no-op — no navigation, no error. Treating it as a pending recipient makes
-  // Start work for an unsaved number, which is the whole point of a free-text "To:" field.
-  // Raw text → recipient, or null when it isn't addressable / is already chosen. Shared by the
-  // pending-recipient derivation and the comma handler so both agree on what counts.
-  const rawToRecipient = (text: string): Recipient | null => {
-    const raw = text.trim().replace(/,$/, '').trim();
-    if (!looksLikeAddress(raw)) return null;
-    const address = recipientAddressFor(raw);
-    if (chosen.has(address.toLowerCase())) return null;
-    // The chip shows the address Start will use, so a +1 the app assumed is visible.
-    return { address, name: address };
-  };
-
   const pendingRecipient = rawToRecipient(query);
 
   // Committing raw typed text (return key) as a chip, when it looks like an address.
@@ -614,10 +617,12 @@ export default function NewChatScreen(): React.JSX.Element {
   // normal send path: a bubble, the outgoing queue and the exact route's acknowledgement, whose
   // message id merges the Mac's copy. A group's text goes through the server's AppleScript route,
   // which returns no id, so a copy fetched as the chat opens could show twice; a group therefore
-  // uses "Open it", which keeps the message as its draft. A share keeps its own durable path. A
-  // typed but uncommitted address isn't part of the lookup, so it never reaches a found chat.
+  // uses "Open it", which keeps the message as its draft. A share keeps its own durable path. An
+  // uncommitted address reaches a found chat only when it is the sole recipient (it was looked up).
   const choosesExisting =
-    selectedMatch !== null && pendingRecipient === null && initialContent.identity === null;
+    selectedMatch !== null &&
+    (pendingRecipient === null || recipients.length === 0) &&
+    initialContent.identity === null;
   const sendsToExisting =
     choosesExisting &&
     !selectedMatch.isGroup &&
