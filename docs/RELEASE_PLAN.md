@@ -54,7 +54,24 @@ The table below deliberately remains frozen to v77 because the operational relea
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.72` / code `95`** was built
+**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.73` / code `96`** was built
+from source `695d7ffe39157f51b2f06ba12dcda8bbb34b6f93` (0.1.72 plus the video out-of-memory fix: bubble
+posters are made one at a time by a short-lived player and a playback player exists only after a tap,
+after a chat with several large videos crashed the owner's Pixel with `java.lang.OutOfMemoryError`
+six times on 0.1.70; up to ten iMessage files picked at once, uploaded one at a time in pick order;
+and attachment-tray thumbnails loaded from MediaStore `content://` rows instead of file paths; push CI
+run `41510114461` green) and promoted as release commit `dc2b13062f2e04ba625f3548ca42b5d1b836097c` on
+local branch `release/android-0.1.73`. Run `android-0.1.73-695d7ff-20261102205256` produced
+`gator-release-0.1.73-v96-dc2b130.aab`, **58,464,644 bytes**, SHA-256
+`dcb83dbcd9ab6fa0d89640a024898dfd6eca2500677101bb340f8e7e956c9b88`. The owner approved this release
+directly on 2026-11-02 ("ship as 0.1.73"); the agent submitted with `--execute --confirm` and the exact
+phrase `SUBMIT 0.1.73 v96 dcb83dbcd9ab TO PLAY INTERNAL` (submitted 21:41:21Z); the Maps key came from
+the login Keychain. Android Publisher readback after the submission confirms Internal release
+`0.1.73`, code `96`, `completed`. Device proof is still owed: the video-heavy group opens without a
+crash, and the tray's previously blank tiles draw. No task status or frozen v77 checklist row is changed
+by this Internal release.
+
+**Historical v95 artifact, 2026-11-02:** **`0.1.72` / code `95`** was built
 from source `fe8b2448a1109eb856286203e20b1132b2197491` (0.1.71 plus New Message finding the existing
 chat for a number typed but never committed, and Apple group rename, photo, add/remove member and leave
 for the Mac's `any;+;` groups while the server's FP-006 gate is open; push CI run `41474568410` green)
