@@ -66,7 +66,8 @@ directly on 2026-11-02; the agent submitted with `--execute --confirm` and the e
 `SUBMIT 0.1.71 v94 94553f42e751 TO PLAY INTERNAL`; the Maps key came from the login Keychain. Android
 Publisher readback after the submission confirms Internal release `0.1.71`, code `94`, `completed`.
 The phones are left to update without early Update taps (Play refuses with error 1010 for a while after an upload), and the
-camera device proof in Gator remains open. No task status or frozen v77 checklist row is changed by
+camera device proof in Gator **PASSED** on the Samsung: a photo taken after `am kill` while
+Samsung Camera was in front came back to the composer tray after Gator restarted (nothing was sent). No task status or frozen v77 checklist row is changed by
 this Internal release.
 
 **Historical v93 artifact, 2026-11-02:** **`0.1.70` / code `93`** was built
