@@ -66,8 +66,9 @@ CI run `41893476375` failed on `6c4088f`; push CI run `41903573626` green) and p
 asked for this release directly on 2026-11-04 ("release"); the agent submitted with `--execute --confirm`
 and the exact phrase `SUBMIT 0.1.74 v97 cadacd3d046c TO PLAY INTERNAL` (submitted 21:56:09Z); the Maps key
 came from the login Keychain. Android Publisher readback after the submission confirms Internal release
-`0.1.74`, code `97`, `completed`. Device proof is still owed: opening an unread iMessage group on one phone
-produces a `POST /api/v1/chat/<guid>/read` on the server and clears the group elsewhere. No task status or
+`0.1.74`, code `97`, `completed`. Device proof 2026-11-04: both phones updated in place to v97; on the
+Samsung, opening an owner-approved unread iMessage group sent `POST /api/v1/chat/<guid>/read`, which
+the server answered 200 at 23:18:12Z (server-side access log), with no app crash. No task status or
 frozen v77 checklist row is changed by this Internal release.
 
 **Historical v96 artifact, 2026-11-02:** **`0.1.73` / code `96`** was built
