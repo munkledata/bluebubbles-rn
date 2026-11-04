@@ -3646,9 +3646,9 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     markReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markRead.<callback:72c1be0046>.<callback:dc5434bf32>:mutator-call:4c4dd515596f',
-      'src/services/chatActions.ts#markRead.<callback:72c1be0046>:mutator-call:d0229de2b31b',
-      'src/services/chatActions.ts#markRead.<callback:72c1be0046>:mutator-call:c97774fbd806',
+      'src/services/chatActions.ts#markRead.<callback:ad9f8e5a8a>.<callback:dc5434bf32>:mutator-call:e3539954c7b6',
+      'src/services/chatActions.ts#markRead.<callback:ad9f8e5a8a>:mutator-call:66f722ed95e4',
+      'src/services/chatActions.ts#markRead.<callback:ad9f8e5a8a>:mutator-call:f75bcff950ae',
     ].sort(),
   );
   assert.deepEqual(
