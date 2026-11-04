@@ -49,12 +49,28 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.68` / version code `91` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.74` / version code `97` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-02 — not a checklist rebind:** **`0.1.73` / code `96`** was built
+**Latest live artifact, 2026-11-04 — not a checklist rebind:** **`0.1.74` / code `97`** was built
+from source `43d8e1d88c7933fc2b239c2c3537637d43f28a7c` (0.1.73 plus group read markers: `markRead` sends
+a read for `iMessage;+;`/`any;+;` groups only while server info advertises
+`supports_imessage_group_read_state` and Send Read Receipts is on, and the killed-app Mark as read action
+carries the same group answer; plus the scanner exact-set test re-pin for the rekeyed `markRead` ids after
+CI run `41893476375` failed on `6c4088f`; push CI run `41903573626` green) and promoted as release commit
+`fffe30c88a44fdc79ce4a6be6ce7e1830f5b9dea` on local branch `release/android-0.1.74`. Run
+`android-0.1.74-43d8e1d-20261104212130` produced `gator-release-0.1.74-v97-fffe30c.aab`,
+**58,464,251 bytes**, SHA-256 `cadacd3d046c965ec9ffa21e41135bb000b9c0a7b86ba84c9e01612f61d82f77`. The owner
+asked for this release directly on 2026-11-04 ("release"); the agent submitted with `--execute --confirm`
+and the exact phrase `SUBMIT 0.1.74 v97 cadacd3d046c TO PLAY INTERNAL` (submitted 21:56:09Z); the Maps key
+came from the login Keychain. Android Publisher readback after the submission confirms Internal release
+`0.1.74`, code `97`, `completed`. Device proof is still owed: opening an unread iMessage group on one phone
+produces a `POST /api/v1/chat/<guid>/read` on the server and clears the group elsewhere. No task status or
+frozen v77 checklist row is changed by this Internal release.
+
+**Historical v96 artifact, 2026-11-02:** **`0.1.73` / code `96`** was built
 from source `695d7ffe39157f51b2f06ba12dcda8bbb34b6f93` (0.1.72 plus the video out-of-memory fix: bubble
 posters are made one at a time by a short-lived player and a playback player exists only after a tap,
 after a chat with several large videos crashed the owner's Pixel with `java.lang.OutOfMemoryError`
@@ -67,8 +83,9 @@ local branch `release/android-0.1.73`. Run `android-0.1.73-695d7ff-2026110220525
 directly on 2026-11-02 ("ship as 0.1.73"); the agent submitted with `--execute --confirm` and the exact
 phrase `SUBMIT 0.1.73 v96 dcb83dbcd9ab TO PLAY INTERNAL` (submitted 21:41:21Z); the Maps key came from
 the login Keychain. Android Publisher readback after the submission confirms Internal release
-`0.1.73`, code `96`, `completed`. Device proof is still owed: the video-heavy group opens without a
-crash, and the tray's previously blank tiles draw. No task status or frozen v77 checklist row is changed
+`0.1.73`, code `96`, `completed`. Device proof 2026-11-04: on the Pixel the video-heavy group opened,
+scrolled about 40 screens back and played a video with one process the whole time and no `FATAL` or
+`OutOfMemoryError` in logcat; on the Samsung the tray's previously blank tiles measured drawn. No task status or frozen v77 checklist row is changed
 by this Internal release.
 
 **Historical v95 artifact, 2026-11-02:** **`0.1.72` / code `95`** was built
