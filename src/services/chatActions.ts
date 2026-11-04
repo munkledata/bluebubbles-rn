@@ -1,5 +1,5 @@
 import { chatsApi, scheduledApi } from '@core/api';
-import { isIMessageReadStateGuid } from '@core/api/endpoints/chats';
+import { isIMessageReadStateGuid, isValidIMessageGroupGuid } from '@core/api/endpoints/chats';
 import type { HttpClient } from '@core/api/http';
 import { parseRcsChatGuid } from '@core/rcs/providerIdentity';
 import { logger } from '@core/secure';
@@ -937,6 +937,8 @@ export interface ReadReceiptTransport {
    * task sets it because it never hydrates the session; when it is absent, the live session decides.
    */
   readonly imessageReadStateEnabled?: boolean;
+  /** The same server answer for the separate FP-006 iMessage group read-state switch. */
+  readonly imessageGroupReadStateEnabled?: boolean;
 }
 
 export interface MarkReadOptions {
@@ -975,9 +977,13 @@ export function markRead(
   options: MarkReadOptions = {},
 ): Promise<void> {
   const isRcs = chatGuid.startsWith('RCS;-;');
-  const readStateSync = isIMessageReadStateGuid(chatGuid)
-    ? reserveReadStateSync(accountLease.generation, chatGuid)
-    : null;
+  // A group read marker is its own FP-006 switch (supports_imessage_group_read_state); with it
+  // off, a group stays local-only exactly as before.
+  const isIMessageGroup = isValidIMessageGroupGuid(chatGuid);
+  const readStateSync =
+    isIMessageReadStateGuid(chatGuid) || isIMessageGroup
+      ? reserveReadStateSync(accountLease.generation, chatGuid)
+      : null;
   const action = runChatAction(accountLease, async (activeLease) => {
     let receiptTransport: ReadReceiptTransport | null = null;
     let expectedRcsEpoch: string | null = null;
@@ -1027,15 +1033,21 @@ export function markRead(
     );
     assertChatActionLease(activeLease);
     if (!target.chatExists) return;
-    const isIMessage = isIMessageReadStateGuid(chatGuid);
+    const isIMessage = isIMessageReadStateGuid(chatGuid) || isIMessageGroup;
     if (!isRcs && !isIMessage) return;
     // A killed-app notification action never hydrates the session, so the transport it resolves
     // reports the iMessage capability from its own server answer (review M199). Until then, only a
     // caller without such a transport can rule the receipt out from the session.
+    const sessionReadStateEnabled = (): boolean =>
+      isIMessageGroup
+        ? sessionAccessors.imessageGroupReadStateEnabled()
+        : sessionAccessors.imessageReadStateEnabled();
     const imessageReadStateEnabled = (): boolean =>
-      receiptTransport?.imessageReadStateEnabled ?? sessionAccessors.imessageReadStateEnabled();
+      (isIMessageGroup
+        ? receiptTransport?.imessageGroupReadStateEnabled
+        : receiptTransport?.imessageReadStateEnabled) ?? sessionReadStateEnabled();
     const sessionRulesOutIMessage = (): boolean =>
-      !options.resolveReceiptTransport && !sessionAccessors.imessageReadStateEnabled();
+      !options.resolveReceiptTransport && !sessionReadStateEnabled();
     if (isIMessage && sessionRulesOutIMessage()) return;
 
     let fs: FeatureSettings;

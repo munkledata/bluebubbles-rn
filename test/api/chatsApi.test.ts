@@ -147,14 +147,32 @@ describe('chatsApi.markChatRead', () => {
     const post = jest.fn();
     const http = { post } as unknown as HttpClient;
 
-    expect(() => markChatRead(http, 'SMS;-;+1555')).toThrow('RCS or one-to-one iMessage');
-    expect(() => markChatRead(http, 'iMessage;-;')).toThrow('RCS or one-to-one iMessage');
-    expect(() => markChatRead(http, `iMessage;-;${'a'.repeat(1_025)}`)).toThrow(
-      'RCS or one-to-one iMessage',
-    );
-    expect(() => markChatRead(http, 'iMessage;-;+1555\n')).toThrow('RCS or one-to-one iMessage');
+    expect(() => markChatRead(http, 'SMS;-;+1555')).toThrow('RCS or iMessage');
+    expect(() => markChatRead(http, 'iMessage;-;')).toThrow('RCS or iMessage');
+    expect(() => markChatRead(http, `iMessage;-;${'a'.repeat(1_025)}`)).toThrow('RCS or iMessage');
+    expect(() => markChatRead(http, 'iMessage;-;+1555\n')).toThrow('RCS or iMessage');
+    expect(() => markChatRead(http, 'SMS;+;chat1')).toThrow('RCS or iMessage');
+    expect(() => markChatRead(http, 'iMessage;+;')).toThrow('RCS or iMessage');
+    expect(() => markChatRead(http, 'any;+;chat1\u0007')).toThrow('RCS or iMessage');
     expect(() => markChatUnread(http, 'RCS;-;+1555')).toThrow('one-to-one iMessage');
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it('posts an iMessage group read marker once with no automatic retry', async () => {
+    const post = jest.fn(() => Promise.resolve({}));
+    const http = { post } as unknown as HttpClient;
+
+    await markChatRead(http, 'any;+;chat1');
+    await markChatRead(http, 'iMessage;+;chat2');
+    expect(post).toHaveBeenNthCalledWith(1, '/chat/any%3B%2B%3Bchat1/read', expect.anything(), {
+      retry: false,
+    });
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      '/chat/iMessage%3B%2B%3Bchat2/read',
+      expect.anything(),
+      { retry: false },
+    );
   });
 
   it('preserves the supported RCS read marker without enabling retries', async () => {

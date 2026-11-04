@@ -245,6 +245,9 @@ export const sessionAccessors = {
   /** Existing one-to-one iMessage read state only; absent/false always fails closed. */
   imessageReadStateEnabled: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_imessage_read_state === true,
+  /** FP-006 iMessage group read state (its own switch); absent/false always fails closed. */
+  imessageGroupReadStateEnabled: (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_imessage_group_read_state === true,
   /** Whether this server supplies exact RCS success/error attempt correlation. */
   rcsSendAttemptOwnershipSupported: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_rcs_send_attempt_ownership === true,

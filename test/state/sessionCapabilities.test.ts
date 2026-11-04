@@ -21,6 +21,25 @@ describe('sessionAccessors.imessageReadStateEnabled', () => {
   });
 });
 
+describe('sessionAccessors.imessageGroupReadStateEnabled', () => {
+  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
+
+  it('is true only for the explicit FP-006 group read-state switch', () => {
+    expect(sessionAccessors.imessageGroupReadStateEnabled()).toBe(false);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: '2.0.46', supports_imessage_read_state: true }),
+    });
+    expect(sessionAccessors.imessageGroupReadStateEnabled()).toBe(false);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: '2.0.46',
+        supports_imessage_group_read_state: true,
+      }),
+    });
+    expect(sessionAccessors.imessageGroupReadStateEnabled()).toBe(true);
+  });
+});
+
 describe('session transport-scoped server info', () => {
   it('rejects an A -> B -> A stale result, accepts the current revision, and clears info on hydration', () => {
     const originalInfo = ServerInfo.parse({ version: '1.0.0' });

@@ -7,6 +7,8 @@
  *   - RCS read behavior is preserved, while RCS unread never hits the unsupported endpoint;
  *   - iMessage calls require the explicit narrow read-state capability; missing/false fails closed;
  *   - iMessage read also requires a successfully hydrated, enabled read-receipt preference;
+ *   - an iMessage GROUP read uses only its own FP-006 group read-state switch, never the
+ *     one-to-one capability (and vice versa);
  *   - iMessage remote read/unread requests preserve the user's per-chat action order;
  *   - the DB is opened with the lazy `ensureDatabase()`, never the eager `getDatabase()` (this path
  *     is shared with the notification actions, which run with no React tree at all).
@@ -40,6 +42,7 @@ const CURRENT_RCS_CHAT_GUID = `RCS;-;g1.${CURRENT_RCS_PROVIDER_EPOCH}.Y29udmVyc2
 let mockRcsProviderEpoch: string | null = CURRENT_RCS_PROVIDER_EPOCH;
 let mockImessageTypingEnabled = false;
 let mockImessageReadStateEnabled = false;
+let mockImessageGroupReadStateEnabled = false;
 let mockSendTypingIndicators = true;
 let mockSendReadReceipts = true;
 let mockSettingsHydrated = true;
@@ -86,6 +89,7 @@ jest.mock('@state/sessionStore', () => ({
     acceptsRcsChat: () => mockAcceptsRcsChat,
     imessageTypingEnabled: () => mockImessageTypingEnabled,
     imessageReadStateEnabled: () => mockImessageReadStateEnabled,
+    imessageGroupReadStateEnabled: () => mockImessageGroupReadStateEnabled,
   },
 }));
 jest.mock('@core/api', () => ({
@@ -150,6 +154,7 @@ beforeEach(() => {
   mockRcsProviderEpoch = CURRENT_RCS_PROVIDER_EPOCH;
   mockImessageTypingEnabled = false;
   mockImessageReadStateEnabled = false;
+  mockImessageGroupReadStateEnabled = false;
   mockSendTypingIndicators = true;
   mockSendReadReceipts = true;
   mockSettingsHydrated = true;
@@ -1199,4 +1204,107 @@ describe('account-switch containment', () => {
     expect(readMarker(accountB.raw, guid)).toBe('marker-1');
     expect(mockMarkChatUnread).not.toHaveBeenCalled();
   });
+});
+
+describe('markRead for an iMessage group (FP-006 group read state)', () => {
+  const GROUP_GUID = 'any;+;chat123456789';
+
+  async function seedGroup(guid = GROUP_GUID) {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }, { address: 'b@x.com' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid, participants: [{ address: 'a@x.com' }, { address: 'b@x.com' }] })],
+      hm,
+    );
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'group-m1', text: 'hi', isFromMe: false, dateCreated: 1000 })],
+      () => chatId,
+      hm,
+    );
+    return raw;
+  }
+
+  it('sends the group read marker once the group switch is on', async () => {
+    const raw = await seedGroup();
+    mockImessageGroupReadStateEnabled = true;
+
+    await markRead(GROUP_GUID);
+
+    expect(readMarker(raw, GROUP_GUID)).toBe('group-m1');
+    expect(mockMarkChatRead).toHaveBeenCalledTimes(1);
+    expect(mockMarkChatRead).toHaveBeenCalledWith({ __http: true }, GROUP_GUID);
+  });
+
+  it('keeps a group read local while only the one-to-one capability is on', async () => {
+    const raw = await seedGroup();
+    mockImessageReadStateEnabled = true;
+    mockImessageGroupReadStateEnabled = false;
+
+    await markRead(GROUP_GUID);
+
+    expect(readMarker(raw, GROUP_GUID)).toBe('group-m1');
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps a group read local when read receipts are off', async () => {
+    const raw = await seedGroup();
+    mockImessageGroupReadStateEnabled = true;
+    mockSendReadReceipts = false;
+
+    await markRead(GROUP_GUID);
+
+    expect(readMarker(raw, GROUP_GUID)).toBe('group-m1');
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps the local group marker when the server refuses the group read', async () => {
+    const raw = await seedGroup();
+    mockImessageGroupReadStateEnabled = true;
+    mockMarkChatRead.mockRejectedValueOnce(new Error('invalid target'));
+
+    await expect(markRead(GROUP_GUID)).resolves.toBeUndefined();
+
+    expect(readMarker(raw, GROUP_GUID)).toBe('group-m1');
+  });
+
+  it('does not let the group switch enable a one-to-one read', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    await seedChat(db, guid);
+    mockImessageGroupReadStateEnabled = true;
+    mockImessageReadStateEnabled = false;
+
+    await markRead(guid);
+
+    expect(readState(raw, guid).marker).toBeNull();
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { group: true, direct: false, sends: true },
+    { group: false, direct: true, sends: false },
+    { group: undefined, direct: true, sends: false },
+  ])(
+    'a killed-process group read follows its own group answer (group $group, direct $direct → $sends)',
+    async ({ group, direct, sends }) => {
+      const raw = await seedGroup();
+      const killedProcessHttp = { __http: 'vault' } as never;
+      const resolveReceiptTransport = jest.fn(async () => ({
+        http: killedProcessHttp,
+        isCurrent: () => true,
+        imessageReadStateEnabled: direct,
+        ...(group === undefined ? {} : { imessageGroupReadStateEnabled: group }),
+      }));
+
+      await markRead(GROUP_GUID, undefined, { resolveReceiptTransport });
+
+      expect(readMarker(raw, GROUP_GUID)).toBe('group-m1');
+      expect(mockMarkChatRead.mock.calls).toEqual(sends ? [[killedProcessHttp, GROUP_GUID]] : []);
+    },
+  );
 });

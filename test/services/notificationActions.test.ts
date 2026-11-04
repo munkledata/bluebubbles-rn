@@ -624,6 +624,46 @@ describe('handleNotificationAction — mark-read', () => {
   );
 });
 
+describe('handleNotificationAction — group mark read', () => {
+  it.each([
+    { supports: true, enabled: true },
+    { supports: false, enabled: false },
+    { supports: undefined, enabled: false },
+  ])(
+    'gives a killed-process group read its own group server answer ($supports → $enabled)',
+    async ({ supports, enabled }) => {
+      const taskHttp = { __taskHttp: 'mark-read', isTransportCurrent: () => true };
+      let resolvedTransport: unknown;
+      mockCaptureCapability.mockReturnValueOnce(undefined);
+      mockFixedClient.mockReturnValueOnce(taskHttp);
+      mockInspectSession.mockResolvedValueOnce({
+        kind: 'ready',
+        session: { origin: 'https://vault.example', password: 'vault-secret' },
+      });
+      (serverApi.serverInfo as jest.Mock).mockResolvedValueOnce({
+        version: 'test',
+        private_api: false,
+        rcs: false,
+        // The one-to-one switch is on, so only the group switch can decide a group receipt.
+        supports_imessage_read_state: true,
+        ...(supports === undefined ? {} : { supports_imessage_group_read_state: supports }),
+      });
+      mockMarkRead.mockImplementationOnce(async (...args: unknown[]) => {
+        const options = args[2] as { resolveReceiptTransport?: () => Promise<unknown> };
+        resolvedTransport = await options.resolveReceiptTransport?.();
+      });
+
+      await handleNotificationAction(
+        safeChatDetail(ACTION_MARK_READ, { chatGuid: 'any;+;chat123456789' }),
+      );
+
+      expect(resolvedTransport).toEqual(
+        expect.objectContaining({ http: taskHttp, imessageGroupReadStateEnabled: enabled }),
+      );
+    },
+  );
+});
+
 describe('handleNotificationAction — love (tapback)', () => {
   it('ignores an iMessage Love action even under injected private_api:true', async () => {
     await handleNotificationAction(

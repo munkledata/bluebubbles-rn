@@ -136,6 +136,7 @@ async function resolveNotificationActionTransport(
     acceptsRcsChat: (guid: string) => isCurrent() && isCurrentRcsChatGuid(info, guid),
     // Killed-app Mark as read has no hydrated session, so this server answer decides (review M199).
     imessageReadStateEnabled: info.supports_imessage_read_state === true,
+    imessageGroupReadStateEnabled: info.supports_imessage_group_read_state === true,
   });
 }
 

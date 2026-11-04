@@ -200,10 +200,18 @@ export function isIMessageReadStateGuid(guid: string): boolean {
   return bytes.byteLength <= MAX_IMESSAGE_READ_STATE_GUID_BYTES && utf8Decode(bytes) === guid;
 }
 
-/** POST /api/v1/chat/{guid}/read — propagate one supported RCS/iMessage read marker. */
+/**
+ * POST /api/v1/chat/{guid}/read — propagate one supported RCS/iMessage read marker. An iMessage
+ * group is accepted here only by shape; callers send one only while the server's FP-006
+ * `supports_imessage_group_read_state` switch is on, and the server proves the exact group again.
+ */
 export function markChatRead(http: HttpClient, guid: string): Promise<unknown> {
-  if (!guid.startsWith('RCS;-;') && !isIMessageReadStateGuid(guid)) {
-    throw new Error('Remote read markers require an RCS or one-to-one iMessage conversation.');
+  if (
+    !guid.startsWith('RCS;-;') &&
+    !isIMessageReadStateGuid(guid) &&
+    !isValidIMessageGroupGuid(guid)
+  ) {
+    throw new Error('Remote read markers require an RCS or iMessage conversation.');
   }
   return http.post(`/chat/${encodeURIComponent(guid)}/read`, z.unknown(), { retry: false });
 }
