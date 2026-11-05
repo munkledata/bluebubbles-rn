@@ -512,6 +512,48 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
   );
 });
 
+describe('Composer — the keyboard stays up while a send is admitted', () => {
+  it('keeps the box editable during a pending send and keeps text typed after the sent copy', async () => {
+    const admission = deferred<boolean>();
+    const onSend = jest.fn(() => admission.promise);
+    const onDraftChange = jest.fn();
+    await renderWithTheme(<Composer onSend={onSend} onDraftChange={onDraftChange} />);
+    await fireEvent.changeText(input(), 'first');
+    await fireEvent.press(screen.getByLabelText('Send message'));
+
+    // A read-only box closes many Android keyboards after every send.
+    expect(input().props.editable).toBe(true);
+    await fireEvent.changeText(input(), 'first and more');
+    // A second press while the first send is still being admitted sends nothing new.
+    await fireEvent.press(screen.getByLabelText('Send message'));
+    expect(onSend).toHaveBeenCalledTimes(1);
+
+    await act(async () => admission.resolve(true));
+
+    await waitFor(() => expect(input().props.value).toBe(' and more'));
+    expect(onDraftChange).toHaveBeenLastCalledWith(' and more');
+  });
+
+  it('still clears the box when nothing was typed during the send', async () => {
+    const admission = deferred<boolean>();
+    await renderWithTheme(<Composer onSend={jest.fn(() => admission.promise)} />);
+    await fireEvent.changeText(input(), 'only this');
+    await fireEvent.press(screen.getByLabelText('Send message'));
+    await act(async () => admission.resolve(true));
+    await waitFor(() => expect(input().props.value).toBe(''));
+  });
+
+  it('leaves a box changed in another way exactly as it is', async () => {
+    const admission = deferred<boolean>();
+    await renderWithTheme(<Composer onSend={jest.fn(() => admission.promise)} />);
+    await fireEvent.changeText(input(), 'original');
+    await fireEvent.press(screen.getByLabelText('Send message'));
+    await fireEvent.changeText(input(), 'rewritten');
+    await act(async () => admission.resolve(true));
+    await waitFor(() => expect(input().props.value).toBe('rewritten'));
+  });
+});
+
 describe('Composer — unsaved-state report', () => {
   it('reports only when the state changes, so typing does not re-render the chat screen', async () => {
     const onRemovalStateChange = jest.fn();

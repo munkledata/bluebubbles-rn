@@ -1150,7 +1150,9 @@ export const Composer = React.memo(function Composer({
         ) : null}
         <TextInput
           ref={inputRef}
-          editable={active && !submissionPending && !scheduleSaving}
+          // Stays editable while a send is admitted: a read-only box makes many Android keyboards
+          // close after every send. A second send is still blocked by the submission guard.
+          editable={active}
           multiline
           value={text}
           onChangeText={changeText}

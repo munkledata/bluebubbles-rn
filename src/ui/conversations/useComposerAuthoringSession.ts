@@ -289,17 +289,26 @@ export function useComposerAuthoringSession({
       }
 
       if (textAdmitted) {
-        // An edit restores the ordinary draft it displaced; a new send consumes that draft.
-        const postText = isEditing ? preEditRef.current : '';
+        // An edit restores the ordinary draft it displaced; a new send consumes only the text it
+        // sent. The box stays editable while a send is admitted, so anything typed after that
+        // copy is kept (and a box changed in any other way is left exactly as it is).
+        const latest = draftStateRef.current.text;
+        const postText = isEditing
+          ? preEditRef.current
+          : latest === capturedAuthoredText
+            ? ''
+            : latest.startsWith(capturedAuthoredText)
+              ? latest.slice(capturedAuthoredText.length)
+              : latest;
         if (mountedRef.current) {
           setText(postText);
         }
         if (typingTimer.current) clearTimeout(typingTimer.current);
         if (draftTimer.current) clearTimeout(draftTimer.current);
-        if (!isEditing) onDraftChange?.('');
+        if (!isEditing) onDraftChange?.(postText);
         // Keep an immediate unmount from restoring the admitted text before React rerenders.
         draftStateRef.current = { ...draftStateRef.current, text: postText };
-        emitTyping(false);
+        if (!postText) emitTyping(false);
       } else if (capturedAuthoredText !== draftStateRef.current.text) {
         // A render may not have committed between the user's final keystroke and this submit.
         // Preserve the exact submitted copy for the unmount flush when admission failed.
