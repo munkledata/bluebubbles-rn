@@ -7473,6 +7473,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6c241088f98',
       'app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3',
       'app/(app)/new-chat.tsx#NewChatScreen.startInFoundRcsChat:mutator-call:3ac19249078d',
+      'app/(app)/new-chat.tsx#NewChatScreen:mutator-reference:5ff858b14288',
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4f80cbb6f44f',
       'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
@@ -7596,7 +7597,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 132);
+  assert.equal(selected.length, 133);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

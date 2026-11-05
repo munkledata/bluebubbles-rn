@@ -171,6 +171,7 @@ import {
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 // eslint-disable-next-line import/first
 import { MAX_RCS_ATTACHMENT_UPLOAD_BYTES, ServerInfo } from '@core/models';
 // eslint-disable-next-line import/first
@@ -591,6 +592,45 @@ describe('NewChatScreen — Start adds to an existing conversation', () => {
     expect(mockCreateNewChat).not.toHaveBeenCalled();
     expect(mockNavigateWithoutPrompt).toHaveBeenCalledTimes(1);
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent('any;-;+15559999999')}`);
+  });
+
+  it('with Send with Return on, Return in the message box starts it like the Start button', async () => {
+    mockFindChat.mockResolvedValue([existing('any;-;+15559999999', { latestMessageDate: 1 })]);
+    useFeatureSettingsStore.setState({ sendWithReturn: true });
+    try {
+      await renderWithTheme(<NewChatScreen />);
+      await addRecipient('+15559999999');
+      await typeMessage('hello');
+      expect(
+        await screen.findByText('Start sends your message to the existing conversation.'),
+      ).toBeTruthy();
+      expect(screen.getByPlaceholderText('Message').props.submitBehavior).toBe('submit');
+
+      await act(async () => {
+        fireEvent(screen.getByPlaceholderText('Message'), 'submitEditing');
+      });
+
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledTimes(1));
+      expect(mockSend).toHaveBeenCalledWith(
+        { chatGuid: 'any;-;+15559999999', text: 'hello' },
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+        expect.any(Function),
+        expect.any(Function),
+      );
+    } finally {
+      useFeatureSettingsStore.setState({ sendWithReturn: false });
+    }
+  });
+
+  it('with Send with Return off, Return in the message box is a newline and sends nothing', async () => {
+    mockFindChat.mockResolvedValue([existing('any;-;+15559999999', { latestMessageDate: 1 })]);
+    useFeatureSettingsStore.setState({ sendWithReturn: false });
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15559999999');
+    await typeMessage('hello');
+    expect(screen.getByPlaceholderText('Message').props.submitBehavior).toBe('newline');
+    expect(screen.getByPlaceholderText('Message').props.onSubmitEditing).toBeUndefined();
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   it('finds the existing chat for a number typed but never committed, and Start sends into it', async () => {

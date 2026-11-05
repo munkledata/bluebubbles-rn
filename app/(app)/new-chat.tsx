@@ -40,6 +40,7 @@ import { logger } from '@core/secure';
 import { consumeForwardAttachmentHandoff } from '@features/conversations/forwardAttachmentHandoff';
 import { observeQueueAdmission } from '@features/conversations/observeQueueAdmission';
 import { useContactSearch } from '@features/contacts/useContactSearch';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useRcsMutationEnabled, useSessionStore } from '@state/sessionStore';
 import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
 import { Icon, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
@@ -793,6 +794,8 @@ export default function NewChatScreen(): React.JSX.Element {
     await startInExistingChat(chatGuid);
   };
 
+  const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
+
   const onStart = async (): Promise<void> => {
     const recipient = effectiveRecipients[0];
     if (
@@ -1302,6 +1305,10 @@ export default function NewChatScreen(): React.JSX.Element {
               if (!screenInteractionIsCurrent()) return;
               setMessage(text);
             }}
+            // "Send with Return", as in the chat composer: Enter starts the conversation (onStart
+            // applies the same checks as the Start button) instead of inserting a newline.
+            submitBehavior={sendWithReturn ? 'submit' : 'newline'}
+            onSubmitEditing={sendWithReturn ? onStart : undefined}
             placeholder="Message"
             placeholderTextColor={theme.color.tertiaryLabel}
             multiline
