@@ -433,7 +433,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:1e716ab98ac5",
       "path": "app/(app)/server-management.tsx",
-      "line": 320,
+      "line": 321,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialReplacement",
@@ -446,7 +446,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:f08dd1db40ef",
       "path": "app/(app)/server-management.tsx",
-      "line": 321,
+      "line": 322,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade",
@@ -459,7 +459,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.confirmDiscardCredential.onConfirm:mutator-call:ffe1420d9aaf",
       "path": "app/(app)/server-management.tsx",
-      "line": 507,
+      "line": 508,
       "symbol": "ServerManagementScreen.confirmDiscardCredential.onConfirm",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential",
@@ -472,7 +472,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796",
       "path": "app/(app)/server-management.tsx",
-      "line": 515,
+      "line": 516,
       "symbol": "ServerManagementScreen.onDiscardCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate",
@@ -485,7 +485,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.<callback:7bf4151522>:mutator-call:6b73b09a1510",
       "path": "app/(app)/server-management.tsx",
-      "line": 885,
+      "line": 890,
       "symbol": "ServerManagementScreen.<callback:7bf4151522>",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential",
@@ -498,7 +498,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onDisconnect.onPress:mutator-call:d4cf58af3ec2",
       "path": "app/(app)/settings.tsx",
-      "line": 251,
+      "line": 252,
       "symbol": "SettingsScreen.onDisconnect.onPress",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#forget",
@@ -511,7 +511,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>:mutator-call:ac9fcd609606",
       "path": "app/(app)/settings.tsx",
-      "line": 294,
+      "line": 295,
       "symbol": "SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#rotateDatabaseKey",
