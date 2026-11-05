@@ -32,7 +32,7 @@
  */
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
-import { ClientErrorCode, formatSeparatorDate } from '@utils';
+import { ClientErrorCode, formatSeparatorDate, SERVER_UNREACHABLE_HINT } from '@utils';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import type { AttachmentRow } from '@db/repositories';
 
@@ -400,6 +400,26 @@ describe('MessageList — failed-message flow', () => {
       'x',
       expect.objectContaining({ isCurrent: expect.any(Function) }),
     );
+  });
+
+  it('a send that never reached the server shows what to check when the server gave no reason', async () => {
+    const messages = [
+      make({
+        id: 1,
+        guid: 'x',
+        text: 'oops',
+        isFromMe: 1,
+        sendState: 'error',
+        error: ClientErrorCode.connectionRefused,
+        errorMessage: null,
+      }),
+    ];
+    await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-x'));
+    expect(await screen.findByTestId('sheet')).toBeTruthy();
+    expect(screen.getByTestId('sheet-detail').props.children).toBe(SERVER_UNREACHABLE_HINT);
   });
 
   it('a failed RCS photo retries from its durable queue row', async () => {

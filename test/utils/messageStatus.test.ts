@@ -1,5 +1,12 @@
 import type { MessageRow } from '@db/repositories';
-import { deliveredQuietly, errorTitleForCode, sendErrorCode, statusFor } from '@utils';
+import {
+  deliveredQuietly,
+  errorHintForCode,
+  errorTitleForCode,
+  SERVER_UNREACHABLE_HINT,
+  sendErrorCode,
+  statusFor,
+} from '@utils';
 import {
   ClientErrorCode,
   isDeliveryUnconfirmedError,
@@ -94,7 +101,7 @@ describe('errorTitleForCode (2.4)', () => {
     expect(errorTitleForCode(10001)).toBe('Client Error');
     expect(errorTitleForCode(10002)).toBe('Bad Gateway');
     expect(errorTitleForCode(10003)).toBe('Network Timed Out');
-    expect(errorTitleForCode(10004)).toBe('Connection Refused');
+    expect(errorTitleForCode(10004)).toBe('Couldn’t Reach Server');
     expect(errorTitleForCode(10005)).toBe('Not Found');
     expect(errorTitleForCode(10006)).toBe('Edit Failed');
     expect(errorTitleForCode(10007)).toBe('Unsend Failed');
@@ -145,7 +152,22 @@ describe('sendErrorCode', () => {
   it('treats a missing HTTP status (network failure) as connectionRefused', () => {
     // Previously collapsed to -1 ("Message Failed to Send"); now a specific title.
     expect(sendErrorCode(null)).toBe(ClientErrorCode.connectionRefused);
-    expect(errorTitleForCode(sendErrorCode(null))).toBe('Connection Refused');
+    expect(errorTitleForCode(sendErrorCode(null))).toBe('Couldn’t Reach Server');
+  });
+});
+
+describe('errorHintForCode', () => {
+  it('says what to check when the server never answered or the proxy timed out', () => {
+    expect(errorHintForCode(sendErrorCode(null))).toBe(SERVER_UNREACHABLE_HINT);
+    expect(errorHintForCode(ClientErrorCode.gatewayTimeout)).toBe(SERVER_UNREACHABLE_HINT);
+  });
+
+  it('adds nothing where the server or the device explains the failure itself', () => {
+    expect(errorHintForCode(ClientErrorCode.badGateway)).toBeNull();
+    expect(errorHintForCode(ClientErrorCode.attachmentUnreadable)).toBeNull();
+    expect(errorHintForCode(500)).toBeNull();
+    expect(errorHintForCode(null)).toBeNull();
+    expect(errorHintForCode(undefined)).toBeNull();
   });
 });
 

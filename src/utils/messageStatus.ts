@@ -85,7 +85,9 @@ const CLIENT_ERROR_TITLES: Record<number, string> = {
   [ClientErrorCode.clientError]: 'Client Error',
   [ClientErrorCode.badGateway]: 'Bad Gateway',
   [ClientErrorCode.gatewayTimeout]: 'Network Timed Out',
-  [ClientErrorCode.connectionRefused]: 'Connection Refused',
+  // No HTTP answer at all (fetch threw, aborted, DNS): the phone never reached the server, so the
+  // server did not "refuse" anything. Say what happened and let the sheet's hint say what to check.
+  [ClientErrorCode.connectionRefused]: 'Couldn’t Reach Server',
   [ClientErrorCode.notFound]: 'Not Found',
   [ClientErrorCode.editFailed]: 'Edit Failed',
   [ClientErrorCode.unsendFailed]: 'Unsend Failed',
@@ -143,6 +145,20 @@ export function errorTitleForCode(
     return `${serviceName} Error (Code ${code})`;
   }
   return 'Message Failed to Send';
+}
+
+/** What to check when a send never got an answer from the server. */
+export const SERVER_UNREACHABLE_HINT =
+  'Check that this phone is online and that the Mac running Gator is on and connected, then try again.';
+
+/**
+ * A short "what to check" line for the failed-message sheet, for failures where the server gave no
+ * explanation of its own: no answer at all, or a proxy timeout. Null for every other code.
+ */
+export function errorHintForCode(code: number | null | undefined): string | null {
+  return code === ClientErrorCode.connectionRefused || code === ClientErrorCode.gatewayTimeout
+    ? SERVER_UNREACHABLE_HINT
+    : null;
 }
 
 /**

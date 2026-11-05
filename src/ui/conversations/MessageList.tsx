@@ -20,6 +20,7 @@ import type { EnrichedMessage } from '@features/conversations/useMessages';
 import {
   ClientErrorCode,
   chatServiceFromGuid,
+  errorHintForCode,
   initialPinState,
   isDeliveryUnconfirmedError,
   isFinalOneShotError,
@@ -562,7 +563,8 @@ export function MessageList({
             (failed?.hasAttachments === 1 || failedImage !== undefined)
           )
         }
-        errorDetail={failed?.errorMessage}
+        // The server's own explanation wins; with none (no answer at all), say what to check.
+        errorDetail={failed?.errorMessage ?? errorHintForCode(failed?.error)}
         onClose={() => setFailedGuid(null)}
         onRetry={() => {
           // The GUID is all `retry` needs — it re-POSTs the queue payload under the same temp id.
