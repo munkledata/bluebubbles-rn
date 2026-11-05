@@ -205,6 +205,7 @@ jest.mock('@ui', () => {
     ThreadSheet: () => null,
     EditHistorySheet: () => null,
     MessageDetailsSheet: () => null,
+    SelectTextSheet: () => null,
     showToast: jest.fn(),
   };
 });

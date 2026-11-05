@@ -57,6 +57,7 @@ import {
   EditHistorySheet,
   MessageActionsOverlay,
   MessageDetailsSheet,
+  SelectTextSheet,
   MessageList,
   Screen,
   ScreenEffectOverlay,
@@ -349,6 +350,9 @@ function ChatScreenInner({
     details,
     setDetails,
     onDetailsSelected,
+    textSelection,
+    setTextSelection,
+    onSelectTextSelected,
     onLongPressMessage,
     onSwipeReply,
     onReplyToSelected,
@@ -1063,6 +1067,7 @@ function ChatScreenInner({
         onRemindLater={onRemindLater}
         onCancelSend={onCancelSelected}
         onCopy={onCopySelected}
+        onSelectText={onSelectTextSelected}
         {...(imessageRepliesAvailable ? { onReply: onReplyToSelected } : {})}
         {...(imessageEditsAvailable ? { onEdit: onEditSelected } : {})}
         {...(imessageUnsendsAvailable ? { onUnsend: onUnsendSelected } : {})}
@@ -1091,6 +1096,7 @@ function ChatScreenInner({
         onClose={() => setDetails(null)}
         chatService={displayService}
       />
+      <SelectTextSheet text={textSelection?.text ?? null} onClose={() => setTextSelection(null)} />
       {screenEffect.effect ? (
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />
       ) : null}

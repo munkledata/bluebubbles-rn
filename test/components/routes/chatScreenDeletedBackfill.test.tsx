@@ -62,6 +62,7 @@ jest.mock('@ui', () => {
     ThreadSheet: () => null,
     EditHistorySheet: () => null,
     MessageDetailsSheet: () => null,
+    SelectTextSheet: () => null,
   };
 });
 jest.mock('@ui/theme/ChatThemeProvider', () => ({

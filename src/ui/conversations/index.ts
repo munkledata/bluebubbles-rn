@@ -14,6 +14,7 @@ export * from './ReplyQuote';
 export * from './MessageActionsOverlay';
 export * from './ThreadSheet';
 export * from './EditHistorySheet';
+export * from './SelectTextSheet';
 export * from './MessageDetailsSheet';
 export * from './UrlPreviewCard';
 export * from './TypingBubble';

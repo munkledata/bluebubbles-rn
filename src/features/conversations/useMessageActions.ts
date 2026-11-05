@@ -626,6 +626,35 @@ export function useMessageActions({
     if (currentSelectedMessage() && selected) setDetails(selected);
   };
 
+  // "Select Text": the message's text (the same text Copy takes) in a sheet where any part of it
+  // can be selected. It keeps the message's retraction proof, so an unsend or edit arriving while
+  // it is open closes it rather than leaving old text on screen.
+  const [textSelection, setTextSelection] = useState<{
+    guid: string;
+    text: string;
+    fingerprint: string;
+  } | null>(null);
+  const onSelectTextSelected = (): void => {
+    const current = currentSelectedMessage();
+    if (!current) return;
+    const text = actionContentOf(current).bodyText || current.text;
+    if (!text?.trim()) return;
+    setTextSelection({ guid: current.guid, text, fingerprint: retractionFingerprintOf(current) });
+  };
+  useEffect(() => {
+    if (!textSelection) return;
+    const current = messages.find((message) => message.guid === textSelection.guid);
+    if (
+      current &&
+      !isAggregateRetractionTombstone(current) &&
+      retractionFingerprintOf(current) === textSelection.fingerprint
+    ) {
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTextSelection(null);
+  }, [messages, textSelection]);
+
   // Multi-select mode: null = off; a Set of selected guids while active. Entered from the
   // long-press menu's "Select" (seeded with that message); exited via Done or after a bulk action.
   const [selectedGuids, setSelectedGuids] = useState<Set<string> | null>(null);
@@ -1045,6 +1074,9 @@ export function useMessageActions({
     details,
     setDetails,
     onDetailsSelected,
+    textSelection,
+    setTextSelection,
+    onSelectTextSelected,
     onLongPressMessage,
     ...(imessageRepliesAvailable ? { onSwipeReply, onReplyToSelected } : {}),
     ...(imessageEditsAvailable ? { onEditSelected } : {}),

@@ -102,6 +102,8 @@ interface MessageActionsOverlayProps {
   onCancelSend: () => void;
   /** Copy the message text to the clipboard. */
   onCopy: () => void;
+  /** Open the message text in a sheet where any part of it can be selected. */
+  onSelectText?: () => void;
   /** Start a plain-text reply to exact message part zero. */
   onReply?: () => void;
   /** Start a plain-text edit of exact message part zero. */
@@ -156,6 +158,7 @@ export function MessageActionsOverlay({
   onRemindLater,
   onCancelSend,
   onCopy,
+  onSelectText,
   onReply,
   onEdit,
   onUnsend,
@@ -343,6 +346,9 @@ export function MessageActionsOverlay({
     actions.push({ key: 'reply', label: 'Reply', onPress: onReply });
   }
   if (hasText) actions.push({ key: 'copy', label: 'Copy', onPress: onCopy });
+  if (onSelectText && hasText) {
+    actions.push({ key: 'select-text', label: 'Select Text', onPress: onSelectText });
+  }
   if (onForward && (hasText || hasAttachments))
     actions.push({ key: 'forward', label: 'Forward', onPress: onForward });
   const senderAddress = selected?.senderAddress?.trim();

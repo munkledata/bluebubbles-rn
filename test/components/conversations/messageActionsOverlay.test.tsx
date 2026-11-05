@@ -139,7 +139,10 @@ function makeSelected(
 
 async function renderOverlay(
   selected: SelectedMessage,
-  h: ReturnType<typeof handlers> & { onMessageSender?: jest.Mock } = handlers(),
+  h: ReturnType<typeof handlers> & {
+    onMessageSender?: jest.Mock;
+    onSelectText?: jest.Mock;
+  } = handlers(),
 ) {
   await renderWithTheme(<MessageActionsOverlay selected={selected} {...h} />);
   return h;
@@ -361,6 +364,31 @@ describe('MessageActionsOverlay — narrow edit + read-only history', () => {
     await renderOverlay(makeSelected({ isFromMe: true, sendState: 'sending' }));
     expect(screen.queryByText('Delete')).toBeNull();
     expect(screen.getByText('Cancel Sending')).toBeTruthy();
+  });
+});
+
+describe('MessageActionsOverlay — Select Text', () => {
+  it('opens the text for selection, then closes the menu', async () => {
+    const onSelectText = jest.fn();
+    const h = await renderOverlay(makeSelected({ text: 'hello world' }), {
+      ...handlers(),
+      onSelectText,
+    });
+    await pressAndFlush(screen.getByText('Select Text'), () =>
+      expect(onSelectText).toHaveBeenCalledTimes(1),
+    );
+    expect(h.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('is offered only when the message has text', async () => {
+    await renderOverlay(
+      makeSelected({
+        text: null,
+        attachments: [{ guid: 'a1', localPath: null, mimeType: 'image/jpeg' }],
+      }),
+      { ...handlers(), onSelectText: jest.fn() },
+    );
+    expect(screen.queryByText('Select Text')).toBeNull();
   });
 });
 
