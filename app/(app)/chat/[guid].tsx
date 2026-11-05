@@ -69,6 +69,7 @@ import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProv
 import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
+import { EdgeFade } from '@ui/conversations/EdgeFade';
 import { useTypingStore } from '@state/typingStore';
 import { isGroupRow, resolveChatDisplayService, resolveChatService } from '@utils';
 
@@ -701,8 +702,8 @@ function ChatScreenInner({
   const kbVisible = useKeyboardVisible();
 
   // Wallpaper mode: the header/composer float transparent over the image and the list runs UNDER
-  // them, with BAR_GAP-padded content insets so resting messages clear the bars (scrolled-past
-  // messages show through behind the transparent bars). Bar heights are measured (onLayout) since
+  // them, with BAR_GAP-padded content insets so resting messages clear the bars, and EdgeFade
+  // veils dissolve scrolled-past messages into the bar zones instead of hard-clipping them. Bar heights are measured (onLayout) since
   // both vary (insets, reply bar, typing bubble) — and the wrappers are measured in BOTH
   // modes, so real heights already exist by the time the (async, reactive) wallpaper flag flips
   // the styles. The estimates only cover the very first frames of a cold mount.
@@ -968,8 +969,9 @@ function ChatScreenInner({
             first render; a participant-set background can also land mid-chat), so branching element
             types here would remount the whole subtree on the flip — wiping the composer draft,
             staged attachments, and list scroll position.
-            Stacking: the header wrapper precedes the list in flow order, so the absolute bars need
-            zIndex 2 to sit above the in-flow list instead of being z-buried under it.
+            Stacking: the bars need zIndex 2 above the EdgeFade veils (zIndex 1), which sit above the
+            in-flow list; the header wrapper precedes the list in flow order, so sibling order alone
+            would z-bury it.
             The absolute bars hang off the unpadded stage view, so the keyboard inset (KAV
             padding) shrinks the stage and the composer rides up with it. */}
         <View style={styles.flex}>
@@ -983,6 +985,22 @@ function ChatScreenInner({
             {unreadChipNode}
           </View>
           {listNode}
+          {hasWallpaper ? (
+            <>
+              <EdgeFade
+                edge="top"
+                height={topBar + EDGE_FADE}
+                holdHeight={topBar}
+                color={theme.color.background}
+              />
+              <EdgeFade
+                edge="bottom"
+                height={bottomBar + EDGE_FADE}
+                holdHeight={bottomBar}
+                color={theme.color.background}
+              />
+            </>
+          ) : null}
           <View
             style={hasWallpaper ? styles.overlayBottom : null}
             onLayout={(e) => setBottomBarH(e.nativeEvent.layout.height)}
@@ -1064,6 +1082,9 @@ function ChatScreenInner({
 // the wallpaper (added to the measured bar height for the list's content inset).
 const BAR_GAP = 28;
 
+// Height of the dissolve band the messages fade across, past the bar zone itself.
+const EDGE_FADE = 28;
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   hiddenComposer: { display: 'none' },
@@ -1078,8 +1099,8 @@ const styles = StyleSheet.create({
   // Placeholder while the first message page loads, so the list mounts already-populated
   // (see messagesLoading) — occupies the list's slot so the layout doesn't jump on arrival.
   listLoading: { alignItems: 'center', justifyContent: 'center' },
-  // Wallpaper mode: bars float over the full-height list instead of framing it. The bars precede
-  // the list in flow order, so zIndex 2 keeps the bar chrome above the in-flow list (0).
+  // Wallpaper mode: bars float over the full-height list instead of framing it. zIndex 2 keeps
+  // the bar chrome above the EdgeFade veils (zIndex 1), which sit above the in-flow list (0).
   overlayTop: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2 },
   overlayBottom: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 2 },
   errorBanner: {

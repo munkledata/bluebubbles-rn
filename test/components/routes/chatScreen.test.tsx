@@ -26,7 +26,7 @@
  */
 import '../support/chatScreenServiceMocks';
 import React from 'react';
-import { AppState } from 'react-native';
+import { AppState, StyleSheet } from 'react-native';
 import { renderWithTheme, screen, act, fireEvent, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import type { ChatSearchResultRow } from '@db/repositories';
@@ -2938,6 +2938,43 @@ describe('ChatScreen — wallpaper chrome flip', () => {
     expect(mockCaptured.composer!.__instance).toBe(firstComposerInstance);
     expect(mockCaptured.list!.onLongPressMessage).toBe(firstLongPress);
     expect(mockCaptured.composer!.onSend).toBe(firstSend);
+  });
+
+  // The edge veils dissolve messages into the transparent header/composer zones of a wallpaper
+  // chat. They exist only with a wallpaper, never take touches, and hold the bar zones' heights.
+  it('adds the top and bottom edge fades only while a wallpaper shows', async () => {
+    type Node = { props?: Record<string, unknown>; children?: unknown[] | null };
+    const veils = (tree: unknown): Record<string, unknown>[] => {
+      const found: Record<string, unknown>[] = [];
+      const walk = (node: unknown): void => {
+        if (!node || typeof node !== 'object') return;
+        if (Array.isArray(node)) return node.forEach(walk);
+        const { props, children } = node as Node;
+        const style = StyleSheet.flatten(props?.style as never) as Record<string, unknown> | null;
+        if (style?.experimental_backgroundImage) found.push({ ...style, ...props });
+        children?.forEach(walk);
+      };
+      walk(tree);
+      return found;
+    };
+
+    const plain = await renderWithTheme(<ChatScreen />);
+    expect(veils(plain.toJSON())).toHaveLength(0);
+    await act(async () => plain.unmount());
+
+    useChatBackgroundUriMock.mockReturnValue(PRIVATE_WALLPAPER_URI);
+    const view = await renderWithTheme(<ChatScreen />);
+    const found = veils(view.toJSON());
+    expect(found).toHaveLength(2);
+    for (const veil of found) {
+      expect(veil.pointerEvents).toBe('none');
+      expect(veil.zIndex).toBe(1);
+      expect(veil.height).toEqual(expect.any(Number));
+    }
+    expect(found.map((veil) => ('top' in veil ? 'top' : 'bottom')).sort()).toEqual([
+      'bottom',
+      'top',
+    ]);
   });
 
   it('removes the wallpaper on the next render after the mounted account lease is revoked', async () => {

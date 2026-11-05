@@ -121,7 +121,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:8ad712352d>.<callback:60008a07b1>:mutator-call:61c25c93f19c",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 251,
+      "line": 252,
       "symbol": "ChatScreenInner.<callback:8ad712352d>.<callback:60008a07b1>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
@@ -134,7 +134,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>:mutator-call:3e3d348f4c24",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 290,
+      "line": 291,
       "symbol": "ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
@@ -147,7 +147,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:4369ee0c83>.<callback:70c7fd292e>:mutator-call:5a63826cf1db",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 483,
+      "line": 484,
       "symbol": "ChatScreenInner.<callback:4369ee0c83>.<callback:70c7fd292e>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
