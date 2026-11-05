@@ -6,14 +6,19 @@ import { isLocalFileUri } from '@utils';
 import { useTheme } from '../theme';
 import { useAttachmentCachePathProtection } from '../attachments/useAttachmentCachePathProtection';
 
-/** A single attachment thumbnail in the shared-media strip (image preview or kind glyph). */
-function MediaThumb({
+/**
+ * A single attachment thumbnail (image preview or kind glyph): the Details strip, and the grid on
+ * the All Attachments page (which passes its own `size` and a long-press menu).
+ */
+export function MediaThumb({
   att,
   kind,
   glyph,
   position,
   total,
   onPress,
+  onLongPress,
+  size,
 }: {
   att: AttachmentRow;
   kind: 'photo' | 'video';
@@ -21,6 +26,9 @@ function MediaThumb({
   position: number;
   total: number;
   onPress?: () => void;
+  onLongPress?: () => void;
+  /** Square side in points; the strip's default is 72 with a right gap. */
+  size?: number;
 }): React.JSX.Element {
   const theme = useTheme();
   // expo-image can't decode a video file, so a video renders ONLY its blurhash poster (no file
@@ -40,14 +48,19 @@ function MediaThumb({
   return (
     <Pressable
       onPress={safeOnPress}
-      disabled={!safeOnPress}
+      onLongPress={onLongPress}
+      disabled={!safeOnPress && !onLongPress}
       // `secondaryBackground`, NOT `groupedBackground`: in 3 of the 5 presets (OLED Dark, Nord,
       // and the default Gator) groupedBackground is byte-identical to `background`, so the tile
       // vanished into the page and a poster-less video rendered as a bare ▶ floating on nothing.
       // Seen on device in Shared Media: "Photos · 60" showed real thumbnails while "Videos · 12"
       // showed five naked play arrows. secondaryBackground is distinct from background in EVERY
       // preset, so the fallback (and an undownloaded photo) always reads as a tile.
-      style={[styles.thumb, { backgroundColor: theme.color.secondaryBackground }]}
+      style={[
+        styles.thumb,
+        size != null && { width: size, height: size, marginRight: 0 },
+        { backgroundColor: theme.color.secondaryBackground },
+      ]}
       accessibilityRole="imagebutton"
       accessibilityLabel={`Shared ${kind} ${position} of ${total}`}
       accessibilityState={{ disabled: !safeOnPress }}

@@ -30,6 +30,7 @@ jest.mock('react-native-safe-area-context', () => ({
 const documentRow: ChatDocumentRow = {
   id: 1,
   guid: 'private-document-guid',
+  messageGuid: 'private-message-guid',
   messageId: 10,
   mimeType: 'application/pdf',
   transferName: 'private-report.pdf',

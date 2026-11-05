@@ -1,7 +1,7 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { Attachment } from '@core/models';
 import { STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
-import { firstUrl, INLINE_IMAGE_MIME_TYPES, mediaSection } from '@utils';
+import { firstUrl, INLINE_IMAGE_MIME_TYPES, mediaSection, type MediaSection } from '@utils';
 import { attachments, chats, messages, outgoingQueue } from '../schema';
 import {
   runInTransactionContext,
@@ -471,9 +471,11 @@ export interface ChatMediaByKind {
 /** Number of additional shared documents requested by each explorer pagination step. */
 export const CHAT_DOCUMENT_PAGE_SIZE = 50;
 
-/** A visible non-photo/video attachment plus its stable conversation ordering key. */
+/** A visible attachment plus its message and its stable conversation ordering key. */
 export interface ChatDocumentRow extends AttachmentRow {
   dateCreated: number | null;
+  /** The message this attachment belongs to, for "Show in Chat". */
+  messageGuid: string;
 }
 
 /** A bounded newest-first prefix for the Shared Documents explorer. */
@@ -482,29 +484,44 @@ export interface ChatDocumentPage {
   hasMore: boolean;
 }
 
+/** Which kind of attachment a paged read returns. Every user file is exactly one of these. */
+export type ChatAttachmentPageKind = MediaSection;
+
+function validChatPageRequest(chatGuid: string, limit: number): boolean {
+  return (
+    chatGuid.length > 0 &&
+    chatGuid.length <= 4096 &&
+    Number.isSafeInteger(limit) &&
+    limit > 0 &&
+    limit % CHAT_DOCUMENT_PAGE_SIZE === 0 &&
+    limit < Number.MAX_SAFE_INTEGER
+  );
+}
+
+function attachmentKindSql(kind: ChatAttachmentPageKind) {
+  if (kind === 'photo') return sql`LOWER(COALESCE(a.mime_type, '')) IN (${inlineImageMimeList()})`;
+  if (kind === 'video') return sql`LOWER(COALESCE(a.mime_type, '')) GLOB 'video/*'`;
+  return sql`LOWER(COALESCE(a.mime_type, '')) NOT IN (${inlineImageMimeList()})
+      AND LOWER(COALESCE(a.mime_type, '')) NOT GLOB 'video/*'`;
+}
+
 /**
- * Visible documents for one chat, newest-first.
+ * Visible attachments of one kind for one chat, newest-first: the paged "All Attachments" tabs and
+ * the Shared Documents explorer.
  *
- * The explorer grows this bounded prefix by exactly {@link CHAT_DOCUMENT_PAGE_SIZE} rows. Fetching
- * one extra row proves whether more remain without running an unbounded COUNT. This is deliberately
+ * Callers grow this bounded prefix by exactly {@link CHAT_DOCUMENT_PAGE_SIZE} rows. Fetching one
+ * extra row proves whether more remain without running an unbounded COUNT. This is deliberately
  * separate from `listChatAttachmentsByKind`: that lightweight mixed-media strip scans only a
- * recent window and can miss an old document behind a photo-heavy conversation.
+ * recent window and can miss an old file behind a photo-heavy conversation. The kinds use the same
+ * lowercased MIME tests, so each visible file appears in exactly one tab.
  */
-export async function listChatDocumentAttachmentsPage(
+export async function listChatAttachmentsPage(
   db: AppDatabase,
   chatGuid: string,
+  kind: ChatAttachmentPageKind,
   limit = CHAT_DOCUMENT_PAGE_SIZE,
 ): Promise<ChatDocumentPage> {
-  if (
-    chatGuid.length === 0 ||
-    chatGuid.length > 4096 ||
-    !Number.isSafeInteger(limit) ||
-    limit <= 0 ||
-    limit % CHAT_DOCUMENT_PAGE_SIZE !== 0 ||
-    limit >= Number.MAX_SAFE_INTEGER
-  ) {
-    return { items: [], hasMore: false };
-  }
+  if (!validChatPageRequest(chatGuid, limit)) return { items: [], hasMore: false };
 
   const rows = await db.all<ChatDocumentRow>(sql`
     SELECT
@@ -515,7 +532,7 @@ export async function listChatDocumentAttachmentsPage(
       a.emoji_image_content_identifier AS emojiImageContentIdentifier,
       a.emoji_image_short_description AS emojiImageShortDescription,
       a.local_path AS localPath, ${RCS_SERVICE_CASE} AS service,
-      m.date_created AS dateCreated
+      m.date_created AS dateCreated, m.guid AS messageGuid
     FROM attachments a
     JOIN messages m ON m.id = a.message_id
     JOIN chats c ON c.id = m.chat_id
@@ -526,13 +543,65 @@ export async function listChatDocumentAttachmentsPage(
       AND a.is_retracted = 0
       AND ${attachmentIsUserFileSql('a', 'm')}
       AND ${messageVisibleInChatSql('m', 'c')}
-      AND LOWER(COALESCE(a.mime_type, '')) NOT IN (${inlineImageMimeList()})
-      AND LOWER(COALESCE(a.mime_type, '')) NOT GLOB 'video/*'
+      AND ${attachmentKindSql(kind)}
     ORDER BY (m.date_created IS NULL) ASC, m.date_created DESC, a.id DESC
     LIMIT ${limit + 1}
   `);
 
   return { items: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+
+/** Visible documents for one chat, newest-first. See {@link listChatAttachmentsPage}. */
+export function listChatDocumentAttachmentsPage(
+  db: AppDatabase,
+  chatGuid: string,
+  limit = CHAT_DOCUMENT_PAGE_SIZE,
+): Promise<ChatDocumentPage> {
+  return listChatAttachmentsPage(db, chatGuid, 'document', limit);
+}
+
+/** A bounded newest-first prefix of a chat's shared links. */
+export interface ChatLinkPage {
+  items: ChatLink[];
+  hasMore: boolean;
+}
+
+/**
+ * Shared links for one chat, newest-first, one entry per URL (its most recent message).
+ *
+ * The prefix is counted in candidate MESSAGES, not links: the read scans at most `limit + 1`
+ * visible text messages that mention "http", so a page can hold fewer than `limit` links when some
+ * repeat or don't parse. `hasMore` is exact for that message prefix, and growing `limit` always
+ * reaches older messages.
+ */
+export async function listChatLinksPage(
+  db: AppDatabase,
+  chatGuid: string,
+  limit = CHAT_DOCUMENT_PAGE_SIZE,
+): Promise<ChatLinkPage> {
+  if (!validChatPageRequest(chatGuid, limit)) return { items: [], hasMore: false };
+
+  const rows = await db.all<{ guid: string; text: string | null; dateCreated: number | null }>(sql`
+    SELECT m.guid, m.text, m.date_created AS dateCreated
+    FROM messages m
+    JOIN chats c ON c.id = m.chat_id
+    WHERE c.guid = ${chatGuid}
+      AND ${chatVisible('c')}
+      AND m.text LIKE '%http%'
+      AND ${messageVisibleInChatSql('m', 'c')}
+      AND m.associated_message_type IS NULL
+    ORDER BY (m.date_created IS NULL) ASC, m.date_created DESC, m.id DESC
+    LIMIT ${limit + 1}
+  `);
+  const seen = new Set<string>();
+  const items: ChatLink[] = [];
+  for (const r of rows.slice(0, limit)) {
+    const url = firstUrl(r.text);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    items.push({ url, messageGuid: r.guid, dateCreated: r.dateCreated });
+  }
+  return { items, hasMore: rows.length > limit };
 }
 
 /**

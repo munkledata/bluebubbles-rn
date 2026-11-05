@@ -34,6 +34,7 @@ function page(count: number, hasMore: boolean): ChatDocumentPage {
     items: Array.from({ length: count }, (_, index) => ({
       id: index + 1,
       guid: `document-${index + 1}`,
+      messageGuid: `message-${index + 1}`,
       messageId: index + 100,
       mimeType: 'application/pdf',
       transferName: `document-${index + 1}.pdf`,

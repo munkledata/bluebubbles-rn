@@ -177,6 +177,8 @@ interface SharedDocumentRowProps {
   attachment: ChatDocumentRow;
   accountLease: ReturnType<typeof captureRealtimeDeliveryLease>;
   screenIsCurrent: () => boolean;
+  /** Optional menu (the All Attachments page offers "Show in Chat"). */
+  onLongPress?: () => void;
 }
 
 /** Full-width file action row used by the virtualized Shared Documents explorer. */
@@ -184,6 +186,7 @@ export function SharedDocumentRow({
   attachment,
   accountLease,
   screenIsCurrent,
+  onLongPress,
 }: SharedDocumentRowProps): React.JSX.Element {
   const theme = useTheme();
   const status = useDownloadStore((state) => state.status[attachment.guid]);
@@ -268,8 +271,9 @@ export function SharedDocumentRow({
 
   return (
     <Pressable
-      onPress={onPress}
-      disabled={disabled}
+      onPress={disabled ? undefined : onPress}
+      onLongPress={onLongPress}
+      disabled={disabled && !onLongPress}
       accessible
       accessibilityRole="button"
       accessibilityLabel={`${action} ${attachment.transferName ?? 'file'}`}
