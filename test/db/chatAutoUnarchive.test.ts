@@ -262,3 +262,28 @@ describe('only messages this batch adds can bring a chat back (independent revie
     expect(chatRow(t, chat.guid).archived).toBe(1);
   });
 });
+
+describe('sync writes and archived_at (release-owner review)', () => {
+  it('a sync insert of a chat the server reports archived is stamped, and a re-sync leaves it', async () => {
+    const t = await createTestDb();
+    const handles = await upsertHandles(t.db, [{ address: ADDRESS }]);
+    const guid = 'iMessage;-;synced-archived';
+    const chat = Chat.parse({
+      guid,
+      style: 45,
+      isArchived: true,
+      participants: [{ address: ADDRESS }],
+    });
+    const before = Date.now();
+    await upsertChats(t.db, [chat], handles);
+    const stamped = chatRow(t, guid);
+    expect(stamped.archived).toBe(1);
+    expect(stamped.archivedAt).toBeGreaterThanOrEqual(before - 1_000);
+
+    // Pin the stamp, then re-sync: is_archived is device-local, so the conflict path never rewrites
+    // it and the update trigger must not fire.
+    t.raw.prepare('UPDATE chats SET archived_at = ? WHERE guid = ?').run(ARCHIVED_AT, guid);
+    await upsertChats(t.db, [Chat.parse({ ...chat, isArchived: false })], handles);
+    expect(chatRow(t, guid)).toMatchObject({ archived: 1, archivedAt: ARCHIVED_AT });
+  });
+});
