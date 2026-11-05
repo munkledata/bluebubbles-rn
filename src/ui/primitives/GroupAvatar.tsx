@@ -16,7 +16,8 @@ interface GroupAvatarProps {
 
 /**
  * The group's own photo when it has one; otherwise two overlapped member avatars (back top-left,
- * front bottom-right).
+ * front bottom-right). Each member shows only their OWN photo or initials, and fewer than two
+ * people draw one full-size avatar, so the same face never appears twice.
  */
 export function GroupAvatar({
   names,
@@ -31,9 +32,14 @@ export function GroupAvatar({
       <Avatar name={names[0] ?? '?'} size={size} uri={photoUri} color={colors?.[0] ?? undefined} />
     );
   }
+  if (names.length < 2) {
+    return (
+      <Avatar name={names[0] ?? '?'} size={size} uri={uris?.[0]} color={colors?.[0] ?? undefined} />
+    );
+  }
   const inner = Math.round(size * 0.66);
   const back = names[0] ?? '?';
-  const front = names[1] ?? names[0] ?? '?';
+  const front = names[1] ?? '?';
 
   return (
     <View style={{ width: size, height: size }}>
@@ -46,12 +52,7 @@ export function GroupAvatar({
           { borderColor: theme.color.background, borderRadius: (inner + 4) / 2 },
         ]}
       >
-        <Avatar
-          name={front}
-          size={inner}
-          uri={uris?.[1] ?? uris?.[0]}
-          color={colors?.[1] ?? colors?.[0] ?? undefined}
-        />
+        <Avatar name={front} size={inner} uri={uris?.[1]} color={colors?.[1] ?? undefined} />
       </View>
     </View>
   );

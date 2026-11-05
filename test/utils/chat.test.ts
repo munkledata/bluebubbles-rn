@@ -262,3 +262,34 @@ describe('participantList / participantAvatars / participantColors', () => {
     expect(primaryParticipantColor('|||#AABBCC')).toBe('#AABBCC');
   });
 });
+
+describe('dedupeParticipantDetails', () => {
+  it('merges one person whose second address has no contact photo, keeping the photo', () => {
+    // Photo on the later row: the earlier, photo-less row adopts it.
+    expect(
+      dedupeParticipantDetails(['Sam', 'Sam'], [null, 'file:///sam.jpg'], [null, '#112233']),
+    ).toEqual({ names: ['Sam'], uris: ['file:///sam.jpg'], colors: ['#112233'] });
+    // Photo on the earlier row: the photo-less duplicate folds in.
+    expect(
+      dedupeParticipantDetails(['Sam', 'Bob', 'Sam'], ['file:///sam.jpg', null, null], []),
+    ).toEqual({
+      names: ['Sam', 'Bob'],
+      uris: ['file:///sam.jpg', null],
+      colors: [null, null],
+    });
+  });
+
+  it('keeps two different photos under one name apart, and never merges blank names', () => {
+    expect(
+      dedupeParticipantDetails(['Chris', 'Chris'], ['file:///a.jpg', 'file:///b.jpg'], []).names,
+    ).toEqual(['Chris', 'Chris']);
+    expect(dedupeParticipantDetails(['', ''], ['file:///a.jpg', null], []).names).toEqual(['', '']);
+  });
+
+  it('still merges rows that share a photo or an exact name and photo', () => {
+    expect(
+      dedupeParticipantDetails(['Sam', 'Sam S'], ['file:///sam.jpg', 'file:///sam.jpg'], []).names,
+    ).toEqual(['Sam']);
+    expect(dedupeParticipantDetails(['Bob', 'Bob'], [null, null], []).names).toEqual(['Bob']);
+  });
+});

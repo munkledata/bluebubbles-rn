@@ -1,9 +1,9 @@
 /**
  * GroupAvatar (src/ui/primitives/GroupAvatar.tsx): two overlapped Avatars for a group chat —
- * back = names[0], front = names[1] (falling back to names[0] when there's only one). Callers
- * feed it the already-collapsed participant list (see dedupeParticipants in src/utils/chat.ts,
- * which collapses one person reachable via multiple handles); GroupAvatar itself just draws the
- * first two entries it's given.
+ * back = names[0], front = names[1], each with only its OWN photo. Fewer than two names draw one
+ * full-size Avatar. Callers feed it the already-collapsed participant list (see
+ * dedupeParticipantDetails in src/utils/chat.ts, which collapses one person reachable via
+ * multiple handles); GroupAvatar itself just draws the first two entries it's given.
  */
 import React from 'react';
 import { StyleSheet } from 'react-native';
@@ -83,18 +83,29 @@ describe('GroupAvatar', () => {
     expect(view.root!.queryAll((node) => node.type === 'Image')).toHaveLength(2);
   });
 
-  it('reuses the sole name for both tiles when only one participant is given', async () => {
-    const view = await renderWithTheme(<GroupAvatar names={['Solo']} />);
-    expect(screen.getAllByText('S')).toHaveLength(2); // back AND front fall back to names[0]
+  it('draws ONE full-size avatar when only one participant is given', async () => {
+    const view = await renderWithTheme(<GroupAvatar names={['Solo']} size={64} />);
+    expect(screen.getAllByText('S')).toHaveLength(1); // never the same person twice
 
-    await view.rerender(<GroupAvatar names={['Solo']} uris={['file:///solo.jpg']} />);
-    expect(
-      view.root!.queryAll((node) => node.type === 'Image').map((image) => image.props.source),
-    ).toEqual([{ uri: 'file:///solo.jpg' }, { uri: 'file:///solo.jpg' }]);
+    await view.rerender(<GroupAvatar names={['Solo']} uris={['file:///solo.jpg']} size={64} />);
+    const photo = view.root!;
+    expect(photo.type).toBe('Image');
+    expect(photo.props.source).toEqual({ uri: 'file:///solo.jpg' });
+    expect(StyleSheet.flatten(photo.props.style)).toMatchObject({ width: 64, height: 64 });
   });
 
-  it('falls back to "?" for both tiles with an empty participant list', async () => {
+  it("never borrows the first member's photo for a second member without one", async () => {
+    const view = await renderWithTheme(
+      <GroupAvatar names={['Alice', 'Bob']} uris={['file:///alice.jpg', null]} />,
+    );
+    expect(
+      view.root!.queryAll((node) => node.type === 'Image').map((image) => image.props.source),
+    ).toEqual([{ uri: 'file:///alice.jpg' }]);
+    expect(screen.getByText('B')).toBeTruthy(); // Bob shows his own initials
+  });
+
+  it('falls back to one "?" avatar with an empty participant list', async () => {
     await renderWithTheme(<GroupAvatar names={[]} />);
-    expect(screen.getAllByText('?')).toHaveLength(2);
+    expect(screen.getAllByText('?')).toHaveLength(1);
   });
 });

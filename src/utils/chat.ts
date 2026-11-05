@@ -305,7 +305,14 @@ export interface ParticipantDetails {
   colors: (string | null)[];
 }
 
-/** Collapse participant rows while retaining aligned avatar colors for the surviving handles. */
+/**
+ * Collapse participant rows while retaining aligned avatar colors for the surviving handles.
+ *
+ * One person reached through two addresses can carry their contact photo on one handle row and none
+ * on the other. Such rows share a name, so a named row merges into an earlier same-name row when
+ * either one lacks a photo, and the photo is kept. Two DIFFERENT photos under one name stay
+ * separate, and blank names never merge by name.
+ */
 export function dedupeParticipantDetails(
   names: string[],
   uris: (string | null)[],
@@ -313,16 +320,25 @@ export function dedupeParticipantDetails(
 ): ParticipantDetails {
   const seen = new Map<string, number>();
   const seenUris = new Map<string, number>();
+  const seenNames = new Map<string, number>();
   const outNames: string[] = [];
   const outUris: (string | null)[] = [];
   const outColors: (string | null)[] = [];
   names.forEach((name, i) => {
     const uri = uris[i] ?? null;
     const key = JSON.stringify([name, uri]); // collision-proof + printable (keeps the file text)
-    const existingIndex = uri != null ? (seenUris.get(uri) ?? seen.get(key)) : seen.get(key);
+    let existingIndex = uri != null ? (seenUris.get(uri) ?? seen.get(key)) : seen.get(key);
+    if (existingIndex == null && name.trim().length > 0) {
+      const sameName = seenNames.get(name);
+      if (sameName != null && (uri == null || outUris[sameName] == null)) existingIndex = sameName;
+    }
     if (existingIndex != null) {
-      // Duplicate handle for the same person: keep the first identity/photo ordering, but do not
-      // lose a valid color merely because the earlier service variant omitted it.
+      // Duplicate handle for the same person: keep the first identity ordering, adopt a photo the
+      // earlier variant lacked, and do not lose a valid color merely because it omitted one.
+      if (outUris[existingIndex] == null && uri != null) {
+        outUris[existingIndex] = uri;
+        seenUris.set(uri, existingIndex);
+      }
       if (outColors[existingIndex] == null && colors[i] != null) {
         outColors[existingIndex] = colors[i]!;
       }
@@ -331,6 +347,7 @@ export function dedupeParticipantDetails(
     const nextIndex = outNames.length;
     seen.set(key, nextIndex);
     if (uri != null) seenUris.set(uri, nextIndex);
+    if (name.trim().length > 0 && !seenNames.has(name)) seenNames.set(name, nextIndex);
     outNames.push(name);
     outUris.push(uri);
     outColors.push(colors[i] ?? null);
