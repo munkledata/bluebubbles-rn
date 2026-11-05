@@ -615,7 +615,7 @@ export default function SettingsScreen(): React.JSX.Element {
               disabled={!secureScreen.available}
               accessibilityLabel="Block Android screenshots and screen recording"
             />
-            <NoteRow text="App Lock blocks protected routes and keeps their content out of Android Recents, including during its grace period. Enabling it clears displayed notifications; new message notices stay generic while it is enabled, including after unlock. Generic scheduled reminders are preserved. Secure Screen separately blocks screenshots and screen recording. Neither setting makes the database key biometric-bound or encrypts files." />
+            <NoteRow text="App Lock hides your chats behind your fingerprint, face or PIN, and keeps them out of the recent-apps screen. While it is on, notifications only say that a message arrived, even after you unlock, and turning it on clears the ones already showing. Reminders still arrive. Secure Screen separately blocks screenshots and screen recording. Neither setting adds encryption: your fingerprint or PIN does not protect the database key or your files." />
             <NavRow
               label="Reminders"
               color="label"
@@ -664,7 +664,7 @@ export default function SettingsScreen(): React.JSX.Element {
               onValueChange={(v) => savePrivacyFlag('sendReadReceipts', v)}
               accessibilityLabel="Let others see when you have read their messages on supported services"
             />
-            <NoteRow text="These preferences apply only when the connected messaging service supports them. They do not enable retired Private API features." />
+            <NoteRow text="These work only when your server supports them." />
           </SettingsSection>
         )}
 
@@ -773,7 +773,7 @@ export default function SettingsScreen(): React.JSX.Element {
                   dimmed={!autoDownload}
                 />
               ))}
-              <NoteRow text="Images always appear in chats. Tap Photos gallery or Gator album to grant the required Photos access. Gator remembers a queued Photos or Gator Album copy and retries it on a later eligible foreground activation. Changing this choice or turning off auto-download cancels queued copies that have not started; a copy Android is already saving may still finish." />
+              <NoteRow text="Images always appear in chats. Choosing Photos gallery or Gator album asks for Photos access. If a copy can't be saved right away, Gator tries again the next time you open the app. Changing this choice or turning off auto-download cancels copies that haven't started yet; one Android is already saving may still finish." />
             </SettingsSection>
           </>
         )}
@@ -805,10 +805,7 @@ export default function SettingsScreen(): React.JSX.Element {
               accessibilityLabel="Allow Gator to send redacted error reports to your connected server"
             />
             <NoteRow text="Off by default. While off, Gator does not queue or send error reports, and any queued reports are deleted. Your connected server must also support report uploads." />
-            <NavRow
-              label="Storage & File Privacy…"
-              onPress={() => router.push('/storage-privacy')}
-            />
+            <NavRow label="Privacy & Storage…" onPress={() => router.push('/storage-privacy')} />
             <NavRow
               label="Download Integrity…"
               onPress={() => router.push('/download-integrity')}
@@ -862,11 +859,10 @@ export default function SettingsScreen(): React.JSX.Element {
             <InfoRow label="Server" value={visibleOrigin ?? '—'} />
             <InfoRow label="Server Version" value={visibleServerInfo?.server_version ?? '—'} />
             <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? '—'} />
-            <InfoRow label="Private API" value="Retired in this release" />
             <NavRow
-              label="Privacy & Data Use…"
+              label="Privacy & Storage…"
               onPress={() => router.push('/storage-privacy')}
-              accessibilityLabel="View privacy and data use"
+              accessibilityLabel="View privacy and storage"
             />
             <NavRow
               label="Legal & Third-Party Notices…"

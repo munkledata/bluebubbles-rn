@@ -134,7 +134,7 @@ describe('ScanScreen', () => {
       [JSON.stringify(['only-password']), 'That Gator QR code has an invalid format.'],
       [
         JSON.stringify(['', 'https://gator.example']),
-        'The QR code does not contain a valid server URL and password or paired-client credential.',
+        'This QR code is missing the server address or password.',
       ],
     ] as const;
 

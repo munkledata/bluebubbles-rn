@@ -71,10 +71,20 @@ function formatUptime(ms: number | null | undefined): string {
 
 /** Server Health / diagnostics — surfaces the server's read-only status channels so the user can
  *  see retired-feature status, Find My key state, push config, connection/TLS, uptime, and alerts. */
+/** Plain names for the server's own TLS modes; anything else is shown as sent. */
+const SERVER_TLS_LABELS: Readonly<Record<string, string>> = {
+  'self-signed': 'Self-signed certificate',
+  letsencrypt: 'Let’s Encrypt certificate',
+  custom: 'Custom certificate',
+  'not-serving': 'Off',
+  off: 'Off',
+};
+
 export default function ServerHealthScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const serverInfo = useSessionStore((s) => s.serverInfo);
+  const origin = useSessionStore((s) => s.origin);
   const password = useSessionStore((s) => s.password);
   const transportRevision = useSessionStore((s) => s.transportRevision);
   const accountLease = useScreenAccountLease();
@@ -180,6 +190,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const fcm = accountCurrent && !scopedCredentialSession ? fcmQ.data : null;
   const ip = accountCurrent ? (ipQ.data ?? null) : null;
   const tls = accountCurrent ? tlsQ.data : null;
+  const visibleOrigin = accountCurrent ? origin : null;
   const admin = accountCurrent ? adminQ.data : null;
   const alerts = accountCurrent && !scopedCredentialSession ? (alertsQ.data ?? null) : null;
   const alertsPlaceholder = scopedCredentialSession
@@ -242,6 +253,15 @@ export default function ServerHealthScreen(): React.JSX.Element {
 
   const tlsMode = tls ? tls.mode : null;
   const tlsDomain = tls ? tls.domain : null;
+  // What protects the phone's connection is the address it uses: an https:// server is encrypted
+  // even when the server's own TLS is off because a proxy (Caddy, a tunnel) handles HTTPS.
+  const httpsConnection = visibleOrigin ? /^https:\/\//i.test(visibleOrigin) : null;
+  const serverTlsLabel =
+    tlsMode == null
+      ? '—'
+      : (tlsMode === 'off' || tlsMode === 'not-serving') && httpsConnection
+        ? 'Off (your proxy handles HTTPS)'
+        : (SERVER_TLS_LABELS[tlsMode] ?? tlsMode);
 
   return (
     <Screen>
@@ -321,8 +341,18 @@ export default function ServerHealthScreen(): React.JSX.Element {
             <InfoRow label="Proxy" value={visibleServerInfo?.proxy_service ?? 'Direct'} />
             <InfoRow label="Public IP" value={ip ?? '—'} />
             <InfoRow
-              label="TLS"
-              value={`${tlsMode ?? '—'}${
+              label="Connection"
+              value={
+                httpsConnection == null
+                  ? '—'
+                  : httpsConnection
+                    ? 'Encrypted (HTTPS)'
+                    : 'Not encrypted (HTTP)'
+              }
+            />
+            <InfoRow
+              label="Server's own TLS"
+              value={`${serverTlsLabel}${
                 typeof tlsDomain === 'string' && tlsDomain ? ` · ${tlsDomain}` : ''
               }`}
             />

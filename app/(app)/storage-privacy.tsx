@@ -45,7 +45,7 @@ function repairResultDialog(result: AttachmentCacheRepairResult): [string, strin
     case 'stale':
       return [
         'Repair Stopped',
-        'The repair stopped because Gator disconnected from this account. Try again from Storage & File Privacy.',
+        'The repair stopped because Gator disconnected from this account. Try again from Privacy & Storage.',
       ];
   }
 }
@@ -87,7 +87,7 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
 
   return (
     <Screen>
-      <ScreenHeader title="Storage & File Privacy" onBack={() => router.back()} />
+      <ScreenHeader title="Privacy & Storage" onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.content}>
         <SettingsSection label="SERVER & MESSAGING">
           <Text style={textStyle}>

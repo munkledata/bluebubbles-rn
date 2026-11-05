@@ -317,7 +317,8 @@ describe('ServerManagementScreen — status queries', () => {
     await renderScreen();
     expect(await screen.findByText('9.9.9')).toBeTruthy();
     expect(screen.getByText('26.0')).toBeTruthy();
-    expect(screen.getByText('Retired in this release')).toBeTruthy();
+    // No retired "Private API" row: it named a setting that no longer exists.
+    expect(screen.queryByText('Private API')).toBeNull();
     await waitFor(() =>
       expect(useSessionStore.getState().serverInfo?.server_version).toBe('9.9.9'),
     );
@@ -342,7 +343,7 @@ describe('ServerManagementScreen — status queries', () => {
       expect(await screen.findByText('9.9.9')).toBeTruthy();
       expect(screen.getByText('iMessage availability')).toBeTruthy();
       expect(screen.getByText(expected)).toBeTruthy();
-      expect(screen.getByText('Retired in this release')).toBeTruthy();
+      expect(screen.queryByText('Private API')).toBeNull();
     },
   );
 

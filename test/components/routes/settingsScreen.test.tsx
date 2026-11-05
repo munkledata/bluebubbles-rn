@@ -244,7 +244,7 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
     expect(screen.queryByText('Send Subject Lines')).toBeNull();
     expect(screen.getByText('Send Typing Indicators')).toBeTruthy();
     expect(screen.getByText('Send Read Receipts')).toBeTruthy();
-    expect(screen.getByText(/connected messaging service supports them/)).toBeTruthy();
+    expect(screen.getByText(/These work only when your server supports them/)).toBeTruthy();
 
     await act(async () => {
       fireEvent(
@@ -290,9 +290,11 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
 
   it('steps the Parallel Downloads cap up through the store', async () => {
     await renderWithTheme(<SettingsScreen />);
-    expect(screen.getByText(/remembers a queued Photos or Gator Album copy/)).toBeTruthy();
-    expect(screen.getByText(/turning off auto-download cancels queued copies/)).toBeTruthy();
-    expect(screen.getByText(/Tap Photos gallery or Gator album to grant/)).toBeTruthy();
+    expect(screen.getByText(/tries again the next time you open the app/)).toBeTruthy();
+    expect(screen.getByText(/turning off auto-download cancels copies that haven/)).toBeTruthy();
+    expect(
+      screen.getByText(/Choosing Photos gallery or Gator album asks for Photos access/),
+    ).toBeTruthy();
     // Gator needs Android 16, so advice for Android 12 and earlier can never apply.
     expect(screen.queryByText(/Android 12/)).toBeNull();
     await act(async () => {
@@ -564,13 +566,11 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
 describe('SettingsScreen — App Lock biometric gate', () => {
   it('states the independent App Lock, Recents, Secure Screen, and storage boundaries', async () => {
     await renderWithTheme(<SettingsScreen />);
-    expect(screen.getByText(/keeps their content out of Android Recents/)).toBeTruthy();
-    expect(screen.getByText(/Neither setting makes the database key biometric-bound/)).toBeTruthy();
+    expect(screen.getByText(/keeps them out of the recent-apps screen/)).toBeTruthy();
+    expect(screen.getByText(/does not protect the database key or your files/)).toBeTruthy();
     expect(screen.getByText(/Secure Screen separately blocks screenshots/)).toBeTruthy();
     expect(
-      screen.getByText(
-        /new message notices stay generic while it is enabled, including after unlock/,
-      ),
+      screen.getByText(/notifications only say that a message arrived, even after you unlock/),
     ).toBeTruthy();
   });
 
@@ -764,14 +764,15 @@ describe('SettingsScreen — navigation rows', () => {
   it.each([
     ['Server Management', 'Server Management…'],
     ['  SERVER   MANAGEMENT…  ', 'Server Management…'],
-    ['Storage & File Privacy', 'Storage & File Privacy…'],
+    ['Privacy & Storage', 'Privacy & Storage…'],
     ['Legal & Third-Party Notices', 'Legal & Third-Party Notices…'],
   ])('finds the visible label for %s', async (query, label) => {
     await renderWithTheme(<SettingsScreen />);
     await act(async () => {
       fireEvent.changeText(screen.getByPlaceholderText('Search settings'), query);
     });
-    expect(screen.getByText(label)).toBeTruthy();
+    // "Privacy & Storage…" appears twice (Privacy and About); every other label once.
+    expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     expect(screen.queryByText(/No settings match/)).toBeNull();
     expect(screen.queryByText('THEME')).toBeNull();
   });
@@ -783,9 +784,7 @@ describe('SettingsScreen — navigation rows', () => {
       ['Reminders', '/reminders'],
       ['Backup', '/backup'],
       ['Find My', '/findmy'],
-      ['Storage & File Privacy…', '/storage-privacy'],
       ['Download Integrity…', '/download-integrity'],
-      ['Privacy & Data Use…', '/storage-privacy'],
       ['Legal & Third-Party Notices…', '/legal-notices'],
       ['Server Management…', '/server-management'],
       ['Change Server Address…', '/change-server-address'],
@@ -797,6 +796,16 @@ describe('SettingsScreen — navigation rows', () => {
       });
       expect(mockPush).toHaveBeenCalledWith(route);
     }
+    // Both privacy rows, in the Privacy section and in About, open the one Privacy & Storage screen.
+    const privacyRows = screen.getAllByText('Privacy & Storage…');
+    expect(privacyRows).toHaveLength(2);
+    mockPush.mockClear();
+    for (const row of privacyRows) {
+      await act(async () => {
+        fireEvent.press(row);
+      });
+    }
+    expect(mockPush.mock.calls).toEqual([['/storage-privacy'], ['/storage-privacy']]);
   });
 
   it.each([{ supports_facetime_link_creation: true }, { supports_facetime_call_start: true }])(
@@ -1045,8 +1054,8 @@ describe('SettingsScreen — account-owned server display', () => {
     expect(
       screen.getByRole('text', { name: PRIVATE_SERVER_SESSION.serverInfo.os_version }),
     ).toBeTruthy();
-    expect(screen.getByText('Private API')).toBeTruthy();
-    expect(screen.getByRole('text', { name: 'Retired in this release' })).toBeTruthy();
+    // The old "Private API: Retired" row is gone: it named a setting that no longer exists.
+    expect(screen.queryByText('Private API')).toBeNull();
     expect(screen.queryByText('fallback-version')).toBeNull();
     expect(screen.queryByText('999')).toBeNull();
     expect(screen.queryByText('iMessage Account…')).toBeNull();
@@ -1066,7 +1075,7 @@ describe('SettingsScreen — account-owned server display', () => {
 
     expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
     expect(screen.queryByText('iMessage Account…')).toBeNull();
-    expect(screen.getByRole('text', { name: 'Retired in this release' })).toBeTruthy();
+    expect(screen.queryByText('Private API')).toBeNull();
   });
 
   it('shows read-only account status only for its separate narrow capability', async () => {
@@ -1081,7 +1090,7 @@ describe('SettingsScreen — account-owned server display', () => {
 
     await renderWithTheme(<SettingsScreen />);
     expect(screen.getByRole('button', { name: 'View iMessage account' })).toBeTruthy();
-    expect(screen.getByRole('text', { name: 'Retired in this release' })).toBeTruthy();
+    expect(screen.queryByText('Private API')).toBeNull();
   });
 
   it('fails closed for an initially stale account and reveals exact details on a fresh mount', async () => {

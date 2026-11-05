@@ -645,7 +645,7 @@ describe('foreground boot production adapters', () => {
       level: 'degraded',
       code: 'attachment-cache-recovery-unavailable',
       userMessage:
-        'New downloads are paused. To fix it, open Settings → Storage & File Privacy → Repair Downloads.',
+        'New downloads are paused. To fix it, open Settings → Privacy & Storage → Repair Downloads.',
     });
     expect(useSessionStore.getState().status).toBe('connected');
   });
@@ -1070,7 +1070,7 @@ describe('saved-session boot and connect — correlated SecureStore state', () =
         level: 'degraded',
         code: 'attachment-cache-recovery-timeout',
         userMessage:
-          'New downloads are paused. To fix it, open Settings → Storage & File Privacy → Repair Downloads.',
+          'New downloads are paused. To fix it, open Settings → Privacy & Storage → Repair Downloads.',
       });
       expect(startSync).toHaveBeenCalledTimes(1);
       expect(startRealtime).toHaveBeenCalledTimes(1);

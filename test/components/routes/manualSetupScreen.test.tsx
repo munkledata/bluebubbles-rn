@@ -78,9 +78,10 @@ describe('ManualSetupScreen', () => {
   it('states the system-CA-only HTTPS policy', async () => {
     await renderWithTheme(<ManualSetupScreen />);
 
-    expect(screen.getByText(/certificate from Android’s built-in system authorities/)).toBeTruthy();
+    // Still the system-CA-only policy, in plain words.
+    expect(screen.getByText(/https:\/\/ addresses need a standard certificate/)).toBeTruthy();
     expect(
-      screen.getByText(/authorities added in Android Settings are not supported/),
+      screen.getByText(/ones you installed yourself in Android Settings won’t work/),
     ).toBeTruthy();
   });
 

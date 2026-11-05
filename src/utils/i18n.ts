@@ -4,7 +4,7 @@ const ENGLISH_MESSAGES = {
   'connect.action.manual': 'Enter Manually',
   'connect.action.scan': 'Scan QR Code',
   'connect.subtitle':
-    'Scan the QR code shown on your {serverName}, or enter the URL and password or paired-client credential manually.',
+    'Scan the QR code shown on your {serverName}, or type in its address and password.',
   'connect.syncDepth.all': 'All',
   'connect.syncDepth.fewer': 'Fewer messages per chat',
   'connect.syncDepth.label': 'Messages per chat',
@@ -29,8 +29,8 @@ const ENGLISH_MESSAGES = {
   'contactsPermission.dialog.settingsFailed.message':
     'Couldn’t open Android app settings. Open Settings and select {appName}.',
   'manual.action.connect': 'Connect',
-  'manual.field.password.label': 'Password or paired-client credential',
-  'manual.field.password.placeholder': 'Password or paired-client credential',
+  'manual.field.password.label': 'Password',
+  'manual.field.password.placeholder': 'Server or paired-client password',
   'manual.field.url.label': 'Server URL',
   'manual.field.url.placeholder': 'https://your-server.ngrok.io',
   'manual.insecure.label': 'Allow insecure connection',
@@ -38,7 +38,7 @@ const ENGLISH_MESSAGES = {
   'manual.insecure.warning.protocol': 'http://',
   'manual.insecure.warning.suffix': '. Only enable for a server you trust.',
   'manual.subtitle':
-    'Enter your {serverName} URL and password or paired-client credential. HTTPS requires a certificate from Android’s built-in system authorities; authorities added in Android Settings are not supported.',
+    'Enter your {serverName} address and password. A password from the server’s Paired Clients list works too. https:// addresses need a standard certificate; ones you installed yourself in Android Settings won’t work.',
   'manual.title': 'Server details',
   'permissions.action.checkAgain': 'Check Again',
   'permissions.action.continue': 'Continue to Messages',
@@ -64,7 +64,7 @@ const ENGLISH_MESSAGES = {
     '{appName} kept this step open so it won’t be skipped. Try Continue again.',
   'permissions.dialog.saveFailed.title': 'Couldn’t save this choice',
   'permissions.intro':
-    'Both choices are optional. {appName} keeps working if you choose Not Now or deny either Android prompt.',
+    'Both are optional. {appName} keeps working if you skip either one or say no when Android asks.',
   'permissions.notifications.copy':
     'Allow notifications to see new messages, calls, reminders, and send failures while {appName} is not open.',
   'permissions.section.contacts': 'Contacts',
@@ -88,8 +88,7 @@ const ENGLISH_MESSAGES = {
   'scan.error.invalidShape': 'That {appName} QR code has an invalid format.',
   'scan.error.insecure':
     'This code uses an insecure http:// address. Choose Enter Manually and turn on Allow insecure connection to use it.',
-  'scan.error.missingCredentials':
-    'The QR code does not contain a valid server URL and password or paired-client credential.',
+  'scan.error.missingCredentials': 'This QR code is missing the server address or password.',
   'scan.instruction.pointCamera': 'Point your camera at the server QR code',
   'scan.permission.action.grant': 'Grant Camera Access',
   'scan.permission.action.settings': 'Open Settings',

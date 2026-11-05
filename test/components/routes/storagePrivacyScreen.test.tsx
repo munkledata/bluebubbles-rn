@@ -171,7 +171,7 @@ describe('StoragePrivacyScreen', () => {
 });
 
 // Review item 888: an old download cache too big for the startup check paused new downloads on
-// every launch, and restarting never helped. Storage & File Privacy offers the repair.
+// every launch, and restarting never helped. Privacy & Storage offers the repair.
 describe('Repair Downloads', () => {
   const pausedIssue = {
     stage: 'attachment-cache',

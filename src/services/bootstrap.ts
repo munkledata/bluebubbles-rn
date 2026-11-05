@@ -106,7 +106,7 @@ const DATABASE_BOOT_FAILURE_MESSAGE =
 const ATTACHMENT_CACHE_RECOVERY_DEADLINE_MS = 45_000;
 // Review item 888: a restart repeats the same failed check, so point to the repair instead.
 const ATTACHMENT_CACHE_PAUSED_MESSAGE =
-  'New downloads are paused. To fix it, open Settings → Storage & File Privacy → Repair Downloads.';
+  'New downloads are paused. To fix it, open Settings → Privacy & Storage → Repair Downloads.';
 const FOREGROUND_DELIVERY_CLEANUP_DEADLINE_MS = 5_000;
 const CONNECT_ACCOUNT_GATE_DEADLINE_MS = 10_000;
 const CONNECT_CANDIDATE_DEADLINE_MS = 45_000;

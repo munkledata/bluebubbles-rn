@@ -582,7 +582,6 @@ export default function ServerManagementScreen(): React.JSX.Element {
           />
           <InfoRow label="Server version" value={visibleServerInfo?.server_version ?? 'Unknown'} />
           <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? 'Unknown'} />
-          <InfoRow label="Private API" value="Retired in this release" />
           <InfoRow
             label="iMessage availability"
             value={iMessageAvailabilityCopy(visibleServerInfo?.supports_imessage_availability)}
