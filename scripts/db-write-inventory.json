@@ -316,7 +316,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d",
       "path": "app/(app)/new-chat.tsx",
-      "line": 402,
+      "line": 403,
       "symbol": "NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
@@ -329,7 +329,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3",
       "path": "app/(app)/new-chat.tsx",
-      "line": 559,
+      "line": 560,
       "symbol": "NewChatScreen.removeStaged.<callback:381edc2f98>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#discardShareIntakeItem",
@@ -342,7 +342,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.startInFoundRcsChat:mutator-call:3ac19249078d",
       "path": "app/(app)/new-chat.tsx",
-      "line": 777,
+      "line": 778,
       "symbol": "NewChatScreen.startInFoundRcsChat",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#findOrCreateRcsChat",
@@ -355,7 +355,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:c822d7410122",
       "path": "app/(app)/new-chat.tsx",
-      "line": 821,
+      "line": 822,
       "symbol": "NewChatScreen.onStart",
       "operation": "mutator-call",
       "target": "app/(app)/new-chat.tsx#NewChatScreen.startInFoundRcsChat",
@@ -368,7 +368,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart.<callback:aa379435cb>:mutator-call:f07a3220abc4",
       "path": "app/(app)/new-chat.tsx",
-      "line": 864,
+      "line": 865,
       "symbol": "NewChatScreen.onStart.<callback:aa379435cb>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan",
@@ -381,7 +381,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6c241088f98",
       "path": "app/(app)/new-chat.tsx",
-      "line": 903,
+      "line": 904,
       "symbol": "NewChatScreen.onStart",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#createNewChat",
@@ -394,7 +394,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:a5c83a9ee95e",
       "path": "app/(app)/new-chat.tsx",
-      "line": 907,
+      "line": 908,
       "symbol": "NewChatScreen.onStart",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#createNewChat",
@@ -407,7 +407,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345",
       "path": "app/(app)/new-chat.tsx",
-      "line": 978,
+      "line": 979,
       "symbol": "NewChatScreen.<callback:6cde4fbfd5>",
       "operation": "mutator-call",
       "target": "app/(app)/new-chat.tsx#NewChatScreen.onStart",
@@ -420,7 +420,7 @@
     {
       "id": "app/(app)/new-chat.tsx#NewChatScreen:mutator-reference:5ff858b14288",
       "path": "app/(app)/new-chat.tsx",
-      "line": 1311,
+      "line": 1314,
       "symbol": "NewChatScreen",
       "operation": "mutator-reference",
       "target": "app/(app)/new-chat.tsx#NewChatScreen.onStart",
@@ -433,7 +433,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:1e716ab98ac5",
       "path": "app/(app)/server-management.tsx",
-      "line": 319,
+      "line": 320,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialReplacement",
@@ -446,7 +446,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:f08dd1db40ef",
       "path": "app/(app)/server-management.tsx",
-      "line": 320,
+      "line": 321,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade",
@@ -459,7 +459,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.confirmDiscardCredential.onConfirm:mutator-call:ffe1420d9aaf",
       "path": "app/(app)/server-management.tsx",
-      "line": 506,
+      "line": 507,
       "symbol": "ServerManagementScreen.confirmDiscardCredential.onConfirm",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential",
@@ -472,7 +472,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796",
       "path": "app/(app)/server-management.tsx",
-      "line": 514,
+      "line": 515,
       "symbol": "ServerManagementScreen.onDiscardCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate",
@@ -485,7 +485,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.<callback:7bf4151522>:mutator-call:6b73b09a1510",
       "path": "app/(app)/server-management.tsx",
-      "line": 884,
+      "line": 886,
       "symbol": "ServerManagementScreen.<callback:7bf4151522>",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential",
@@ -498,7 +498,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onDisconnect.onPress:mutator-call:d4cf58af3ec2",
       "path": "app/(app)/settings.tsx",
-      "line": 250,
+      "line": 251,
       "symbol": "SettingsScreen.onDisconnect.onPress",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#forget",
@@ -511,7 +511,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>:mutator-call:ac9fcd609606",
       "path": "app/(app)/settings.tsx",
-      "line": 293,
+      "line": 294,
       "symbol": "SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#rotateDatabaseKey",
@@ -524,7 +524,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda",
       "path": "app/(setup)/manual.tsx",
-      "line": 41,
+      "line": 42,
       "symbol": "Manual.submit",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#connect",
@@ -537,7 +537,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510",
       "path": "app/(setup)/manual.tsx",
-      "line": 86,
+      "line": 87,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",
@@ -550,7 +550,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:9d60163bfff7",
       "path": "app/(setup)/manual.tsx",
-      "line": 113,
+      "line": 115,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "src/services/bootstrap.ts#forgetOnThisPhoneOnly",
@@ -563,7 +563,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2",
       "path": "app/(setup)/manual.tsx",
-      "line": 121,
+      "line": 123,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",
