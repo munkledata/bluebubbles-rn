@@ -70,8 +70,8 @@ notices have not yet been approved; that review is a gate for broader distributi
 export const LEGAL_INVENTORY_SUMMARY = Object.freeze({
   productionPackageRecords: 1020,
   uniquePackageVersions: 926,
-  assetFiles: 14,
-  pendingAssetProvenance: 14,
+  assetFiles: 13,
+  pendingAssetProvenance: 13,
   localComponents: 15,
   dependencyLockSha256: 'f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921',
   unresolvedPackageRecords: 127,

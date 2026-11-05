@@ -8,13 +8,13 @@
     "dependencyLockSha256": "f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
-    "assetProvenanceSha256": "3cac88da944f16b5a1db936c10dafba90a23eb72d3a3a0c185f806a734033e4f"
+    "assetProvenanceSha256": "8b71ef2c2c8b2cd4b120753c70a8db5312bd9ef63c010fd3d87f2b37adc9b630"
   },
   "summary": {
     "productionPackageRecords": 1020,
     "uniquePackageVersions": 926,
-    "assetFiles": 14,
-    "pendingAssetProvenance": 14,
+    "assetFiles": 13,
+    "pendingAssetProvenance": 13,
     "localComponents": 15,
     "dependencyLockSha256": "f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921",
     "unresolvedPackageRecords": 127,
@@ -20452,12 +20452,6 @@
       "path": "assets/icon.png",
       "sha256": "fbb36d965fa726625028acf7f9068dfb8592241e846245669191d7fe8df8de6b",
       "bytes": 765914,
-      "provenanceStatus": "unresolved"
-    },
-    {
-      "path": "assets/notification-avatar.png",
-      "sha256": "7fc67788ca60bdb759ce59a1c711e52db80da13bbbf534b171c227c8ca9bfc23",
-      "bytes": 37359,
       "provenanceStatus": "unresolved"
     },
     {

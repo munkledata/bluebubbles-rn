@@ -5,8 +5,8 @@
 - Dependency lock SHA-256 (package-lock.json without the app's own version): `f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921`
 - Production package records: 1020
 - Unique package versions: 926
-- Source assets: 14
-- Pending asset provenance: 14
+- Source assets: 13
+- Pending asset provenance: 13
 - Local components: 15
 - Package records needing review: 127
 - Exact AAB coverage: **absent**
@@ -20,7 +20,6 @@
 | `assets/android-icon-monochrome.png` | 30870 | `549be35f8aeaa02fca09c76257c1897a9449c9b0f52761e1659aeca3eb8e4461` | unresolved |
 | `assets/favicon.png` | 13191 | `b56fdb8a77c6959edc9e92c5ad589c0624848e03213360cf0245f7d051ecf6f2` | unresolved |
 | `assets/icon.png` | 765914 | `fbb36d965fa726625028acf7f9068dfb8592241e846245669191d7fe8df8de6b` | unresolved |
-| `assets/notification-avatar.png` | 37359 | `7fc67788ca60bdb759ce59a1c711e52db80da13bbbf534b171c227c8ca9bfc23` | unresolved |
 | `assets/notification/ic_stat_gator-hdpi.png` | 1229 | `a5e626dd8404dfbabdd360b8c6b204e0ed97bc8de480050e0759f199311cea20` | unresolved |
 | `assets/notification/ic_stat_gator-mdpi.png` | 789 | `c809d3b4da42a8be6ad31f660472ca02bdfe0716ea56eaf4b660b8547cb3a157` | unresolved |
 | `assets/notification/ic_stat_gator-xhdpi.png` | 1830 | `a0446f5a58118eded35c937dacc0dbc7ec889e183745e0094a0dfc2771011b0d` | unresolved |

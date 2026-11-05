@@ -6,7 +6,6 @@
     { "path": "assets/android-icon-monochrome.png", "provenanceStatus": "unresolved" },
     { "path": "assets/favicon.png", "provenanceStatus": "unresolved" },
     { "path": "assets/icon.png", "provenanceStatus": "unresolved" },
-    { "path": "assets/notification-avatar.png", "provenanceStatus": "unresolved" },
     { "path": "assets/notification/ic_stat_gator-hdpi.png", "provenanceStatus": "unresolved" },
     { "path": "assets/notification/ic_stat_gator-mdpi.png", "provenanceStatus": "unresolved" },
     { "path": "assets/notification/ic_stat_gator-xhdpi.png", "provenanceStatus": "unresolved" },
