@@ -279,6 +279,11 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
 }));
 jest.mock('@/services/realtimeControl', () => ({ getSocket: jest.fn() }));
 
+let mockChatStats: import('@db/repositories').ChatStats | null = null;
+jest.mock('@features/conversations/useChatStats', () => ({
+  useChatStats: () => mockChatStats,
+}));
+
 jest.mock('@db/useReactiveQuery', () => ({
   useReactiveQuery: (_query: unknown, tables: string[], deps: unknown[]) => {
     const ReactLib = jest.requireActual('react') as typeof import('react');
@@ -634,6 +639,7 @@ let keyboardDismissSpy: jest.SpiedFunction<typeof Keyboard.dismiss>;
 const mockGetDatabase = getDatabase as jest.Mock;
 
 beforeEach(() => {
+  mockChatStats = null;
   resumeRealtimeDeliveries();
   useSessionStore.setState({ serverInfo: { version: 'test', private_api: true } as any });
   jest.clearAllMocks();
@@ -2816,5 +2822,21 @@ describe('ChatSettingsScreen video posters', () => {
 
     expect(screen.getByText('Videos · 1')).toBeTruthy();
     expect(mockLoadVideoPoster).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatSettingsScreen stats', () => {
+  it('shows what this phone stores for the chat', async () => {
+    mockChatStats = {
+      sent: 3,
+      received: 4,
+      photos: 1,
+      videos: 0,
+      otherFiles: 2,
+      firstMessageAt: null,
+    };
+    await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.getByText('STATS')).toBeTruthy();
+    expect(screen.getByText('3 sent · 4 received')).toBeTruthy();
   });
 });

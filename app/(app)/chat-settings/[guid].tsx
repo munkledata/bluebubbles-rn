@@ -55,6 +55,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { useSessionStore } from '@state/sessionStore';
 import { useChatHeader } from '@features/conversations/useChatHeader';
+import { useChatStats } from '@features/conversations/useChatStats';
 import { useSharedDocuments } from '@features/conversations/useSharedDocuments';
 import {
   isGroupRow,
@@ -72,6 +73,7 @@ import {
   ThemeStudio,
   useTheme,
 } from '@ui';
+import { ChatStatsSection } from '@ui/conversations/ChatStatsSection';
 import { MediaSections } from '@ui/conversations/MediaSections';
 import { MemberContactActions } from '@ui/conversations/MemberContactActions';
 import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
@@ -419,6 +421,7 @@ function ChatSettingsScreen({
     [guid],
   );
   const { data: documentPage } = useSharedDocuments(guid, accountLease);
+  const chatStats = useChatStats(guid);
 
   // The studio opens with a stored dark theme. A legacy light theme stays in the DB but
   // starts from the active dark colors if the user chooses to convert it by applying edits.
@@ -1303,6 +1306,8 @@ function ChatSettingsScreen({
           onOpenLink={openLink}
           videoPosters={showVideoPosters}
         />
+
+        <ChatStatsSection stats={chatStats} style={styles.gap} />
 
         <SettingsSection label="NOTIFICATIONS" style={styles.gap}>
           <SwitchRow
