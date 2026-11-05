@@ -38,6 +38,7 @@ import {
   removeAppleGroupPhoto,
   removeAppleGroupParticipant,
   resetChatLocalPreferences,
+  setChatAutoUnarchive,
   setChatMuted,
   startChatRepair,
   updateChatAppearance,
@@ -337,6 +338,8 @@ function ChatSettingsScreen({
   const appleGroupNameChanged =
     appleGroupNameValue.trim().length > 0 && appleGroupNameValue !== appleGroupNameBaseline;
   const muted = data?.muteType === 'mute';
+  // Default on: only an explicit 0 keeps this chat archived when a new message arrives.
+  const autoUnarchive = data?.autoUnarchive !== 0;
   const accent = data?.customColor ?? null;
   // The placeholder shows what the title would be WITHOUT a custom name.
   const serverTitle = data ? resolveTitle({ ...data, customName: null }) : '';
@@ -939,6 +942,13 @@ function ChatSettingsScreen({
       setChatMuted(operationGrant.chatGuid, on, operationGrant.accountLease),
     );
   };
+  const toggleAutoUnarchive = (on: boolean): void => {
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
+    queueScreenCommand(operationGrant, () =>
+      setChatAutoUnarchive(operationGrant.chatGuid, on, operationGrant.accountLease),
+    );
+  };
   const resetAll = (): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
@@ -1263,6 +1273,12 @@ function ChatSettingsScreen({
             value={muted}
             onValueChange={toggleMute}
             accessibilityLabel="Mute notifications for this chat"
+          />
+          <SwitchRow
+            label="Bring back from Archived on new messages"
+            value={autoUnarchive}
+            onValueChange={toggleAutoUnarchive}
+            accessibilityLabel="Bring this chat back from Archived when a new message arrives"
           />
           {Platform.OS === 'android' ? (
             <NavRow

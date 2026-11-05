@@ -37,7 +37,10 @@ import { appleScreeningEmitted, appleScreeningFlagForStorage } from '../appleScr
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
 import { upsertAttachmentsWithinTransaction } from './attachments';
-import { clearSupersededTombstonesWithinTransaction } from './chats';
+import {
+  clearSupersededTombstonesWithinTransaction,
+  unarchiveChatsWithNewMessagesWithinTransaction,
+} from './chats';
 import { handleMapKey } from './handles';
 import {
   getTrustedMessageStateLedgersWithinTransaction,
@@ -955,6 +958,17 @@ export function upsertMessagesWithinTransaction(
       // `chatVisible` reads with, so re-synced history, a tapback and an unsent row still cannot
       // resurrect a conversation the user deleted.
       await clearSupersededTombstonesWithinTransaction(context, destinationChatIds);
+      // Same chokepoint: a new message from someone else brings an archived chat back.
+      // Only rows this batch inserted count; a re-saved message never un-archives anything.
+      const insertedMessageIds = storedWithChat
+        .filter(({ m }) => !existingLocationByGuid.has(m.guid))
+        .map(({ m }) => map.get(m.guid))
+        .filter((id): id is number => id != null);
+      await unarchiveChatsWithNewMessagesWithinTransaction(
+        context,
+        destinationChatIds,
+        insertedMessageIds,
+      );
     }
     return map;
   });

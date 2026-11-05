@@ -62,6 +62,7 @@ export {
   saveChatDraft,
   setChatMuted,
   setChatArchived,
+  setChatAutoUnarchive,
   setChatPinned,
   updateChatAppearance,
   updateChatCustomization,

@@ -1395,4 +1395,45 @@ export const MIGRATIONS: Migration[] = [
       `DROP TABLE m0059_leftovers`,
     ],
   },
+  {
+    // A new message brings an archived chat back to the inbox (owner decision, 2026-11-05), unless
+    // that chat's own switch is off. `archived_at` records WHEN it was archived, so only a message
+    // newer than that counts: re-synced or repaired history never un-archives anything. Chats that
+    // are archived already get this migration's time, so only messages after the upgrade bring
+    // them back. Both columns are additive; a downgrade simply ignores them.
+    name: '0060_chat_auto_unarchive',
+    statements: [
+      `ALTER TABLE chats ADD COLUMN archived_at INTEGER`,
+      `ALTER TABLE chats ADD COLUMN auto_unarchive INTEGER NOT NULL DEFAULT 1`,
+      `UPDATE chats
+          SET archived_at = MAX(CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER),
+                                COALESCE(latest_message_date, 0))
+        WHERE is_archived = 1`,
+      // Stamp archived_at however a chat gets archived (the Archive action, a backup restore, or
+      // the un-archive rule clearing it), so no write path can forget it. The stamp is the later of
+      // the phone's clock and the chat's newest message (the Mac's clock), so a message that was
+      // already there never counts as newer. These triggers write
+      // only archived_at, never is_archived, so they cannot fire themselves.
+      `CREATE TRIGGER chats_archived_at_update
+         AFTER UPDATE OF is_archived ON chats
+         WHEN NEW.is_archived IS NOT OLD.is_archived
+       BEGIN
+         UPDATE chats
+            SET archived_at = CASE WHEN NEW.is_archived = 1
+                                   THEN MAX(CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER),
+                                            COALESCE(NEW.latest_message_date, 0))
+                                   END
+          WHERE id = NEW.id;
+       END`,
+      `CREATE TRIGGER chats_archived_at_insert
+         AFTER INSERT ON chats
+         WHEN NEW.is_archived = 1 AND NEW.archived_at IS NULL
+       BEGIN
+         UPDATE chats
+            SET archived_at = MAX(CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER),
+                                  COALESCE(NEW.latest_message_date, 0))
+          WHERE id = NEW.id;
+       END`,
+    ],
+  },
 ];

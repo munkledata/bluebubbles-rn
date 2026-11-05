@@ -1151,6 +1151,8 @@ export interface ChatHeaderRow {
   customName: string | null;
   customColor: string | null;
   muteType: string | null;
+  /** 1 (default) when a new message brings this chat back from Archived; 0 keeps it archived. */
+  autoUnarchive?: number | null;
   style: number | null;
   /** A group's own downloaded photo (file:// uri), shown instead of the member pictures. */
   groupPhotoUri?: string | null;
@@ -1204,6 +1206,7 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
   const rows = await db.all<ChatHeaderRow>(sql`
     SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier, c.display_name AS displayName,
       c.custom_name AS customName, c.custom_color AS customColor, c.mute_type AS muteType, c.style,
+      c.auto_unarchive AS autoUnarchive,
       c.deleted_at AS deletedAt,
       c.group_photo_uri AS groupPhotoUri,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,

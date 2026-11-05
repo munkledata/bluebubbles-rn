@@ -526,6 +526,67 @@ export function clearSupersededTombstonesWithinTransaction(
 }
 
 /**
+ * Bring an archived chat back to the inbox when a NEW message from someone else lands in it
+ * (owner decision 2026-11-05), unless that chat's `auto_unarchive` switch is off. Muting does not
+ * stop it: a muted chat comes back but stays silent.
+ *
+ * Only messages this batch ADDED count (`newMessageIds`), never ones already stored, so re-saving
+ * a message, a later reaction or your own send can't bring a chat back because of something that
+ * arrived earlier (for example while the switch was off). The message must also be newer than
+ * `archived_at`, which a trigger stamps however the chat got archived (as the later of the phone's
+ * clock and the chat's newest message, so a Mac clock running ahead can't count a message that was
+ * already there). Re-synced or repaired history, reactions, group events, your own sends and
+ * deleted/retracted messages never un-archive. A chat with no `archived_at` stays archived.
+ * Clearing `is_archived` lets the same trigger clear `archived_at`.
+ */
+export function unarchiveChatsWithNewMessagesWithinTransaction(
+  context: DbTransactionContext,
+  chatIds: number[],
+  newMessageIds: number[],
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    if (chatIds.length === 0 || newMessageIds.length === 0) return;
+    const inList = sql.join(
+      chatIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const newList = sql.join(
+      newMessageIds.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    // One statement per batch, and `is_archived = 1` keeps the EXISTS to the few archived chats.
+    await db.run(sql`
+    UPDATE chats
+       SET is_archived = 0
+     WHERE id IN (${inList})
+       AND is_archived = 1
+       AND auto_unarchive = 1
+       AND archived_at IS NOT NULL
+       AND EXISTS (SELECT 1 FROM messages am
+                    WHERE am.id IN (${newList})
+                      AND am.chat_id = chats.id
+                      AND am.is_from_me = 0
+                      AND am.date_deleted IS NULL
+                      AND am.associated_message_type IS NULL
+                      AND COALESCE(am.item_type, 0) = 0
+                      AND ${messageHasVisibleContentSql('am')}
+                      AND am.date_created > chats.archived_at)
+  `);
+  });
+}
+
+/** Turn a chat's "new messages bring this chat back from Archived" switch on or off. */
+export function setChatAutoUnarchiveWithinTransaction(
+  context: DbTransactionContext,
+  guid: string,
+  enabled: boolean,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.update(chats).set({ autoUnarchive: enabled }).where(eq(chats.guid, guid));
+  });
+}
+
+/**
  * Locally delete a chat: tombstone the chat row, then destroy the chat-scoped rows this layer can
  * safely destroy (messages, pending outgoing-queue rows, locally owned scheduled messages and the
  * composer draft). Nothing is deleted on the server, and state whose cancellation needs the native

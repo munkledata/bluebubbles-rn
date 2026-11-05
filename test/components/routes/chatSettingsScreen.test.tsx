@@ -14,6 +14,7 @@ const mockSetChatAppearanceWithinTransaction = jest.fn();
 const mockSetChatCustomizationWithinTransaction = jest.fn();
 const mockSetHandleColorWithinTransaction = jest.fn();
 const mockSetChatMuteWithinTransaction = jest.fn();
+const mockSetChatAutoUnarchiveWithinTransaction = jest.fn();
 const mockComputeBackgroundIsLight = jest.fn();
 const mockAdaptiveTokensFromImage = jest.fn();
 const mockSafeOpenUrl = jest.fn();
@@ -62,6 +63,7 @@ function makeLease(generation: number, current = true): MockLease {
 let mockAccountLease = makeLease(73);
 let mockGuid = 'iMessage;-;chat-settings-private-guid';
 let mockMuteType: 'mute' | null = null;
+let mockAutoUnarchive: number | undefined;
 let mockCustomColor: string | null = null;
 let mockHandleColor: string | null = null;
 let mockChatStyle = 43;
@@ -246,6 +248,8 @@ jest.mock('@db/repositories', () => ({
   setHandleColorWithinTransaction: (...args: unknown[]) =>
     mockSetHandleColorWithinTransaction(...args),
   setChatMuteWithinTransaction: (...args: unknown[]) => mockSetChatMuteWithinTransaction(...args),
+  setChatAutoUnarchiveWithinTransaction: (...args: unknown[]) =>
+    mockSetChatAutoUnarchiveWithinTransaction(...args),
 }));
 
 // Exercise the route through the real account-scoped chat command implementations while keeping
@@ -340,6 +344,7 @@ jest.mock('@features/conversations/useChatHeader', () => ({
         customName: source.customTitle,
         customColor: mockCustomColor,
         muteType: mockMuteType,
+        autoUnarchive: mockAutoUnarchive,
         style: mockChatStyle,
         participantCount: mockParticipantCount,
         participantNames: `${source.member}, Second Member`,
@@ -428,6 +433,7 @@ jest.mock('@/services', () => {
     removeAppleGroupPhoto: (...args: unknown[]) => mockRemoveAppleGroupPhoto(...args),
     removeAppleGroupParticipant: (...args: unknown[]) => mockRemoveAppleGroupParticipant(...args),
     resetChatLocalPreferences: chatActions.resetChatLocalPreferences,
+    setChatAutoUnarchive: chatActions.setChatAutoUnarchive,
     setChatMuted: chatActions.setChatMuted,
     startChatRepair: (...args: unknown[]) => mockStartChatRepair(...args),
     updateChatAppearance: chatActions.updateChatAppearance,
@@ -618,6 +624,7 @@ beforeEach(() => {
   });
   mockGuid = CHAT_GUID;
   mockMuteType = null;
+  mockAutoUnarchive = undefined;
   mockCustomColor = null;
   mockHandleColor = null;
   mockChatStyle = 43;
@@ -639,6 +646,7 @@ beforeEach(() => {
   mockSetChatCustomizationWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetHandleColorWithinTransaction.mockReset().mockResolvedValue(true);
   mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
+  mockSetChatAutoUnarchiveWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockComputeBackgroundIsLight.mockReset().mockResolvedValue(false);
   mockAdaptiveTokensFromImage.mockReset().mockResolvedValue(null);
   mockSafeOpenUrl.mockReset().mockResolvedValue(true);
@@ -2267,6 +2275,34 @@ describe('ChatSettingsScreen source and account ownership', () => {
       );
       await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
       expect(mockSetChatMuteWithinTransaction).toHaveBeenCalledTimes(1);
+      expect(mockDatabaseB.run).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['turns off', undefined, false],
+    ['turns on', 0, true],
+  ] as const)(
+    'the "bring back from Archived" switch %s in one committed A transaction',
+    async (_label, initial, expected) => {
+      mockAutoUnarchive = initial;
+      await renderWithTheme(<ChatSettingsScreen />);
+      const toggle = screen.getByRole('switch', {
+        name: 'Bring back from Archived on new messages',
+      });
+      // The test SwitchRow writes !value on press, so the written value also proves the start state.
+
+      await fireEvent.press(toggle);
+
+      await waitFor(() =>
+        expect(mockSetChatAutoUnarchiveWithinTransaction).toHaveBeenCalledWith(
+          expect.any(Object),
+          CHAT_GUID,
+          expected,
+        ),
+      );
+      await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
+      expect(mockSetChatAutoUnarchiveWithinTransaction).toHaveBeenCalledTimes(1);
       expect(mockDatabaseB.run).not.toHaveBeenCalled();
     },
   );

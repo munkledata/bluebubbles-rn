@@ -64,6 +64,10 @@ export const chats = sqliteTable(
     displayName: text('display_name'),
     style: integer('style'),
     isArchived: integer('is_archived', { mode: 'boolean' }).default(false),
+    /** When the chat was archived (ms). Only a message newer than this un-archives it. */
+    archivedAt: integer('archived_at'),
+    /** Per-chat switch: a new message brings this chat back from Archived (default on). */
+    autoUnarchive: integer('auto_unarchive', { mode: 'boolean' }).notNull().default(true),
     isPinned: integer('is_pinned', { mode: 'boolean' }).default(false),
     /** Stable device-local order for pinned chats. Null whenever the chat is not pinned. */
     pinOrder: integer('pin_order'),

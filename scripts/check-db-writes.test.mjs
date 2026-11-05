@@ -2165,14 +2165,18 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   const chatSettingsPreferenceTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/services/chatActions.ts' &&
-      ['resetChatLocalPreferences', 'setChatMuted', 'updateChatCustomization'].some((symbol) =>
-        finding.symbol.startsWith(symbol),
-      ) &&
+      [
+        'resetChatLocalPreferences',
+        'setChatAutoUnarchive',
+        'setChatMuted',
+        'updateChatCustomization',
+      ].some((symbol) => finding.symbol.startsWith(symbol)) &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target ===
           'src/db/repositories/chatAppearance.ts#setChatCustomizationWithinTransaction' ||
         finding.target === 'src/db/repositories/chats.ts#setChatMuteWithinTransaction' ||
+        finding.target === 'src/db/repositories/chats.ts#setChatAutoUnarchiveWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith('src/services/chatActions.ts#'))),
   );
@@ -2205,10 +2209,14 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     chatSettingsPreferenceTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:5186ac7666>.<callback:63de6d5552>:mutator-call:3cbd76759ff2',
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:5186ac7666>.<callback:63de6d5552>:mutator-call:672a4295bae0',
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:5186ac7666>:mutator-call:7392b85d41c5',
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:5186ac7666>:mutator-call:a9cd1d0d27f5',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>.<callback:693295bb81>:mutator-call:15e7b55171b6',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>.<callback:693295bb81>:mutator-call:d3a2361706b9',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>:mutator-call:0afdf4eccb0c',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>:mutator-call:9744dce787b8',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>.<callback:693295bb81>:mutator-call:89d8c9dc78f8',
+      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:9934960d51>.<callback:ab7078ec6b>:mutator-call:b006f0e24dae',
+      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:9934960d51>:mutator-call:2dbf66d292ea',
+      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:9934960d51>:mutator-call:75672233abd0',
       'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>.<callback:df7eb4dfd5>:mutator-call:fff2c3df103d',
       'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:45188afd5c9d',
       'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:ff21837237be',

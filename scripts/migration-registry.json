@@ -325,6 +325,16 @@
       "upgradeTest": "test/db/migrations/0059_retire_doubled_text_local_copies.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 60,
+      "name": "0060_chat_auto_unarchive",
+      "task": "UPSTREAM-1B-AUTO-UNARCHIVE",
+      "branchPr": "fix/upstream-gaps-1b",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0060_chat_auto_unarchive.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

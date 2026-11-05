@@ -26,6 +26,7 @@ import {
   recordShareIntakeNewChatWithinTransaction,
   setChatAppearanceWithinTransaction,
   setChatArchiveWithinTransaction,
+  setChatAutoUnarchiveWithinTransaction,
   setChatCustomizationWithinTransaction,
   setHandleColorWithinTransaction,
   setChatMuteWithinTransaction,
@@ -257,6 +258,27 @@ export function setChatArchived(
   });
 }
 
+/** Choose whether a new message brings this conversation back from Archived (default on). */
+export function setChatAutoUnarchive(
+  chatGuid: string,
+  enabled: boolean,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatAutoUnarchiveWithinTransaction(context, chatGuid, enabled);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
 /** Set or clear the device-local pinned state for one conversation. */
 export function setChatPinned(
   chatGuid: string,
@@ -357,7 +379,10 @@ export function updateChatAppearance(
   });
 }
 
-/** Atomically clear the local name, accent color, and mute preference for one conversation. */
+/**
+ * Atomically clear the local name, accent color, and mute preference for one conversation, and put
+ * its "bring back from Archived on new messages" switch back to the default (on).
+ */
 export function resetChatLocalPreferences(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
@@ -375,6 +400,8 @@ export function resetChatLocalPreferences(
         });
         assertChatActionLease(activeLease);
         await setChatMuteWithinTransaction(context, chatGuid, null);
+        assertChatActionLease(activeLease);
+        await setChatAutoUnarchiveWithinTransaction(context, chatGuid, true);
         assertChatActionLease(activeLease);
       },
       () => activeLease.isCurrent(),
