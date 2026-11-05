@@ -17,10 +17,12 @@ import {
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import {
+  getChatParticipantContacts,
   getChatParticipants,
   getChatTheme,
   listChatAttachmentsByKind,
   type ChatParticipant,
+  type ChatParticipantContact,
   type ChatMediaByKind,
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
@@ -65,6 +67,7 @@ import {
   useTheme,
 } from '@ui';
 import { MediaSections } from '@ui/conversations/MediaSections';
+import { MemberContactActions } from '@ui/conversations/MemberContactActions';
 import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
 import { requestPhotoLibraryAccess } from '@ui/permissions/photoLibraryPermission';
 import { showExternalOpenFailure } from '@ui/toast/external-open-feedback';
@@ -369,6 +372,19 @@ function ChatSettingsScreen({
     [guid],
   );
   const members = membersData ?? [];
+  // Each member's linked device contact, for View Contact. Read apart from the roster above, whose
+  // row count guarded send paths compare with the chat header.
+  const { data: memberContactsData } = useReactiveQuery<ChatParticipantContact[]>(
+    () => getChatParticipantContacts(getDatabase(), guid),
+    ['chat_handles', 'handles', 'contacts'],
+    [guid],
+  );
+  const memberContactIds = new Map(
+    (memberContactsData ?? []).map((row) => [
+      JSON.stringify([row.address, row.service]),
+      row.contactSourceId,
+    ]),
+  );
 
   // Per-chat theme + background (Phase 3.2). Reactive so the row subtitle reflects state.
   const { data: chatThemeData } = useReactiveQuery(
@@ -1368,6 +1384,13 @@ function ChatSettingsScreen({
                     </Pressable>
                   ) : null}
                 </View>
+                <MemberContactActions
+                  name={member.name}
+                  address={member.address}
+                  contactSourceId={
+                    memberContactIds.get(JSON.stringify([member.address, member.service])) ?? null
+                  }
+                />
                 <View style={styles.handleSwatchRow}>
                   <Pressable
                     onPress={() => pickHandleColor(member, null)}

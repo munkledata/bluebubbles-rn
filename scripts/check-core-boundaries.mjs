@@ -42,6 +42,8 @@ const REVIEWED_UI_DB_REPOSITORY_VALUES = new Set([
   'MAX_CUSTOM_FOLDER_MEMBERS',
   'findChatsByParticipantAddresses',
   'getChatHeader',
+  // Read-only: each participant's linked device contact id, for chat details' View Contact.
+  'getChatParticipantContacts',
   'getChatParticipants',
   'getChatTheme',
   'getScheduledById',

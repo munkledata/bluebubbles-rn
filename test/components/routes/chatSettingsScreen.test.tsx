@@ -66,6 +66,7 @@ let mockMuteType: 'mute' | null = null;
 let mockAutoUnarchive: number | undefined;
 let mockCustomColor: string | null = null;
 let mockHandleColor: string | null = null;
+let mockMemberContactSourceId: string | null = null;
 let mockChatStyle = 43;
 let mockParticipantCount = 2;
 let mockHandleServices: string | null = null;
@@ -238,6 +239,7 @@ jest.mock('@ui/toast/toastStore', () => ({
 }));
 
 jest.mock('@db/repositories', () => ({
+  getChatParticipantContacts: jest.fn(),
   getChatParticipants: jest.fn(),
   getChatTheme: jest.fn(),
   listChatAttachmentsByKind: jest.fn(),
@@ -287,6 +289,18 @@ jest.mock('@db/useReactiveQuery', () => ({
     const source = mockSourceFor(
       mockPendingReactiveGuid === requestedGuid ? firstGuid : requestedGuid,
     );
+    // The contact-actions read also watches chat_handles, so answer it first.
+    if (tables.includes('contacts')) {
+      return {
+        data: [
+          {
+            address: source.address,
+            service: 'iMessage',
+            contactSourceId: mockMemberContactSourceId,
+          },
+        ],
+      };
+    }
     if (tables.includes('chat_handles')) {
       return {
         data: [
@@ -394,6 +408,8 @@ jest.mock('@features/conversations/useSharedDocuments', () => ({
 }));
 
 jest.mock('@utils', () => ({
+  // The member contact actions classify each address with the real, pure helpers.
+  ...jest.requireActual('@utils/memberAddress'),
   isGroupRow: (row: { style?: number }) => row.style === 43,
   isProvenIMessageGroupChat: (
     row: {
@@ -627,6 +643,7 @@ beforeEach(() => {
   mockAutoUnarchive = undefined;
   mockCustomColor = null;
   mockHandleColor = null;
+  mockMemberContactSourceId = null;
   mockChatStyle = 43;
   mockParticipantCount = 2;
   mockHandleServices = null;
@@ -2208,6 +2225,22 @@ describe('ChatSettingsScreen source and account ownership', () => {
     );
     await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
     expect(mockDatabaseB.run).not.toHaveBeenCalled();
+  });
+
+  it('offers each member Copy, Email and the matching Contacts action', async () => {
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.getByRole('button', { name: `Copy ${PRIVATE_MEMBER}’s address` })).toBeTruthy();
+    expect(screen.getByRole('button', { name: `Email ${PRIVATE_MEMBER}` })).toBeTruthy();
+    // The member's address is an email address, so there is no Call button.
+    expect(screen.queryByRole('button', { name: `Call ${PRIVATE_MEMBER}` })).toBeNull();
+    expect(screen.getByRole('button', { name: `Add ${PRIVATE_MEMBER} to Contacts` })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: `View ${PRIVATE_MEMBER} in Contacts` })).toBeNull();
+
+    // Once the member's handle is linked to a device contact, the same row opens that contact.
+    mockMemberContactSourceId = '4242';
+    await view.rerender(<ChatSettingsScreen />);
+    expect(screen.getByRole('button', { name: `View ${PRIVATE_MEMBER} in Contacts` })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: `Add ${PRIVATE_MEMBER} to Contacts` })).toBeNull();
   });
 
   it('chooses and resets an exact device-owned participant color', async () => {

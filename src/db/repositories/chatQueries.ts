@@ -1365,3 +1365,33 @@ export async function getChatParticipants(
      ORDER BY h.id
   `);
 }
+
+/** A chat participant's linked device contact, for the chat-details contact actions only. */
+export interface ChatParticipantContact {
+  address: string;
+  service: string | null;
+  /** The device contact's own id (`contacts.source_id`); null when the handle has no linked contact. */
+  contactSourceId: string | null;
+}
+
+/**
+ * The linked device contact of each of a chat's participant handles. A handle links to at most one
+ * contact row (`handles.contact_id` → `contacts.id`), so this returns exactly one row per participant
+ * handle. It is deliberately separate from {@link getChatParticipants}, whose row count guarded send
+ * paths (mentions, group commands) compare with the chat header.
+ */
+export async function getChatParticipantContacts(
+  db: AppDatabase,
+  guid: string,
+): Promise<ChatParticipantContact[]> {
+  return db.all<ChatParticipantContact>(sql`
+    SELECT h.address AS address, NULLIF(h.service, '') AS service,
+           NULLIF(ct.source_id, '') AS contactSourceId
+      FROM chat_handles ch
+      JOIN handles h ON h.id = ch.handle_id
+      JOIN chats c ON c.id = ch.chat_id
+      LEFT JOIN contacts ct ON ct.id = h.contact_id
+     WHERE c.guid = ${guid}
+     ORDER BY h.id
+  `);
+}
