@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { logger } from '@core/secure';
+import { isIgnoringBatteryOptimizations } from '@/native/powerManager';
 
 const FALLBACK_PACKAGE = 'com.bluegreengatorapps.messages';
 
@@ -41,5 +42,31 @@ export async function requestDisableBatteryOptimization(): Promise<boolean> {
   } catch (e) {
     logger.warn('battery-optimization request failed', e);
     return false;
+  }
+}
+
+export type BatteryOptimizationStatus = 'unrestricted' | 'optimized' | 'unknown';
+
+/**
+ * Gator's battery-optimization status on this phone, read fresh each time (the person may have
+ * just changed it in Android's settings). "unknown" off Android, on an app build without the native
+ * module, or when Android doesn't answer.
+ */
+export function getBatteryOptimizationStatus(): BatteryOptimizationStatus {
+  if (Platform.OS !== 'android') return 'unknown';
+  const ignoring = isIgnoringBatteryOptimizations();
+  if (ignoring === null) return 'unknown';
+  return ignoring ? 'unrestricted' : 'optimized';
+}
+
+/** The Settings note for a status; null when there is nothing reliable to say. */
+export function batteryOptimizationNote(status: BatteryOptimizationStatus): string | null {
+  switch (status) {
+    case 'unrestricted':
+      return 'Battery: Unrestricted. Android won’t hold back Gator’s notifications.';
+    case 'optimized':
+      return 'Battery: Optimized. Android may delay notifications while the phone is idle. For prompt notifications, set Gator to “Unrestricted” in Battery Optimization Settings.';
+    case 'unknown':
+      return null;
   }
 }

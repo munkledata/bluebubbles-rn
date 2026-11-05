@@ -21,7 +21,12 @@ import {
   rotateDatabaseKey,
   setAppLockEnabled,
 } from '@/services';
-import { requestDisableBatteryOptimization } from '@/services/battery';
+import {
+  batteryOptimizationNote,
+  getBatteryOptimizationStatus,
+  requestDisableBatteryOptimization,
+  type BatteryOptimizationStatus,
+} from '@/services/battery';
 import {
   setAttachmentAutoDownloadDestination,
   setAttachmentAutoDownloadEnabled,
@@ -175,6 +180,12 @@ export default function SettingsScreen(): React.JSX.Element {
   const visibleOrigin = accountCurrent ? origin : null;
   const visibleServerInfo = accountCurrent ? serverInfo : null;
   const [syncing, setSyncing] = useState(false);
+  // Read on open and again on every return to the app: the person may have just changed it in
+  // Android's battery settings.
+  const [batteryStatus, setBatteryStatus] = useState<BatteryOptimizationStatus>(
+    getBatteryOptimizationStatus,
+  );
+  const batteryNote = batteryOptimizationNote(batteryStatus);
   const [notificationPermission, setNotificationPermission] = useState<
     NotificationPermissionState | 'loading' | 'unavailable'
   >('loading');
@@ -193,7 +204,9 @@ export default function SettingsScreen(): React.JSX.Element {
     };
     void refresh();
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refresh();
+      if (state !== 'active') return;
+      setBatteryStatus(getBatteryOptimizationStatus());
+      void refresh();
     });
     return () => {
       mountedRef.current = false;
@@ -735,11 +748,14 @@ export default function SettingsScreen(): React.JSX.Element {
             {/* Android reliability: open the general battery-optimization settings, where the
                 user can review or change Gator's treatment. This is not a direct exemption. */}
             {Platform.OS === 'android' ? (
-              <NavRow
-                label="Battery Optimization Settings…"
-                onPress={() => void requestDisableBatteryOptimization()}
-                accessibilityLabel="Open battery optimization settings for reliable notifications"
-              />
+              <>
+                <NavRow
+                  label="Battery Optimization Settings…"
+                  onPress={() => void requestDisableBatteryOptimization()}
+                  accessibilityLabel="Open battery optimization settings for reliable notifications"
+                />
+                {batteryNote ? <NoteRow text={batteryNote} /> : null}
+              </>
             ) : null}
           </SettingsSection>
         )}

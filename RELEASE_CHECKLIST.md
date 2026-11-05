@@ -349,6 +349,7 @@ cd android
   :gator-bounded-document:compileDebugKotlin \
   :gator-bounded-download:compileDebugKotlin \
   :gator-screen-security:compileDebugKotlin \
+  :gator-power:compileDebugKotlin \
   --no-daemon
 ./gradlew \
   :gator-paste-input:testDebugUnitTest \

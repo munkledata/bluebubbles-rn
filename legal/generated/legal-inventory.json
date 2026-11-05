@@ -8,14 +8,14 @@
     "dependencyLockSha256": "f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
-    "assetProvenanceSha256": "9faa6b47f887c55528bc18f511a4c99aad5c66150aa22542fa4a7ce096fb5134"
+    "assetProvenanceSha256": "3cac88da944f16b5a1db936c10dafba90a23eb72d3a3a0c185f806a734033e4f"
   },
   "summary": {
     "productionPackageRecords": 1020,
     "uniquePackageVersions": 926,
     "assetFiles": 14,
     "pendingAssetProvenance": 14,
-    "localComponents": 14,
+    "localComponents": 15,
     "dependencyLockSha256": "f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
@@ -20529,6 +20529,13 @@
       "provenanceStatus": "unresolved",
       "files": 5,
       "sha256": "81bf436bca04c9bbe8ebc29fd1b844a501c3100b489d486e545fe0d639d6f560",
+      "issue": null
+    },
+    {
+      "path": "modules/gator-power",
+      "provenanceStatus": "unresolved",
+      "files": 3,
+      "sha256": "0619f15dc9e511160439b3cd8f183f4fcbfd4c329c880fafa4cdf98627ec8316",
       "issue": null
     },
     {

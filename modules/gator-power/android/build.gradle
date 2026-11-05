@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.gator.power'
+version = '0.1.0'
+
+// Uses only Android's PowerManager and the Expo module API, so no extra dependency is needed.
+
+android {
+  namespace "expo.modules.gatorpower"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}

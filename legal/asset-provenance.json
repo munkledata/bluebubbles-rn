@@ -20,6 +20,7 @@
     { "path": "modules/gator-bounded-document", "provenanceStatus": "unresolved" },
     { "path": "modules/gator-bounded-download", "provenanceStatus": "unresolved" },
     { "path": "modules/gator-paste-input", "provenanceStatus": "unresolved" },
+    { "path": "modules/gator-power", "provenanceStatus": "unresolved" },
     { "path": "modules/gator-screen-security", "provenanceStatus": "unresolved" },
     { "path": "modules/gator-share-intake", "provenanceStatus": "unresolved" },
     { "path": "modules/gator-share-shortcuts", "provenanceStatus": "unresolved" },

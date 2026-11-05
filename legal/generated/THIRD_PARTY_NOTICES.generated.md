@@ -7,7 +7,7 @@
 - Unique package versions: 926
 - Source assets: 14
 - Pending asset provenance: 14
-- Local components: 14
+- Local components: 15
 - Package records needing review: 127
 - Exact AAB coverage: **absent**
 
@@ -37,6 +37,7 @@
 | `modules/gator-bounded-document` | 5 | `392ff12e0b2cf6b9d074ca0f0dedd97213284aa5df97d4317fffeb68bf409730` | unresolved |
 | `modules/gator-bounded-download` | 14 | `36c96541a6828ad38ec1d51e0595a5a4e961c3123aa6300a89abd74367024e94` | unresolved |
 | `modules/gator-paste-input` | 5 | `81bf436bca04c9bbe8ebc29fd1b844a501c3100b489d486e545fe0d639d6f560` | unresolved |
+| `modules/gator-power` | 3 | `0619f15dc9e511160439b3cd8f183f4fcbfd4c329c880fafa4cdf98627ec8316` | unresolved |
 | `modules/gator-screen-security` | 5 | `442b19c3ed829f92255447c78e4b3c7501a793188b3d9e5913bc497fee19eaeb` | unresolved |
 | `modules/gator-share-intake` | 10 | `573ff6a31e63d35144254fdfdb6ff1723ce1f31b4df55c57a347b955ecbd8201` | unresolved |
 | `modules/gator-share-shortcuts` | 6 | `22f00c362e8888d226f1a3c9001b43dce3871214122ddf2de1e5f48c9a78c82c` | unresolved |

@@ -60,6 +60,12 @@ jest.mock('@native/biometrics', () => ({
   hasDeviceCredential: jest.fn(),
   authenticate: jest.fn(),
 }));
+let mockBatteryStatus: 'unrestricted' | 'optimized' | 'unknown' = 'unknown';
+jest.mock('@/services/battery', () => ({
+  ...jest.requireActual('@/services/battery'),
+  getBatteryOptimizationStatus: () => mockBatteryStatus,
+  requestDisableBatteryOptimization: jest.fn(async () => true),
+}));
 jest.mock('@native/screenSecurity', () => ({
   getSecureScreenState: jest.fn(() => ({ available: true, enabled: false })),
   setSecureScreenEnabled: jest.fn(),
@@ -96,6 +102,8 @@ jest.mock('@db/repositories', () => ({
   kvSetWithinTransaction: jest.fn(async () => undefined),
 }));
 
+// eslint-disable-next-line import/first
+import { AppState, Platform } from 'react-native';
 // eslint-disable-next-line import/first
 import SettingsScreen from '../../../app/(app)/settings';
 // eslint-disable-next-line import/first
@@ -236,6 +244,47 @@ beforeEach(() => {
 
 afterEach(() => {
   resumeRealtimeDeliveries();
+});
+
+describe('SettingsScreen — battery optimization status (Android)', () => {
+  let os: { restore: () => void } | undefined;
+  beforeEach(() => {
+    os = jest.replaceProperty(Platform, 'OS', 'android');
+  });
+  afterEach(() => {
+    os?.restore();
+    mockBatteryStatus = 'unknown';
+  });
+
+  it('says when Android leaves Gator unrestricted', async () => {
+    mockBatteryStatus = 'unrestricted';
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText('Battery Optimization Settings…')).toBeTruthy();
+    expect(screen.getByText(/^Battery: Unrestricted\./)).toBeTruthy();
+  });
+
+  it('explains an optimized status, and reads it again on return to the app', async () => {
+    mockBatteryStatus = 'optimized';
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText(/^Battery: Optimized\./)).toBeTruthy();
+
+    // The person sets Gator to Unrestricted in Android's settings, then comes back.
+    mockBatteryStatus = 'unrestricted';
+    const changeListeners = (AppState.addEventListener as jest.Mock).mock.calls
+      .filter(([event]) => event === 'change')
+      .map(([, listener]) => listener as (state: string) => void);
+    await act(async () => {
+      for (const listener of changeListeners) listener('active');
+    });
+    expect(screen.getByText(/^Battery: Unrestricted\./)).toBeTruthy();
+    expect(screen.queryByText(/^Battery: Optimized\./)).toBeNull();
+  });
+
+  it('shows no status it can’t back up', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText('Battery Optimization Settings…')).toBeTruthy();
+    expect(screen.queryByText(/^Battery: /)).toBeNull();
+  });
 });
 
 describe('SettingsScreen — Double-Tap to Love', () => {

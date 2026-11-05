@@ -212,6 +212,7 @@ jobs:
           :gator-bounded-document:compileDebugKotlin
           :gator-bounded-download:compileDebugKotlin
           :gator-screen-security:compileDebugKotlin
+          :gator-power:compileDebugKotlin
           --no-daemon
 
       - name: Test local native modules

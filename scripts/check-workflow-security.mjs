@@ -62,6 +62,7 @@ const LOCAL_NATIVE_COMPILE_TASKS = [
   ':gator-bounded-document:compileDebugKotlin',
   ':gator-bounded-download:compileDebugKotlin',
   ':gator-screen-security:compileDebugKotlin',
+  ':gator-power:compileDebugKotlin',
 ];
 const LOCAL_NATIVE_TEST_TASKS = [
   ':gator-paste-input:testDebugUnitTest',

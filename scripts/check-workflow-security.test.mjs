@@ -876,6 +876,12 @@ test('requires the local screen-security Kotlin compile task', () => {
   );
 });
 
+test('requires the local power Kotlin compile task', () => {
+  const mutated = workflow.replace(':gator-power:compileDebugKotlin', ':gator-power:tasks');
+  assert.notEqual(mutated, workflow, 'the power mutation must change the fixture');
+  assert.ok(errorsFor(mutated).some((error) => error.includes(':gator-power:compileDebugKotlin')));
+});
+
 test('requires every local native module unit-test task that has test sources', () => {
   for (const task of [
     ':gator-paste-input:testDebugUnitTest',
