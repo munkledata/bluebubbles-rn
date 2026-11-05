@@ -14,6 +14,7 @@ import type { FindMyDevice, FindMyFriend } from '@core/findmy';
 import { useFindMyStore } from '@state/findmyStore';
 import { useLockStore } from '@state/lockStore';
 import { hasCoordinates, resolveDisplayPoint, safeOpenUrl, type DisplayPoint } from '@utils';
+import { formatUpdatedAgo } from '@utils/relativeTime';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import {
   FindMyMap,
@@ -37,6 +38,12 @@ export default function FindMyScreen(): React.JSX.Element {
   const serverFriends = useFindMyStore((s) => s.friends);
   // Show the phone contact's name when the friend's address matches one, like chats do.
   const contactNames = useFindMyContactNames();
+  // "Updated 5 min ago" labels: one clock for the list, ticking once a minute while open.
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
   const friends = useMemo(
     () =>
       serverFriends.map((friend) => {
@@ -267,6 +274,7 @@ export default function FindMyScreen(): React.JSX.Element {
                 <FriendRow
                   key={`${f.id}:${index}`}
                   friend={f}
+                  now={now}
                   onFocus={
                     mappedMarkerIds.has(`p:${index}`)
                       ? () => focusMapMarker(`p:${index}`)
@@ -331,10 +339,12 @@ function DeviceRow({
 
 function FriendRow({
   friend,
+  now,
   onFocus,
   onOpenLocation,
 }: {
   friend: FindMyFriend;
+  now: number;
   onFocus?: () => void;
   onOpenLocation: (point: DisplayPoint, label: string) => void;
 }): React.JSX.Element {
@@ -343,6 +353,7 @@ function FriendRow({
   const located = hasCoordinates(friend.latitude, friend.longitude);
   const name = friend.name;
   const detail = friend.address ?? (located ? 'Location available' : 'No location');
+  const updated = formatUpdatedAgo(friend.lastUpdated, now);
   return (
     <Pressable
       onPress={point.visible && onFocus ? onFocus : undefined}
@@ -354,6 +365,9 @@ function FriendRow({
       <View style={styles.rowText}>
         <Text style={[styles.name, { color: theme.color.label }]}>{name}</Text>
         <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>{detail}</Text>
+        {updated ? (
+          <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>{updated}</Text>
+        ) : null}
       </View>
       {point.visible ? (
         <Pressable

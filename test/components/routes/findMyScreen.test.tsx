@@ -323,6 +323,40 @@ describe('FindMyScreen external map handoff', () => {
     expect(screen.queryByText('+15551234567')).toBeNull();
   });
 
+  it('shows when each friend was last updated, and nothing when the time is unknown', async () => {
+    const friend = { latitude: 47.6, longitude: -122.3, address: 'Seattle', handle: null };
+    useFindMyStore.setState({
+      friends: [
+        { ...friend, id: 'f-new', name: 'Recent Friend', lastUpdated: Date.now() - 5 * 60_000 },
+        { ...friend, id: 'f-none', name: 'Unknown Time', lastUpdated: null },
+      ],
+    });
+    await renderWithTheme(<FindMyScreen />);
+    await fireEvent.press(screen.getByRole('tab', { name: 'People' }));
+
+    expect(screen.getByText('Updated 5 min ago')).toBeTruthy();
+    expect(screen.getAllByText(/^Updated /)).toHaveLength(1);
+  });
+
+  it('moves the "Updated" label on while the screen stays open', async () => {
+    jest.useFakeTimers({ now: 10_000_000 });
+    try {
+      const friend = { latitude: 47.6, longitude: -122.3, address: 'Seattle', handle: null };
+      useFindMyStore.setState({
+        friends: [{ ...friend, id: 'f', name: 'Friend', lastUpdated: 10_000_000 - 5 * 60_000 }],
+      });
+      await renderWithTheme(<FindMyScreen />);
+      await fireEvent.press(screen.getByRole('tab', { name: 'People' }));
+      expect(screen.getByText('Updated 5 min ago')).toBeTruthy();
+      await act(async () => {
+        jest.advanceTimersByTime(2 * 60_000);
+      });
+      expect(screen.getByText('Updated 7 min ago')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('does not offer a native handoff for a non-finite point', async () => {
     useFindMyStore.setState({
       devices: [{ ...DEVICE, latitude: Number.NaN }],
