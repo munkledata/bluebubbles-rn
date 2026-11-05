@@ -33,3 +33,4 @@ export * from './reminders';
 export * from './maintenance';
 export * from './shareIntakeReceipts';
 export * from './storageBreakdown';
+export * from './chatStats';
