@@ -5,6 +5,12 @@ const ENGLISH_MESSAGES = {
   'connect.action.scan': 'Scan QR Code',
   'connect.subtitle':
     'Scan the QR code shown on your {serverName}, or enter the URL and password or paired-client credential manually.',
+  'connect.syncDepth.all': 'All',
+  'connect.syncDepth.fewer': 'Fewer messages per chat',
+  'connect.syncDepth.label': 'Messages per chat',
+  'connect.syncDepth.more': 'More messages per chat',
+  'connect.syncDepth.note':
+    'How much history the first sync downloads for each chat. Older messages still load when you open a chat. You can change this later in Settings.',
   'connect.title': 'Connect',
   'contactsPermission.action.continue': 'Continue',
   'contactsPermission.action.notNow': 'Not Now',

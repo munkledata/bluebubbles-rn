@@ -26,7 +26,7 @@ function closeDb() {
 }
 
 beforeEach(() => {
-  useSyncSettingsStore.setState({ messagesPerChat: 0, hydrated: false });
+  useSyncSettingsStore.setState({ messagesPerChat: 0, unsaved: false, hydrated: false });
 });
 
 describe('hydrate with the DB not open yet (app launch before connect)', () => {
@@ -141,5 +141,48 @@ describe('syncSettingsStore', () => {
     await kvSet(db, SYNC_MESSAGES_PER_CHAT_KEY, raw);
     await useSyncSettingsStore.getState().hydrate();
     expect(useSyncSettingsStore.getState().messagesPerChat).toBe(expected);
+  });
+});
+
+describe('a choice made during setup, before the DB is open', () => {
+  it('survives the connect-time hydrate and is saved then', async () => {
+    closeDb();
+    await useSyncSettingsStore.getState().setMessagesPerChat(100);
+    expect(useSyncSettingsStore.getState()).toMatchObject({ messagesPerChat: 100, unsaved: true });
+
+    const db = await openTestDb();
+    await kvSet(db, SYNC_MESSAGES_PER_CHAT_KEY, '0'); // an older stored value must not win
+    await useSyncSettingsStore.getState().hydrate();
+
+    expect(useSyncSettingsStore.getState()).toMatchObject({
+      messagesPerChat: 100,
+      unsaved: false,
+      hydrated: true,
+    });
+    expect(await kvGet(db, SYNC_MESSAGES_PER_CHAT_KEY)).toBe('100');
+  });
+
+  it('saves nothing when the hydrate belongs to a retired connect attempt', async () => {
+    closeDb();
+    await useSyncSettingsStore.getState().setMessagesPerChat(50);
+    const db = await openTestDb();
+
+    await useSyncSettingsStore.getState().hydrate({ shouldCommit: () => false });
+
+    expect(await kvGet(db, SYNC_MESSAGES_PER_CHAT_KEY)).toBeNull();
+    expect(useSyncSettingsStore.getState()).toMatchObject({
+      messagesPerChat: 50,
+      unsaved: true,
+      hydrated: false,
+    });
+  });
+
+  it('a later ordinary hydrate reads the saved value again', async () => {
+    const db = await openTestDb();
+    await useSyncSettingsStore.getState().setMessagesPerChat(250);
+    await kvSet(db, SYNC_MESSAGES_PER_CHAT_KEY, '500'); // e.g. restored from a backup
+    useSyncSettingsStore.setState({ hydrated: false });
+    await useSyncSettingsStore.getState().hydrate();
+    expect(useSyncSettingsStore.getState().messagesPerChat).toBe(500);
   });
 });

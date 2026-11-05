@@ -27978,10 +27978,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/components/routes/permissionsScreen.test.tsx; test/components/routes/indexScreen.test.tsx; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/syncSettingsStore.ts#<callback:ee91d9571b>.setMessagesPerChat:mutator-call:00bf9d8287a3",
+      "id": "src/state/syncSettingsStore.ts#<callback:8b76f87f3d>.setMessagesPerChat:mutator-call:a1053cc15bbe",
       "path": "src/state/syncSettingsStore.ts",
-      "line": 43,
-      "symbol": "<callback:ee91d9571b>.setMessagesPerChat",
+      "line": 63,
+      "symbol": "<callback:8b76f87f3d>.setMessagesPerChat",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -27991,12 +27991,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/kvSettingsStores.test.ts; test/state/hydrateStores.test.ts; test/components/routes/homeScreen.test.tsx; test/services/sessionScopedState.test.ts; test/services/forget.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/syncSettingsStore.ts#<callback:ee91d9571b>.setMessagesPerChat:mutator-call:1e8801617211",
+      "id": "src/state/syncSettingsStore.ts#<callback:8b76f87f3d>.setMessagesPerChat:mutator-call:ff43d28d10df",
       "path": "src/state/syncSettingsStore.ts",
-      "line": 43,
-      "symbol": "<callback:ee91d9571b>.setMessagesPerChat",
+      "line": 63,
+      "symbol": "<callback:8b76f87f3d>.setMessagesPerChat",
       "operation": "mutator-call",
-      "target": "src/state/syncSettingsStore.ts#<callback:ee91d9571b>.setMessagesPerChat.<callback:8b49481064>",
+      "target": "src/state/syncSettingsStore.ts#<callback:8b76f87f3d>.setMessagesPerChat.<callback:8b49481064>",
       "detectedContext": "withDbTransaction",
       "owner": "syncSettingsStore.setMessagesPerChat",
       "transactionContext": "withDbTransaction",
@@ -28004,10 +28004,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/kvSettingsStores.test.ts; test/state/hydrateStores.test.ts; test/components/routes/homeScreen.test.tsx; test/services/sessionScopedState.test.ts; test/services/forget.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/syncSettingsStore.ts#<callback:ee91d9571b>.setMessagesPerChat.<callback:8b49481064>:mutator-call:e59b045ca953",
+      "id": "src/state/syncSettingsStore.ts#<callback:8b76f87f3d>.setMessagesPerChat.<callback:8b49481064>:mutator-call:46fad1594a10",
       "path": "src/state/syncSettingsStore.ts",
-      "line": 44,
-      "symbol": "<callback:ee91d9571b>.setMessagesPerChat.<callback:8b49481064>",
+      "line": 64,
+      "symbol": "<callback:8b76f87f3d>.setMessagesPerChat.<callback:8b49481064>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
