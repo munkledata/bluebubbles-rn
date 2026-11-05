@@ -73,12 +73,15 @@ describe('UI-01 rendered control contrast', () => {
       </SwipeableRow>,
     );
 
+    // A closed row's buttons are hidden from screen readers, but sighted users see them once they
+    // swipe, so their contrast still counts.
+    const hidden = { includeHiddenElements: true } as const;
     for (const action of actions) {
       const buttonStyle = StyleSheet.flatten(
-        screen.getByRole('button', { name: action.label }).props.style,
+        screen.getByRole('button', { name: action.label, ...hidden }).props.style,
       ) as ViewStyle;
       const labelStyle = StyleSheet.flatten(
-        screen.getByText(action.label).props.style,
+        screen.getByText(action.label, hidden).props.style,
       ) as TextStyle;
       expectReadable(labelStyle.color, buttonStyle.backgroundColor);
     }
