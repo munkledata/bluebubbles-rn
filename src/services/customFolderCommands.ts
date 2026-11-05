@@ -9,6 +9,7 @@ import {
   readCustomFolderMessageMatchBatchWithinTransaction,
   renameCustomFolderWithinTransaction,
   reorderCustomFoldersWithinTransaction,
+  addChatToCustomFolderWithinTransaction,
   replaceCustomFolderMembershipWithinTransaction,
   setCustomFolderShowUnreadBadgeWithinTransaction,
   type CustomFolderInboxPage,
@@ -221,6 +222,23 @@ export function reorderCustomFolders(
     return withDbTransaction(
       db,
       (context) => reorderCustomFoldersWithinTransaction(context, snapshot),
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Add one chat to a folder ("Add to Folder…"); see addChatToCustomFolderWithinTransaction. */
+export function addChatToCustomFolder(
+  folderId: number,
+  chatGuid: string,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<CustomFolderCommandResult<'added' | 'already' | 'missing'>> {
+  return runCustomFolderCommand(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertAccountOperationCurrent(activeLease);
+    return withDbTransaction(
+      db,
+      (context) => addChatToCustomFolderWithinTransaction(context, folderId, chatGuid),
       () => activeLease.isCurrent(),
     );
   });

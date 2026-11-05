@@ -312,6 +312,57 @@ export function reorderCustomFoldersWithinTransaction(
 }
 
 /**
+ * Add ONE chat to a folder ("Add to Folder…" from a chat's long-press), without rewriting the
+ * folder's whole member list. Same rules as a full save: the folder must exist, the chat guid is
+ * validated the same way, and the per-folder and all-folders caps apply (the same
+ * CustomFolderMembershipLimitError). Adding a chat that is already a member changes nothing.
+ * Returns `added`, `already` (it was a member), or `missing` (the folder no longer exists).
+ */
+export function addChatToCustomFolderWithinTransaction(
+  context: DbTransactionContext,
+  folderId: number,
+  chatGuid: string,
+): Promise<'added' | 'already' | 'missing'> {
+  return runInTransactionContext(context, async (db) => {
+    requireFolderId(folderId);
+    const [guid] = normalizeChatGuids([chatGuid]);
+    if (guid == null) throw new RangeError('Every folder member must have a valid chat GUID.');
+    const folder = await db.all<{ id: number }>(
+      sql`SELECT id FROM custom_folders WHERE id = ${folderId} LIMIT 1`,
+    );
+    if (folder.length === 0) return 'missing';
+
+    const member = await db.all<{ one: number }>(sql`
+      SELECT 1 AS one FROM custom_folder_members
+       WHERE folder_id = ${folderId} AND chat_guid = ${guid}
+       LIMIT 1
+    `);
+    if (member.length > 0) return 'already';
+
+    const [counts] = await db.all<{ inFolder: number; total: number }>(sql`
+      WITH in_folder AS MATERIALIZED (
+        SELECT 1 FROM custom_folder_members
+         WHERE folder_id = ${folderId}
+         LIMIT ${MAX_CUSTOM_FOLDER_MEMBERS}
+      ), all_members AS MATERIALIZED (
+        SELECT 1 FROM custom_folder_members
+         LIMIT ${MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL}
+      )
+      SELECT (SELECT COUNT(*) FROM in_folder) AS inFolder,
+             (SELECT COUNT(*) FROM all_members) AS total
+    `);
+    if (
+      (counts?.inFolder ?? 0) >= MAX_CUSTOM_FOLDER_MEMBERS ||
+      (counts?.total ?? 0) >= MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL
+    ) {
+      throw new CustomFolderMembershipLimitError();
+    }
+    await db.insert(customFolderMembers).values({ folderId, chatGuid: guid }).onConflictDoNothing();
+    return 'added';
+  });
+}
+
+/**
  * Add desired memberships before pruning stale rows. The transaction makes the final set atomic;
  * the write order also prevents same-connection observers from seeing a transient empty folder.
  */
