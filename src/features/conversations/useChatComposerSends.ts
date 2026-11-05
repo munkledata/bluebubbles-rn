@@ -15,6 +15,7 @@ import {
   send,
   sendEffect,
   sendFormatted,
+  sendSubject,
   sendMention,
   type SendOperationIssue,
 } from '@/services/send';
@@ -46,6 +47,7 @@ export interface ChatComposerSendOptions {
     | 'mentionParticipants'
     | 'imessageFormattedAvailable'
   > &
+    Partial<Pick<ChatCapabilities, 'imessageSubjectAvailable'>> &
     Partial<Pick<ChatCapabilities, 'imessagePartRepliesAvailable'>>;
   editing: ComposerEditTarget | null;
   setEditing: Dispatch<SetStateAction<ComposerEditTarget | null>>;
@@ -76,6 +78,7 @@ export function useChatComposerSends({
     imessageMentionsAvailable,
     mentionParticipants,
     imessageFormattedAvailable,
+    imessageSubjectAvailable = false,
   } = capabilities;
 
   // useCallback-stable: these feed the memoized Composer, so a reactive tick re-rendering the
@@ -374,5 +377,51 @@ export function useChatComposerSends({
     [accountLease, guid, imessageFormattedAvailable],
   );
 
-  return { onSchedule, onScheduleAttachment, onSend, onSendEffect, onSendMention, onSendFormatted };
+  const onSendSubject = useCallback(
+    async (text: string, subject: string): Promise<boolean> => {
+      if (!imessageSubjectAvailable || !accountLease.isCurrent()) return false;
+      try {
+        const result = await sendSubject(
+          { chatGuid: guid, text, subject },
+          accountLease,
+          presentSendIssue,
+        );
+        if (!accountLease.isCurrent()) return false;
+        if (result == null || result.status === 'rejected') {
+          showDialog(
+            'Message Not Sent',
+            'Your message and subject are still here so you can try again.',
+          );
+          return false;
+        }
+        if (result.status === 'outcome-unknown') {
+          showDialog(
+            'Message Not Confirmed',
+            'It may have been delivered. Check the conversation before sending another copy.',
+          );
+        }
+        return true;
+      } catch (error) {
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] subject-message submission failed', error);
+          showDialog(
+            'Message Not Sent',
+            'Your message and subject are still here so you can try again.',
+          );
+        }
+        return false;
+      }
+    },
+    [accountLease, guid, imessageSubjectAvailable],
+  );
+
+  return {
+    onSchedule,
+    onScheduleAttachment,
+    onSend,
+    onSendEffect,
+    onSendMention,
+    onSendFormatted,
+    onSendSubject,
+  };
 }

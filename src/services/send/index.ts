@@ -6,6 +6,7 @@ import {
 } from '@core/models/serverInfo';
 import {
   canSendRestoredIMessageReply,
+  canSendRestoredIMessageSubject,
   canSendRestoredIMessageTapback,
   canUseRestoredIMessageGroupFeature,
   IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
@@ -86,6 +87,11 @@ import {
   type SendEffectArgs,
   type SendEffectResult,
 } from './sendEffectService';
+import {
+  sendIMessageSubject,
+  type SendSubjectArgs,
+  type SendSubjectResult,
+} from './sendSubjectService';
 import {
   sendIMessageMention,
   type SendMentionArgs,
@@ -359,6 +365,11 @@ export {
   type SendEffectArgs,
   type SendEffectResult,
 } from './sendEffectService';
+export {
+  sendIMessageSubject,
+  type SendSubjectArgs,
+  type SendSubjectResult,
+} from './sendSubjectService';
 export { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
 
 /**
@@ -1072,6 +1083,39 @@ export function sendMention(
         throw new SendCapabilityUnavailableError();
       }
       return sendIMessageMention(
+        getDatabase(),
+        accountHttp(accountLease),
+        snapshot,
+        Date.now(),
+        () => accountLease.isCurrent(),
+        capability,
+      );
+    },
+    { logicalSendChat: snapshot.chatGuid },
+    reportIssue,
+  );
+}
+
+/** UI-facing one-shot FP-006 text with a subject line, one-to-one or in an all-iMessage group. */
+export function sendSubject(
+  args: SendSubjectArgs,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
+): Promise<SendSubjectResult | null> {
+  const snapshot: SendSubjectArgs = { ...args };
+  return runUiAccountOperation(
+    accountLease,
+    () => {
+      const capability = captureSessionRcsCapabilityLease();
+      if (
+        !capability ||
+        isRcsChatGuid(snapshot.chatGuid) ||
+        !canSendRestoredIMessageSubject(capability.serverInfo, snapshot.chatGuid) ||
+        !capability.isCurrent()
+      ) {
+        throw new SendCapabilityUnavailableError();
+      }
+      return sendIMessageSubject(
         getDatabase(),
         accountHttp(accountLease),
         snapshot,

@@ -62,6 +62,7 @@ interface TextPayload {
   imessageEffectV1?: true;
   imessageMentionV1?: true;
   imessageFormattedV1?: true;
+  imessageSubjectV1?: true;
   imessagePlainTextV1?: true;
   imessagePlainTextRetrySafeV1?: true;
 }
@@ -147,7 +148,8 @@ function requiresRetiredPrivateApi(row: QueueRowShape): boolean {
       if (
         payload.imessageEffectV1 === true ||
         payload.imessageMentionV1 === true ||
-        payload.imessageFormattedV1 === true
+        payload.imessageFormattedV1 === true ||
+        payload.imessageSubjectV1 === true
       )
         return true;
       if (isRcsChatGuid(row.chatGuid)) return false;
@@ -235,6 +237,20 @@ function isNarrowImessageFormatted(row: QueueRowShape): boolean {
   try {
     const payload = JSON.parse(row.payload) as TextPayload;
     return payload.imessageFormattedV1 === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A recovered marked FP-006 subject message may already have dispatched and must never be
+ * replayed. It is recorded with the plain-text "may have been delivered" wording.
+ */
+function isNarrowImessageSubject(row: QueueRowShape): boolean {
+  if (row.kind !== 'text') return false;
+  try {
+    const payload = JSON.parse(row.payload) as TextPayload;
+    return payload.imessageSubjectV1 === true;
   } catch {
     return false;
   }
@@ -478,11 +494,13 @@ export async function resendOutgoingRow(
           ? 'mention'
           : isNarrowImessageFormatted(row)
             ? 'formatted'
-            : isMarkedImessageAttachment(row)
-              ? 'attachment'
-              : row.kind === 'contact'
-                ? 'contact'
-                : null;
+            : isNarrowImessageSubject(row)
+              ? 'plain'
+              : isMarkedImessageAttachment(row)
+                ? 'attachment'
+                : row.kind === 'contact'
+                  ? 'contact'
+                  : null;
     if (oneShotKind) {
       // A process death may have hidden a successful helper dispatch. Never replay this key or
       // present the generic "not sent" notification; keep the authored local row for review.

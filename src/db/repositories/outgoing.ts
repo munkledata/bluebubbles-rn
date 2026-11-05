@@ -368,6 +368,8 @@ export interface InsertOutgoingTextArgs {
   oneShotMention?: boolean;
   /** Marks the dedicated one-shot formatted payload for crash recovery without enabling replay. */
   oneShotFormatted?: boolean;
+  /** Marks the dedicated one-shot FP-006 subject payload for crash recovery without replay. */
+  oneShotSubject?: boolean;
   /** Pins this row to the separately gated exact-GUID plain-text route. */
   imessagePlainTextV1?: boolean;
 }
@@ -396,6 +398,7 @@ export async function insertOutgoingTextWithinTransaction(
         imessageEffectV1: args.oneShotEffect === true ? true : undefined,
         imessageMentionV1: args.oneShotMention === true ? true : undefined,
         imessageFormattedV1: args.oneShotFormatted === true ? true : undefined,
+        imessageSubjectV1: args.oneShotSubject === true ? true : undefined,
         imessagePlainTextV1: args.imessagePlainTextV1 === true ? true : undefined,
         subject: args.subject,
         // Persisted so a crash-recovery resend keeps the subject + mention spans
@@ -764,13 +767,15 @@ function isQueuedOneShotText(row: Pick<RetryableOutgoing, 'kind' | 'payload'>): 
       imessageEffectV1?: unknown;
       imessageMentionV1?: unknown;
       imessageFormattedV1?: unknown;
+      imessageSubjectV1?: unknown;
     };
     // The durable markers are authoritative. Missing/corrupt rich fields must fail closed rather
     // than convert a possibly-dispatched helper send into manually replayable plain text.
     return (
       payload.imessageEffectV1 === true ||
       payload.imessageMentionV1 === true ||
-      payload.imessageFormattedV1 === true
+      payload.imessageFormattedV1 === true ||
+      payload.imessageSubjectV1 === true
     );
   } catch {
     return false;
@@ -870,8 +875,8 @@ export function claimFailedOutgoingForRetryWithinTransaction(
     // a manual re-send could only stop before the network and relabel the bubble "maybe sent".
     if (imessagePlainTextState === 'unsafe') return { claim: 'unsendable' };
     const queuedTarget = queuedMessageTarget(row.kind, row.payload);
-    // One-shot iMessage attachments, contacts, replies, effects, mentions, and formatted messages
-    // may not be manually replayed: a lost HTTP acknowledgement can mean the helper dispatched them.
+    // One-shot iMessage attachments, contacts, replies, effects, mentions, formatted and subject
+    // messages may not be manually replayed: a lost HTTP acknowledgement can mean the helper dispatched them.
     if (
       isQueuedOneShotText(row) ||
       (!isRcsChatGuid(row.chatGuid) &&

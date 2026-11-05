@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import {
   canSendRestoredIMessageAttachments,
+  canSendRestoredIMessageSubject,
   restoredGroupCommandsAcceptAnyPrefix,
 } from '@core/models/imessageRestoredFeatures';
 import { currentRcsProviderEpoch, isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
@@ -57,6 +58,8 @@ export interface ChatCapabilities {
   imessageRemoteDeleteAvailable: boolean;
   imessageEffectsAvailable: boolean;
   imessageFormattedAvailable: boolean;
+  /** FP-006: a subject line on plain text, one-to-one or in a proven all-iMessage group. */
+  imessageSubjectAvailable: boolean;
   imessageMentionsAvailable: boolean;
   /** Group members a mention can name; empty unless every member has a unique, clean address. */
   mentionParticipants: MentionParticipant[];
@@ -122,11 +125,14 @@ export function useChatCapabilities(
   const groupEditSupported = useServerSupports('supports_imessage_group_edit');
   const groupUnsendSupported = useServerSupports('supports_imessage_group_unsend');
   const groupEffectsSupported = useServerSupports('supports_imessage_group_effects');
+  const subjectSupported = useSessionStore((s) =>
+    canSendRestoredIMessageSubject(s.serverInfo, guid),
+  );
   // FP-006 part 2: one restored file per send (HEIC, video, GIF, documents, group pictures).
   const restoredAttachmentsSupported = useSessionStore((s) =>
     canSendRestoredIMessageAttachments(s.serverInfo, guid),
   );
-  // Group contact, location and subject switches are deliberately NOT read here, even when a server
+  // Group contact and location switches are deliberately NOT read here, even when a server
   // advertises them: this app cannot send them yet, so it must not offer them. (The group
   // read-state switch is read by the mark-read path, not by a chat-screen feature.)
   const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
@@ -216,6 +222,7 @@ export function useChatCapabilities(
       (effectsSupported && oneToOne && header?.participantCount === 1) ||
       (groupEffectsSupported && restoredGroup),
     imessageFormattedAvailable: formattedSupported && oneToOne,
+    imessageSubjectAvailable: subjectSupported && (oneToOne || restoredGroup),
     imessageMentionsAvailable,
     mentionParticipants,
     imessageVoiceAvailable,

@@ -143,6 +143,8 @@ interface AttachmentTrayProps {
   onPickContact?: () => void;
   /** Confirm and send one foreground-acquired current location. */
   onShareLocation?: () => void;
+  /** FP-006: open the composer's subject line. Omitted where subjects are not offered. */
+  onAddSubject?: () => void;
   /** False when the tray exists only for non-media actions such as Location. */
   mediaEnabled?: boolean;
   /** The first iMessage upload slice accepts a single bounded still image with known bytes. */
@@ -165,6 +167,7 @@ export function AttachmentTray({
   onPickFiles,
   onPickContact,
   onShareLocation,
+  onAddSubject,
   mediaEnabled = true,
   imessageImageOnly = false,
   imessageVideoAllowed = false,
@@ -484,6 +487,20 @@ export function AttachmentTray({
           >
             <Icon name="location-outline" size={26} color={theme.color.tint} />
             <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Location</Text>
+          </Pressable>
+        ) : null}
+
+        {onAddSubject ? (
+          <Pressable
+            onPress={() => {
+              if (isCurrent()) onAddSubject();
+            }}
+            style={[styles.files, { backgroundColor: theme.color.secondaryBackground }]}
+            accessibilityRole="button"
+            accessibilityLabel="Add subject"
+          >
+            <Icon name="text-outline" size={26} color={theme.color.tint} />
+            <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Subject</Text>
           </Pressable>
         ) : null}
 

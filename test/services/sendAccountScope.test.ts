@@ -57,6 +57,7 @@ jest.mock('@/services/send/sendEditService', () => ({
   sendUnsend: jest.fn(),
 }));
 jest.mock('@/services/send/sendEffectService', () => ({ sendIMessageEffect: jest.fn() }));
+jest.mock('@/services/send/sendSubjectService', () => ({ sendIMessageSubject: jest.fn() }));
 jest.mock('@/services/send/rcsAttemptCapability', () => ({
   ...jest.requireActual('@/services/send/rcsAttemptCapability'),
   captureSessionRcsCapabilityLease: jest.fn(),
@@ -104,6 +105,7 @@ import {
   sendContactCard,
   sendEffect,
   sendImage,
+  sendSubject,
   sendImages,
   sendTextAttachment,
   unsend,
@@ -1185,6 +1187,37 @@ describe('UI send account lease', () => {
       }
     },
   );
+
+  it.each([
+    ['the subject switch on', { supports_imessage_subject: true }, true],
+    ['the subject switch off', { supports_imessage_formatted_messages: true }, false],
+  ])('FP-006: with %s, a subject send is delegated=%s', async (_label, flags, sent) => {
+    const { sendIMessageSubject } = jest.requireMock('@/services/send/sendSubjectService') as {
+      sendIMessageSubject: jest.Mock;
+    };
+    sendIMessageSubject.mockResolvedValue({ status: 'accepted', tempGuid: 'temp-subject' });
+    mockCaptureCapability.mockReturnValue({
+      kind: 'session',
+      origin: 'https://capability.test',
+      revision: 1,
+      serverInfo: { ...RCS_SERVER_INFO, ...flags },
+      isCurrent: () => true,
+      publish: () => true,
+    });
+    for (const chatGuid of ['any;+;chat-group', 'iMessage;-;+15551234567']) {
+      sendIMessageSubject.mockClear();
+      await expect(sendSubject({ chatGuid, text: 'hi', subject: 'Plans' })).resolves.toEqual(
+        sent ? { status: 'accepted', tempGuid: 'temp-subject' } : null,
+      );
+      expect(sendIMessageSubject).toHaveBeenCalledTimes(sent ? 1 : 0);
+    }
+    // RCS never takes a subject, whatever the switch says.
+    sendIMessageSubject.mockClear();
+    await expect(
+      sendSubject({ chatGuid: rcsChatGuid('subject'), text: 'hi', subject: 'Plans' }),
+    ).resolves.toBeNull();
+    expect(sendIMessageSubject).not.toHaveBeenCalled();
+  });
 
   it('snapshots mutable send payloads before they wait behind an earlier job', async () => {
     const blockerResult = deferred<{ tempGuid: string }>();

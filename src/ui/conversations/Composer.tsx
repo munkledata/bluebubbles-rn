@@ -114,6 +114,11 @@ interface ComposerProps {
     text: string,
     textFormatting: IMessageTextFormattingRange[],
   ) => ComposerTextAdmission;
+  /**
+   * FP-006: send text with a subject line (bold above the text). Omit to hide "Add subject".
+   * Subjects go with plain text only: no attachments, effect, formatting, mention or reply.
+   */
+  onSendSubject?: (text: string, subject: string) => ComposerTextAdmission;
   /** Exact current group participants offered after the user types `@`. */
   mentionParticipants?: MentionParticipant[];
   /** Exact message-part-zero target for the narrow plain-text reply path. */
@@ -230,6 +235,7 @@ export const Composer = React.memo(function Composer({
   onSendEffect,
   onSendMention,
   onSendFormatted,
+  onSendSubject,
   mentionParticipants,
   replyTo,
   onCancelReply,
@@ -284,6 +290,9 @@ export const Composer = React.memo(function Composer({
     };
   }, []);
   const [effectPickerOpen, setEffectPickerOpen] = useState(false);
+  // null = no subject line; '' = the line is open but empty. Shown only while subjects are offered.
+  const [subjectDraft, setSubjectDraft] = useState<string | null>(null);
+  const subjectOpen = subjectDraft !== null && !!onSendSubject;
   const [mentions, setMentions] = useState<MessageMention[]>([]);
   const mentionsRef = useRef<MessageMention[]>([]);
   mentionsRef.current = mentions;
@@ -608,6 +617,7 @@ export const Composer = React.memo(function Composer({
     const state: ComposerRemovalState = {
       ...(isEditing ? { hasUnsavedEdit: text !== editingText } : {}),
       hasUnsavedDraftMetadata:
+        (subjectOpen && (subjectDraft ?? '').trim().length > 0) ||
         pending.length > 0 ||
         mentions.length > 0 ||
         hasSuspendedMentionMetadata ||
@@ -638,6 +648,8 @@ export const Composer = React.memo(function Composer({
     mentions.length,
     onRemovalStateChange,
     pending.length,
+    subjectDraft,
+    subjectOpen,
     text,
     textFormatting.length,
     trayOpen,
@@ -694,6 +706,36 @@ export const Composer = React.memo(function Composer({
   };
   const submit = (): void => {
     if (scheduleSavingRef.current) return;
+    const subjectLine = subjectOpen ? (subjectDraft ?? '').trim() : '';
+    if (subjectLine.length > 0 && !replyTo && !isEditing && onSendSubject) {
+      if (mentionsRef.current.length > 0 || textFormattingRef.current.length > 0) {
+        showToast('A message with a subject can’t include mentions or formatting');
+        return;
+      }
+      const submitSubject = onSendSubject;
+      void submitAuthored((captured) => {
+        const admission = submitSubject(captured, subjectLine);
+        // Consume only the subject that was sent: one edited during a pending send stays.
+        const clearSubject = (accepted: void | boolean): void => {
+          if (accepted === false) return;
+          setSubjectDraft((current) =>
+            current !== null && current.trim() === subjectLine ? null : current,
+          );
+        };
+        if (
+          admission != null &&
+          typeof (admission as PromiseLike<void | boolean>).then === 'function'
+        ) {
+          return Promise.resolve(admission).then((accepted) => {
+            clearSubject(accepted);
+            return accepted;
+          });
+        }
+        clearSubject(admission as void | boolean);
+        return admission;
+      });
+      return;
+    }
     if (!replyTo && !isEditing && textFormattingRef.current.length > 0) {
       const submitFormatted = onSendFormatted;
       const normalized = formattingForTrimmedText(
@@ -751,6 +793,7 @@ export const Composer = React.memo(function Composer({
   };
   const effectsAvailable =
     !!onSendEffect &&
+    !subjectOpen &&
     active &&
     !isEditing &&
     !replyTo &&
@@ -765,10 +808,17 @@ export const Composer = React.memo(function Composer({
     effectLongPressConsumed.current = true;
     setEffectPickerOpen(true);
   };
+  // "Add subject" lives in the tray, so the + button also opens for it alone.
+  const subjectOffered = !!onSendSubject && !replyTo && !isEditing && !subjectOpen;
   const attachEnabled =
-    trayEnabled && !isEditing && mentions.length === 0 && textFormatting.length === 0;
+    (trayEnabled || subjectOffered) &&
+    !subjectOpen &&
+    !isEditing &&
+    mentions.length === 0 &&
+    textFormatting.length === 0;
   const formattingControlsVisible =
     !!onSendFormatted &&
+    !subjectOpen &&
     active &&
     !isEditing &&
     !replyTo &&
@@ -844,6 +894,7 @@ export const Composer = React.memo(function Composer({
 
   const scheduleAvailable =
     active &&
+    !subjectOpen &&
     !isEditing &&
     !replyTo &&
     !submissionPending &&
@@ -1134,6 +1185,41 @@ export const Composer = React.memo(function Composer({
         </View>
       ) : null}
 
+      {subjectOpen ? (
+        <View style={styles.subjectRow}>
+          <TextInput
+            testID="composer-subject"
+            value={subjectDraft ?? ''}
+            onChangeText={setSubjectDraft}
+            editable={active}
+            placeholder="Subject"
+            placeholderTextColor={theme.color.tertiaryLabel}
+            accessibilityLabel="Subject"
+            maxLength={300}
+            returnKeyType="next"
+            onSubmitEditing={() => inputRef.current?.focus()}
+            style={[
+              styles.subjectInput,
+              {
+                color: theme.color.label,
+                borderColor: theme.color.separator,
+                backgroundColor: theme.color.secondaryBackground,
+              },
+            ]}
+          />
+          <Pressable
+            onPress={() => setSubjectDraft(null)}
+            disabled={submissionPending || scheduleSaving}
+            hitSlop={8}
+            style={styles.attach}
+            accessibilityRole="button"
+            accessibilityLabel="Remove subject"
+          >
+            <Icon name="close" size={22} color={theme.color.secondaryLabel} />
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={styles.row}>
         {attachEnabled ? (
           <Pressable
@@ -1252,6 +1338,14 @@ export const Composer = React.memo(function Composer({
           onPick={addPending}
           onPickFiles={handlePickFiles}
           mediaEnabled={attachmentsEnabled}
+          onAddSubject={
+            subjectOffered
+              ? () => {
+                  setTrayOpen(false);
+                  setSubjectDraft('');
+                }
+              : undefined
+          }
           imessageImageOnly={imessageImageOnly}
           imessageVideoAllowed={imessageVideoAllowed}
           cameraChatGuid={cameraChatGuid}
@@ -1398,6 +1492,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   send: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
+  subjectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingBottom: 6,
+    gap: 4,
+  },
+  subjectInput: {
+    flex: 1,
+    minHeight: 34,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 17,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    fontSize: 15,
+    fontWeight: '600',
+  },
   attach: { width: 34, height: 38, alignItems: 'center', justifyContent: 'center' },
   micBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
   // Frosted bubble behind a control when the composer floats over a wallpaper.

@@ -231,3 +231,22 @@ describe('useChatCapabilities FP-006 restored flags', () => {
     expect(caps.imessagePartRepliesAvailable).toBe(true);
   });
 });
+
+describe('useChatCapabilities FP-006 subject line', () => {
+  it.each([
+    ['a one-to-one chat with the switch on', ONE_TO_ONE, 'direct', true, true],
+    ['an any;+; all-iMessage group with the switch on', ANY_GROUP, 'group', true, true],
+    ['a group with an SMS member', ANY_GROUP, 'sms-group', true, false],
+    ['a one-to-one chat with the switch off', ONE_TO_ONE, 'direct', false, false],
+  ])('offers a subject only where allowed: %s', async (_label, guid, shape, on, expected) => {
+    await serverInfo(on ? { supports_imessage_subject: true } : EVERY_IMESSAGE_FLAG);
+    const row =
+      shape === 'direct'
+        ? header()
+        : shape === 'group'
+          ? ANY_GROUP_HEADER
+          : { ...ANY_GROUP_HEADER, handleServices: 'iMessage,SMS' };
+    const caps = await capabilitiesFor(guid, row);
+    expect(caps.imessageSubjectAvailable).toBe(expected);
+  });
+});

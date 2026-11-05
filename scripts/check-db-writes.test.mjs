@@ -3524,6 +3524,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#sendFormatted.<callback:a6fdee4f2c>:mutator-call:63a9ed12033f',
       'src/services/send/index.ts#sendImages.<callback:84ef35880b>.<callback:e4983ee008>:mutator-call:8bd9a889f487',
       'src/services/send/index.ts#sendMention.<callback:5b64ad267f>:mutator-call:4312bcd22a52',
+      'src/services/send/index.ts#sendSubject.<callback:190bd17327>:mutator-call:ff8cf4941041',
       'src/services/send/index.ts#sendTextAttachment.<callback:528e229137>:mutator-call:ccc84ddd3899',
       'src/services/send/index.ts#sendVoice.<callback:2b1d4eb2d6>:mutator-call:b8b4b25f8b41',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:b57de385513f',
@@ -3573,7 +3574,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch:mutator-call:9caef164c0df',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 46);
+  assert.equal(sendFrontDoorFindings.length, 47);
 });
 
 // FP-006: the restored tapback sender has exactly one DB edge, its guarded exact-target read.

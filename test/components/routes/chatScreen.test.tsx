@@ -304,6 +304,7 @@ jest.mock('@/services/send', () => ({
   ),
   sendEffect: jest.fn().mockResolvedValue({ status: 'accepted', tempGuid: 'temp-effect' }),
   sendFormatted: jest.fn().mockResolvedValue({ status: 'accepted', tempGuid: 'temp-formatted' }),
+  sendSubject: jest.fn().mockResolvedValue({ status: 'accepted', tempGuid: 'temp-subject' }),
   sendMention: jest.fn().mockResolvedValue({ status: 'accepted', tempGuid: 'temp-mention' }),
   sendImage: jest.fn(),
   sendVoice: jest.fn(),
@@ -355,6 +356,7 @@ import {
   send,
   sendEffect,
   sendFormatted,
+  sendSubject,
   sendMention,
   sendImage,
   sendVoice,
@@ -2250,6 +2252,33 @@ describe('ChatScreen — send routing', () => {
         text: 'A B',
         textFormatting: [{ start: 1, length: 1, styles: ['underline'] }],
       },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
+    );
+  });
+
+  // FP-006 subject line: offered only while the subject switch is on for a proven iMessage chat.
+  it.each([
+    ['on', true],
+    ['off', false],
+  ])('wires the subject line to sendSubject only with the switch %s', async (_label, on) => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_subject: on } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+
+    if (!on) {
+      expect(mockCaptured.composer?.onSendSubject).toBeUndefined();
+      return;
+    }
+    expect(mockCaptured.composer?.onSendSubject).toEqual(expect.any(Function));
+    await expect(mockCaptured.composer!.onSendSubject('Hi there', 'Plans')).resolves.toBe(true);
+    expect(sendSubject).toHaveBeenCalledWith(
+      { chatGuid: GUID, text: 'Hi there', subject: 'Plans' },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
     );

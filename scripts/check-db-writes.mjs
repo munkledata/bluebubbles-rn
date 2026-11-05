@@ -126,6 +126,7 @@ export const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/send/sendContactService.ts',
   'src/services/send/sendEffectService.ts',
   'src/services/send/sendFormattedService.ts',
+  'src/services/send/sendSubjectService.ts',
   'src/services/send/sendLocationService.ts',
   'src/services/send/sendMentionService.ts',
   'src/services/send/sendOutcome.ts',
@@ -2524,6 +2525,11 @@ function dbProcessRelaunchCertificateCandidate({
     'src/services/send/sendFormattedService.ts',
     'sendIMessageFormatted',
   );
+  const sendIMessageSubject = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendSubjectService.ts',
+    'sendIMessageSubject',
+  );
   const sendTextMessage = topLevelFunction(
     filesByPath,
     'src/services/send/sendService.ts',
@@ -2616,6 +2622,7 @@ function dbProcessRelaunchCertificateCandidate({
     [sendIMessageEffect, '6fcc4a5d714b4696464d6f924e887584d39a6721ff33a4a5bca586e49c67519b'],
     [sendIMessageMention, '8b826ea5df538b8230e006779358bf8bed44322f3007956340b20ee7fd104843'],
     [sendIMessageFormatted, 'cf64954748fc0a92dd4a00fd8d72f8111062fbead8fbcf575434513d428e4a54'],
+    [sendIMessageSubject, 'd95b45e6751ca9173af28c0ff0b6f13ce5dc7caa7c339ff83a5ca807b47c2828'],
     [reconcileSendOutcome, 'aedfc0bb25afbf331d39a1eb1e425b726dee99a5878b04a4fbb9bdca5f9636b1'],
     [handleSendFailure, 'f15ed881134c6a2b31fee3d185b6811708f4d913ccfd2ecad327915eb84a1178'],
     [
@@ -2700,6 +2707,7 @@ function dbProcessRelaunchCertificateCandidate({
     !sendIMessageEffect?.body ||
     !sendIMessageMention?.body ||
     !sendIMessageFormatted?.body ||
+    !sendIMessageSubject?.body ||
     !sendTextMessage?.body ||
     !sendContactMessage?.body ||
     !sendReactionMessage?.body ||
@@ -3765,7 +3773,7 @@ function dbProcessRelaunchCertificateCandidate({
     !runtimeSendOptions ||
     normalizedSnippet(runtimeSendOptions, runtimeWaveFile) !==
       "{ failureNoticeMode: 'suppressed' }" ||
-    optionedReconcileEdges.length !== 9 ||
+    optionedReconcileEdges.length !== 10 ||
     !hasExactOptionedEdge(
       optionedReconcileEdges,
       sendTextMessage,
@@ -3808,6 +3816,12 @@ function dbProcessRelaunchCertificateCandidate({
       5,
       '{ expectedChatGuid: request.chatGuid, }',
     ) ||
+    !hasExactOptionedEdge(
+      optionedReconcileEdges,
+      sendIMessageSubject,
+      5,
+      '{ expectedChatGuid: request.chatGuid, }',
+    ) ||
     !hasExactOptionedEdge(optionedReconcileEdges, sendImageMessage, 5, 'attemptOptions') ||
     !hasExactNestedOptionedEdge(
       optionedReconcileEdges,
@@ -3815,7 +3829,7 @@ function dbProcessRelaunchCertificateCandidate({
       5,
       '{ attemptOwnerToken, expectedChatGuid: row.chatGuid, }',
     ) ||
-    optionedFailureEdges.length !== 8 ||
+    optionedFailureEdges.length !== 9 ||
     !hasExactOptionedEdge(
       optionedFailureEdges,
       sendTextMessage,
@@ -3857,6 +3871,12 @@ function dbProcessRelaunchCertificateCandidate({
       sendIMessageFormatted,
       7,
       "{ terminalUncertainKind: 'formatted', expectedChatGuid: request.chatGuid }",
+    ) ||
+    !hasExactNestedOptionedEdge(
+      optionedFailureEdges,
+      sendIMessageSubject,
+      7,
+      "{ terminalUncertainKind: 'plain', expectedChatGuid: request.chatGuid }",
     ) ||
     !hasExactNestedOptionedEdge(
       optionedFailureEdges,

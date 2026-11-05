@@ -95,6 +95,39 @@ export function isDefiniteIMessageMentionError(error: unknown): error is ApiErro
   return expectedStatus !== undefined && error.status === expectedStatus;
 }
 
+/**
+ * Only exact reviewed status/type pairs prove that an FP-006 subject message was refused before
+ * the restored helper dispatched it (bbd `IMessageRestoredSend*Error` and the retry ledger).
+ * `imessage_restored_send_outcome_unknown` is also 409 but a different type, so it never matches.
+ */
+const DEFINITE_IMESSAGE_SUBJECT_ERRORS = new Map<string, number>([
+  ['imessage_restored_send_invalid_target', 400],
+  ['imessage_restored_send_unavailable', 503],
+  ['imessage_restored_send_rejected', 409],
+  ['idempotency_key_invalid', 400],
+  ['idempotency_persistence_unavailable', 503],
+]);
+
+export function isDefiniteIMessageSubjectError(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError) || error.serverErrorType == null) return false;
+  const expectedStatus = DEFINITE_IMESSAGE_SUBJECT_ERRORS.get(error.serverErrorType);
+  return expectedStatus !== undefined && error.status === expectedStatus;
+}
+
+/** The same content rules the subject request enforces, for a caller to check before admission. */
+export function requireIMessageSubjectContent(args: {
+  chatGuid: string;
+  text: string;
+  subject: string;
+}): void {
+  requireRestoredSubjectText({
+    chatGuid: args.chatGuid,
+    tempGuid: 'temp-subject-check',
+    message: args.text,
+    subject: args.subject,
+  });
+}
+
 /** Only exact reviewed status/type pairs prove that the formatted helper did not dispatch. */
 export function isDefiniteIMessageFormattedError(error: unknown): error is ApiError {
   if (!(error instanceof ApiError) || error.serverErrorType == null) return false;

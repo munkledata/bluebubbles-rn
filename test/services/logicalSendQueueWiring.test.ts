@@ -113,7 +113,7 @@ describe('logical send queue production wiring', () => {
         'src/services/notifications/actions.ts acquire chatGuid',
         'src/services/send/index.ts run mode.logicalSendChat',
         'src/services/send/index.ts chat chatGuid',
-        ...Array.from({ length: 11 }, () => 'src/services/send/index.ts chat snapshot.chatGuid'),
+        ...Array.from({ length: 12 }, () => 'src/services/send/index.ts chat snapshot.chatGuid'),
       ].sort(),
     );
   });

@@ -154,6 +154,7 @@ function ChatScreenInner({
     imessageRemoteDeleteAvailable,
     imessageEffectsAvailable,
     imessageFormattedAvailable,
+    imessageSubjectAvailable,
     imessageMentionsAvailable,
     mentionParticipants,
     typingFeaturesAvailable,
@@ -313,16 +314,23 @@ function ChatScreenInner({
   const isDev = isDevServer;
   useChatScheduledCatchup(accountLease);
 
-  const { onSchedule, onScheduleAttachment, onSend, onSendEffect, onSendMention, onSendFormatted } =
-    useChatComposerSends({
-      guid,
-      accountLease,
-      capabilities,
-      editing,
-      setEditing,
-      replyTo,
-      setReplyTo,
-    });
+  const {
+    onSchedule,
+    onScheduleAttachment,
+    onSend,
+    onSendEffect,
+    onSendMention,
+    onSendFormatted,
+    onSendSubject,
+  } = useChatComposerSends({
+    guid,
+    accountLease,
+    capabilities,
+    editing,
+    setEditing,
+    replyTo,
+    setReplyTo,
+  });
 
   // Long-press and multi-select handlers. Stable callbacks feed the memoized list/row chain.
   const {
@@ -702,11 +710,12 @@ function ChatScreenInner({
   const kbVisible = useKeyboardVisible();
 
   // Wallpaper mode: the header/composer float transparent over the image and the list runs UNDER
-  // them, with BAR_GAP-padded content insets so resting messages clear the bars, and EdgeFade
-  // veils dissolve scrolled-past messages into the bar zones instead of hard-clipping them. Bar heights are measured (onLayout) since
-  // both vary (insets, reply bar, typing bubble) — and the wrappers are measured in BOTH
-  // modes, so real heights already exist by the time the (async, reactive) wallpaper flag flips
-  // the styles. The estimates only cover the very first frames of a cold mount.
+  // them, with BAR_GAP-padded content insets so resting messages clear the bars, and EdgeFade veils
+  // dissolve scrolled-past messages into the bar zones instead of hard-clipping them. Bar heights
+  // are measured (onLayout) since both vary (insets, reply bar, typing bubble) — and the wrappers
+  // are measured in BOTH modes, so real heights already exist by the time the (async, reactive)
+  // wallpaper flag flips the styles. The estimates only cover the very first frames of a cold
+  // mount.
   const hasWallpaper = !!visibleBackgroundUri;
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -874,6 +883,9 @@ function ChatScreenInner({
           }
           onSendFormatted={
             !replyTo && !editing && imessageFormattedAvailable ? onSendFormatted : undefined
+          }
+          onSendSubject={
+            !replyTo && !editing && imessageSubjectAvailable ? onSendSubject : undefined
           }
           mentionParticipants={mentionParticipants}
           {...(replyTo ? { replyTo, onCancelReply: cancelReply } : {})}

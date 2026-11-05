@@ -69,9 +69,11 @@ jest.mock('@ui/conversations/AttachmentTray', () => {
     AttachmentTray: ({
       onPick,
       onPickFiles,
+      onAddSubject,
     }: {
       onPick: (i: unknown) => void;
       onPickFiles: () => void;
+      onAddSubject?: () => void;
     }) =>
       React.createElement(
         React.Fragment,
@@ -82,6 +84,7 @@ jest.mock('@ui/conversations/AttachmentTray', () => {
           onPick(B);
         }),
         btn('tray-files', () => onPickFiles()),
+        onAddSubject ? btn('tray-add-subject', () => onAddSubject()) : null,
       ),
   };
 });
@@ -1542,5 +1545,96 @@ describe('Composer — typing indicator (debounced emit)', () => {
 
     await view.rerender(<Composer onSend={jest.fn()} />);
     expect(onTyping).toHaveBeenCalledWith(false);
+  });
+});
+
+// FP-006 subject line: "+" → "Add subject" opens a slim Subject line above the box. A subject goes
+// with plain text only, so scheduling (and effects/attachments) step aside while it is open.
+describe('Composer — subject line', () => {
+  async function openSubject(): Promise<void> {
+    await fireEvent.press(await screen.findByLabelText('Open attachment options'));
+    await fireEvent.press(await screen.findByLabelText('tray-add-subject'));
+  }
+
+  it('offers no subject without onSendSubject', async () => {
+    await renderWithTheme(<Composer onSend={jest.fn()} onSendAttachments={jest.fn()} />);
+    await fireEvent.press(await screen.findByLabelText('Open attachment options'));
+    expect(screen.queryByLabelText('tray-add-subject')).toBeNull();
+    expect(screen.queryByPlaceholderText('Subject')).toBeNull();
+  });
+
+  it('sends text with its subject through onSendSubject, then closes the line', async () => {
+    const onSend = jest.fn();
+    const onSendSubject = jest.fn(() => true);
+    await renderWithTheme(<Composer onSend={onSend} onSendSubject={onSendSubject} />);
+    await openSubject();
+    await fireEvent.changeText(screen.getByPlaceholderText('Subject'), '  Dinner plans ');
+    await fireEvent.changeText(input(), 'Are we still on?');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
+
+    expect(onSendSubject).toHaveBeenCalledWith('Are we still on?', 'Dinner plans');
+    expect(onSend).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByPlaceholderText('Subject')).toBeNull());
+  });
+
+  it('keeps the subject and text when the send is refused', async () => {
+    const onSendSubject = jest.fn(() => false);
+    await renderWithTheme(<Composer onSend={jest.fn()} onSendSubject={onSendSubject} />);
+    await openSubject();
+    await fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'Dinner plans');
+    await fireEvent.changeText(input(), 'Are we still on?');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
+
+    expect(onSendSubject).toHaveBeenCalledTimes(1);
+    expect(screen.getByPlaceholderText('Subject').props.value).toBe('Dinner plans');
+  });
+
+  it('keeps a subject edited while the send is pending', async () => {
+    const pending = deferred<boolean>();
+    const onSendSubject = jest.fn(() => pending.promise);
+    await renderWithTheme(<Composer onSend={jest.fn()} onSendSubject={onSendSubject} />);
+    await openSubject();
+    await fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'Dinner plans');
+    await fireEvent.changeText(input(), 'Are we still on?');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
+    await fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'Lunch instead');
+    await act(async () => pending.resolve(true));
+
+    expect(screen.getByPlaceholderText('Subject').props.value).toBe('Lunch instead');
+  });
+
+  it.each([
+    ['removed with ✕', true],
+    ['left blank', false],
+  ])('sends plain text through onSend when the subject is %s', async (_label, remove) => {
+    const onSend = jest.fn();
+    const onSendSubject = jest.fn(() => true);
+    await renderWithTheme(<Composer onSend={onSend} onSendSubject={onSendSubject} />);
+    await openSubject();
+    if (remove) await fireEvent.press(screen.getByLabelText('Remove subject'));
+    await fireEvent.changeText(input(), 'plain');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
+
+    expect(onSend).toHaveBeenCalledWith('plain');
+    expect(onSendSubject).not.toHaveBeenCalled();
+  });
+
+  it('hides scheduling and the attachment button while the subject line is open', async () => {
+    await renderWithTheme(
+      <Composer
+        onSend={jest.fn()}
+        onSendSubject={jest.fn(() => true)}
+        onSendAttachments={jest.fn()}
+        onSchedule={jest.fn()}
+      />,
+    );
+    await fireEvent.changeText(input(), 'hello');
+    expect(screen.getByRole('button', { name: 'Schedule message' })).toBeTruthy();
+    await openSubject();
+
+    expect(screen.queryByRole('button', { name: 'Schedule message' })).toBeNull();
+    expect(screen.queryByLabelText('Open attachment options')).toBeNull();
+    await fireEvent.press(screen.getByLabelText('Remove subject'));
+    expect(await screen.findByLabelText('Open attachment options')).toBeTruthy();
   });
 });

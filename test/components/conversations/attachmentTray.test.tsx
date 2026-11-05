@@ -539,6 +539,30 @@ describe('AttachmentTray — current location button (capability-gated)', () => 
   });
 });
 
+describe('AttachmentTray — subject button (FP-006, capability-gated)', () => {
+  it('shows "Subject" only when offered and opens it without inspecting media', async () => {
+    const onAddSubject = jest.fn();
+    const view = await renderWithTheme(
+      <AttachmentTray
+        onPick={jest.fn()}
+        onPickFiles={jest.fn()}
+        onAddSubject={onAddSubject}
+        mediaEnabled={false}
+      />,
+    );
+    expect(getPerm).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByLabelText('Add subject'));
+    expect(onAddSubject).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      view.rerender(
+        <AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} mediaEnabled={false} />,
+      );
+    });
+    expect(screen.queryByLabelText('Add subject')).toBeNull();
+  });
+});
+
 describe('AttachmentTray — camera capture', () => {
   it('stages a captured photo via onPick', async () => {
     grantWith([]);
