@@ -5763,7 +5763,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#listPastedAttachmentProtectionPaths:mutator-call:543990b98095",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 413,
+      "line": 522,
       "symbol": "listPastedAttachmentProtectionPaths",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5776,7 +5776,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-insert:99e2263a1304",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 472,
+      "line": 581,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-insert",
       "target": "attachment_cache_entries",
@@ -5789,7 +5789,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-delete:045962bd8b71",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 501,
+      "line": 610,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5802,7 +5802,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-update:9609800f7a37",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 510,
+      "line": 619,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-update",
       "target": "attachments",
@@ -5815,7 +5815,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess:sql-update:3ca8ab1b4190",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 614,
+      "line": 723,
       "symbol": "recordAttachmentCacheAccess",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5828,7 +5828,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:c78a3766ee18",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 651,
+      "line": 760,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5841,7 +5841,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-update:27b8750a28ca",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 658,
+      "line": 767,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-update",
       "target": "attachments",
@@ -5854,7 +5854,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:b9564831e666",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 673,
+      "line": 782,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-delete",
       "target": "attachment_cache_entries",
@@ -5867,7 +5867,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-delete:ff6e109326d8",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 903,
+      "line": 1012,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5880,7 +5880,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:0fd63f0dd34a",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 913,
+      "line": 1022,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5893,7 +5893,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:300d170b9271",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 930,
+      "line": 1039,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-update",
       "target": "attachments",
@@ -5906,7 +5906,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#scheduleAttachmentCacheRetirementRetry:sql-update:94a4794dc91e",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 961,
+      "line": 1070,
       "symbol": "scheduleAttachmentCacheRetirementRetry",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5919,7 +5919,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted:sql-delete:f009e63ebbd9",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 1010,
+      "line": 1119,
       "symbol": "confirmAttachmentCacheEntryDeleted",
       "operation": "sql-delete",
       "target": "attachment_cache_entries",
@@ -18399,7 +18399,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve:mutator-call:57660cf8e9b1",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 215,
+      "line": 216,
       "symbol": "AttachmentCacheCoordinator.reserve",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -18412,7 +18412,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve.<callback:545c570a32>:mutator-call:8fa5b0c434c3",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 223,
+      "line": 224,
       "symbol": "AttachmentCacheCoordinator.reserve.<callback:545c570a32>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep",
@@ -18425,7 +18425,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve:mutator-call:790799f83301",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 232,
+      "line": 233,
       "symbol": "AttachmentCacheCoordinator.reserve",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement",
@@ -18438,7 +18438,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.conformCurrentQuota:mutator-call:b2ebff423c78",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 252,
+      "line": 253,
       "symbol": "AttachmentCacheCoordinator.conformCurrentQuota",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -18451,7 +18451,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.conformCurrentQuota.<callback:0dcf6c14a5>:mutator-call:7a455dfc3371",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 267,
+      "line": 268,
       "symbol": "AttachmentCacheCoordinator.conformCurrentQuota.<callback:0dcf6c14a5>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep",
@@ -18464,7 +18464,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.conformCurrentQuota:mutator-call:407a969fb807",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 285,
+      "line": 286,
       "symbol": "AttachmentCacheCoordinator.conformCurrentQuota",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement",
@@ -18477,7 +18477,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting:mutator-call:38f52c5bccc4",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 350,
+      "line": 351,
       "symbol": "AttachmentCacheCoordinator.reuseExisting",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected",
@@ -18488,126 +18488,152 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentCache.test.ts; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/attachmentCacheRecovery.test.ts; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/deleteChat.test.ts"
     },
     {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>:mutator-call:8bd2c7eb08a0",
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries:mutator-call:e1c200479b26",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 379,
-      "symbol": "AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>",
-      "operation": "mutator-call",
-      "target": "src/db/transaction.ts#withDbTransaction",
-      "detectedContext": "transaction-coordinator",
-      "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
-      "transactionContext": "transaction-coordinator",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry)"
-    },
-    {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>:mutator-call:9afaadeee5b7",
-      "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 379,
-      "symbol": "AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>",
-      "operation": "mutator-call",
-      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>.<callback:512f1de3ea>",
-      "detectedContext": "withDbTransaction",
-      "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry)"
-    },
-    {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>.<callback:512f1de3ea>:mutator-call:013502c2232e",
-      "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 397,
-      "symbol": "AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>.<callback:512f1de3ea>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
-      "detectedContext": "withDbTransaction",
-      "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry)"
-    },
-    {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>.<callback:512f1de3ea>:mutator-call:8e1e0babd149",
-      "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 424,
-      "symbol": "AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:d87a8ed078>.<callback:512f1de3ea>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
-      "detectedContext": "withDbTransaction",
-      "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry)"
-    },
-    {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>:mutator-call:930a07982424",
-      "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 433,
-      "symbol": "AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>",
-      "operation": "mutator-call",
-      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:41968decb2>",
-      "detectedContext": "withDbTransaction",
-      "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry)"
-    },
-    {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>:mutator-call:9fb329ce81a0",
-      "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 433,
-      "symbol": "AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>",
-      "operation": "mutator-call",
-      "target": "src/db/transaction.ts#withDbTransaction",
-      "detectedContext": "transaction-coordinator",
-      "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
-      "transactionContext": "transaction-coordinator",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry)"
-    },
-    {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:41968decb2>:mutator-call:398d3ce66937",
-      "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 449,
-      "symbol": "AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:41968decb2>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
-      "detectedContext": "withDbTransaction",
-      "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry)"
-    },
-    {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:41968decb2>:mutator-call:a788972c1e21",
-      "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 469,
-      "symbol": "AttachmentCacheCoordinator.retireInactiveEntries.<callback:8423f487f4>.<callback:41968decb2>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
-      "detectedContext": "withDbTransaction",
-      "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry)"
-    },
-    {
-      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries:mutator-call:00d0f346acf8",
-      "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 510,
+      "line": 365,
       "symbol": "AttachmentCacheCoordinator.retireInactiveEntries",
       "operation": "mutator-call",
-      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement",
+      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates",
       "detectedContext": "coordinated-delegation",
       "owner": "AttachmentCacheCoordinator.retireInactiveEntries",
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentCache.test.ts; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/attachmentCacheRecovery.test.ts; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/deleteChat.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentCache.test.ts; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/attachmentCacheRecovery.test.ts; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/deleteChat.test.ts; test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireChatEntries:mutator-call:3033603a5021",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 385,
+      "symbol": "AttachmentCacheCoordinator.retireChatEntries",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates",
+      "detectedContext": "coordinated-delegation",
+      "owner": "AttachmentCacheCoordinator.retireChatEntries",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentCache.test.ts; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/attachmentCacheRecovery.test.ts; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/deleteChat.test.ts; test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>:mutator-call:0f25eff63269",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 414,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry); test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>:mutator-call:a82c56b3c404",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 414,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>.<callback:1da3a4f1ee>",
+      "detectedContext": "withDbTransaction",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry); test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>.<callback:1da3a4f1ee>:mutator-call:599312dfc0fb",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 432,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>.<callback:1da3a4f1ee>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
+      "detectedContext": "withDbTransaction",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry); test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>.<callback:1da3a4f1ee>:mutator-call:65e541d93e60",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 459,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:404b348ac8>.<callback:1da3a4f1ee>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
+      "detectedContext": "withDbTransaction",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry); test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>:mutator-call:2d6e8f29175b",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 468,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry); test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>:mutator-call:e5bb1ff71825",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 468,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:cccd048bbd>",
+      "detectedContext": "withDbTransaction",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry); test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:cccd048bbd>:mutator-call:9860c1eba2fc",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 484,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:cccd048bbd>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
+      "detectedContext": "withDbTransaction",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry); test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:cccd048bbd>:mutator-call:dab317526ba6",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 504,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates.<callback:a67d31cfe5>.<callback:cccd048bbd>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
+      "detectedContext": "withDbTransaction",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts (tracked atomic inactive list/claim/reference ownership, outgoing-path exclusion, rollback cleanup/same-path retry, native-after-commit/outside-owner ordering, and 100-path batching); test/services/deleteChat.test.ts (production queued revocation/drain/no-write, neighbour rollback isolation, and fresh-generation retry); test/services/attachmentCacheChatRemoval.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates:mutator-call:bc6a56507572",
+      "path": "src/services/download/attachmentCacheCoordinator.ts",
+      "line": 553,
+      "symbol": "AttachmentCacheCoordinator.retireCandidates",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement",
+      "detectedContext": "coordinated-delegation",
+      "owner": "AttachmentCacheCoordinator.retireCandidates",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentCache.test.ts; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/attachmentCacheRecovery.test.ts; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/deleteChat.test.ts; test/services/attachmentCacheChatRemoval.test.ts"
     },
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements.<callback:8e7fd49d0d>:mutator-call:b3591dcd08ea",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 544,
+      "line": 601,
       "symbol": "AttachmentCacheCoordinator.drainDueRetirements.<callback:8e7fd49d0d>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18620,7 +18646,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements:mutator-call:babc5144318d",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 551,
+      "line": 608,
       "symbol": "AttachmentCacheCoordinator.drainDueRetirements",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18633,7 +18659,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements.<callback:9390dd3030>.<callback:5887af4f98>:mutator-call:94b844aad651",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 584,
+      "line": 641,
       "symbol": "AttachmentCacheCoordinator.drainDueRetirements.<callback:9390dd3030>.<callback:5887af4f98>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18646,7 +18672,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements.<callback:9390dd3030>:mutator-call:eddbb2ff2147",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 591,
+      "line": 648,
       "symbol": "AttachmentCacheCoordinator.drainDueRetirements.<callback:9390dd3030>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18659,7 +18685,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements:mutator-call:95f380d7a8a7",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 618,
+      "line": 675,
       "symbol": "AttachmentCacheCoordinator.drainDueRetirements",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement",
@@ -18672,7 +18698,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:82605ec350>:mutator-call:9ac0064005fa",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 661,
+      "line": 718,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:82605ec350>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18685,7 +18711,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep:mutator-call:58105dd227ad",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 670,
+      "line": 727,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18698,7 +18724,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:3d93169c7d>:mutator-call:72d60b76207d",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 711,
+      "line": 768,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:3d93169c7d>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18711,7 +18737,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:3d93169c7d>:mutator-call:a26c0e7421c2",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 711,
+      "line": 768,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:3d93169c7d>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:3d93169c7d>.<callback:cd29f027aa>",
@@ -18724,7 +18750,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:3d93169c7d>.<callback:cd29f027aa>:mutator-call:7679da6fca8a",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 714,
+      "line": 771,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:3d93169c7d>.<callback:cd29f027aa>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#createAttachmentCacheReservation",
@@ -18737,7 +18763,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep:mutator-call:38df55613376",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 722,
+      "line": 779,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:cd29f027aa>",
@@ -18750,7 +18776,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep:mutator-call:e34eaf889dba",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 722,
+      "line": 779,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18763,7 +18789,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:cd29f027aa>:mutator-call:9ca02648ff32",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 723,
+      "line": 780,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:cd29f027aa>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#createAttachmentCacheReservation",
@@ -18776,7 +18802,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:df09439464>:mutator-call:5805c81da2ee",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 770,
+      "line": 827,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:df09439464>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18789,7 +18815,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:df09439464>:mutator-call:848ea25f510a",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 770,
+      "line": 827,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:df09439464>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:df09439464>.<callback:82c1897231>",
@@ -18802,7 +18828,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:df09439464>.<callback:82c1897231>:mutator-call:4f2eb0807cda",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 772,
+      "line": 829,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:df09439464>.<callback:82c1897231>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
@@ -18815,7 +18841,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep:mutator-call:08aa4127d3ec",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 776,
+      "line": 833,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:82c1897231>",
@@ -18828,7 +18854,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep:mutator-call:bc5ca763d831",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 776,
+      "line": 833,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18841,7 +18867,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planAdmissionStep.<callback:82c1897231>:mutator-call:fa5552e55115",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 777,
+      "line": 834,
       "symbol": "AttachmentCacheCoordinator.planAdmissionStep.<callback:82c1897231>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
@@ -18854,7 +18880,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep.<callback:2d2b0b7b08>:mutator-call:cb1bfc109f34",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 821,
+      "line": 878,
       "symbol": "AttachmentCacheCoordinator.planConformanceStep.<callback:2d2b0b7b08>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18867,7 +18893,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep:mutator-call:feb86e102f02",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 827,
+      "line": 884,
       "symbol": "AttachmentCacheCoordinator.planConformanceStep",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18880,7 +18906,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep.<callback:df09439464>:mutator-call:5097f4860535",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 875,
+      "line": 932,
       "symbol": "AttachmentCacheCoordinator.planConformanceStep.<callback:df09439464>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep.<callback:df09439464>.<callback:82c1897231>",
@@ -18893,7 +18919,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep.<callback:df09439464>:mutator-call:6913f7e5ec4c",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 875,
+      "line": 932,
       "symbol": "AttachmentCacheCoordinator.planConformanceStep.<callback:df09439464>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18906,7 +18932,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep.<callback:df09439464>.<callback:82c1897231>:mutator-call:3f98b5f26a1c",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 877,
+      "line": 934,
       "symbol": "AttachmentCacheCoordinator.planConformanceStep.<callback:df09439464>.<callback:82c1897231>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
@@ -18919,7 +18945,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep:mutator-call:7969901994ae",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 881,
+      "line": 938,
       "symbol": "AttachmentCacheCoordinator.planConformanceStep",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep.<callback:82c1897231>",
@@ -18932,7 +18958,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep:mutator-call:d5422f6b3d45",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 881,
+      "line": 938,
       "symbol": "AttachmentCacheCoordinator.planConformanceStep",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18945,7 +18971,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.planConformanceStep.<callback:82c1897231>:mutator-call:a89f1114a691",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 882,
+      "line": 939,
       "symbol": "AttachmentCacheCoordinator.planConformanceStep.<callback:82c1897231>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
@@ -18958,7 +18984,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>:mutator-call:13581fd4105e",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 935,
+      "line": 992,
       "symbol": "AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -18971,7 +18997,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>:mutator-call:be8893f30c2b",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 935,
+      "line": 992,
       "symbol": "AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>.<callback:fca892b269>",
@@ -18984,7 +19010,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>.<callback:fca892b269>:mutator-call:c4405fc7f365",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 939,
+      "line": 996,
       "symbol": "AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>.<callback:fca892b269>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess",
@@ -18997,7 +19023,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>.<callback:fca892b269>:mutator-call:f85354471500",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 951,
+      "line": 1008,
       "symbol": "AttachmentCacheCoordinator.reuseProtected.<callback:d25641cb1e>.<callback:fca892b269>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry",
@@ -19010,7 +19036,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected:mutator-call:c275bbdb8fed",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 963,
+      "line": 1020,
       "symbol": "AttachmentCacheCoordinator.reuseProtected",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected.<callback:823eabfd61>",
@@ -19023,7 +19049,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected:mutator-call:d89fe4666b76",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 963,
+      "line": 1020,
       "symbol": "AttachmentCacheCoordinator.reuseProtected",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19036,7 +19062,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected.<callback:823eabfd61>:mutator-call:9d29a16efe16",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 967,
+      "line": 1024,
       "symbol": "AttachmentCacheCoordinator.reuseProtected.<callback:823eabfd61>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess",
@@ -19049,7 +19075,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseProtected.<callback:823eabfd61>:mutator-call:e00fc4dc8086",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 979,
+      "line": 1036,
       "symbol": "AttachmentCacheCoordinator.reuseProtected.<callback:823eabfd61>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry",
@@ -19062,7 +19088,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.publicReservation.release:mutator-call:f3b469f7fd19",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1042,
+      "line": 1099,
       "symbol": "AttachmentCacheCoordinator.publicReservation.release",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -19075,7 +19101,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:97abf09099>:mutator-call:23020158d014",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1067,
+      "line": 1124,
       "symbol": "AttachmentCacheCoordinator.settleRetirement.<callback:97abf09099>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:97abf09099>.<callback:a239e497cf>",
@@ -19088,7 +19114,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:97abf09099>:mutator-call:6e91e7e84eb2",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1067,
+      "line": 1124,
       "symbol": "AttachmentCacheCoordinator.settleRetirement.<callback:97abf09099>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19101,7 +19127,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:97abf09099>.<callback:a239e497cf>:mutator-call:9ef0d36c9adb",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1069,
+      "line": 1126,
       "symbol": "AttachmentCacheCoordinator.settleRetirement.<callback:97abf09099>.<callback:a239e497cf>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted",
@@ -19114,7 +19140,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:9aa63ad3ca>:mutator-call:caeeb8c4d306",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1076,
+      "line": 1133,
       "symbol": "AttachmentCacheCoordinator.settleRetirement.<callback:9aa63ad3ca>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:9aa63ad3ca>.<callback:cb6847676e>",
@@ -19127,7 +19153,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:9aa63ad3ca>:mutator-call:d075906e60ac",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1076,
+      "line": 1133,
       "symbol": "AttachmentCacheCoordinator.settleRetirement.<callback:9aa63ad3ca>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19140,7 +19166,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:9aa63ad3ca>.<callback:cb6847676e>:mutator-call:ac9c4649e269",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1078,
+      "line": 1135,
       "symbol": "AttachmentCacheCoordinator.settleRetirement.<callback:9aa63ad3ca>.<callback:cb6847676e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#scheduleAttachmentCacheRetirementRetry",
@@ -19153,7 +19179,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement:mutator-call:337e0cb65937",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1085,
+      "line": 1142,
       "symbol": "AttachmentCacheCoordinator.settleRetirement",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:a239e497cf>",
@@ -19166,7 +19192,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement:mutator-call:65a8450e61bf",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1085,
+      "line": 1142,
       "symbol": "AttachmentCacheCoordinator.settleRetirement",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19179,7 +19205,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:a239e497cf>:mutator-call:18da451d5c13",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1086,
+      "line": 1143,
       "symbol": "AttachmentCacheCoordinator.settleRetirement.<callback:a239e497cf>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted",
@@ -19192,7 +19218,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement:mutator-call:1fbb7d18f7df",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1090,
+      "line": 1147,
       "symbol": "AttachmentCacheCoordinator.settleRetirement",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19205,7 +19231,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement:mutator-call:b9b33b6f4ca3",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1090,
+      "line": 1147,
       "symbol": "AttachmentCacheCoordinator.settleRetirement",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:cb6847676e>",
@@ -19218,7 +19244,7 @@
     {
       "id": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.settleRetirement.<callback:cb6847676e>:mutator-call:6a2d320c3555",
       "path": "src/services/download/attachmentCacheCoordinator.ts",
-      "line": 1091,
+      "line": 1148,
       "symbol": "AttachmentCacheCoordinator.settleRetirement.<callback:cb6847676e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#scheduleAttachmentCacheRetirementRetry",
@@ -19851,6 +19877,32 @@
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
+    },
+    {
+      "id": "src/services/download/removeChatDownloads.ts#removeChatDownloadedFiles.<callback:ab1b560960>:mutator-call:cb7f94d91217",
+      "path": "src/services/download/removeChatDownloads.ts",
+      "line": 41,
+      "symbol": "removeChatDownloadedFiles.<callback:ab1b560960>",
+      "operation": "mutator-call",
+      "target": "src/services/databaseControl.ts#ensureDatabase",
+      "detectedContext": "startup-single-flight-delegation",
+      "owner": "removeChatDownloadedFiles",
+      "transactionContext": "startup-single-flight-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
+    },
+    {
+      "id": "src/services/download/removeChatDownloads.ts#removeChatDownloadedFiles.<callback:ab1b560960>:mutator-call:d4955f6951bc",
+      "path": "src/services/download/removeChatDownloads.ts",
+      "line": 45,
+      "symbol": "removeChatDownloadedFiles.<callback:ab1b560960>",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireChatEntries",
+      "detectedContext": "coordinated-delegation",
+      "owner": "removeChatDownloadedFiles",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/removeChatDownloads.test.ts; test/services/attachmentCacheChatRemoval.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/db/chatOnlyAttachmentCache.test.ts"
     },
     {
       "id": "src/services/errors/errorReportQueueService.ts#runQueueBody:mutator-call:4d7d77b3c92a",

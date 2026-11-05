@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import {
   runInTransactionContext,
   withDbTransaction,
@@ -235,6 +235,115 @@ export async function listInactiveAttachmentCachePaths(
     LIMIT ${boundedLimit}
   `);
   return rows.map((row: { path: string }) => row.path);
+}
+
+/**
+ * The SQL test for "every attachment that points at cache path `e.path` belongs to chat `chatId`".
+ * Rows with no message, or whose message is missing, may be local/outgoing handoffs, so they count
+ * as belonging elsewhere and keep the file (the same conservative rule as the inactive scan).
+ */
+function cachePathOnlyInChatSql(chatId: SQL) {
+  return sql`EXISTS (
+        SELECT 1 FROM attachments a JOIN messages m ON m.id = a.message_id
+        WHERE a.local_path = e.path AND m.chat_id = ${chatId}
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM attachments a
+        LEFT JOIN messages m ON m.id = a.message_id
+        WHERE a.local_path = e.path
+          AND (a.message_id IS NULL OR m.id IS NULL OR m.chat_id IS NOT ${chatId})
+      )`;
+}
+
+/** Cache path `e.path` is not the source of a pending automatic Photos copy (the claim's own test). */
+function notAwaitingPhotosCopySql() {
+  return sql`NOT EXISTS (
+        SELECT 1
+          FROM attachment_media_exports ame
+          JOIN attachments a ON a.guid = ame.attachment_guid
+          JOIN messages m ON m.id = a.message_id
+          JOIN chats c ON c.id = m.chat_id
+         WHERE ${attachmentMediaExportProtectsCacheSql()}
+           AND a.local_path = e.path
+           AND ${attachmentMediaExportOwnerEligibleSql()}
+      )`;
+}
+
+function chatIdByGuidSql(chatGuid: string) {
+  return sql`(SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)`;
+}
+
+/**
+ * Active cache paths used ONLY by one chat's attachments, least recently used first: the
+ * candidates for "Remove this chat's downloaded files". A file another chat also uses (one physical
+ * copy of a forwarded photo) is excluded, because a retirement claim clears every reference to its
+ * path. Files awaiting an automatic Photos copy are left out too: one of them would make the claim
+ * refuse its WHOLE batch and stall every later pass (the quota snapshot filters them the same way).
+ * The coordinator reads this inside
+ * the same outer transaction as the exact claim, while its in-memory gate excludes mounted,
+ * reserved and in-flight paths.
+ */
+export async function listChatOnlyAttachmentCachePaths(
+  db: AppDatabase,
+  chatGuid: string,
+  limit = MAX_RETIREMENT_BATCH,
+): Promise<string[]> {
+  requireNonnegativeSafeInteger(limit, 'Attachment cache chat-path limit');
+  const boundedLimit = Math.min(limit, MAX_RETIREMENT_BATCH);
+  if (boundedLimit === 0 || chatGuid.length === 0 || chatGuid.length > MAX_PATH_CHARS) return [];
+  const rows = await db.all<{ path: string }>(sql`
+    SELECT e.path
+    FROM attachment_cache_entries e
+    WHERE e.state = 'active'
+      AND ${cachePathOnlyInChatSql(chatIdByGuidSql(chatGuid))}
+      AND ${notAwaitingPhotosCopySql()}
+    ORDER BY e.last_used_at ASC, e.path ASC
+    LIMIT ${boundedLimit}
+  `);
+  return rows.map((row: { path: string }) => row.path);
+}
+
+/** What "Remove this chat's downloaded files" would remove, and how many files it would keep. */
+export interface ChatDownloadedFilesSummary {
+  /** Downloaded files the removal would take: used only by this chat, not awaiting a Photos copy. */
+  files: number;
+  bytes: number;
+  /**
+   * This chat's other downloaded files, which stay: another chat (or a deleted message there) uses
+   * them, an attachment with no message still holds them, or a Photos copy is still pending.
+   */
+  keptFiles: number;
+}
+
+/**
+ * Totals for the removal confirmation. Bounded by the cache ledger itself, which startup recovery
+ * holds to {@link ATTACHMENT_CACHE_RECOVERY_MAX_FILES} rows.
+ */
+export async function getChatDownloadedFilesSummary(
+  db: AppDatabase,
+  chatGuid: string,
+): Promise<ChatDownloadedFilesSummary> {
+  const empty = { files: 0, bytes: 0, keptFiles: 0 };
+  if (chatGuid.length === 0 || chatGuid.length > MAX_PATH_CHARS) return empty;
+  const chatId = chatIdByGuidSql(chatGuid);
+  // Exactly the candidate test of listChatOnlyAttachmentCachePaths, so the promise matches the work.
+  const removable = sql`(${cachePathOnlyInChatSql(chatId)} AND ${notAwaitingPhotosCopySql()})`;
+  const rows = await db.all<{ files: number; bytes: number; inChat: number }>(sql`
+    SELECT
+      COALESCE(SUM(CASE WHEN ${removable} THEN 1 ELSE 0 END), 0) AS files,
+      COALESCE(SUM(CASE WHEN ${removable} THEN e.bytes ELSE 0 END), 0) AS bytes,
+      COUNT(*) AS inChat
+    FROM attachment_cache_entries e
+    WHERE e.state = 'active'
+      AND EXISTS (
+        SELECT 1 FROM attachments a JOIN messages m ON m.id = a.message_id
+        WHERE a.local_path = e.path AND m.chat_id = ${chatId}
+      )
+  `);
+  const row = rows[0];
+  if (!row) return empty;
+  return { files: row.files, bytes: row.bytes, keptFiles: row.inChat - row.files };
 }
 
 function requirePath(path: string): void {

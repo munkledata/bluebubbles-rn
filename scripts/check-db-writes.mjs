@@ -152,6 +152,7 @@ export const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/download/autoDownloadAttachments.ts',
   'src/services/download/downloadService.ts',
   'src/services/download/index.ts',
+  'src/services/download/removeChatDownloads.ts',
   'src/services/send/scheduleService.ts',
   'src/services/send/sendEditService.ts',
   'src/state/featureSettingsStore.ts',

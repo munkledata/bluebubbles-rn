@@ -3840,7 +3840,9 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve.<callback:545c570a32>:mutator-call:8fa5b0c434c3',
       'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve:mutator-call:57660cf8e9b1',
       'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve:mutator-call:790799f83301',
-      'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries:mutator-call:00d0f346acf8',
+      'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireCandidates:mutator-call:bc6a56507572',
+      'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireChatEntries:mutator-call:3033603a5021',
+      'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries:mutator-call:e1c200479b26',
       'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting:mutator-call:38f52c5bccc4',
       'src/services/download/attachmentCacheRecovery.ts#drainCrashOwners:mutator-call:25bf144af248',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:12f416335881',
@@ -3864,7 +3866,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
   );
   assert.equal(leaves.length, 14);
   assert.equal(snapshotOwners.length, 1);
-  assert.equal(delegated.length, 28);
+  assert.equal(delegated.length, 30);
   assert.deepEqual(
     findings
       .filter((finding) => finding.path === 'src/services/download/attachmentCacheAccountScope.ts')

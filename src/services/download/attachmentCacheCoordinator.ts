@@ -4,6 +4,7 @@ import {
   createAttachmentCacheReservation,
   getAttachmentCacheEntry,
   getAttachmentCacheQuotaSnapshot,
+  listChatOnlyAttachmentCachePaths,
   listInactiveAttachmentCachePaths,
   listDueAttachmentCacheRetirements,
   recordAttachmentCacheAccess,
@@ -361,6 +362,40 @@ export class AttachmentCacheCoordinator {
     db: AppDatabase,
     input: { readonly scope?: AttachmentCacheReservationScope; readonly limit?: number } = {},
   ): Promise<AttachmentCacheRetirementDrainResult> {
+    return this.retireCandidates(db, input, (reader) =>
+      listInactiveAttachmentCachePaths(reader, input.limit),
+    );
+  }
+
+  /**
+   * "Remove this chat's downloaded files": retire one bounded batch of active files that ONLY this
+   * chat's attachments use. Exactly the same gate, claim and native-delete settlement as
+   * {@link retireInactiveEntries}: mounted, reserved, in-flight, outgoing-send and pending Photos
+   * copies are skipped, and each claimed file's `local_path` is cleared in the claim transaction so
+   * its message offers the download again. Callers repeat while `confirmed > 0`.
+   */
+  async retireChatEntries(
+    db: AppDatabase,
+    input: {
+      readonly chatGuid: string;
+      readonly scope?: AttachmentCacheReservationScope;
+      readonly limit?: number;
+    },
+  ): Promise<AttachmentCacheRetirementDrainResult> {
+    return this.retireCandidates(db, input, (reader) =>
+      listChatOnlyAttachmentCachePaths(reader, input.chatGuid, input.limit),
+    );
+  }
+
+  /**
+   * The shared retirement owner. `listCandidates` is a bounded read that runs inside the claim's
+   * own outer transaction, so the candidates and the exact claim see one ledger moment.
+   */
+  private async retireCandidates(
+    db: AppDatabase,
+    input: { readonly scope?: AttachmentCacheReservationScope },
+    listCandidates: (reader: AppDatabase) => Promise<string[]>,
+  ): Promise<AttachmentCacheRetirementDrainResult> {
     let skipped = 0;
     const step = await this.runExclusive(async () => {
       const pending: string[] = [];
@@ -379,7 +414,7 @@ export class AttachmentCacheCoordinator {
               withDbTransaction(
                 db,
                 async (context) => {
-                  const candidates = await listInactiveAttachmentCachePaths(db, input.limit);
+                  const candidates = await listCandidates(db);
                   const eligible = candidates.filter((path) => {
                     const blocked =
                       this.reservations.has(path) ||
@@ -431,7 +466,7 @@ export class AttachmentCacheCoordinator {
             );
           } else {
             claimResult = await withDbTransaction(db, async (context) => {
-              const candidates = await listInactiveAttachmentCachePaths(db, input.limit);
+              const candidates = await listCandidates(db);
               const eligible = candidates.filter((path) => {
                 const blocked =
                   this.reservations.has(path) ||
@@ -506,19 +541,41 @@ export class AttachmentCacheCoordinator {
 
     let confirmed = 0;
     let failed = 0;
-    for (const record of step.records) {
-      const outcome = await this.settleRetirement(db, record, input.scope);
-      if (outcome === 'stale') {
-        return {
-          status: 'stale',
-          attempted: confirmed + failed + 1,
-          confirmed,
-          failed,
-          skipped,
-        };
+    let settled = 0;
+    try {
+      for (const record of step.records) {
+        // No native delete once the account is gone: a stale exit leaves the remaining rows
+        // 'retiring' for authorized startup recovery (or account teardown) to finish.
+        if (input.scope && !input.scope.isCurrent()) {
+          return { status: 'stale', attempted: confirmed + failed, confirmed, failed, skipped };
+        }
+        settled += 1;
+        const outcome = await this.settleRetirement(db, record, input.scope);
+        if (outcome === 'stale') {
+          return {
+            status: 'stale',
+            attempted: confirmed + failed + 1,
+            confirmed,
+            failed,
+            skipped,
+          };
+        }
+        if (outcome === 'confirmed') confirmed += 1;
+        else failed += 1;
       }
-      if (outcome === 'confirmed') confirmed += 1;
-      else failed += 1;
+    } finally {
+      // settleRetirement releases its own record. Records an early exit never reached must not
+      // stay owned in memory, or protect/reserve would treat their paths as busy until restart.
+      const unsettled = step.records.slice(settled);
+      if (unsettled.length > 0) {
+        await this.runExclusive(async () => {
+          for (const record of unsettled) {
+            if (this.retirementOwners.get(record.path)?.token === record.token) {
+              this.retirementOwners.delete(record.path);
+            }
+          }
+        });
+      }
     }
     return {
       status: 'complete',
