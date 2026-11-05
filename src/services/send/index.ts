@@ -114,7 +114,7 @@ import {
 import { runAccountOperation } from '../realtime/accountOperation';
 import { expoAttachmentUploader, expoFileExists, expoFileSize } from './attachmentUpload';
 import { createRcsPacedUploader, createRcsShareUploader } from './rcsUploadPacing';
-import { createConcurrencyGate, uploadRegistry } from './uploadControl';
+import { createConcurrencyGate, runRegisteredInGate, uploadRegistry } from './uploadControl';
 import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
 import { createAttachmentCacheAccountScope } from '../download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
@@ -571,11 +571,19 @@ export function sendImages(
   // One multi-file share: its RCS files take turns instead of uploading at once.
   const rcsShareUploader = createRcsShareUploader(expoAttachmentUploader);
   // The iMessage files of one pick upload one at a time in pick order: each is its own message, and
-  // two large videos at once only compete for the network.
+  // two large videos at once only compete for the network. A file stays registered while it waits,
+  // so the outgoing recovery can't retire it as "may have been delivered" mid-wait, and Cancel
+  // Sending or Disconnect ends its wait before any request starts.
   const imessageLane = createConcurrencyGate(1);
   const shareUploader: AttachmentUploader = (args) =>
     args.service === 'iMessage'
-      ? imessageLane.run(() => rcsShareUploader(args), args.signal)
+      ? runRegisteredInGate(
+          imessageLane,
+          uploadRegistry,
+          args.tempGuid,
+          () => rcsShareUploader(args),
+          args.signal,
+        )
       : rcsShareUploader(args);
   return runUiAccountOperation(
     accountLease,

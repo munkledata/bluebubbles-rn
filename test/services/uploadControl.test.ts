@@ -2,6 +2,7 @@ import {
   createConcurrencyGate,
   createUploadRegistry,
   DEFAULT_MAX_CONCURRENT_UPLOADS,
+  runRegisteredInGate,
   UploadGateCancelledError,
 } from '@/services/send/uploadControl';
 
@@ -357,5 +358,134 @@ describe('createUploadRegistry', () => {
     await expect(registry.awaitIdle()).resolves.toBeUndefined();
     expect(registry.pending).toBe(0);
     expect(registry.cancelAll()).toBe(0);
+  });
+});
+
+// A file waiting its turn in a multi-file pick must look in-flight to the outgoing recovery, which
+// skips registered keys (outgoingQueueService "leaves a row alone while this process is still
+// uploading it").
+describe('runRegisteredInGate', () => {
+  it('registers a key while it waits, and releases it after its work settles', async () => {
+    const gate = createConcurrencyGate(1);
+    const registry = createUploadRegistry();
+    const first = deferred<string>();
+    const second = deferred<string>();
+    const ran: string[] = [];
+    const a = runRegisteredInGate(gate, registry, 'a', () => {
+      ran.push('a');
+      return first.promise;
+    });
+    const b = runRegisteredInGate(gate, registry, 'b', () => {
+      ran.push('b');
+      return second.promise;
+    });
+    await flush();
+    expect(ran).toEqual(['a']);
+    expect(registry.has('b')).toBe(true); // still waiting for its turn, yet registered
+
+    first.resolve('A');
+    await expect(a).resolves.toBe('A');
+    await flush();
+    expect(registry.has('a')).toBe(false);
+    expect(ran).toEqual(['a', 'b']);
+
+    second.resolve('B');
+    await expect(b).resolves.toBe('B');
+    expect(registry.size).toBe(0);
+  });
+
+  it('never removes the upload’s own handle under the same key', async () => {
+    const gate = createConcurrencyGate(1);
+    const registry = createUploadRegistry();
+    let releaseUpload!: () => void;
+    const run = runRegisteredInGate(gate, registry, 'k', async () => {
+      // The real upload registers its own handle under the same temp guid once its turn comes.
+      releaseUpload = registry.add('k', { cancel: jest.fn(), settled: Promise.resolve() });
+      return 'done';
+    });
+    await expect(run).resolves.toBe('done');
+    expect(registry.has('k')).toBe(true);
+    expect(registry.size).toBe(1);
+    releaseUpload();
+    expect(registry.has('k')).toBe(false);
+  });
+
+  it('cancelling a waiting key ends its wait before its work starts, and the wait settles', async () => {
+    const gate = createConcurrencyGate(1);
+    const registry = createUploadRegistry();
+    const hold = deferred();
+    const work = jest.fn(async () => 'never');
+    const first = runRegisteredInGate(gate, registry, 'first', () => hold.promise);
+    const waiting = runRegisteredInGate(gate, registry, 'waiting', work);
+    await flush();
+
+    expect(registry.cancel('waiting')).toBe(true); // Cancel Sending on the waiting message
+    await expect(waiting).rejects.toBeInstanceOf(UploadGateCancelledError);
+    expect(work).not.toHaveBeenCalled(); // no request ever starts
+    expect(gate.waiting).toBe(0);
+    await expect(registry.awaitIdle()).resolves.toBeUndefined();
+
+    hold.resolve();
+    await first;
+    expect(registry.size).toBe(0);
+  });
+
+  it('a cancel during the upload never lets the next waiter start before that upload settles', async () => {
+    const gate = createConcurrencyGate(1);
+    const registry = createUploadRegistry();
+    const upload = deferred<string>();
+    const ran: string[] = [];
+    const first = runRegisteredInGate(gate, registry, 'first', () => {
+      ran.push('first');
+      return upload.promise;
+    });
+    const second = runRegisteredInGate(gate, registry, 'second', async () => {
+      ran.push('second');
+      return 'second-done';
+    });
+    await flush();
+    expect(ran).toEqual(['first']);
+
+    // Cancel Sending on the file that is already uploading. Its finished wait ignores the abort, so
+    // the running upload keeps the lane's one slot (the upload's own handle owns its cancellation).
+    expect(registry.cancel('first')).toBe(true);
+    await flush();
+    expect(ran).toEqual(['first']);
+    expect(gate.active).toBe(1);
+    expect(gate.waiting).toBe(1);
+
+    upload.resolve('first-done');
+    await expect(first).resolves.toBe('first-done');
+    await expect(second).resolves.toBe('second-done');
+    expect(ran).toEqual(['first', 'second']);
+  });
+
+  it('ends the wait for an owner abort, an already-aborted owner and Disconnect', async () => {
+    const gate = createConcurrencyGate(1);
+    const registry = createUploadRegistry();
+    const hold = deferred();
+    const owner = new AbortController();
+    const preAborted = new AbortController();
+    preAborted.abort();
+    const work = jest.fn(async () => 'never');
+    const first = runRegisteredInGate(gate, registry, 'first', () => hold.promise);
+    const byOwner = runRegisteredInGate(gate, registry, 'by-owner', work, owner.signal);
+    const alreadyAborted = runRegisteredInGate(gate, registry, 'pre', work, preAborted.signal);
+    const byDisconnect = runRegisteredInGate(gate, registry, 'by-disconnect', work);
+    await expect(alreadyAborted).rejects.toBeInstanceOf(UploadGateCancelledError);
+    expect(registry.has('pre')).toBe(false);
+
+    owner.abort();
+    await expect(byOwner).rejects.toBeInstanceOf(UploadGateCancelledError);
+    expect(registry.has('by-owner')).toBe(false);
+
+    registry.cancelAll(); // Disconnect
+    await expect(byDisconnect).rejects.toBeInstanceOf(UploadGateCancelledError);
+    // Disconnect's wait for cancelled handles finishes; the running upload owns its own handle.
+    await expect(registry.awaitIdle()).resolves.toBeUndefined();
+    expect(work).not.toHaveBeenCalled();
+
+    hold.resolve();
+    await first;
   });
 });

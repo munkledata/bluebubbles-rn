@@ -220,6 +220,49 @@ export function createUploadRegistry(): UploadRegistry {
   };
 }
 
+/**
+ * Run `fn` through `gate`, keeping `key` registered from the moment it starts waiting.
+ *
+ * A file of a multi-file pick that waits for its turn is otherwise invisible to the registry until
+ * its own upload registers, so the outgoing-recovery pass (which skips registered keys) could retire
+ * it as "may have been delivered" once the earlier files outlast that pass's grace window.
+ *
+ * - Cancelling the key (Cancel Sending, Disconnect) or aborting `signal` ends the wait before `fn`
+ *   runs, so no request ever starts, and rejects with UploadGateCancelledError.
+ * - The handle's `settled` resolves as soon as the wait ends, either way, so an account teardown
+ *   never waits on it; the upload's own handle covers the upload itself.
+ * - The handle is released only after `fn` settles, so the key is never unregistered between the
+ *   wait and the upload's own registration. Releases are identity-checked, so this one never
+ *   removes the upload's handle under the same key.
+ */
+export function runRegisteredInGate<T>(
+  gate: ConcurrencyGate,
+  registry: UploadRegistry,
+  key: string,
+  fn: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const wait = new AbortController();
+  const abortWait = (): void => wait.abort();
+  if (signal?.aborted) wait.abort();
+  else signal?.addEventListener('abort', abortWait, { once: true });
+  let endWait!: () => void;
+  const waitEnded = new Promise<void>((resolve) => {
+    endWait = resolve;
+  });
+  const release = registry.add(key, { cancel: abortWait, settled: waitEnded });
+  return gate
+    .run(() => {
+      endWait();
+      return fn();
+    }, wait.signal)
+    .finally(() => {
+      endWait();
+      release();
+      signal?.removeEventListener('abort', abortWait);
+    });
+}
+
 /** Process-wide gate + registry the production uploader uses. */
 export const uploadGate: ConcurrencyGate = createConcurrencyGate(DEFAULT_MAX_CONCURRENT_UPLOADS);
 export const uploadRegistry: UploadRegistry = createUploadRegistry();

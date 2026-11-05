@@ -84,13 +84,31 @@ jest.mock('@/services/send/attachmentUpload', () => ({
   expoFileExists: jest.fn(async () => true),
   expoFileSize: jest.fn(async () => null),
 }));
-jest.mock('@/services/send/uploadControl', () => ({
+jest.mock('@/services/send/uploadControl', () => {
   // The real gate helpers (pure); send/index.ts builds the paced RCS uploader at module load.
-  ...jest.requireActual<typeof import('@/services/send/uploadControl')>(
+  const actual = jest.requireActual<typeof import('@/services/send/uploadControl')>(
     '@/services/send/uploadControl',
-  ),
-  uploadRegistry: { cancel: jest.fn() },
-}));
+  );
+  // A real registry, because a waiting file of a multi-file pick registers while it waits; only
+  // cancel is spied on. (Its methods use no `this`, so they can be passed on directly.)
+  const registry = actual.createUploadRegistry();
+  return {
+    ...actual,
+    uploadRegistry: {
+      add: registry.add,
+      has: registry.has,
+      cancelAll: registry.cancelAll,
+      awaitIdle: registry.awaitIdle,
+      cancel: jest.fn((key: string) => registry.cancel(key)),
+      get pending() {
+        return registry.pending;
+      },
+      get size() {
+        return registry.size;
+      },
+    },
+  };
+});
 // eslint-disable-next-line import/first
 import {
   acquireAndSendCurrentLocation,
@@ -135,7 +153,7 @@ import { sendEdit, sendUnsend } from '@/services/send/sendEditService';
 // eslint-disable-next-line import/first
 import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
 // eslint-disable-next-line import/first
-import { uploadRegistry } from '@/services/send/uploadControl';
+import { UploadGateCancelledError, uploadRegistry } from '@/services/send/uploadControl';
 // eslint-disable-next-line import/first
 import {
   deleteMessageLocalWithinTransaction,
@@ -1001,6 +1019,64 @@ describe('UI send account lease', () => {
       { tempGuid: 'temp-b.mov' },
       { tempGuid: 'temp-c.mov' },
     ]);
+    mockUploader.mockReset();
+  });
+
+  it('keeps the waiting files of one pick registered, and Cancel Sending ends a wait before it uploads', async () => {
+    const uploads: { name: string; finish: Deferred<{ guid: string }> }[] = [];
+    const mockUploader = jest.requireMock('@/services/send/attachmentUpload')
+      .expoAttachmentUploader as jest.Mock;
+    mockUploader.mockImplementation(({ name }: { name: string }) => {
+      const finish = deferred<{ guid: string }>();
+      uploads.push({ name, finish });
+      return finish.promise;
+    });
+    const outcomes: Record<string, string> = {};
+    mockSendImage.mockImplementation(
+      async (_db: unknown, http: unknown, args: { image: { name: string } }, upload: Function) => {
+        try {
+          await upload({
+            http,
+            service: 'iMessage',
+            name: args.image.name,
+            tempGuid: args.image.name,
+          });
+          outcomes[args.image.name] = 'sent';
+        } catch (error) {
+          outcomes[args.image.name] =
+            error instanceof UploadGateCancelledError ? 'cancelled' : 'failed';
+        }
+        return { tempGuid: `temp-${args.image.name}` };
+      },
+    );
+
+    const images = sendImages({
+      chatGuid: 'any;+;chat-group',
+      service: 'iMessage',
+      images: ['a.mov', 'b.mov', 'c.mov'].map((name) => ({
+        uri: `file:///${name}`,
+        name,
+        mimeType: 'video/quicktime',
+        size: 1,
+      })),
+    });
+
+    await waitUntil(() => uploads.length === 1);
+    // b and c are still waiting for their turn, yet look in-flight to the outgoing recovery, so a
+    // slow first upload can no longer get them retired as "may have been delivered".
+    expect(uploadRegistry.has('b.mov')).toBe(true);
+    expect(uploadRegistry.has('c.mov')).toBe(true);
+
+    // Cancel Sending on c while it waits: its upload never starts.
+    expect(uploadRegistry.cancel('c.mov')).toBe(true);
+    uploads[0]!.finish.resolve({ guid: 'g-a' });
+    await waitUntil(() => uploads.length === 2);
+    uploads[1]!.finish.resolve({ guid: 'g-b' });
+    await images;
+
+    expect(uploads.map((u) => u.name)).toEqual(['a.mov', 'b.mov']);
+    expect(outcomes).toEqual({ 'a.mov': 'sent', 'b.mov': 'sent', 'c.mov': 'cancelled' });
+    expect(['a.mov', 'b.mov', 'c.mov'].some((key) => uploadRegistry.has(key))).toBe(false);
     mockUploader.mockReset();
   });
 
