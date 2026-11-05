@@ -8,6 +8,7 @@ import {
   applyLocalEditWithinTransaction,
   applyLocalUnsendWithinTransaction,
   explicitMessageTargetPart,
+  getChatHeader,
   MessageTargetUnavailableError,
   clearUnconfirmedUnsendWithinTransaction,
   readMessageUnsendFence,
@@ -23,6 +24,7 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { isProvenIMessageGroupChat } from '@utils';
 import { utf8Decode, utf8Encode } from '@utils/bytes';
 import { messageTargetCommitGuard } from './rcsAttemptCapability';
 
@@ -44,10 +46,15 @@ const DEFINITE_UNSEND_FAILURES = new Set([
 export interface SendEditArgs {
   messageGuid: string;
   newText: string;
-  /** Proven existing one-to-one iMessage chat that owns the exact message target. */
+  /**
+   * Proven existing iMessage chat that owns the exact message target: one-to-one, or (with
+   * `restoredGroup`) an all-iMessage group.
+   */
   chatGuid: string;
   /** The narrow command accepts only exact text part zero. */
   partIndex?: 0;
+  /** FP-006: the caller proved `supports_imessage_group_edit` for this exact group guid. */
+  restoredGroup?: boolean;
 }
 
 export type SendEditResult =
@@ -57,10 +64,15 @@ export type SendEditResult =
 
 export interface SendUnsendArgs {
   messageGuid: string;
-  /** Proven existing one-to-one iMessage chat that owns the exact message target. */
+  /**
+   * Proven existing iMessage chat that owns the exact message target: one-to-one, or (with
+   * `restoredGroup`) an all-iMessage group.
+   */
   chatGuid: string;
   /** The narrow command accepts only exact text part zero. */
   partIndex?: 0;
+  /** FP-006: the caller proved `supports_imessage_group_unsend` for this exact group guid. */
+  restoredGroup?: boolean;
 }
 
 export type SendUnsendResult =
@@ -117,9 +129,9 @@ function requireNarrowEditArgs(args: SendEditArgs): void {
   }
 }
 
-function isNarrowIMessageChatGuid(chatGuid: string): boolean {
+function isNarrowIMessageChatGuid(chatGuid: string, restoredGroup = false): boolean {
   return (
-    /^(?:iMessage|any);-;.+$/u.test(chatGuid) &&
+    (restoredGroup ? /^(?:iMessage|any);\+;.+$/u : /^(?:iMessage|any);-;.+$/u).test(chatGuid) &&
     !CONTROL_CHARACTER.test(chatGuid) &&
     isWellFormedBoundedUtf8(chatGuid, EDIT_ID_MAX_BYTES)
   );
@@ -133,10 +145,22 @@ function requireNarrowUnsendArgs(args: SendUnsendArgs): void {
     target.messageGuid.trim() !== target.messageGuid ||
     CONTROL_CHARACTER.test(target.messageGuid) ||
     !isWellFormedBoundedUtf8(target.messageGuid, EDIT_ID_MAX_BYTES) ||
-    !isNarrowIMessageChatGuid(args.chatGuid)
+    !isNarrowIMessageChatGuid(args.chatGuid, args.restoredGroup === true)
   ) {
     throw new MessageTargetUnavailableError('This message cannot be unsent.');
   }
+}
+
+/**
+ * FP-006: an `any;+;` guid alone also fits SMS and RCS groups, so a group edit or unsend leaves
+ * the phone only while the stored chat row is this exact guid with an all-iMessage participant
+ * set, the same proof the restored tapback and reply use. The server proves it again.
+ */
+async function restoredGroupStillProven(db: AppDatabase, chatGuid: string): Promise<boolean> {
+  const header = await getChatHeader(db, chatGuid);
+  return (
+    header?.guid === chatGuid && isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true })
+  );
 }
 
 function editOutcomeIsUnknown(error: unknown): boolean {
@@ -225,6 +249,10 @@ async function sendEditOnce(
   serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<SendEditResult> {
   requireNarrowEditArgs(args);
+  const restoredGroup = args.restoredGroup === true;
+  if (restoredGroup && !(await restoredGroupStillProven(db, args.chatGuid))) {
+    return { status: 'rejected' };
+  }
   const target = {
     chatGuid: args.chatGuid,
     messageGuid: args.messageGuid,
@@ -258,7 +286,7 @@ async function sendEditOnce(
       ? previous.storedText
       : plainTextFromAttributedBody(previous.attributedBody) || previous.storedText;
   const chatGuid = args.chatGuid;
-  if (!isNarrowIMessageChatGuid(chatGuid)) {
+  if (!isNarrowIMessageChatGuid(chatGuid, restoredGroup)) {
     await revertOptimisticEdit(
       db,
       admittedTarget.messageGuid,
@@ -307,12 +335,16 @@ async function sendEditOnce(
   try {
     // Once the request has started only the account may abort settlement. A capability refresh
     // while it was out says nothing about whether the server applied it: report it unconfirmed.
-    const ack = await editMessage(http, {
-      chatGuid,
-      messageGuid: finalTarget.messageGuid,
-      editedMessage: args.newText,
-      partIndex: 0,
-    });
+    const ack = await editMessage(
+      http,
+      {
+        chatGuid,
+        messageGuid: finalTarget.messageGuid,
+        editedMessage: args.newText,
+        partIndex: 0,
+      },
+      { restoredGroup },
+    );
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     if (serverAuthorization && !serverAuthorization.isCurrent()) {
       return { status: 'outcome-unknown' };
@@ -388,6 +420,10 @@ async function sendUnsendOnce(
   serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<SendUnsendResult> {
   requireNarrowUnsendArgs(args);
+  const restoredGroup = args.restoredGroup === true;
+  if (restoredGroup && !(await restoredGroupStillProven(db, args.chatGuid))) {
+    return { status: 'rejected' };
+  }
   const exactTopologyAuthorization = serverAuthorization
     ? Object.freeze({
         allowsLegacyPartZero: false,
@@ -456,11 +492,15 @@ async function sendUnsendOnce(
   try {
     // Once the request has started only the account may abort settlement. A capability refresh
     // while it was out says nothing about whether the server applied it: report it unconfirmed.
-    const ack = await unsendMessage(http, {
-      chatGuid: args.chatGuid,
-      messageGuid: finalTarget.messageGuid,
-      partIndex: 0,
-    });
+    const ack = await unsendMessage(
+      http,
+      {
+        chatGuid: args.chatGuid,
+        messageGuid: finalTarget.messageGuid,
+        partIndex: 0,
+      },
+      { restoredGroup },
+    );
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     if (
       (!serverAuthorization || serverAuthorization.isCurrent()) &&
@@ -537,7 +577,7 @@ function forgetUnconfirmedUnsend(
 export function checkUnconfirmedUnsend(
   db: AppDatabase,
   http: HttpClient,
-  args: { chatGuid: string; messageGuid: string },
+  args: { chatGuid: string; messageGuid: string; restoredGroup?: boolean },
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
   serverAuthorization?: MessageTargetServerAuthorization,
@@ -551,7 +591,7 @@ export function checkUnconfirmedUnsend(
 async function checkUnconfirmedUnsendOnce(
   db: AppDatabase,
   http: HttpClient,
-  args: { chatGuid: string; messageGuid: string },
+  args: { chatGuid: string; messageGuid: string; restoredGroup?: boolean },
   now: number,
   commitGuard?: DbCommitGuard,
   serverAuthorization?: MessageTargetServerAuthorization,
@@ -584,11 +624,15 @@ async function checkUnconfirmedUnsendOnce(
     macCopy.dateCreated == null || now - macCopy.dateCreated > IMESSAGE_UNSEND_WINDOW_MS;
   if (!tooLate) {
     try {
-      const ack = await unsendMessage(http, {
-        chatGuid: args.chatGuid,
-        messageGuid: args.messageGuid,
-        partIndex: 0,
-      });
+      const restoredGroup = args.restoredGroup === true;
+      if (restoredGroup && !(await restoredGroupStillProven(db, args.chatGuid))) {
+        return { status: 'outcome-unknown' };
+      }
+      const ack = await unsendMessage(
+        http,
+        { chatGuid: args.chatGuid, messageGuid: args.messageGuid, partIndex: 0 },
+        { restoredGroup },
+      );
       if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
       if (
         (!serverAuthorization || serverAuthorization.isCurrent()) &&

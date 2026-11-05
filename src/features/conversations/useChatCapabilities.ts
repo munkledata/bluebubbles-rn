@@ -75,11 +75,11 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
  *
  * A server flag alone is not enough for an iMessage feature. The chat's own header, loaded for this
  * exact chat, must also prove an iMessage chat of the right shape: one-to-one for most features, a
- * group for mentions, either for Mac remote delete. FP-006 part 1 adds only group tapbacks and group
- * replies in a proven iMessage group (`iMessage;+;` or `any;+;`), plus emoji and part > 0 targets
- * on top of an available tapback or reply; other restored switches are ignored until the app can
- * send them. All are false on older servers. RCS features need the server's current RCS
- * provider to own this chat. Every value follows the live session and header, so a capability lost
+ * group for mentions, either for Mac remote delete. FP-006 adds group tapbacks, replies, edits and
+ * unsends in a proven iMessage group (`iMessage;+;` or `any;+;`), each behind its own group switch,
+ * plus emoji and part > 0 targets on top of an available tapback or reply; other restored switches
+ * are ignored until the app can send them. All are false on older servers. RCS features need the
+ * server's current RCS provider to own this chat. Every value follows the live session and header, so a capability lost
  * while the chat is open turns its feature off at the next render.
  */
 export function useChatCapabilities(
@@ -115,13 +115,15 @@ export function useChatCapabilities(
   const partReactionsSupported = useServerSupports('supports_imessage_part_reactions');
   const groupRepliesSupported = useServerSupports('supports_imessage_group_replies');
   const partRepliesSupported = useServerSupports('supports_imessage_part_replies');
+  const groupEditSupported = useServerSupports('supports_imessage_group_edit');
+  const groupUnsendSupported = useServerSupports('supports_imessage_group_unsend');
   // FP-006 part 2: one restored file per send (HEIC, video, GIF, documents, group pictures).
   const restoredAttachmentsSupported = useSessionStore((s) =>
     canSendRestoredIMessageAttachments(s.serverInfo, guid),
   );
-  // Group edit, unsend, effects, read state, contact, location and subject switches are
-  // deliberately NOT read here, even when a server advertises them: this app cannot send them yet,
-  // so it must not offer them.
+  // Group effects, contact, location and subject switches are deliberately NOT read here, even
+  // when a server advertises them: this app cannot send them yet, so it must not offer them. (The
+  // group read-state switch is read by the mark-read path, not by a chat-screen feature.)
   const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
 
   // The header must be this chat's own row, so a recycled screen never borrows another chat's proof.
@@ -195,8 +197,9 @@ export function useChatCapabilities(
     imessagePartReactionsAvailable: imessageReactionsAvailable && partReactionsSupported,
     imessageRepliesAvailable,
     imessagePartRepliesAvailable: imessageRepliesAvailable && partRepliesSupported,
-    imessageEditsAvailable: editSupported && oneToOne,
-    imessageUnsendsAvailable: unsendSupported && oneToOne,
+    imessageEditsAvailable: (editSupported && oneToOne) || (groupEditSupported && restoredGroup),
+    imessageUnsendsAvailable:
+      (unsendSupported && oneToOne) || (groupUnsendSupported && restoredGroup),
     imessageRemoteDeleteAvailable: remoteDeleteSupported && (oneToOne || group),
     imessageEffectsAvailable: effectsSupported && oneToOne && header?.participantCount === 1,
     imessageFormattedAvailable: formattedSupported && oneToOne,

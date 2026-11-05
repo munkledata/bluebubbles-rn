@@ -1103,6 +1103,55 @@ describe('UI send account lease', () => {
     expect(mockSendUnsend).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      'one-to-one switches only',
+      { supports_imessage_edit: true, supports_imessage_unsend: true },
+      false,
+      true,
+    ],
+    [
+      'group switches only',
+      { supports_imessage_group_edit: true, supports_imessage_group_unsend: true },
+      true,
+      false,
+    ],
+  ])(
+    'FP-006: with %s, a group edit/unsend is sent %s and a one-to-one one %s',
+    async (_label, flags, groupSent, directSent) => {
+      mockCaptureCapability.mockReturnValue({
+        kind: 'session',
+        origin: 'https://capability.test',
+        revision: 1,
+        serverInfo: { ...RCS_SERVER_INFO, ...flags },
+        isCurrent: () => true,
+        publish: () => true,
+      });
+      const group = 'any;+;chat-group';
+      const direct = 'iMessage;-;+15551234567';
+      for (const [chatGuid, sent] of [
+        [group, groupSent],
+        [direct, directSent],
+      ] as const) {
+        mockSendEdit.mockClear();
+        mockSendUnsend.mockClear();
+        await expect(
+          editText({ messageGuid: 'm-edit', newText: 'edited', chatGuid, partIndex: 0 }),
+        ).resolves.toEqual(sent ? { status: 'accepted' } : null);
+        await expect(unsend({ messageGuid: 'm-unsend', chatGuid, partIndex: 0 })).resolves.toEqual(
+          sent ? { status: 'accepted' } : null,
+        );
+        expect(mockSendEdit).toHaveBeenCalledTimes(sent ? 1 : 0);
+        expect(mockSendUnsend).toHaveBeenCalledTimes(sent ? 1 : 0);
+        if (sent) {
+          const restoredGroup = chatGuid === group;
+          expect(mockSendEdit.mock.calls[0]?.[2]).toMatchObject({ chatGuid, restoredGroup });
+          expect(mockSendUnsend.mock.calls[0]?.[2]).toMatchObject({ chatGuid, restoredGroup });
+        }
+      }
+    },
+  );
+
   it('snapshots mutable send payloads before they wait behind an earlier job', async () => {
     const blockerResult = deferred<{ tempGuid: string }>();
     mockSendText.mockImplementationOnce(() => blockerResult.promise);

@@ -1084,7 +1084,7 @@ describe('ChatScreen — FP-006 part 1 offers only what it can send', () => {
     supports_imessage_subject: true,
   };
 
-  it('in a group with every restored flag on, offers tapbacks and Reply but no other restored action', async () => {
+  it('in a group with every restored flag on, offers tapbacks, Reply, Edit and Unsend but no other restored action', async () => {
     mockGuid = RESTORED_GROUP;
     useSessionStore.setState({
       serverInfo: { version: 'test', ...EVERY_RESTORED_FLAG } as any,
@@ -1104,6 +1104,9 @@ describe('ChatScreen — FP-006 part 1 offers only what it can send', () => {
       makeMsg({
         guid: 'm-own-restored',
         isFromMe: 1,
+        // Delivered with no error, which Unsend also requires.
+        isSent: 1,
+        error: 0,
         text: 'hello',
         senderService: 'iMessage',
         messagePartTopology: JSON.stringify({
@@ -1115,18 +1118,17 @@ describe('ChatScreen — FP-006 part 1 offers only what it can send', () => {
       } as Partial<EnrichedMessage>),
     );
 
-    // Part 1 sends these: group/emoji tapbacks and a group reply.
+    // The app sends these in a group: group/emoji tapbacks, a group reply, edit and unsend.
     const overlay = mockCaptured.overlay!;
     expect(overlay.selected.canReact).toBe(true);
     expect(overlay.selected.canUseEmojiReactions).toBe(true);
     expect(overlay.selected.replyPartIndex).toBe(0);
     expect(overlay.onReply).toEqual(expect.any(Function));
-    // Advertised but not sendable yet: no Edit or Unsend in the action sheet.
-    expect(overlay.selected.editPartIndex).toBeUndefined();
-    expect(overlay.selected.unsendPartIndex).toBeUndefined();
-    expect(overlay.onEdit).toBeUndefined();
-    expect(overlay.onUnsend).toBeUndefined();
-    // ...and no group effect, contact card or location in the composer.
+    expect(overlay.selected.editPartIndex).toBe(0);
+    expect(overlay.selected.unsendPartIndex).toBe(0);
+    expect(overlay.onEdit).toEqual(expect.any(Function));
+    expect(overlay.onUnsend).toEqual(expect.any(Function));
+    // Advertised but not sendable yet: no group effect, contact card or location in the composer.
     const composer = mockCaptured.composer!;
     expect(composer.onSendEffect).toBeUndefined();
     expect(composer.onPickContact).toBeUndefined();

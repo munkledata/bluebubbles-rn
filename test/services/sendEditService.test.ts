@@ -2,7 +2,13 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import type { AppDatabase } from '@db/types';
-import { listMessagesWithSenders, readUnconfirmedUnsend } from '@db/repositories';
+import {
+  listMessagesWithSenders,
+  readUnconfirmedUnsend,
+  upsertChats,
+  upsertHandles,
+} from '@db/repositories';
+import { Chat } from '@core/models';
 import { IMESSAGE_UNSEND_WINDOW_MS } from '@core/messages/retraction';
 import { checkUnconfirmedUnsend, sendEdit, sendUnsend } from '@/services/send/sendEditService';
 import { createTestDb } from '../support/testDb';
@@ -587,5 +593,211 @@ describe('checking an unconfirmed unsend', () => {
     });
     expect(mac.get).not.toHaveBeenCalled();
     await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.toBeNull();
+  });
+});
+
+// FP-006: a group edit or unsend leaves the phone only for a caller-proven group switch AND a
+// stored all-iMessage group row, and then goes to the same route with the group's guid.
+describe('FP-006 group edit and unsend', () => {
+  const GROUP = 'any;+;chat-group-1';
+  const GROUP_MESSAGE = 'group-message-1';
+  let raw: Database.Database;
+  let db: AppDatabase;
+
+  async function seedGroupTarget(secondService = 'iMessage'): Promise<void> {
+    const participants = [
+      { address: 'ann@example.com', service: 'iMessage' },
+      { address: 'ben@example.com', service: secondService },
+    ];
+    const handles = await upsertHandles(db, participants);
+    const chats = await upsertChats(
+      db,
+      [Chat.parse({ guid: GROUP, style: 43, participants })],
+      handles,
+    );
+    raw
+      .prepare(
+        `INSERT INTO messages(
+           guid, chat_id, text, is_from_me, date_created, send_state, message_part_topology
+         ) VALUES (?, ?, 'original', 1, 100, 'sent', ?)`,
+      )
+      .run(GROUP_MESSAGE, chats.get(GROUP)!, TOPOLOGY);
+  }
+
+  const groupRow = () =>
+    raw
+      .prepare(
+        `SELECT text, date_edited AS dateEdited, date_retracted AS dateRetracted
+           FROM messages WHERE guid = ?`,
+      )
+      .get(GROUP_MESSAGE) as {
+      text: string | null;
+      dateEdited: number | null;
+      dateRetracted: number | null;
+    };
+
+  beforeEach(async () => {
+    ({ db, raw } = await createTestDb());
+  });
+
+  afterEach(() => raw.close());
+
+  it('edits a proven group message through the edit route with the group guid', async () => {
+    await seedGroupTarget();
+    const transport = fakeHttp(async () => ({ guid: GROUP_MESSAGE, viaPrivateApi: true }));
+    await expect(
+      sendEdit(
+        db,
+        transport.http,
+        {
+          chatGuid: GROUP,
+          messageGuid: GROUP_MESSAGE,
+          newText: 'edited',
+          partIndex: 0,
+          restoredGroup: true,
+        },
+        5_000,
+      ),
+    ).resolves.toEqual({ status: 'accepted' });
+    expect(transport.post).toHaveBeenCalledTimes(1);
+    expect(transport.post.mock.calls[0]?.[0]).toBe(`/message/${GROUP_MESSAGE}/edit`);
+    expect(transport.post.mock.calls[0]?.[2]).toMatchObject({
+      retry: false,
+      json: { chatGuid: GROUP, editedText: 'edited', partIndex: 0 },
+    });
+    expect(groupRow()).toMatchObject({ text: 'edited', dateEdited: 5_000 });
+  });
+
+  it('never sends a group edit without the caller-proven group switch', async () => {
+    await seedGroupTarget();
+    const transport = fakeHttp(async () => ({ guid: GROUP_MESSAGE }));
+    await expect(
+      sendEdit(
+        db,
+        transport.http,
+        { chatGuid: GROUP, messageGuid: GROUP_MESSAGE, newText: 'edited', partIndex: 0 },
+        5_000,
+      ),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(groupRow()).toMatchObject({ text: 'original', dateEdited: null });
+  });
+
+  it('never sends a group edit when a member is not iMessage', async () => {
+    await seedGroupTarget('SMS');
+    const transport = fakeHttp(async () => ({ guid: GROUP_MESSAGE }));
+    await expect(
+      sendEdit(
+        db,
+        transport.http,
+        {
+          chatGuid: GROUP,
+          messageGuid: GROUP_MESSAGE,
+          newText: 'edited',
+          partIndex: 0,
+          restoredGroup: true,
+        },
+        5_000,
+      ),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(groupRow()).toMatchObject({ text: 'original', dateEdited: null });
+  });
+
+  it('a group flag never widens a one-to-one guid into a group', async () => {
+    await seedGroupTarget();
+    const transport = fakeHttp(async () => ({ unsent: true, guid: GROUP_MESSAGE }));
+    await expect(
+      sendUnsend(
+        db,
+        transport.http,
+        { chatGuid: CHAT_GUID, messageGuid: GROUP_MESSAGE, partIndex: 0, restoredGroup: true },
+        5_000,
+      ),
+    ).rejects.toThrow('This message cannot be unsent.');
+    expect(transport.post).not.toHaveBeenCalled();
+  });
+
+  it('unsends a proven group message through the unsend route with the group guid', async () => {
+    await seedGroupTarget();
+    const transport = fakeHttp(async () => ({ unsent: true, guid: GROUP_MESSAGE }));
+    await expect(
+      sendUnsend(
+        db,
+        transport.http,
+        { chatGuid: GROUP, messageGuid: GROUP_MESSAGE, partIndex: 0, restoredGroup: true },
+        5_000,
+      ),
+    ).resolves.toEqual({ status: 'accepted' });
+    expect(transport.post).toHaveBeenCalledTimes(1);
+    expect(transport.post.mock.calls[0]?.[0]).toBe(`/message/${GROUP_MESSAGE}/unsend`);
+    expect(transport.post.mock.calls[0]?.[2]).toMatchObject({
+      retry: false,
+      json: { chatGuid: GROUP, partIndex: 0 },
+    });
+    expect(groupRow().dateRetracted).toBe(5_000);
+  });
+
+  it('refuses a group unsend without the caller-proven group switch', async () => {
+    await seedGroupTarget();
+    const transport = fakeHttp(async () => ({ unsent: true, guid: GROUP_MESSAGE }));
+    await expect(
+      sendUnsend(
+        db,
+        transport.http,
+        { chatGuid: GROUP, messageGuid: GROUP_MESSAGE, partIndex: 0 },
+        5_000,
+      ),
+    ).rejects.toThrow('This message cannot be unsent.');
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(groupRow().dateRetracted).toBeNull();
+  });
+
+  it('never sends a group unsend when a member is not iMessage', async () => {
+    await seedGroupTarget('SMS');
+    const transport = fakeHttp(async () => ({ unsent: true, guid: GROUP_MESSAGE }));
+    await expect(
+      sendUnsend(
+        db,
+        transport.http,
+        { chatGuid: GROUP, messageGuid: GROUP_MESSAGE, partIndex: 0, restoredGroup: true },
+        5_000,
+      ),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(groupRow().dateRetracted).toBeNull();
+  });
+
+  it('"check again" retries a group unsend with the group guid', async () => {
+    await seedGroupTarget();
+    const unknown = fakeHttp(async () => {
+      throw new ApiError('timeout', 'no answer', undefined);
+    });
+    await sendUnsend(
+      db,
+      unknown.http,
+      { chatGuid: GROUP, messageGuid: GROUP_MESSAGE, partIndex: 0, restoredGroup: true },
+      6_000,
+    );
+    expect(await readUnconfirmedUnsend(db, GROUP_MESSAGE)).not.toBeNull();
+    const get = jest.fn(async () => ({
+      messages: [{ guid: GROUP_MESSAGE, dateCreated: 100, dateRetracted: null }],
+    }));
+    const post = jest.fn(async () => ({ unsent: true, guid: GROUP_MESSAGE }));
+    const http = { get, post } as unknown as HttpClient;
+    await expect(
+      checkUnconfirmedUnsend(
+        db,
+        http,
+        { chatGuid: GROUP, messageGuid: GROUP_MESSAGE, restoredGroup: true },
+        1_100,
+      ),
+    ).resolves.toEqual({ status: 'confirmed' });
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0]).toEqual([
+      `/message/${GROUP_MESSAGE}/unsend`,
+      expect.anything(),
+      expect.objectContaining({ json: { chatGuid: GROUP, partIndex: 0 } }),
+    ]);
   });
 });

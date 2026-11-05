@@ -93,19 +93,19 @@ const RESTORED_ON = {
 
 const ANY_GROUP_HEADER = { ...GROUP_HEADER, guid: ANY_GROUP };
 
-/** The restored features FP-006 part 1 can actually send: tapbacks and replies. */
+/** The restored group features this app can send: tapbacks, replies, edits and unsends. */
 const PART_ONE_KEYS = [
   'imessageReactionsAvailable',
   'imessageEmojiReactionsAvailable',
   'imessagePartReactionsAvailable',
   'imessageRepliesAvailable',
   'imessagePartRepliesAvailable',
-] as const;
-
-/** Group features whose restored switches part 1 ignores, because it cannot send them yet. */
-const NOT_YET_SENDABLE_KEYS = [
   'imessageEditsAvailable',
   'imessageUnsendsAvailable',
+] as const;
+
+/** Group features whose restored switches the app ignores, because it cannot send them yet. */
+const NOT_YET_SENDABLE_KEYS = [
   'imessageEffectsAvailable',
   'contactCardAvailable',
   'currentLocationAvailable',
@@ -127,7 +127,7 @@ describe('useChatCapabilities FP-006 restored flags', () => {
     }
   });
 
-  it('opens only the part-1 group features in an iMessage;+; and any;+; group with every flag on', async () => {
+  it('opens only the sendable group features in an iMessage;+; and any;+; group with every flag on', async () => {
     await serverInfo(RESTORED_ON);
     for (const [guid, row] of [
       [GROUP, GROUP_HEADER],
@@ -142,12 +142,12 @@ describe('useChatCapabilities FP-006 restored flags', () => {
     }
   });
 
-  it('opens one part-1 group feature per flag and nothing for the other restored flags', async () => {
+  it('opens one sendable group feature per flag and nothing for the other restored flags', async () => {
     const pairs: [keyof typeof RESTORED_ON, (typeof GROUP_RESTORED_KEYS)[number][]][] = [
       ['supports_imessage_group_reactions', ['imessageReactionsAvailable']],
       ['supports_imessage_group_replies', ['imessageRepliesAvailable']],
-      ['supports_imessage_group_edit', []],
-      ['supports_imessage_group_unsend', []],
+      ['supports_imessage_group_edit', ['imessageEditsAvailable']],
+      ['supports_imessage_group_unsend', ['imessageUnsendsAvailable']],
       ['supports_imessage_group_effects', []],
       ['supports_imessage_group_read_state', []],
       ['supports_imessage_group_contact', []],

@@ -7,7 +7,9 @@ import {
 import {
   canSendRestoredIMessageReply,
   canSendRestoredIMessageTapback,
+  canUseRestoredIMessageGroupFeature,
   IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
+  restoredChatKind,
 } from '@core/models/imessageRestoredFeatures';
 import { logger } from '@core/secure';
 import {
@@ -1117,6 +1119,28 @@ export function sendFormatted(
   );
 }
 
+/**
+ * Whether the server will take this edit or unsend right now: the reviewed one-to-one command, or
+ * (FP-006) the restored group command while its own group switch is on. A group never borrows the
+ * one-to-one switch, and a one-to-one chat never borrows a group switch.
+ */
+function messageChangeSupported(
+  info: Parameters<typeof canUseRestoredIMessageGroupFeature>[0],
+  chatGuid: string,
+  change: 'edit' | 'unsend',
+): boolean {
+  if (restoredChatKind(chatGuid) === 'group') {
+    return canUseRestoredIMessageGroupFeature(
+      info,
+      chatGuid,
+      change === 'edit' ? 'supports_imessage_group_edit' : 'supports_imessage_group_unsend',
+    );
+  }
+  return (
+    (change === 'edit' ? info?.supports_imessage_edit : info?.supports_imessage_unsend) === true
+  );
+}
+
 /** UI-facing edit of a sent message's text (optimistic + revert on failure). */
 export function editText(
   args: {
@@ -1132,22 +1156,23 @@ export function editText(
     if (
       isRcsChatGuid(args.chatGuid) ||
       args.partIndex !== 0 ||
-      capability?.serverInfo?.supports_imessage_edit !== true ||
+      !capability ||
+      !messageChangeSupported(capability.serverInfo, args.chatGuid, 'edit') ||
       !capability.isCurrent()
     ) {
       throw new SendCapabilityUnavailableError();
     }
     const serverAuthorization = messageTargetServerAuthorization(
-      capability?.serverInfo,
+      capability.serverInfo,
       () =>
         accountLease.isCurrent() &&
         capability.isCurrent() &&
-        capability.serverInfo?.supports_imessage_edit === true,
+        messageChangeSupported(capability.serverInfo, args.chatGuid, 'edit'),
     );
     return sendEdit(
       getDatabase(),
       accountHttp(accountLease),
-      args,
+      { ...args, restoredGroup: restoredChatKind(args.chatGuid) === 'group' },
       Date.now(),
       () => accountLease.isCurrent(),
       serverAuthorization,
@@ -1165,22 +1190,23 @@ export function unsend(
     if (
       isRcsChatGuid(args.chatGuid) ||
       args.partIndex !== 0 ||
-      capability?.serverInfo?.supports_imessage_unsend !== true ||
+      !capability ||
+      !messageChangeSupported(capability.serverInfo, args.chatGuid, 'unsend') ||
       !capability.isCurrent()
     ) {
       throw new SendCapabilityUnavailableError();
     }
     const serverAuthorization = messageTargetServerAuthorization(
-      capability?.serverInfo,
+      capability.serverInfo,
       () =>
         accountLease.isCurrent() &&
         capability.isCurrent() &&
-        capability.serverInfo?.supports_imessage_unsend === true,
+        messageChangeSupported(capability.serverInfo, args.chatGuid, 'unsend'),
     );
     return sendUnsend(
       getDatabase(),
       accountHttp(accountLease),
-      args,
+      { ...args, restoredGroup: restoredChatKind(args.chatGuid) === 'group' },
       Date.now(),
       () => accountLease.isCurrent(),
       serverAuthorization,
@@ -1197,22 +1223,23 @@ export function checkUnsend(
     const capability = captureSessionRcsCapabilityLease();
     if (
       isRcsChatGuid(args.chatGuid) ||
-      capability?.serverInfo?.supports_imessage_unsend !== true ||
+      !capability ||
+      !messageChangeSupported(capability.serverInfo, args.chatGuid, 'unsend') ||
       !capability.isCurrent()
     ) {
       throw new SendCapabilityUnavailableError();
     }
     const serverAuthorization = messageTargetServerAuthorization(
-      capability?.serverInfo,
+      capability.serverInfo,
       () =>
         accountLease.isCurrent() &&
         capability.isCurrent() &&
-        capability.serverInfo?.supports_imessage_unsend === true,
+        messageChangeSupported(capability.serverInfo, args.chatGuid, 'unsend'),
     );
     return checkUnconfirmedUnsend(
       getDatabase(),
       accountHttp(accountLease),
-      args,
+      { ...args, restoredGroup: restoredChatKind(args.chatGuid) === 'group' },
       Date.now(),
       () => accountLease.isCurrent(),
       serverAuthorization,
