@@ -304,7 +304,10 @@ async function reEnqueueOutgoingFromMessageWithinTransaction(
     if (queued[0]) return null; // a live ladder already owns it — bump, don't duplicate
     const att = await db.all<{ guid: string; localPath: string | null }>(sql`
       SELECT guid, local_path AS localPath FROM attachments
-      WHERE message_id = ${msg.id} AND guid LIKE '%-att' LIMIT 1`);
+      WHERE message_id = ${msg.id} AND guid LIKE '%-att' ORDER BY id ASC LIMIT 2`);
+    // A message of several files is never rebuilt from one of them: re-sending only the first
+    // would deliver part of what was sent as one message.
+    if (att.length > 1) return null;
     const firstAtt = att[0];
     if (!firstAtt?.localPath) return null; // unsafe/absent payload or nothing on disk to re-upload
     const payload = JSON.stringify({

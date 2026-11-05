@@ -1,5 +1,6 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { Attachment } from '@core/models';
+import { IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES } from '@core/models/imessageRestoredFeatures';
 import { STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import { firstUrl, INLINE_IMAGE_MIME_TYPES, mediaSection, type MediaSection } from '@utils';
 import { attachments, chats, messages, outgoingQueue } from '../schema';
@@ -23,6 +24,61 @@ import type { OutgoingInsertResult } from './outgoing';
  * Transaction-only attachment ingestion. Temp-row identity/local-path reconciliation and the
  * final attachment upsert must remain in the owning message transaction.
  */
+interface OptimisticAttachmentRow {
+  guid: string;
+  localPath: string | null;
+  transferName: string | null;
+  totalBytes: number | null;
+}
+
+/**
+ * Pair one message's real attachments with its optimistic temp rows. A real attachment takes the
+ * temp row with the same name and size when exactly one of each carries that pair; the rest pair
+ * in order (temp rows by id, which is pick order; real ones in payload order). Identical repeats
+ * are interchangeable, so order is enough for them. The server's per-message attachment query has
+ * no fixed order, which is why name and size come first. A temp row whose own guid is in the
+ * payload is a refresh of itself and is never paired. One left over keeps its local file.
+ */
+function pairOptimisticAttachments(
+  temps: OptimisticAttachmentRow[],
+  incoming: Attachment[],
+): Array<{ temp: OptimisticAttachmentRow; att: Attachment }> {
+  const incomingGuids = new Set(incoming.map((att) => att.guid));
+  const freeTemps = temps.filter((temp) => !incomingGuids.has(temp.guid));
+  const tempGuids = new Set(temps.map((temp) => temp.guid));
+  const real = incoming.filter((att) => !tempGuids.has(att.guid));
+  const fileKey = (name: string | null | undefined, bytes: number | null | undefined) =>
+    name != null && bytes != null ? `${bytes}:${name}` : null;
+  const counts = (keys: Array<string | null>) => {
+    const out = new Map<string, number>();
+    for (const key of keys) if (key != null) out.set(key, (out.get(key) ?? 0) + 1);
+    return out;
+  };
+  const tempKeys = freeTemps.map((temp) => fileKey(temp.transferName, temp.totalBytes));
+  const realKeys = real.map((att) => fileKey(att.transferName, att.totalBytes));
+  const tempCounts = counts(tempKeys);
+  const realCounts = counts(realKeys);
+  const pairs: Array<{ temp: OptimisticAttachmentRow; att: Attachment }> = [];
+  const pairedTemps = new Set<number>();
+  const unpaired: Attachment[] = [];
+  real.forEach((att, index) => {
+    const key = realKeys[index] ?? null;
+    const unique = key != null && tempCounts.get(key) === 1 && realCounts.get(key) === 1;
+    const tempIndex = unique ? tempKeys.indexOf(key) : -1;
+    if (tempIndex >= 0) {
+      pairs.push({ temp: freeTemps[tempIndex]!, att });
+      pairedTemps.add(tempIndex);
+    } else {
+      unpaired.push(att);
+    }
+  });
+  const leftTemps = freeTemps.filter((_, index) => !pairedTemps.has(index));
+  for (let index = 0; index < Math.min(leftTemps.length, unpaired.length); index += 1) {
+    pairs.push({ temp: leftTemps[index]!, att: unpaired[index]! });
+  }
+  return pairs;
+}
+
 export function upsertAttachmentsWithinTransaction(
   context: DbTransactionContext,
   items: Array<{ att: Attachment; messageId: number }>,
@@ -76,25 +132,30 @@ export function upsertAttachmentsWithinTransaction(
     // (guid like 'temp-…-att', identified by its retained local_path), re-point that temp
     // row to the real guid in place — preserving its on-disk local_path so the image keeps
     // rendering without a re-download, and avoiding a duplicate attachment on the bubble.
-    for (const { att, messageId } of deduped) {
-      const temp = await db.all<{ guid: string; localPath: string | null }>(
-        sql`SELECT guid, local_path AS localPath FROM attachments
-          WHERE message_id = ${messageId} AND guid LIKE 'temp-%-att' AND guid <> ${att.guid}
-          LIMIT 1`,
+    // Several files sent as one message have one temp row each, so each real attachment is
+    // paired with the temp row of the same file (see pairOptimisticAttachments).
+    for (const messageId of new Set(deduped.map((item) => item.messageId))) {
+      const incoming = deduped.filter((item) => item.messageId === messageId).map(({ att }) => att);
+      const temps = await db.all<OptimisticAttachmentRow>(
+        sql`SELECT guid, local_path AS localPath, transfer_name AS transferName,
+            total_bytes AS totalBytes
+          FROM attachments
+          WHERE message_id = ${messageId} AND guid LIKE 'temp-%-att'
+          ORDER BY id ASC`,
       );
-      const t = temp[0];
-      if (!t) continue;
-      // If the real guid already exists (a prior echo inserted it), just drop the temp row.
-      const existing = await db.all<{ id: number }>(
-        sql`SELECT id FROM attachments WHERE guid = ${att.guid} LIMIT 1`,
-      );
-      if (existing[0]) {
-        await db.delete(attachments).where(eq(attachments.guid, t.guid));
-      } else {
-        await db
-          .update(attachments)
-          .set({ guid: att.guid, localPath: t.localPath })
-          .where(eq(attachments.guid, t.guid));
+      for (const { temp: t, att } of pairOptimisticAttachments(temps, incoming)) {
+        // If the real guid already exists (a prior echo inserted it), just drop the temp row.
+        const existing = await db.all<{ id: number }>(
+          sql`SELECT id FROM attachments WHERE guid = ${att.guid} LIMIT 1`,
+        );
+        if (existing[0]) {
+          await db.delete(attachments).where(eq(attachments.guid, t.guid));
+        } else {
+          await db
+            .update(attachments)
+            .set({ guid: att.guid, localPath: t.localPath })
+            .where(eq(attachments.guid, t.guid));
+        }
       }
     }
 
@@ -722,6 +783,23 @@ export interface InsertOutgoingAttachmentArgs {
   attemptAware?: boolean;
   /** Durable marker for the one-shot helper-backed iMessage attachment slice. */
   imessageAttachmentV1?: true;
+  /**
+   * More files of the same message, after the main one, in pick order: several files sent as one
+   * iMessage. Only for the one-shot iMessage slice, never with a reply, at most ten files in all,
+   * every guid distinct.
+   */
+  additionalFiles?: OutgoingAttachmentFile[];
+}
+
+/** One more file of an optimistic outgoing message (see `additionalFiles`). */
+export interface OutgoingAttachmentFile {
+  attachmentGuid: string;
+  localPath: string;
+  mimeType: string;
+  transferName: string;
+  totalBytes: number;
+  width?: number;
+  height?: number;
 }
 
 /** Transaction-only body for one optimistic outgoing attachment insert. */
@@ -730,6 +808,29 @@ export function insertOutgoingAttachmentWithinTransaction(
   args: InsertOutgoingAttachmentArgs,
 ): Promise<OutgoingInsertResult> {
   return runInTransactionContext(context, async (db) => {
+    const additionalFiles = args.additionalFiles ?? [];
+    const files: OutgoingAttachmentFile[] = [
+      {
+        attachmentGuid: args.attachmentGuid,
+        localPath: args.localPath,
+        mimeType: args.mimeType,
+        transferName: args.transferName,
+        totalBytes: args.totalBytes,
+        width: args.width,
+        height: args.height,
+      },
+      ...additionalFiles,
+    ];
+    if (
+      additionalFiles.length > 0 &&
+      (args.imessageAttachmentV1 !== true ||
+        args.selectedMessageGuid !== undefined ||
+        files.length > IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES ||
+        new Set(files.map((file) => file.attachmentGuid)).size !== files.length)
+    ) {
+      throw new Error('Several files need one bounded one-shot iMessage without a reply.');
+    }
+    const partCount = files.length + (args.text ? 1 : 0);
     const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(messages).values({
       guid: args.tempGuid,
@@ -738,7 +839,7 @@ export function insertOutgoingAttachmentWithinTransaction(
       dateCreated: args.now,
       text: args.text ?? null,
       hasAttachments: true,
-      partCount: args.text ? 2 : null,
+      partCount: partCount > 1 ? partCount : null,
       threadOriginatorGuid: args.selectedMessageGuid ?? null,
       threadOriginatorPart: args.selectedMessageGuid ? (args.partIndex ?? null) : null,
       sendState: 'sending',
@@ -751,16 +852,19 @@ export function insertOutgoingAttachmentWithinTransaction(
       .from(messages)
       .where(eq(messages.guid, args.tempGuid))
       .limit(1);
-    await db.insert(attachments).values({
-      guid: args.attachmentGuid,
-      messageId: inserted[0]!.id,
-      mimeType: args.mimeType,
-      transferName: args.transferName,
-      totalBytes: args.totalBytes,
-      width: args.width ?? null,
-      height: args.height ?? null,
-      localPath: args.localPath,
-    });
+    // One statement, rows in pick order: the bubble shows attachments by id.
+    await db.insert(attachments).values(
+      files.map((file) => ({
+        guid: file.attachmentGuid,
+        messageId: inserted[0]!.id,
+        mimeType: file.mimeType,
+        transferName: file.transferName,
+        totalBytes: file.totalBytes,
+        width: file.width ?? null,
+        height: file.height ?? null,
+        localPath: file.localPath,
+      })),
+    );
     await db.insert(outgoingQueue).values({
       tempGuid: args.tempGuid,
       chatGuid: args.chatGuid,
@@ -772,6 +876,10 @@ export function insertOutgoingAttachmentWithinTransaction(
         selectedMessageGuid: args.selectedMessageGuid,
         partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
         ...(args.imessageAttachmentV1 === true ? { imessageAttachmentV1: true } : {}),
+        // The one-shot row is never re-uploaded; the full list keeps the queue honest.
+        ...(additionalFiles.length > 0
+          ? { attachmentGuids: files.map((file) => file.attachmentGuid) }
+          : {}),
       }),
     });
     await db
