@@ -108,6 +108,16 @@ internal fun clearStaleCurrentShareShortcuts(
 internal data class ShareShortcutSpec(
   val guid: String,
   val label: String,
+  /** Never the app icon: a malformed or missing picture becomes a neutral person-glyph circle. */
+  val avatar: ShareShortcutAvatarSpec = FALLBACK_AVATAR,
+)
+
+/** A neutral letter-circle stand-in (palette blue, person glyph) for a missing or bad picture. */
+internal val FALLBACK_AVATAR = ShareShortcutAvatarSpec(
+  photoUri = null,
+  initials = "",
+  background = (0xFF shl 24) or 0x4DABF7,
+  foreground = (0xFF shl 24) or 0x111111,
 )
 
 /** Expo bridge input. Conversation identities never become Android shortcut ids or intent extras. */
@@ -117,6 +127,19 @@ class ShareShortcutRecord : Record {
 
   @Field
   var label: String = ""
+
+  /** Optional picture, computed in JS with the app's avatar rules (see ShareShortcutAvatar.kt). */
+  @Field
+  var photoUri: String? = null
+
+  @Field
+  var initials: String? = null
+
+  @Field
+  var background: String? = null
+
+  @Field
+  var foreground: String? = null
 }
 
 internal fun normalizeShareShortcutSpecs(records: List<ShareShortcutRecord>): List<ShareShortcutSpec> {
@@ -134,7 +157,13 @@ internal fun normalizeShareShortcutSpecs(records: List<ShareShortcutRecord>): Li
       "Invalid Direct Share label"
     }
     require(seen.add(guid)) { "Duplicate Direct Share conversation identity" }
-    ShareShortcutSpec(guid, label)
+    val avatar = normalizeAvatarSpec(
+      record.photoUri,
+      record.initials,
+      record.background,
+      record.foreground,
+    ) ?: FALLBACK_AVATAR
+    ShareShortcutSpec(guid, label, avatar)
   }
 }
 
@@ -261,7 +290,9 @@ private class AndroidLegacyShortcutStore(private val context: Context) : LegacyS
 /**
  * Owned SHARE-02 Direct Share boundary.
  *
- * Android receives only opaque HMAC ids plus a bounded display label and the generic app icon.
+ * Android receives opaque HMAC ids, a bounded display label, and the chat's picture: its contact or
+ * group photo, or a letter circle computed in JS (owner-approved Phase 2, 2026-11-05: these shortcuts
+ * also make notifications Android conversations). Nothing is published while App Lock is enabled.
  * Resolution always happens against the current unlocked account's candidate GUIDs supplied by
  * JavaScript; stale, forged, deleted, or wrong-account ids resolve to null.
  */
@@ -310,6 +341,9 @@ class GatorShareShortcutsModule : Module() {
         records: List<ShareShortcutRecord>,
         appLockEnabled: Boolean,
       ->
+      // Returns the published chats' shortcut ids in record order (empty while App Lock is on), so
+      // a conversation notification can name its chat's shortcut without a second HMAC call.
+      var published: List<String> = emptyList()
       mutate(revision) { context ->
         val store = AndroidLegacyShortcutStore(context)
         if (appLockEnabled) {
@@ -317,8 +351,9 @@ class GatorShareShortcutsModule : Module() {
           clearCurrentShareShortcuts(store)
           return@mutate
         }
-        publishShareShortcuts(context, normalizeShareShortcutSpecs(records))
+        published = publishShareShortcuts(context, normalizeShareShortcutSpecs(records))
       }
+      published
     }
 
     Function("resolveShareShortcutTarget") { token: String, candidates: List<String> ->
@@ -356,7 +391,7 @@ class GatorShareShortcutsModule : Module() {
     }
   }
 
-  private fun publishShareShortcuts(context: Context, requested: List<ShareShortcutSpec>) {
+  private fun publishShareShortcuts(context: Context, requested: List<ShareShortcutSpec>): List<String> {
     val owner = ShareShortcutTokenOwner(context)
     val limit = minOf(
       MAX_PUBLISHED_SHORTCUTS,
@@ -371,7 +406,7 @@ class GatorShareShortcutsModule : Module() {
       requestedWithTokens.mapTo(mutableSetOf()) { it.second },
     )
 
-    val appIcon = IconCompat.createWithResource(context, context.applicationInfo.icon)
+    val renderer = ShareShortcutAvatarRenderer(context)
     val launchIntent = checkNotNull(context.packageManager.getLaunchIntentForPackage(context.packageName)) {
       "Direct Share launch activity is unavailable"
     }.apply {
@@ -381,15 +416,18 @@ class GatorShareShortcutsModule : Module() {
       clipData = null
     }
     val shortcuts = requestedWithTokens.map { (spec, token) ->
+      // Android draws a conversation notification's avatar from this icon, so it is the chat's own
+      // picture (photo or letter circle), never the app icon.
+      val icon = renderer.iconFor(spec.avatar)
       val person = Person.Builder()
         .setName(spec.label)
         .setKey(token)
-        .setIcon(appIcon)
+        .setIcon(icon)
         .build()
       ShortcutInfoCompat.Builder(context, token)
         .setShortLabel(spec.label)
         .setLongLabel(spec.label)
-        .setIcon(appIcon)
+        .setIcon(icon)
         .setIntent(Intent(launchIntent))
         .setPerson(person)
         .setCategories(setOf(CURRENT_SHARE_SHORTCUT_CATEGORY))
@@ -400,5 +438,6 @@ class GatorShareShortcutsModule : Module() {
     check(ShortcutManagerCompat.setDynamicShortcuts(context, shortcuts)) {
       "Direct Share shortcuts could not be published"
     }
+    return requestedWithTokens.map { it.second }
   }
 }

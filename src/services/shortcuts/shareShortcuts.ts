@@ -17,17 +17,23 @@ const TARGET_TOKEN = /^gator-share-v2-[A-Za-z0-9_-]{43}$/;
 export interface ShareShortcutRow {
   guid: string;
   label: string;
+  /** The chat's picture, computed with the app's avatar rules; native only validates and draws it. */
+  photoUri?: string | null;
+  initials?: string;
+  background?: string;
+  foreground?: string;
 }
 
 interface GatorShareShortcutsNative {
   clearLegacyShareShortcuts(revision: number): void;
   clearCurrentShareShortcuts(revision: number): void;
   clearAllShareShortcuts(revision: number): void;
+  /** Returns the published chats' shortcut ids in record order (an older build returns nothing). */
   setShareShortcuts(
     revision: number,
     records: readonly ShareShortcutRow[],
     appLockEnabled: boolean,
-  ): void;
+  ): unknown;
   resolveShareShortcutTarget(token: string, candidates: readonly string[]): string | null;
   reportShareShortcutUsed(token: string): void;
 }
@@ -44,6 +50,12 @@ let shortcutMutationSequence = 0;
  * Android's shortcut file on the JS thread, so an unchanged list is skipped. Cleared with the rows.
  */
 let lastPublished: string | null = null;
+/**
+ * Shortcut id of each chat the native module last published (chat guid → opaque token). A
+ * conversation notification names its chat's shortcut with this; empty while App Lock is on, after
+ * any cleanup, and on an older native build that returns no ids.
+ */
+let publishedShortcutIds = new Map<string, string>();
 
 function nextShortcutMutationRevision(): number {
   shortcutMutationSequence += 1;
@@ -85,6 +97,7 @@ export function clearShareShortcuts(): boolean {
 /** Account teardown: scrub legacy/current labels, then rotate the native opaque-id namespace. */
 export function clearAllShareShortcuts(): boolean {
   lastPublished = null;
+  publishedShortcutIds = new Map();
   return runMutation('account cleanup', (native, revision) => {
     native.clearAllShareShortcuts(revision);
   });
@@ -93,6 +106,7 @@ export function clearAllShareShortcuts(): boolean {
 /** Remove only current-account rows and rotate their opaque-id namespace. */
 export function clearCurrentShareShortcuts(): boolean {
   lastPublished = null;
+  publishedShortcutIds = new Map();
   return runMutation('current cleanup', (native, revision) => {
     native.clearCurrentShareShortcuts(revision);
   });
@@ -115,11 +129,35 @@ export function publishShareShortcuts(rows: readonly InboxRow[], appLockEnabled:
   }));
   const payload = JSON.stringify([appLockEnabled, records]);
   if (payload === lastPublished) return true;
+  let ids: unknown = undefined;
   const published = runMutation('publish', (native, revision) => {
-    native.setShareShortcuts(revision, records, appLockEnabled);
+    ids = native.setShareShortcuts(revision, records, appLockEnabled);
   });
   lastPublished = published ? payload : null;
+  publishedShortcutIds = published ? shortcutIdsByGuid(records, ids) : new Map();
   return published;
+}
+
+/** Pair each published record with the id native returned for it; anything malformed is skipped. */
+function shortcutIdsByGuid(
+  records: readonly ShareShortcutRow[],
+  ids: unknown,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!Array.isArray(ids)) return out;
+  records.forEach((record, index) => {
+    const id: unknown = ids[index];
+    if (typeof id === 'string' && TARGET_TOKEN.test(id)) out.set(record.guid, id);
+  });
+  return out;
+}
+
+/**
+ * The Android shortcut id that makes this chat's notification a conversation, or null when the chat
+ * has no published shortcut (outside the top ten, App Lock on, or an older native build).
+ */
+export function conversationShortcutIdFor(chatGuid: string): string | null {
+  return publishedShortcutIds.get(chatGuid) ?? null;
 }
 
 /** The ordered active-chat list shortcuts are published from and resolved against. */

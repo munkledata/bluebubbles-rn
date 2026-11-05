@@ -50,6 +50,7 @@ import {
   clearAllShareShortcuts,
   clearCurrentShareShortcuts,
   clearShareShortcuts,
+  conversationShortcutIdFor,
   publishShareShortcuts,
   refreshShareShortcuts,
   resolveShareShortcutTarget,
@@ -267,6 +268,69 @@ describe('Direct Share shortcut mutation bridge', () => {
     expect(clearAllShareShortcuts()).toBe(false);
     expect(publishShareShortcuts([inboxRow()], false)).toBe(false);
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('conversation shortcut ids (Phase 2)', () => {
+  const id = (n: number) => `gator-share-v2-${String(n).repeat(43).slice(0, 43)}`;
+
+  it('remembers the id native returns for each published chat', () => {
+    const rows = manyRows(3);
+    native.setShareShortcuts.mockReturnValueOnce([id(1), id(2), id(3)]);
+    expect(publishShareShortcuts(rows, false)).toBe(true);
+    expect(conversationShortcutIdFor(rows[0]!.guid)).toBe(id(1));
+    expect(conversationShortcutIdFor(rows[2]!.guid)).toBe(id(3));
+    expect(conversationShortcutIdFor('iMessage;-;not-published')).toBeNull();
+  });
+
+  it('keeps the ids when an unchanged list skips the native publish', () => {
+    const rows = manyRows(2);
+    native.setShareShortcuts.mockReturnValueOnce([id(1), id(2)]);
+    publishShareShortcuts(rows, false);
+    publishShareShortcuts(rows, false);
+    expect(native.setShareShortcuts).toHaveBeenCalledTimes(1);
+    expect(conversationShortcutIdFor(rows[1]!.guid)).toBe(id(2));
+  });
+
+  it('skips malformed ids and treats an older native build (no ids) as none', () => {
+    const rows = manyRows(3);
+    native.setShareShortcuts.mockReturnValueOnce([id(1), 'not-a-token', 7]);
+    publishShareShortcuts(rows, false);
+    expect(conversationShortcutIdFor(rows[0]!.guid)).toBe(id(1));
+    expect(conversationShortcutIdFor(rows[1]!.guid)).toBeNull();
+    expect(conversationShortcutIdFor(rows[2]!.guid)).toBeNull();
+
+    native.setShareShortcuts.mockReturnValueOnce(undefined);
+    publishShareShortcuts([{ ...rows[0]!, displayName: 'Renamed' }], false);
+    expect(conversationShortcutIdFor(rows[0]!.guid)).toBeNull();
+  });
+
+  it('forgets every id under App Lock, after a refused publish, and on cleanup', () => {
+    const rows = manyRows(1);
+    let round = 0;
+    const remember = () => {
+      round += 1; // a new label each round, so the unchanged-list skip can't apply
+      native.setShareShortcuts.mockReturnValueOnce([id(1)]);
+      publishShareShortcuts([{ ...rows[0]!, displayName: `Round ${round}` }], false);
+      expect(conversationShortcutIdFor(rows[0]!.guid)).toBe(id(1));
+    };
+    remember();
+    publishShareShortcuts(rows, true);
+    expect(conversationShortcutIdFor(rows[0]!.guid)).toBeNull();
+
+    remember();
+    native.setShareShortcuts.mockImplementationOnce(() => {
+      throw new Error('refused');
+    });
+    publishShareShortcuts([{ ...rows[0]!, displayName: 'refused' }], false);
+    expect(conversationShortcutIdFor(rows[0]!.guid)).toBeNull();
+
+    remember();
+    clearCurrentShareShortcuts();
+    expect(conversationShortcutIdFor(rows[0]!.guid)).toBeNull();
+    remember();
+    clearAllShareShortcuts();
+    expect(conversationShortcutIdFor(rows[0]!.guid)).toBeNull();
   });
 });
 
