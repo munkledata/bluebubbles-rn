@@ -976,6 +976,39 @@ describe('Composer — staged attachments', () => {
     expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1);
   });
 
+  it('sends text typed beside two files as its own message first, then the files', async () => {
+    const onSend = jest.fn();
+    const onSendAttachments = jest.fn();
+    const onSendTextAttachment = jest.fn();
+    const canSubmit = jest.fn(() => true);
+    await renderWithTheme(
+      <Composer
+        onSend={onSend}
+        onSendAttachments={onSendAttachments}
+        onSendTextAttachment={onSendTextAttachment}
+        canSubmit={canSubmit}
+      />,
+    );
+    await fireEvent.changeText(input(), 'caption for both');
+    await fireEvent.press(screen.getByLabelText('Open attachment options'));
+    await fireEvent.press(await screen.findByLabelText('tray-pick-two'));
+    await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(2));
+
+    await fireEvent.press(screen.getByLabelText('Send message'));
+
+    // Two logical sends: the text, then one batch of files.
+    expect(canSubmit).toHaveBeenCalledWith(2);
+    expect(onSendTextAttachment).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith('caption for both');
+    expect(onSendAttachments).toHaveBeenCalledTimes(1);
+    expect(onSendAttachments.mock.calls[0]?.[0]).toHaveLength(2);
+    expect(onSend.mock.invocationCallOrder[0]).toBeLessThan(
+      onSendAttachments.mock.invocationCallOrder[0]!,
+    );
+    await waitFor(() => expect(screen.queryAllByLabelText('Remove attachment')).toHaveLength(0));
+    expect(input().props.value).toBe('');
+  });
+
   it('removes only attachments whose queue rows committed', async () => {
     const admission = deferred<readonly string[]>();
     const onSendAttachments = jest.fn(() => admission.promise);

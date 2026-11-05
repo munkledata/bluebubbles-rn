@@ -210,11 +210,9 @@ export function useComposerAuthoringSession({
     const attachments = isEditing ? [] : pending;
     if (!captured && attachments.length === 0) return;
     if (isSubmitOwnerCurrent && !isSubmitOwnerCurrent()) return;
-    const isTextAttachment = !!captured && attachments.length > 0;
-    if (isTextAttachment && attachments.length !== 1) {
-      showToast('Send one attachment with its text at a time');
-      return;
-    }
+    // One attachment with text goes as one captioned message. With two or more, the text goes
+    // first as its own message and the files follow it, so text never blocks a multi-file send.
+    const isTextAttachment = !!captured && attachments.length === 1;
     if (isTextAttachment && !onSendTextAttachment) {
       showToast('This server can’t send text and an attachment as one message');
       return;
@@ -354,8 +352,9 @@ export function useComposerAuthoringSession({
       return;
     }
 
-    const attachmentAdmission = admitAttachments();
+    // Text first, so a caption typed beside several files is queued ahead of them.
     const textAdmission = admitText();
+    const attachmentAdmission = admitAttachments();
     if (!isPromiseLike(attachmentAdmission) && !isPromiseLike(textAdmission)) {
       try {
         applyAdmission(attachmentAdmission, textAdmission);
