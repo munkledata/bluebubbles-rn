@@ -51,10 +51,15 @@ export function buildGroupEventText(m: GroupEventFields): string {
     if (groupActionType === 2) return `${name} removed the group photo.`;
     // macOS 26 synced "transcript background" (chat wallpaper): 4 = changed, 6 = removed. The
     // wallpaper asset itself is refetched on ingestion by GroupEventSideEffectSink (the event does
-    // not carry the new channel). groupActionType 3 and 5 also occur in the wild, but the server
-    // left their semantics unconfirmed, so they intentionally fall through to the unknown line.
+    // not carry the new channel).
     if (groupActionType === 4) return `${name} changed the chat background.`;
     if (groupActionType === 6) return `${name} removed the chat background.`;
+    // 3 is how newer Macs record a group photo change: the one real row seen on the dev Mac
+    // (macOS 27.2) carries a `GroupPhotoImage` attachment, and that Mac has no 3/1 rows at all.
+    if (groupActionType === 3) return `${name} changed the group photo.`;
+    // Anything else here (5 occurs in the wild; nobody has confirmed what it means) is still a
+    // change to the group, so say that plainly instead of "Unknown group event".
+    return `${name} updated the conversation.`;
   } else if (itemType === 4 && groupActionType === 0) {
     return `${name} shared ${name === 'You' ? 'your' : 'their'} location.`;
   } else if (itemType === 5) {

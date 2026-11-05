@@ -60,12 +60,21 @@ describe('buildGroupEventText', () => {
     );
   });
 
-  it('itemType 3 with an unconfirmed groupActionType (3 or 5) falls back to unknown', () => {
+  it('itemType 3 / groupActionType 3 is a group photo change (newer Macs)', () => {
     expect(buildGroupEventText({ itemType: 3, groupActionType: 3, senderName: 'Alice' })).toBe(
-      'Unknown group event',
+      'Alice changed the group photo.',
     );
+    expect(buildGroupEventText({ itemType: 3, groupActionType: 3, isFromMe: true })).toBe(
+      'You changed the group photo.',
+    );
+  });
+
+  it('an unconfirmed itemType 3 action (5, or anything new) says the group was updated', () => {
     expect(buildGroupEventText({ itemType: 3, groupActionType: 5, senderName: 'Alice' })).toBe(
-      'Unknown group event',
+      'Alice updated the conversation.',
+    );
+    expect(buildGroupEventText({ itemType: 3, groupActionType: 99 })).toBe(
+      'Someone updated the conversation.',
     );
   });
 
