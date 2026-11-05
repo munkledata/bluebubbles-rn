@@ -211,6 +211,36 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     }
   });
 
+  it('shows a sender with no contact name as a formatted number', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await deliverRaw(
+      router,
+      'new-message',
+      {
+        guid: 'number-only-sender-message',
+        text: 'hello',
+        dateCreated: 1_700_000_000_004,
+        handle: { address: '+15550101234' },
+        chats: [
+          {
+            guid: 'SMS;-;+15550101234',
+            style: 45,
+            participants: [{ address: '+15550101234' }],
+          },
+        ],
+      },
+      'socket',
+    );
+
+    const intent = intents[0];
+    expect(intent?.kind).toBe('message');
+    if (intent?.kind === 'message') {
+      expect(intent.senderName).toBe('(555) 010-1234');
+      expect(intent.chatTitle).toBe('(555) 010-1234');
+    }
+  });
+
   it('falls back to the handle count only when the chat has no style', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);

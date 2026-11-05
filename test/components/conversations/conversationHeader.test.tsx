@@ -199,7 +199,7 @@ describe('ConversationHeader — contact number under the name', () => {
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
     expect(screen.getByText('Alice')).toBeTruthy();
-    expect(screen.getByText('+1 (555) 123-0000', HIDDEN)).toBeTruthy();
+    expect(screen.getByText('(555) 123-0000', HIDDEN)).toBeTruthy();
   });
 
   it('shows an email handle verbatim', async () => {
@@ -225,7 +225,7 @@ describe('ConversationHeader — contact number under the name', () => {
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
     expect(screen.getByText('alice@example.com', HIDDEN)).toBeTruthy();
-    expect(screen.queryByText('+1 (555) 123-0000', HIDDEN)).toBeNull();
+    expect(screen.queryByText('(555) 123-0000', HIDDEN)).toBeNull();
   });
 
   it('does NOT repeat the number when it is already the title (unsaved contact)', async () => {
@@ -238,8 +238,8 @@ describe('ConversationHeader — contact number under the name', () => {
     await renderWithTheme(
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
-    expect(screen.getAllByText('+1 (555) 123-0000', HIDDEN)).toHaveLength(1);
-    expect(screen.getByLabelText('+1 (555) 123-0000, chat details')).toBeTruthy();
+    expect(screen.getAllByText('(555) 123-0000', HIDDEN)).toHaveLength(1);
+    expect(screen.getByLabelText('(555) 123-0000, chat details')).toBeTruthy();
   });
 
   it('shows no number for a GROUP chat', async () => {
@@ -253,7 +253,7 @@ describe('ConversationHeader — contact number under the name', () => {
     await renderWithTheme(
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
-    expect(screen.queryByText('+1 (555) 123-0000', HIDDEN)).toBeNull();
+    expect(screen.queryByText('(555) 123-0000', HIDDEN)).toBeNull();
     expect(screen.getByLabelText('Alice, Bob, chat details')).toBeTruthy();
   });
 
@@ -266,7 +266,7 @@ describe('ConversationHeader — contact number under the name', () => {
     await renderWithTheme(
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
-    expect(screen.getByText('+1 (555) 123-0000', HIDDEN)).toBeTruthy();
+    expect(screen.getByText('(555) 123-0000', HIDDEN)).toBeTruthy();
   });
 
   it('never surfaces a raw chat-guid identifier as if it were a number', async () => {
@@ -334,7 +334,7 @@ describe('ConversationHeader — affordances', () => {
     await renderWithTheme(<ConversationHeader chatGuid={guid} data={mockHeaderData} />);
     const detailsPress = retainConfiguredPress(
       screen.getByRole('button', {
-        name: 'Alice, +1 (555) 123-0000, chat details',
+        name: 'Alice, (555) 123-0000, chat details',
       }),
     );
     await act(async () => {

@@ -3,6 +3,7 @@ import {
   isCurrentRcsChatGuid,
   type RcsProviderServerInfo,
 } from '@core/rcs/providerIdentity';
+import { formatHandleAddress } from './handleFormat';
 
 export interface TitleInput {
   customName?: string | null;
@@ -47,6 +48,25 @@ export function resolveTitle(c: TitleInput): string {
   const id = c.chatIdentifier?.trim();
   if (id && !RAW_CHAT_GUID.test(id)) return id; // a phone/email identifier is a usable 1:1 fallback
   return 'Group'; // a raw chat-guid group with no synced name/members
+}
+
+/** Participant names with number-only entries in display shape, e.g. "(555) 123-4567". */
+export function formatParticipantNames(names: string | null): string | null {
+  if (!names) return names;
+  return JSON.stringify(participantList(names).map((name) => formatHandleAddress(name)));
+}
+
+/**
+ * resolveTitle for what people SEE: a name that is only a phone number reads "(555) 123-4567", as in
+ * the chat header, never the raw "+15551234567". Search indexing and sorting keep resolveTitle's raw
+ * text, so typed digits still match.
+ */
+export function resolveDisplayTitle(c: TitleInput): string {
+  return resolveTitle({
+    ...c,
+    participantNames: formatParticipantNames(c.participantNames ?? null),
+    chatIdentifier: c.chatIdentifier ? formatHandleAddress(c.chatIdentifier) : c.chatIdentifier,
+  });
 }
 
 /**

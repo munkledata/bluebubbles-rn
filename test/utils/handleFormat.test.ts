@@ -19,13 +19,13 @@ describe('formatHandleAddress', () => {
     expect(formatHandleAddress('5551234567')).toBe('(555) 123-4567');
   });
 
-  it('formats an 11-digit 1-prefixed number with the country code', () => {
-    expect(formatHandleAddress('+15551234567')).toBe('+1 (555) 123-4567');
-    expect(formatHandleAddress('15551234567')).toBe('+1 (555) 123-4567');
+  it('formats an 11-digit 1-prefixed number exactly like the 10-digit one', () => {
+    expect(formatHandleAddress('+15551234567')).toBe('(555) 123-4567');
+    expect(formatHandleAddress('15551234567')).toBe('(555) 123-4567');
   });
 
   it('normalizes an already-formatted number to the canonical shape', () => {
-    expect(formatHandleAddress('+1 (555) 123-4567')).toBe('+1 (555) 123-4567');
+    expect(formatHandleAddress('+1 (555) 123-4567')).toBe('(555) 123-4567');
     expect(formatHandleAddress('555-123-4567')).toBe('(555) 123-4567');
     expect(formatHandleAddress('(555) 123.4567')).toBe('(555) 123-4567');
   });

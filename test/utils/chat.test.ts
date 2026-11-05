@@ -14,6 +14,7 @@ import {
   resolveBubbleColor,
   resolveChatDisplayService,
   resolveChatService,
+  resolveDisplayTitle,
   resolveTitle,
   type TitleInput,
 } from '@utils/chat';
@@ -291,5 +292,34 @@ describe('dedupeParticipantDetails', () => {
       dedupeParticipantDetails(['Sam', 'Sam S'], ['file:///sam.jpg', 'file:///sam.jpg'], []).names,
     ).toEqual(['Sam']);
     expect(dedupeParticipantDetails(['Bob', 'Bob'], [null, null], []).names).toEqual(['Bob']);
+  });
+});
+
+describe('resolveDisplayTitle', () => {
+  it('shows number-only names and identifiers in one readable shape', () => {
+    expect(resolveDisplayTitle({ ...base, participantNames: '["+15551234567"]' })).toBe(
+      '(555) 123-4567',
+    );
+    expect(
+      resolveDisplayTitle({
+        ...base,
+        style: 43,
+        participantCount: 2,
+        participantNames: '["Alice","5551234567"]',
+      }),
+    ).toBe('Alice, (555) 123-4567');
+    expect(resolveDisplayTitle({ ...base, chatIdentifier: '+15551234567' })).toBe('(555) 123-4567');
+  });
+
+  it('leaves names, emails, short codes and typed custom names alone', () => {
+    expect(resolveDisplayTitle({ ...base, participantNames: '["12345"]' })).toBe('12345');
+    expect(resolveDisplayTitle({ ...base, participantNames: '["bob@example.com"]' })).toBe(
+      'bob@example.com',
+    );
+    expect(resolveDisplayTitle({ ...base, customName: '+15551234567' })).toBe('+15551234567');
+  });
+
+  it('keeps resolveTitle raw, so the search index still matches typed digits', () => {
+    expect(resolveTitle({ ...base, participantNames: '["+15551234567"]' })).toBe('+15551234567');
   });
 });

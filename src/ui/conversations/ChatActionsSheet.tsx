@@ -14,7 +14,7 @@ import {
 } from '@/services';
 import { clearChatNotification } from '@/services/notifications/notifeeService';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
-import { resolveTitle } from '@utils';
+import { resolveDisplayTitle } from '@utils';
 import { useTheme } from '../theme';
 
 export interface ChatActionTarget {
@@ -40,7 +40,7 @@ export function toChatActionTarget(
 ): ChatActionTarget {
   return {
     guid: row.guid,
-    title: resolveTitle(row),
+    title: resolveDisplayTitle(row),
     isPinned: !!row.isPinned,
     isArchived: !!row.isArchived,
     muted: row.muteType === 'mute',

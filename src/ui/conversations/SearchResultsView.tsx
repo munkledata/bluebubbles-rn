@@ -10,7 +10,7 @@ import {
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { formatChatDate, resolveTitle } from '@utils';
+import { formatChatDate, resolveDisplayTitle } from '@utils';
 import { useTheme } from '../theme';
 import { useChatNavigator } from '../useChatNavigator';
 import { ConversationTile } from './ConversationTile';
@@ -22,7 +22,7 @@ const MAX_CHAT_RESULTS = 50;
 // The chat title for a message hit, resolved exactly like the inbox so a group shows its
 // name/participants (never a raw chat-guid) and a 1:1 shows the contact name.
 function chatTitle(r: SearchResultRow): string {
-  return resolveTitle({
+  return resolveDisplayTitle({
     customName: r.chatCustomName,
     displayName: r.chatDisplayName,
     chatIdentifier: r.chatIdentifier,

@@ -7,7 +7,7 @@ import {
   runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { resolveTitle } from '@utils/chat';
+import { resolveDisplayTitle } from '@utils/chat';
 
 const MAX_PUBLISHED_SHORTCUTS = 10;
 const MAX_RESOLUTION_CANDIDATES = 256;
@@ -99,7 +99,7 @@ export function clearCurrentShareShortcuts(): boolean {
 }
 
 function boundedLabel(row: InboxRow): string {
-  const label = resolveTitle(row).trim() || 'Conversation';
+  const label = resolveDisplayTitle(row).trim() || 'Conversation';
   // Native validates UTF-16 length too; slice cannot grow it and keeps Binder input bounded.
   return label.slice(0, MAX_LABEL_UTF16_UNITS);
 }

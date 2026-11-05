@@ -8,7 +8,7 @@ import { listDeletedChats, type DeletedChatRow } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { DeletedChatRestoreUnsafeError, restoreDeletedChat } from '@/services';
 import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
-import { resolveTitle } from '@utils';
+import { resolveDisplayTitle } from '@utils';
 import { Screen, ScreenHeader } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
@@ -63,7 +63,7 @@ export function DeletedChatsScreen(): React.JSX.Element {
   const confirmRestore = useCallback(
     (row: DeletedChatRow): void => {
       if (!accountLease.isCurrent() || restoringGuid) return;
-      const title = resolveTitle(row);
+      const title = resolveDisplayTitle(row);
       showDialog(
         'Restore Conversation',
         `Restore “${title}” and re-download its 500 most recent messages? Older history remains available through a full Local Cache Repair.`,
@@ -107,7 +107,7 @@ export function DeletedChatsScreen(): React.JSX.Element {
         <View style={[styles.row, { borderBottomColor: theme.color.separator }]}>
           <View style={styles.details}>
             <Text numberOfLines={1} style={[styles.title, { color: theme.color.label }]}>
-              {resolveTitle(item)}
+              {resolveDisplayTitle(item)}
             </Text>
             <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
               Deleted {new Date(item.deletedAt).toLocaleDateString()}
@@ -117,7 +117,7 @@ export function DeletedChatsScreen(): React.JSX.Element {
             onPress={() => confirmRestore(item)}
             disabled={disabled}
             accessibilityRole="button"
-            accessibilityLabel={`Restore ${resolveTitle(item)}`}
+            accessibilityLabel={`Restore ${resolveDisplayTitle(item)}`}
             accessibilityState={{ disabled, busy: restoring }}
             style={[styles.restoreButton, { backgroundColor: theme.color.tint }]}
           >

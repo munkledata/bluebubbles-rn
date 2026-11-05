@@ -19,9 +19,8 @@ import {
   setCustomFolderShowUnreadBadge,
 } from '@/services/customFolderCommands';
 import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
-import { resolveTitle } from '@utils';
+import { isGroupRow, resolveDisplayTitle } from '@utils';
 import {
-  Avatar,
   Icon,
   readableTextOn,
   Screen,
@@ -30,6 +29,7 @@ import {
   SwitchRow,
   useTheme,
 } from '@ui';
+import { ChatAvatar, chatPeopleCount } from '@ui/conversations/ChatAvatar';
 import { InboxSeparator } from '@ui/conversations/FilteredChatListScreen';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
@@ -354,11 +354,13 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
     ({ item }: { item: InboxRow }): React.JSX.Element => {
       const checked = selected.has(item.guid);
       const disabled = saving || !initialized || !accountCurrent;
-      const title = resolveTitle(item);
+      const title = resolveDisplayTitle(item);
+      // Count people the way the chat list draws them: one person with two addresses is one.
+      const people = chatPeopleCount(item);
       const details = [
         item.isArchived ? 'Archived' : null,
-        item.participantCount > 1
-          ? `${item.participantCount.toLocaleString()} people`
+        isGroupRow(item)
+          ? `${people.toLocaleString()} ${people === 1 ? 'person' : 'people'}`
           : 'Conversation',
       ]
         .filter((part): part is string => part != null)
@@ -372,7 +374,7 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
           accessibilityState={{ checked, disabled }}
           style={styles.row}
         >
-          <Avatar name={title} size={40} />
+          <ChatAvatar row={item} size={40} />
           <View style={styles.rowText}>
             <Text numberOfLines={1} style={[styles.title, { color: theme.color.label }]}>
               {title}
@@ -389,7 +391,7 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
             ]}
           >
             {checked ? (
-              <Text style={[styles.check, { color: readableTextOn(theme.color.tint) }]}>✓</Text>
+              <Icon name="checkmark" size={16} color={readableTextOn(theme.color.tint)} />
             ) : null}
           </View>
         </Pressable>
@@ -583,7 +585,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  check: { fontSize: 15, fontWeight: '800' },
   empty: { alignItems: 'center', paddingTop: 72, paddingHorizontal: 24 },
   emptyText: { textAlign: 'center', fontSize: 15, lineHeight: 21 },
   listContent: { paddingBottom: 32 },

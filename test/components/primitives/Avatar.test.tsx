@@ -9,6 +9,13 @@ import { StyleSheet } from 'react-native';
 import { renderWithTheme, screen } from '../support/renderWithTheme';
 import { Avatar } from '@ui/primitives/Avatar';
 
+// Ionicons' async font-load setState trips overlapping-act; render its name synchronously.
+jest.mock('@expo/vector-icons', () => {
+  const R = jest.requireActual<typeof import('react')>('react');
+  const { Text } = jest.requireActual<typeof import('react-native')>('react-native');
+  return { Ionicons: ({ name }: { name: string }) => R.createElement(Text, null, name) };
+});
+
 describe('Avatar initials', () => {
   it('uses the first letter for a single-word name, uppercased', async () => {
     await renderWithTheme(
@@ -29,9 +36,37 @@ describe('Avatar initials', () => {
     expect(screen.getByText('AB')).toBeTruthy();
   });
 
-  it('falls back to "?" for an empty / whitespace-only name', async () => {
+  it('shows a person glyph for an empty / whitespace-only name', async () => {
     await renderWithTheme(<Avatar name="   " />);
-    expect(screen.getByText('?')).toBeTruthy();
+    expect(screen.getByText('person')).toBeTruthy();
+  });
+
+  it('uses letters only: punctuation, digits and emoji never become initials', async () => {
+    await renderWithTheme(
+      <>
+        <Avatar name="(555) 123-4567" />
+        <Avatar name="+1 555 123 4567" />
+        <Avatar name="?" />
+      </>,
+    );
+    expect(screen.getAllByText('person')).toHaveLength(3);
+    expect(screen.queryByText('(5')).toBeNull();
+    expect(screen.queryByText('+')).toBeNull();
+  });
+
+  it('skips letterless words and finds the first letter inside a word', async () => {
+    await renderWithTheme(
+      <>
+        <Avatar name="Jay 41646" />
+        <Avatar name="🎉 party crew" />
+        <Avatar name="(Ana) Ruiz" />
+        <Avatar name="Émile Zola" />
+      </>,
+    );
+    expect(screen.getByText('J')).toBeTruthy();
+    expect(screen.getByText('PC')).toBeTruthy();
+    expect(screen.getByText('AR')).toBeTruthy();
+    expect(screen.getByText('ÉZ')).toBeTruthy();
   });
 });
 

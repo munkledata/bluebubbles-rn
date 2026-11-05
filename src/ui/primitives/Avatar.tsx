@@ -2,6 +2,7 @@ import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { normalizeHandleColor } from '@core/models';
 import { readableTextOn } from '../theme/adaptiveFromImage';
+import { Icon } from './Icon';
 
 interface AvatarProps {
   /** Display name or handle address used for initials + deterministic color. */
@@ -31,15 +32,24 @@ function colorFor(name: string): string {
   return PALETTE[Math.abs(hash) % PALETTE.length]!;
 }
 
+/**
+ * The first LETTER (any script) of the first and last words. Punctuation, digits and emoji never
+ * count, so "(555) 123-4567" or "+1 555…" no longer show "(5" or "+". Empty when the name has no
+ * letters at all; the avatar then shows a person glyph instead.
+ */
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0]!.charAt(0).toUpperCase();
-  return (parts[0]!.charAt(0) + parts[parts.length - 1]!.charAt(0)).toUpperCase();
+  const letters = name
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.match(/\p{L}/u)?.[0] ?? '')
+    .filter(Boolean);
+  if (letters.length === 0) return '';
+  if (letters.length === 1) return letters[0]!.toUpperCase();
+  return (letters[0]! + letters[letters.length - 1]!).toUpperCase();
 }
 
 /**
- * Circular contact avatar: a photo when available, else initials on a color.
+ * Circular contact avatar: a photo when available, else initials (or a person glyph) on a color.
  * Decorative (`accessible={false}`) — the tile/header alongside it announces the
  * name; memoized so it doesn't recompute when the parent re-renders.
  */
@@ -59,6 +69,8 @@ export const Avatar = React.memo(function Avatar({
     );
   }
   const backgroundColor = normalizeHandleColor(color) ?? colorFor(name);
+  const foreground = readableTextOn(backgroundColor);
+  const letters = initials(name);
   return (
     <View
       accessible={false}
@@ -67,9 +79,11 @@ export const Avatar = React.memo(function Avatar({
         { width: size, height: size, borderRadius: size / 2, backgroundColor },
       ]}
     >
-      <Text style={[styles.text, { color: readableTextOn(backgroundColor), fontSize: size * 0.4 }]}>
-        {initials(name)}
-      </Text>
+      {letters ? (
+        <Text style={[styles.text, { color: foreground, fontSize: size * 0.4 }]}>{letters}</Text>
+      ) : (
+        <Icon name="person" size={Math.round(size * 0.55)} color={foreground} />
+      )}
     </View>
   );
 });

@@ -54,7 +54,7 @@ import {
 import { useSessionStore } from '@state/sessionStore';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { useSharedDocuments } from '@features/conversations/useSharedDocuments';
-import { isGroupRow, isProvenIMessageGroupChat, resolveTitle, safeOpenUrl } from '@utils';
+import { isGroupRow, isProvenIMessageGroupChat, resolveDisplayTitle, safeOpenUrl } from '@utils';
 import {
   NavRow,
   Screen,
@@ -342,7 +342,7 @@ function ChatSettingsScreen({
   const autoUnarchive = data?.autoUnarchive !== 0;
   const accent = data?.customColor ?? null;
   // The placeholder shows what the title would be WITHOUT a custom name.
-  const serverTitle = data ? resolveTitle({ ...data, customName: null }) : '';
+  const serverTitle = data ? resolveDisplayTitle({ ...data, customName: null }) : '';
 
   useEffect(() => {
     if (!acceptedAppleGroupNameOverlay) return;
@@ -1044,7 +1044,7 @@ function ChatSettingsScreen({
     };
     void openChatNotificationSettings(
       guid,
-      data ? resolveTitle(data) : 'Conversation',
+      data ? resolveDisplayTitle(data) : 'Conversation',
       sourceAccountContext,
     ).catch(() => {
       if (!grantIsCurrent(operationGrant)) return;

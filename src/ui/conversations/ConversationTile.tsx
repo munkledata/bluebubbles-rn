@@ -6,20 +6,14 @@ import { deleteChat, markRead, markUnread, setChatArchived, setChatMuted } from 
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import {
-  avatarSeed,
   buildPreview,
-  dedupeParticipantDetails,
   formatChatDate,
-  isGroupRow,
-  participantAvatars,
-  participantColors,
-  participantList,
-  primaryParticipantColor,
   resolveChatDisplayService,
-  resolveTitle,
+  resolveDisplayTitle,
 } from '@utils';
-import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
+import { Icon, ServiceBadge } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
+import { ChatAvatar } from './ChatAvatar';
 import { SwipeableRow, type SwipeAction } from './SwipeableRow';
 
 interface ConversationTileProps {
@@ -47,15 +41,13 @@ export const ConversationTile = React.memo(function ConversationTile({
   const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
   const compact = useFeatureSettingsStore((s) => s.compactChatList);
   const unread = row.unreadCount > 0;
-  const title = resolveTitle(row);
+  const title = resolveDisplayTitle(row);
   const preview = buildPreview(row);
-  const group = isGroupRow(row);
   const muted = row.muteType === 'mute';
   // Service pill (iMessage / SMS / RCS) — same treatment for all three, coloured to match the
   // bubble palette. Resolved from the participant handle service (not just the guid prefix) so an
   // SMS-only contact/shortcode reads SMS even when its guid was reported as iMessage, and an RCS chat the
-  // Mac relays from an iPhone reads RCS (display only — see resolveChatDisplayService). De-duplicated
-  // participant photos for the group collage (a contact with two handles otherwise renders twice).
+  // Mac relays from an iPhone reads RCS (display only — see resolveChatDisplayService).
   const service = resolveChatDisplayService(row.guid, row.handleServices);
   const badge =
     service === 'RCS'
@@ -65,12 +57,6 @@ export const ConversationTile = React.memo(function ConversationTile({
         : service === 'iMessage'
           ? { label: 'iMessage', color: theme.color.bubble.senderBackground }
           : null;
-  const colors = participantColors(row.participantColors);
-  const groupParts = dedupeParticipantDetails(
-    participantList(row.participantNames),
-    participantAvatars(row.participantAvatars),
-    colors,
-  );
 
   const confirmDelete = (): void => {
     showDialog(
@@ -143,20 +129,7 @@ export const ConversationTile = React.memo(function ConversationTile({
         {/* Unread is now signalled by the count badge on the right, so the leading gutter is
               always the spacer (keeps avatars aligned across read/unread rows). */}
         <View style={styles.dotSpacer} />
-        {group ? (
-          <GroupAvatar
-            names={groupParts.names}
-            uris={groupParts.uris}
-            colors={groupParts.colors}
-            photoUri={row.groupPhotoUri}
-          />
-        ) : (
-          <Avatar
-            name={avatarSeed(row)}
-            uri={participantAvatars(row.participantAvatars)[0]}
-            color={primaryParticipantColor(row.participantColors)}
-          />
-        )}
+        <ChatAvatar row={row} />
       </View>
 
       <View style={styles.center}>

@@ -11,6 +11,13 @@ import { renderWithTheme, screen } from '../support/renderWithTheme';
 import { GroupAvatar } from '@ui/primitives/GroupAvatar';
 import { darkTheme } from '@ui/theme/tokens';
 
+// Ionicons' async font-load setState trips overlapping-act; render its name synchronously.
+jest.mock('@expo/vector-icons', () => {
+  const R = jest.requireActual<typeof import('react')>('react');
+  const { Text } = jest.requireActual<typeof import('react-native')>('react-native');
+  return { Ionicons: ({ name }: { name: string }) => R.createElement(Text, null, name) };
+});
+
 describe('GroupAvatar', () => {
   it('draws the first two participants (back + front)', async () => {
     const view = await renderWithTheme(<GroupAvatar names={['Alice', 'Bob', 'Carol']} />);
@@ -104,8 +111,8 @@ describe('GroupAvatar', () => {
     expect(screen.getByText('B')).toBeTruthy(); // Bob shows his own initials
   });
 
-  it('falls back to one "?" avatar with an empty participant list', async () => {
+  it('falls back to one person-glyph avatar with an empty participant list', async () => {
     await renderWithTheme(<GroupAvatar names={[]} />);
-    expect(screen.getAllByText('?')).toHaveLength(1);
+    expect(screen.getAllByText('person')).toHaveLength(1);
   });
 });

@@ -9,7 +9,7 @@ import {
   participantColors,
   participantList,
   primaryParticipantColor,
-  resolveTitle,
+  resolveDisplayTitle,
 } from '@utils';
 import { Avatar, GroupAvatar } from '../primitives';
 import { useTheme } from '../theme';
@@ -33,7 +33,7 @@ export function PinnedGrid({
   return (
     <View style={styles.grid}>
       {rows.map((row, index) => {
-        const title = resolveTitle(row);
+        const title = resolveDisplayTitle(row);
         const unread = row.unreadCount > 0;
         const colors = participantColors(row.participantColors);
         const parts = dedupeParticipantDetails(

@@ -5,6 +5,7 @@ import {
   contactHandleNationalMatchKeys,
   contactNationalMatchKey,
   contactPhoneMatchKey,
+  digitsOnly,
 } from '@utils/contactMatch';
 import { contacts, handles } from '../schema';
 import {
@@ -138,6 +139,19 @@ export interface ContactPick {
 }
 
 /**
+ * True for an address a message can be sent to. Address books also hold dial-only entries: carrier
+ * codes with * or # (balance checks, voicemail) and 3-digit service numbers such as directory
+ * assistance. Those never take a text, so the recipient picker leaves them out.
+ */
+function isTextableContactAddress(address: string): boolean {
+  const trimmed = address.trim();
+  if (!trimmed) return false;
+  if (trimmed.includes('@')) return true;
+  if (/[*#]/.test(trimmed)) return false;
+  return digitsOnly(trimmed).length >= 4;
+}
+
+/**
  * Flattened (name, address) pairs from synced device contacts, filtered by name or
  * address substring — for the new-chat recipient picker. Empty query → first `limit`.
  *
@@ -149,8 +163,12 @@ export interface ContactPick {
  *    half of the address book came back empty. The two generations project byte-identical values
  *    on all three selected columns, so DISTINCT removes exactly one of them.
  *  - the `seen` set below then collapses a contact who lists the SAME number under two labels
- *    (home/mobile), and any generation pair whose values did change — neither of which DISTINCT
+ *    (home/mobile) or in two spellings ("(555) 123-4567" and "5551234567"; compared by match key,
+ *    not raw text), and any generation pair whose values did change — neither of which DISTINCT
  *    can catch, since they differ per row.
+ *
+ * Dial-only entries (`isTextableContactAddress`) are left out of the suggestions; a number typed by
+ * hand is not affected.
  */
 export async function searchContactAddresses(
   db: AppDatabase,
@@ -180,8 +198,9 @@ export async function searchContactAddresses(
     const name = r.displayName ?? '';
     for (const address of [...parse(r.phones), ...parse(r.emails)]) {
       if (!q || name.toLowerCase().includes(q) || address.toLowerCase().includes(q)) {
+        if (!isTextableContactAddress(address)) continue;
         // NUL-joined so a name containing the separator can't forge a collision with another pair.
-        const key = `${name}\u0000${address}`;
+        const key = `${name}\u0000${contactHandleMatchKey(address) || address.trim().toLowerCase()}`;
         if (seen.has(key)) continue;
         seen.add(key);
         out.push({ name, address });

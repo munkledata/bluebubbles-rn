@@ -1,6 +1,7 @@
 import {
   linkHandlesToContacts,
   matchContactsToHandles,
+  searchContactAddresses,
   upsertContacts,
   upsertHandles,
   upsertHandlesWithinTransaction,
@@ -1226,5 +1227,37 @@ describe('contacts account commit boundary', () => {
         )
         .get(),
     ).toEqual({ name: 'Server Name', contactId: null });
+  });
+});
+
+describe('searchContactAddresses (New Message suggestions)', () => {
+  it('lists a number once even when the address book spells it two ways', async () => {
+    const { db } = await createTestDb();
+    await upsertContacts(db, [
+      contact({ sourceId: 'a', displayName: 'Ada', phones: ['(555) 010-2000', '5550102000'] }),
+      contact({ sourceId: 'b', displayName: 'Ben', phones: ['+1 555 010 3000'] }),
+    ]);
+
+    expect(await searchContactAddresses(db, '')).toEqual([
+      { name: 'Ada', address: '(555) 010-2000' },
+      { name: 'Ben', address: '+1 555 010 3000' },
+    ]);
+  });
+
+  it('leaves out dial-only entries but keeps short codes and emails', async () => {
+    const { db } = await createTestDb();
+    await upsertContacts(db, [
+      contact({
+        sourceId: 'c',
+        displayName: 'Carrier',
+        phones: ['#3282', '*86', '411', ' ', '72345'],
+        emails: ['help@example.com'],
+      }),
+    ]);
+
+    expect((await searchContactAddresses(db, '')).map((pick) => pick.address)).toEqual([
+      '72345',
+      'help@example.com',
+    ]);
   });
 });

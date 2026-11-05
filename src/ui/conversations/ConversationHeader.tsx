@@ -16,7 +16,7 @@ import {
   primaryChatAddress,
   primaryParticipantColor,
   resolveChatDisplayService,
-  resolveTitle,
+  resolveDisplayTitle,
 } from '@utils';
 import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
 import { readableTextOn, useTheme, withAlpha } from '../theme';
@@ -50,7 +50,7 @@ export function ConversationHeader({
     scheduledMessageCount > 0
       ? `View all scheduled messages (${scheduledMessageCount} in this conversation)`
       : 'View scheduled messages';
-  const title = data ? resolveTitle(data) : '';
+  const title = data ? resolveDisplayTitle(data) : '';
   const group = data ? isGroupRow(data) : false;
   // Over a wallpaper the bar disappears and each control floats in its own frosted bubble.
   const chip = withAlpha(theme.color.background, 0.62);

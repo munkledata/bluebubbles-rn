@@ -11,6 +11,8 @@ import {
 import type { AppDatabase } from '@db/types';
 import {
   buildMessageSnippet,
+  formatHandleAddress,
+  formatParticipantNames,
   isGroupRow,
   isProvenIMessageGroupChat,
   isProvenOneToOneIMessageChat,
@@ -107,19 +109,23 @@ async function buildCurrentMessageIntent(
 
   const address = currentPreview.senderAddress ?? message.handle?.address;
   const profile = address ? await getHandleProfile(db, address) : null;
-  const senderName =
+  // A sender with no contact name reads "(555) 123-4567", as in the chat list, not "+15551234567".
+  const senderName = formatHandleAddress(
     profile?.name ??
-    currentPreview.senderName ??
-    message.handle?.displayName ??
-    address ??
-    'Unknown';
+      currentPreview.senderName ??
+      message.handle?.displayName ??
+      address ??
+      'Unknown',
+  );
   // Trust the chat's own style (43 = group, 45 = one-to-one), as the chat list does. One person
   // reached through two addresses (iMessage + SMS) has two handle rows but is still a one-to-one
   // chat; counting rows made Android draw its group layout for them.
   const isGroup = header ? isGroupRow(header) : false;
   const chatTitle =
     header?.displayName ||
-    (isGroup ? participantDisplayNames(header?.participantNames ?? null) : senderName) ||
+    (isGroup
+      ? participantDisplayNames(formatParticipantNames(header?.participantNames ?? null))
+      : senderName) ||
     senderName;
 
   return {

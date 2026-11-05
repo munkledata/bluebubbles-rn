@@ -25,7 +25,7 @@ import {
   formatChatDate,
   formatSeparatorDate,
   isRcsChatFromAnotherKnownPairing,
-  resolveTitle,
+  resolveDisplayTitle,
 } from '@utils';
 import { useSessionStore } from '@state/sessionStore';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
@@ -70,7 +70,7 @@ export default function ScheduledScreen(): React.JSX.Element {
       const chatNames: Record<string, string> = {};
       for (const chatGuid of new Set([...pending, ...history].map((row) => row.chatGuid))) {
         const header = await getChatHeader(getDatabase(), chatGuid);
-        if (header) chatNames[chatGuid] = resolveTitle(header);
+        if (header) chatNames[chatGuid] = resolveDisplayTitle(header);
       }
       return { pending, history, chatNames };
     },

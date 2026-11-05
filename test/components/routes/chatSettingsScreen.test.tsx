@@ -414,7 +414,7 @@ jest.mock('@utils', () => ({
       services.every((service) => service === 'iMessage')
     );
   },
-  resolveTitle: (row: { customName?: string | null; displayName?: string | null }) =>
+  resolveDisplayTitle: (row: { customName?: string | null; displayName?: string | null }) =>
     row.customName || row.displayName || 'Conversation',
   isLocalFileUri: (uri: string | null | undefined) => !!uri?.startsWith('file://'),
   safeOpenUrl: (...args: unknown[]) => mockSafeOpenUrl(...args),
