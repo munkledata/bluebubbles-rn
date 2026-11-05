@@ -49,12 +49,28 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.74` / version code `97` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.75` / version code `98` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-04 — not a checklist rebind:** **`0.1.74` / code `97`** was built
+**Latest live artifact, 2026-11-05 — not a checklist rebind:** **`0.1.75` / code `98`** was built
+from source `b1e59c3a78be1d95680fcb580d14378f556fc15d` (0.1.74 plus group edit/unsend, group effects,
+the wallpaper edge fade, ♥ Love on iMessage notifications, `any;+;` mentions and Delete from Mac, any-part
+tapbacks, sync retry/group event/Find My names/`imessage:` links, migration `0060` auto-unarchive, reply
+drafts, Messages per chat, the Expo SDK 57 patch bump, a caption beside several files sent as its own
+message first, Send with Return on New Message, text typed during a send kept, and the screen-audit
+wording batch; push CI run `42102936360` green) and promoted as release commit
+`1aa19703d4cf9c34e5f21d5c19a90e18e64fc720` on local branch `release/android-0.1.75`. Run
+`android-0.1.75-b1e59c3-20261105212908` produced `gator-release-0.1.75-v98-1aa1970.aab`,
+**58,446,254 bytes**, SHA-256 `94b273c7061659a7c0404978d6b03e724d93a9548c59acf7616ba6ad2d111a40`. The owner
+asked for this release directly on 2026-11-05 ("Yes, release 0.1.75"); the agent submitted with
+`--execute --confirm` and the exact phrase `SUBMIT 0.1.75 v98 94b273c70616 TO PLAY INTERNAL` (completed
+about 22:06Z); the Maps key came from the login Keychain. Android Publisher readback after the submission
+confirms Internal release `0.1.75`, code `98`, `completed`. Device proof is still owed, including the camera
+after the Expo patch move. No task status or frozen v77 checklist row is changed by this Internal release.
+
+**Historical v97 artifact, 2026-11-04:** **`0.1.74` / code `97`** was built
 from source `43d8e1d88c7933fc2b239c2c3537637d43f28a7c` (0.1.73 plus group read markers: `markRead` sends
 a read for `iMessage;+;`/`any;+;` groups only while server info advertises
 `supports_imessage_group_read_state` and Send Read Receipts is on, and the killed-app Mark as read action
