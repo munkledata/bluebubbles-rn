@@ -45,6 +45,7 @@ describe('normalizeFriend', () => {
     expect(normalizeFriend(raw, 0)).toEqual({
       id: '+1',
       name: 'Mom',
+      handle: '+1',
       address: 'Palo Alto',
       latitude: 37.44,
       longitude: -122.14,
@@ -57,10 +58,23 @@ describe('normalizeFriend', () => {
     expect(f).toEqual({
       id: 'Tim',
       name: 'Tim',
+      handle: null,
       address: null,
       latitude: null,
       longitude: null,
       lastUpdated: null,
     });
+  });
+
+  it("keeps the Gator server's plain-string handle", () => {
+    const f = normalizeFriend({ handle: 'pat@example.com', title: 'Pat', coordinates: null }, 0);
+    expect(f.handle).toBe('pat@example.com');
+    expect(f.name).toBe('Pat');
+  });
+
+  it('never names a person after a place: the handle comes before a short address', () => {
+    const f = normalizeFriend({ handle: '+15551234567', shortAddress: 'Palo Alto' }, 0);
+    expect(f.name).toBe('+15551234567');
+    expect(f.address).toBe('Palo Alto');
   });
 });

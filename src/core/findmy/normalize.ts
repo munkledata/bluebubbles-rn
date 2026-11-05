@@ -47,7 +47,9 @@ export function normalizeFriend(raw: unknown, index: number): FindMyFriend {
   const longAddr = str(o.longAddress) ?? str(o.long_address);
   return {
     id: str(o.id) ?? handleStr ?? handleAddr ?? str(o.title) ?? shortAddr ?? `friend-${index}`,
-    name: str(o.title) ?? shortAddr ?? handleStr ?? handleAddr ?? 'Unknown',
+    // A place name is never a person's name, so the address only fills in when nothing else does.
+    name: str(o.title) ?? handleStr ?? handleAddr ?? shortAddr ?? 'Unknown',
+    handle: handleStr ?? handleAddr ?? null,
     address: longAddr ?? shortAddr ?? str(o.subtitle) ?? null,
     latitude: num(coords[0]),
     longitude: num(coords[1]),

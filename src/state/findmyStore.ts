@@ -48,6 +48,7 @@ const FIXTURE_FRIENDS: FindMyFriend[] = [
   {
     id: 'f1',
     name: 'Mom',
+    handle: null,
     address: 'Home — Palo Alto, CA',
     latitude: 37.4419,
     longitude: -122.143,
@@ -56,6 +57,7 @@ const FIXTURE_FRIENDS: FindMyFriend[] = [
   {
     id: 'f2',
     name: 'Craig',
+    handle: null,
     address: 'Infinite Loop, Cupertino',
     latitude: 37.3318,
     longitude: -122.0312,
@@ -64,6 +66,7 @@ const FIXTURE_FRIENDS: FindMyFriend[] = [
   {
     id: 'f3',
     name: 'Tim',
+    handle: null,
     address: 'Locating…',
     latitude: null,
     longitude: null,

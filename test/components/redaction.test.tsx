@@ -144,6 +144,7 @@ const LOCATED_ITEM = {
 const LOCATED_FRIEND = {
   id: SHARED_ENTITY_ID,
   name: SECRET_FRIEND,
+  handle: null,
   latitude: 51.507351,
   longitude: -0.127758,
   address: SECRET_FRIEND_ADDRESS,

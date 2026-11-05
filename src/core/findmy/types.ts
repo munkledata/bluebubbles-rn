@@ -12,6 +12,8 @@ export interface FindMyDevice {
 export interface FindMyFriend {
   id: string;
   name: string;
+  /** The friend's iMessage address (phone or email), used to show their contact name. */
+  handle: string | null;
   address: string | null;
   latitude: number | null;
   longitude: number | null;

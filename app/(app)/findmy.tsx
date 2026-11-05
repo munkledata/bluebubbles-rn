@@ -22,6 +22,10 @@ import {
   type MapMarker,
 } from '@ui/findmy/FindMyMap';
 import { showExternalOpenFailure } from '@ui/toast/external-open-feedback';
+import {
+  contactNameForHandle,
+  useFindMyContactNames,
+} from '@features/findmy/useFindMyContactNames';
 import { useFindMyPolling } from '@features/findmy/useFindMyPolling';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
@@ -30,7 +34,17 @@ export default function FindMyScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const devices = useFindMyStore((s) => s.devices);
-  const friends = useFindMyStore((s) => s.friends);
+  const serverFriends = useFindMyStore((s) => s.friends);
+  // Show the phone contact's name when the friend's address matches one, like chats do.
+  const contactNames = useFindMyContactNames();
+  const friends = useMemo(
+    () =>
+      serverFriends.map((friend) => {
+        const contactName = contactNameForHandle(contactNames, friend.handle);
+        return contactName ? { ...friend, name: contactName } : friend;
+      }),
+    [serverFriends, contactNames],
+  );
   const items = useFindMyStore((s) => s.items);
   const loading = useFindMyStore((s) => s.loading);
   const refreshing = useFindMyStore((s) => s.refreshing);

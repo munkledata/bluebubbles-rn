@@ -110,6 +110,7 @@ describe('resetSessionScopedState', () => {
         {
           id: 'old-friend',
           name: 'Previous account person',
+          handle: null,
           latitude: 41,
           longitude: -106,
           address: 'Private location',

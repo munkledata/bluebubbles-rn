@@ -38,6 +38,12 @@ jest.mock('@ui/findmy/FindMyMap', () => {
 });
 
 jest.mock('@features/findmy/useFindMyPolling', () => ({ useFindMyPolling: jest.fn() }));
+// The contacts read behind Find My names; each test sets the phone contacts it needs.
+let mockContactPicks: { name: string; address: string }[] = [];
+jest.mock('@db/database', () => ({ getDatabase: () => ({}) }));
+jest.mock('@db/useReactiveQuery', () => ({
+  useReactiveQuery: () => ({ data: mockContactPicks }),
+}));
 jest.mock('@core/api', () => ({ findMyApi: {} }));
 jest.mock('@/services/clients', () => ({ http: {} }));
 jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
@@ -120,6 +126,7 @@ beforeEach(() => {
     refresh: jest.fn(async () => undefined),
   });
   useLockStore.setState({ enabled: false, hydrated: true, locked: false });
+  mockContactPicks = [];
 });
 
 afterEach(() => {
@@ -182,6 +189,7 @@ describe('FindMyScreen external map handoff', () => {
         {
           id: 'private-friend-1',
           name: 'Casey',
+          handle: null,
           latitude: 47.6062,
           longitude: -122.3321,
           address: 'Location available',
@@ -285,6 +293,34 @@ describe('FindMyScreen external map handoff', () => {
     });
 
     expect(useToastStore.getState().current).toBeNull();
+  });
+
+  it("shows the phone contact's name for a friend whose address matches", async () => {
+    mockContactPicks = [
+      { name: 'Jordan Rivera', address: '(555) 123-4567' },
+      { name: 'Sam Lee', address: 'Sam@Example.com' },
+    ];
+    const friend = {
+      latitude: 47.6062,
+      longitude: -122.3321,
+      address: 'Location available',
+      lastUpdated: null,
+    };
+    useFindMyStore.setState({
+      friends: [
+        { ...friend, id: 'f-phone', name: '+15551234567', handle: '+15551234567' },
+        { ...friend, id: 'f-email', name: 'sam@example.com', handle: 'sam@example.com' },
+        { ...friend, id: 'f-none', name: 'stranger@example.com', handle: 'stranger@example.com' },
+      ],
+    });
+    await renderWithTheme(<FindMyScreen />);
+    await fireEvent.press(screen.getByRole('tab', { name: 'People' }));
+
+    expect(screen.getByRole('button', { name: 'Open Jordan Rivera in Maps' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open Sam Lee in Maps' })).toBeTruthy();
+    // No matching contact: keep the server's name.
+    expect(screen.getByRole('button', { name: 'Open stranger@example.com in Maps' })).toBeTruthy();
+    expect(screen.queryByText('+15551234567')).toBeNull();
   });
 
   it('does not offer a native handoff for a non-finite point', async () => {
