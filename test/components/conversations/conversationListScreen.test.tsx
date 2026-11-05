@@ -133,6 +133,12 @@ let mockKbVisible = false;
 jest.mock('@ui/hooks/useKeyboardVisible', () => ({
   useKeyboardVisible: () => mockKbVisible,
 }));
+// ChatActionsSheet's "Add to Folder…" commands; their behaviour is covered by chatActionsSheet tests.
+jest.mock('@/services/customFolderCommands', () => ({
+  CustomFolderMembershipLimitError: class extends Error {},
+  loadCustomFolders: jest.fn(),
+  addChatToCustomFolder: jest.fn(),
+}));
 jest.mock('@/services', () => ({
   refreshInbox: jest.fn(),
   markAllChatsRead: jest.fn(() => Promise.resolve()),

@@ -66,6 +66,12 @@ jest.mock('react-native-safe-area-context', () => ({
 
 // The real ChatActionsSheet module (loaded below for toChatActionTarget) imports `markRead`
 // from the services barrel, which pulls native modules at import — stub it.
+// ChatActionsSheet's "Add to Folder…" commands; their behaviour is covered by chatActionsSheet tests.
+jest.mock('@/services/customFolderCommands', () => ({
+  CustomFolderMembershipLimitError: class extends Error {},
+  loadCustomFolders: jest.fn(),
+  addChatToCustomFolder: jest.fn(),
+}));
 jest.mock('@/services', () => ({ markRead: jest.fn() }));
 
 jest.mock('@ui/conversations/ConversationTile', () => {

@@ -58,6 +58,15 @@ jest.mock('@/services', () => ({
 }));
 
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
+jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
+jest.mock('@/services/customFolderCommands', () => {
+  class CustomFolderMembershipLimitError extends Error {}
+  return {
+    CustomFolderMembershipLimitError,
+    loadCustomFolders: jest.fn(),
+    addChatToCustomFolder: jest.fn(),
+  };
+});
 // The same tray-dismiss helper the chat-open path uses; its native/lease behavior is covered by the
 // notifeeService suite. Here we prove WHEN the sheet calls it.
 jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotification: jest.fn() }));
@@ -470,5 +479,102 @@ describe('ChatActionsSheet — Delete', () => {
     expect(cancel?.text).toBe('Cancel');
     cancel?.onPress?.(); // no-op by design
     expect(mockDeleteChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatActionsSheet — Add to Folder', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const commands = require('@/services/customFolderCommands') as {
+    CustomFolderMembershipLimitError: new () => Error;
+    loadCustomFolders: jest.Mock;
+    addChatToCustomFolder: jest.Mock;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { showToast } = require('@ui/toast/toastStore') as { showToast: jest.Mock };
+  const folder = (id: number, name: string) => ({
+    id,
+    name,
+    sortOrder: id,
+    chatCount: 0,
+    showUnreadBadge: 1 as const,
+  });
+
+  beforeEach(() => {
+    commands.loadCustomFolders.mockReset().mockResolvedValue({
+      status: 'committed',
+      value: [folder(1, 'Family'), folder(2, 'Work')],
+    });
+    commands.addChatToCustomFolder
+      .mockReset()
+      .mockResolvedValue({ status: 'committed', value: 'added' });
+    showToast.mockReset();
+  });
+
+  it('lists the folders, adds the chat to the one picked, and says so', async () => {
+    const onClose = await renderSheet(makeTarget());
+    await fireEvent.press(screen.getByRole('button', { name: 'Add to Folder…' }));
+    expect(await screen.findByText('Add Alice to…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Work' }));
+    expect(onClose).toHaveBeenCalled();
+    expect(commands.addChatToCustomFolder).toHaveBeenCalledWith(
+      2,
+      'iMessage;-;+15551230000',
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Added to Work'));
+  });
+
+  it('says where to make a folder when there are none', async () => {
+    commands.loadCustomFolders.mockResolvedValue({ status: 'committed', value: [] });
+    await renderSheet(makeTarget());
+    await fireEvent.press(screen.getByRole('button', { name: 'Add to Folder…' }));
+    expect(
+      await screen.findByText('No folders yet. Create one in Settings › Folders.'),
+    ).toBeTruthy();
+  });
+
+  it('reports an already-saved chat, full folders, and a failed load', async () => {
+    commands.addChatToCustomFolder.mockResolvedValueOnce({ status: 'committed', value: 'already' });
+    await renderSheet(makeTarget());
+    await fireEvent.press(screen.getByRole('button', { name: 'Add to Folder…' }));
+    await fireEvent.press(await screen.findByRole('button', { name: 'Family' }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith('Already in Family'));
+
+    commands.addChatToCustomFolder.mockRejectedValueOnce(
+      new commands.CustomFolderMembershipLimitError(),
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Family' }));
+    await waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith(
+        'Folders are full. Remove some chats from a folder first.',
+      ),
+    );
+  });
+
+  it('ignores a folder load that finishes after the sheet closed, even for the same chat', async () => {
+    let finish!: (value: unknown) => void;
+    commands.loadCustomFolders.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const view = await renderWithTheme(
+      <ChatActionsSheet target={makeTarget()} onClose={jest.fn()} />,
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Add to Folder…' }));
+    expect(screen.getByText('Loading folders…')).toBeTruthy();
+    await view.rerender(<ChatActionsSheet target={null} onClose={jest.fn()} />);
+    await view.rerender(<ChatActionsSheet target={makeTarget()} onClose={jest.fn()} />);
+    await act(async () => {
+      finish({ status: 'committed', value: [folder(1, 'Family')] });
+    });
+    // Reopened on its ordinary actions; the old load does not swap in a folder list.
+    expect(screen.queryByText('Family')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeTruthy();
+  });
+
+  it('shows an error when folders can’t be loaded', async () => {
+    commands.loadCustomFolders.mockRejectedValue(new Error('db'));
+    await renderSheet(makeTarget());
+    await fireEvent.press(screen.getByRole('button', { name: 'Add to Folder…' }));
+    expect(await screen.findByText('Couldn’t load your folders.')).toBeTruthy();
   });
 });
