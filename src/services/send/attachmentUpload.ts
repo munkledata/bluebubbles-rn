@@ -5,6 +5,8 @@ import { parseServerErrorBody } from '@core/api/serverErrorDetail';
 import { apiResponse } from '@core/models/common';
 import {
   IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES,
+  IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
+  IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES,
   isRestoredAttachmentFile,
   isValidRestoredText,
 } from '@core/models/imessageRestoredFeatures';
@@ -97,6 +99,15 @@ function releaseProgressSubscription(task: FileSystem.UploadTask): void {
 const MAX_TIMER_MS = 2_147_483_647;
 type UploadStopReason = 'cancelled' | 'timeout';
 
+function hasSafeUploadName(name: string): boolean {
+  try {
+    assertSafeUploadFilename(name);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const expoAttachmentUploader: AttachmentUploader = async ({
   http,
   chatGuid,
@@ -112,6 +123,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   uri,
   mimeType,
   totalBytes,
+  additionalFiles,
   signal,
   timeoutMs,
 }) => {
@@ -175,6 +187,24 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
     }
   } else if (!isRcsChatGuid(chatGuid)) {
     throw new Error('iMessage attachments require the narrow attachment-only capability.');
+  }
+  // Several files in one restored request: each is checked like the main file, and together they
+  // stay within the server's ten files and 200 MiB.
+  const extraFiles = additionalFiles ?? [];
+  if (
+    extraFiles.length > 0 &&
+    (!imessageRestored ||
+      extraFiles.length > IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES - 1 ||
+      extraFiles.some(
+        (file) =>
+          !hasSafeUploadName(file.name) ||
+          !Number.isSafeInteger(file.totalBytes) ||
+          !isRestoredAttachmentFile({ name: file.name, size: file.totalBytes }),
+      ) ||
+      totalBytes! + extraFiles.reduce((sum, file) => sum + file.totalBytes, 0) >
+        IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES)
+  ) {
+    throw new Error('These files can’t be sent together to this iMessage chat.');
   }
   if (
     timeoutMs !== undefined &&
@@ -299,16 +329,55 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
           : 'Choose a JPEG, PNG, or PDF file no larger than 10 MiB',
       );
     }
+    // Each extra file of a several-file send passes the same pre-flight, and their real sizes
+    // together stay within the server's limit.
+    let extraBytes = 0;
+    for (const extra of extraFiles) {
+      const extraInfo = await withinAttempt(FileSystem.getInfoAsync(extra.uri).catch(() => null));
+      if (stopReason !== null) throw stoppedError();
+      if (!extraInfo?.exists) {
+        logger.warn('[upload] attachment file is missing before upload');
+        throw new ApiError('local_file', 'Attachment file is no longer available');
+      }
+      if (
+        !Number.isSafeInteger(extraInfo.size) ||
+        extraInfo.size <= 0 ||
+        !isRestoredAttachmentFile({ name: extra.name, size: extraInfo.size })
+      ) {
+        throw new ApiError(
+          'local_file',
+          `Choose a file no larger than ${IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024)} MiB`,
+        );
+      }
+      extraBytes += extraInfo.size;
+    }
+    if (
+      extraFiles.length > 0 &&
+      fileInfo.size + extraBytes > IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES
+    ) {
+      throw new ApiError(
+        'local_file',
+        `Choose files no larger than ${IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES / (1024 * 1024)} MiB together`,
+      );
+    }
 
     try {
       // The tracked wrapper publishes byte progress under the ATTACHMENT guid (what the bubble
       // renders under) and guarantees the entry is cleared however this attempt ends. The control
       // race belongs INSIDE its callback so a timeout settles the UI immediately, while the
       // underlying active native transfer retains its gate slot until cancelAsync actually settles.
+      // A several-file send publishes every file's bytes under the main attachment guid.
       result = await runTrackedUpload(
         uploadStoreSink,
         attachmentGuid,
-        { chatGuid, name, total: totalBytes ?? 0 },
+        {
+          chatGuid,
+          name,
+          total:
+            extraFiles.length > 0
+              ? (totalBytes ?? 0) + extraFiles.reduce((sum, file) => sum + file.totalBytes, 0)
+              : (totalBytes ?? 0),
+        },
         async (onProgress) => {
           const transfer = uploadGate.run(async () => {
             // Cancelled during pre-flight or while queued — never open a socket at all.
@@ -325,6 +394,15 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
                 uploadType: FileSystem.FileSystemUploadType.MULTIPART,
                 fieldName: 'attachment',
                 gatorFileName: name,
+                ...(extraFiles.length > 0
+                  ? {
+                      gatorAdditionalFiles: extraFiles.map((file) => ({
+                        uri: file.uri,
+                        fileName: file.name,
+                        mimeType: file.mimeType,
+                      })),
+                    }
+                  : {}),
                 mimeType,
                 parameters: {
                   chatGuid,

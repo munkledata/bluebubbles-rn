@@ -71,6 +71,7 @@ import {
 import {
   RcsAttachmentTooLargeError,
   sendImageMessage,
+  SeveralFilesUnavailableError,
   UnsendableAttachmentNameError,
   type AttachmentTextService,
   type AttachmentUploader,
@@ -535,7 +536,10 @@ export function sendTextAttachment(
   );
 }
 
-/** UI-facing multi-image send: one optimistic message + attachment per picked asset. */
+/**
+ * UI-facing multi-image send: several iMessage files go as one message when the server's restored
+ * route takes them all for the chat; otherwise one optimistic message + attachment per asset.
+ */
 export function sendImages(
   args: {
     chatGuid: string;
@@ -592,41 +596,52 @@ export function sendImages(
         snapshot.images.map((image) => withMeasuredSize(image, accountLease)),
       );
       const db = getDatabase();
-      const settled = await Promise.allSettled(
-        images.map(async (image) => {
-          let queued = false;
-          try {
-            return await sendImageMessage(
-              db,
-              accountHttp(accountLease),
-              {
-                chatGuid: snapshot.chatGuid,
-                image,
-                service: snapshot.service,
-                shareIntake: image.origin === 'share' ? snapshot.shareIntake : undefined,
-              },
-              shareUploader,
-              Date.now(),
-              () => accountLease.isCurrent(),
-              undefined,
-              pasteOwnership,
-              (tempGuid) => {
-                queued = true;
-                try {
-                  if (accountLease.isCurrent()) {
-                    onAdmission?.({ uri: image.uri, queued: true, tempGuid });
-                  }
-                } catch (error) {
-                  logger.warn('[send] optional attachment admission observer failed', error);
-                }
-              },
-              captureSessionRcsCapabilityLease(),
-            );
-          } catch (error) {
-            if (!queued && accountLease.isCurrent()) {
+      // One send: a file on its own, or several files as one iMessage. Both use this one call, so
+      // every file keeps the same admission, observers and failure handling.
+      const sendUnit = async (image: PickedImage, additionalImages?: PickedImage[]) => {
+        const unitImages = [image, ...(additionalImages ?? [])];
+        let queued = false;
+        try {
+          return await sendImageMessage(
+            db,
+            accountHttp(accountLease),
+            {
+              chatGuid: snapshot.chatGuid,
+              image,
+              service: snapshot.service,
+              shareIntake: image.origin === 'share' ? snapshot.shareIntake : undefined,
+              ...(additionalImages ? { additionalImages } : {}),
+            },
+            shareUploader,
+            Date.now(),
+            () => accountLease.isCurrent(),
+            undefined,
+            pasteOwnership,
+            (tempGuid) => {
+              queued = true;
               try {
+                if (accountLease.isCurrent()) {
+                  for (const file of unitImages) {
+                    onAdmission?.({ uri: file.uri, queued: true, tempGuid });
+                  }
+                }
+              } catch (error) {
+                logger.warn('[send] optional attachment admission observer failed', error);
+              }
+            },
+            captureSessionRcsCapabilityLease(),
+          );
+        } catch (error) {
+          // A batch that can't go as one message goes file by file below; report nothing yet.
+          if (
+            !queued &&
+            accountLease.isCurrent() &&
+            !(error instanceof SeveralFilesUnavailableError)
+          ) {
+            try {
+              for (const file of unitImages) {
                 onAdmission?.({
-                  uri: image.uri,
+                  uri: file.uri,
                   queued: false,
                   ...(error instanceof UnsendableAttachmentNameError
                     ? { reason: 'file-name' as const }
@@ -634,14 +649,31 @@ export function sendImages(
                       ? { reason: 'too-large' as const }
                       : {}),
                 });
-              } catch (observerError) {
-                logger.warn('[send] optional attachment admission observer failed', observerError);
               }
+            } catch (observerError) {
+              logger.warn('[send] optional attachment admission observer failed', observerError);
             }
-            throw error;
           }
-        }),
-      );
+          throw error;
+        }
+      };
+      // Several files of one iMessage pick go as ONE message when the restored route takes them all
+      // for this chat. When it can't, it says so before writing anything, and each file is sent as
+      // its own message, exactly as before.
+      const first = images[0];
+      if (
+        snapshot.service === 'iMessage' &&
+        first &&
+        images.length > 1 &&
+        images.every((image) => (image.origin === 'share') === (first.origin === 'share'))
+      ) {
+        try {
+          return [await sendUnit(first, images.slice(1))];
+        } catch (error) {
+          if (!(error instanceof SeveralFilesUnavailableError)) throw error;
+        }
+      }
+      const settled = await Promise.allSettled(images.map((image) => sendUnit(image)));
       // Promise.all rejects as soon as ONE item fails and would release the account drain while the
       // other native uploads keep running. Wait for every operation we started, then preserve the
       // original current-account failure behavior.

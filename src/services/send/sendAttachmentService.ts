@@ -11,6 +11,8 @@ import {
 } from '@core/models/serverInfo';
 import {
   canSendRestoredIMessageAttachments,
+  IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
+  IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES,
   isRestoredAttachmentFile,
   isValidRestoredText,
 } from '@core/models/imessageRestoredFeatures';
@@ -73,6 +75,45 @@ export interface SendImageMessageArgs {
   partIndex?: number;
   /** Exact native batch identity required when this file came from Android share intake. */
   shareIntake?: ShareIntakeManifestIdentity;
+  /**
+   * More files sent with `image` as ONE iMessage through the restored route, in pick order: at
+   * most nine, never with voice or a reply. When they cannot all go together to this chat, this
+   * throws SeveralFilesUnavailableError before writing anything, and the caller sends one message
+   * per file instead.
+   */
+  additionalImages?: PickedImage[];
+}
+
+/** These files cannot go together as one iMessage here; nothing was written or sent. */
+export class SeveralFilesUnavailableError extends Error {
+  constructor() {
+    super('These files cannot be sent together as one iMessage here.');
+    this.name = 'SeveralFilesUnavailableError';
+  }
+}
+
+/** One extra file of a several-file send: owned, protected and admitted like the main file. */
+interface SeveralFileUnit {
+  image: PickedImage;
+  readonly attachmentGuid: string;
+  cacheReservation?: AttachmentCacheReservation;
+  sourceProtection?: NonNullable<ReturnType<typeof attachmentCacheCoordinator.protect>>;
+  handoff: boolean;
+}
+
+const SEVERAL_FILES_PARTLY_CLAIMED = Symbol('several-files-partly-claimed');
+
+function totalFileBytes(files: readonly PickedImage[]): number {
+  return files.reduce((sum, file) => sum + file.size, 0);
+}
+
+function hasSafeUploadName(file: PickedImage): boolean {
+  try {
+    assertSafeUploadFilename(file.name);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -111,6 +152,18 @@ export type AttachmentUploader = (args: {
   mimeType: string;
   /** Size if the caller knows it, else 0/undefined — the uploader learns the real one natively. */
   totalBytes?: number;
+  /**
+   * More files of the same restored iMessage, after this one, in pick order (at most nine), in one
+   * request. Each keeps its own attachment row; the progress of all of them is published under
+   * `attachmentGuid`. Only with `restored`.
+   */
+  additionalFiles?: readonly {
+    attachmentGuid: string;
+    name: string;
+    uri: string;
+    mimeType: string;
+    totalBytes: number;
+  }[];
   /** Optional owner lifetime; abort requests native cancellation before any later settlement. */
   signal?: AbortSignal;
   /**
@@ -213,6 +266,33 @@ export async function sendImageMessage(
         : 'This server cannot send an RCS media reply.',
     );
   }
+  // Several files as one message: anything one file of the batch would refuse sends the whole
+  // batch back to the caller's one-message-per-file path, where each file meets today's checks.
+  const additionalImages = args.additionalImages ?? [];
+  if (additionalImages.length > 0) {
+    const files = [args.image, ...additionalImages];
+    if (
+      !imessageAttachment ||
+      imessageVoice ||
+      files.length > IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES ||
+      !files.every(hasSafeUploadName) ||
+      !files.every((file) => isRestoredAttachmentFile(file)) ||
+      totalFileBytes(files) > IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES
+    ) {
+      throw new SeveralFilesUnavailableError();
+    }
+    for (const extra of additionalImages) {
+      if ((extra.origin === 'share') !== (args.shareIntake !== undefined)) {
+        throw new Error('Shared attachment is missing its exact native batch identity.');
+      }
+      if (
+        args.shareIntake &&
+        (!Number.isInteger(extra.shareItemIndex) || extra.shareItemIndex == null)
+      ) {
+        throw new Error('Shared attachment is missing its stable native item index.');
+      }
+    }
+  }
   // The uploader sends the file's own name and cannot carry some (quotes, slashes, control
   // characters, over 255 bytes). Refuse before any bubble or queue row so the person can rename
   // the file: refused after admission, iMessage read "may have been sent" and RCS retried 5 times.
@@ -270,6 +350,20 @@ export async function sendImageMessage(
   let cacheProtectionHandoff = false;
   let attemptOwnerToken: SendAttemptOwnerToken | null = null;
   let duplicateOwnerGuid: string | null = null;
+  // The extra files of a several-file send, in pick order, each under its own attachment guid.
+  const extras: SeveralFileUnit[] = additionalImages.map((extra, index) => ({
+    image: extra,
+    attachmentGuid: `${tempGuid}-${index + 1}-att`,
+    handoff: false,
+  }));
+  const releaseExtras = async (): Promise<void> => {
+    for (const extra of extras) {
+      extra.sourceProtection?.release();
+      extra.sourceProtection = undefined;
+      await extra.cacheReservation?.release().catch(() => undefined);
+      extra.cacheReservation = undefined;
+    }
+  };
   const capability = await resolveRcsAttemptOwnership(
     transport.http,
     args.chatGuid,
@@ -296,12 +390,14 @@ export async function sendImageMessage(
       (args.text === undefined || serverInfo.supports_imessage_attachment_caption_upload === true);
     restoredRoute =
       !imessageVoice &&
-      !narrowUsable &&
+      (additionalImages.length > 0 || !narrowUsable) &&
       (oneToOne || isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true })) &&
       canSendRestoredIMessageAttachments(serverInfo, args.chatGuid) &&
       isRestoredAttachmentFile(image) &&
       (args.text === undefined || isValidRestoredText(args.text));
   }
+  // Several files only ever go as one restored iMessage; otherwise they go one per message.
+  if (additionalImages.length > 0 && !restoredRoute) throw new SeveralFilesUnavailableError();
   // Reject false/missing service capability before cache ownership or durable queue admission.
   // The retired helper was the only iMessage attachment transport; RCS remains independent but
   // still requires its own live bridge rather than inheriting authority from `private_api`.
@@ -396,6 +492,47 @@ export async function sendImageMessage(
     }
   }
 
+  // A several-file send prepares its extra files exactly like the main one; any failure releases
+  // every reservation taken so far, the main file's included.
+  try {
+    for (const extra of extras) {
+      if (extra.image.origin !== 'paste' && extra.image.origin !== 'share') continue;
+      if (!prepareOwnership) {
+        throw new Error('Staged attachment ownership preparation is unavailable.');
+      }
+      const prepared = await prepareOwnership({
+        db,
+        image: extra.image,
+        attachmentGuid: extra.attachmentGuid,
+      });
+      extra.image = prepared.image;
+      extra.cacheReservation = prepared.cacheReservation;
+      if (
+        !extra.cacheReservation ||
+        extra.image.uri !== extra.cacheReservation.path ||
+        extra.image.size !== extra.cacheReservation.maxBytes ||
+        !Number.isSafeInteger(extra.image.size) ||
+        extra.image.size <= 0
+      ) {
+        throw new Error('Prepared attachment ownership is inconsistent.');
+      }
+      if (!isRestoredAttachmentFile(extra.image)) {
+        throw new Error('Choose files of at most 100 MiB each that iMessage can send.');
+      }
+    }
+    if (
+      extras.length > 0 &&
+      totalFileBytes([image, ...extras.map((extra) => extra.image)]) >
+        IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES
+    ) {
+      throw new Error('Choose files of at most 200 MiB together.');
+    }
+  } catch (error) {
+    await releaseExtras();
+    await cacheReservation?.release().catch(() => undefined);
+    throw error;
+  }
+
   // A forwarded download can share this exact cache file with its source message. Pin it before
   // the first DB await so a concurrent tombstone/quota pass cannot claim and unlink it between the
   // user's Start tap and the durable outgoing attachment+queue commit. Non-cache picked files are
@@ -411,8 +548,25 @@ export async function sendImageMessage(
       sourceProtection = undefined;
     }
     if (sourceProtection === null) {
+      await releaseExtras();
       throw new Error('Attachment is no longer available for sending.');
     }
+  }
+  for (const extra of extras) {
+    if (extra.cacheReservation) continue;
+    let protection: ReturnType<typeof attachmentCacheCoordinator.protect> | undefined;
+    try {
+      protection = attachmentCacheCoordinator.protect(extra.image.uri);
+    } catch {
+      protection = undefined;
+    }
+    if (protection === null) {
+      sourceProtection?.release();
+      await releaseExtras();
+      await cacheReservation?.release().catch(() => undefined);
+      throw new Error('Attachment is no longer available for sending.');
+    }
+    extra.sourceProtection = protection;
   }
 
   try {
@@ -427,9 +581,29 @@ export async function sendImageMessage(
             ownerGuid: tempGuid,
             appliedAtMs: now,
           });
+          // A several-file share is one message: every item must be new, or every item must
+          // already belong to the same earlier message. Anything else rolls back to one per file.
+          const extraClaims = [];
+          for (const extra of extras) {
+            extraClaims.push(
+              await claimShareIntakeFileWithinTransaction(context, {
+                identity: args.shareIntake,
+                chatGuid: args.chatGuid,
+                itemIndex: extra.image.shareItemIndex!,
+                ownerGuid: tempGuid,
+                appliedAtMs: now,
+              }),
+            );
+          }
           if (!shareClaim.claimed) {
+            if (
+              extraClaims.some((claim) => claim.claimed || claim.ownerGuid !== shareClaim.ownerGuid)
+            ) {
+              throw SEVERAL_FILES_PARTLY_CLAIMED;
+            }
             return { kind: 'duplicate' as const, ownerGuid: shareClaim.ownerGuid };
           }
+          if (extraClaims.some((claim) => !claim.claimed)) throw SEVERAL_FILES_PARTLY_CLAIMED;
         }
         if (cacheReservation) {
           const promoted = await commitAttachmentCacheReservation(context, {
@@ -441,6 +615,18 @@ export async function sendImageMessage(
             throw ATTACHMENT_CACHE_PROMOTION_CONFLICT;
           }
           cacheProtectionHandoff = true;
+        }
+        for (const extra of extras) {
+          if (!extra.cacheReservation) continue;
+          const promoted = await commitAttachmentCacheReservation(context, {
+            path: extra.image.uri,
+            bytes: extra.image.size,
+            lastUsedAt: now,
+          });
+          if (!promoted || !extra.cacheReservation.beginProtectionHandoff()) {
+            throw ATTACHMENT_CACHE_PROMOTION_CONFLICT;
+          }
+          extra.handoff = true;
         }
         const inserted = await insertOutgoingAttachmentWithinTransaction(context, {
           tempGuid,
@@ -456,6 +642,19 @@ export async function sendImageMessage(
           text: args.text,
           attemptAware: capability.attemptAware,
           ...(imessageAttachment ? { imessageAttachmentV1: true } : {}),
+          ...(extras.length > 0
+            ? {
+                additionalFiles: extras.map((extra) => ({
+                  attachmentGuid: extra.attachmentGuid,
+                  localPath: extra.image.uri,
+                  mimeType: extra.image.mimeType,
+                  transferName: extra.image.name,
+                  totalBytes: extra.image.size,
+                  width: extra.image.width,
+                  height: extra.image.height,
+                })),
+              }
+            : {}),
         });
         return { kind: 'inserted' as const, inserted };
       },
@@ -468,14 +667,22 @@ export async function sendImageMessage(
       cacheReservation.rollbackProtectionHandoff();
       cacheProtectionHandoff = false;
     }
+    for (const extra of extras) {
+      if (extra.cacheReservation && extra.handoff) {
+        extra.cacheReservation.rollbackProtectionHandoff();
+        extra.handoff = false;
+      }
+    }
     if (error === ATTACHMENT_CACHE_PROMOTION_CONFLICT) {
       throw new Error('Staged attachment ownership changed before it could be sent.');
     }
+    if (error === SEVERAL_FILES_PARTLY_CLAIMED) throw new SeveralFilesUnavailableError();
     throw error;
   } finally {
     // The queue row plus attachment local_path now provide durable ownership. Releasing earlier
     // would reopen the deletion race; retaining it through the network upload would pin needlessly.
     sourceProtection?.release();
+    await releaseExtras();
     if (cacheReservation) await cacheReservation.release().catch(() => undefined);
   }
 
@@ -507,6 +714,17 @@ export async function sendImageMessage(
       uri: image.uri,
       mimeType: image.mimeType,
       totalBytes: image.size,
+      ...(extras.length > 0
+        ? {
+            additionalFiles: extras.map((extra) => ({
+              attachmentGuid: extra.attachmentGuid,
+              name: extra.image.name,
+              uri: extra.image.uri,
+              mimeType: extra.image.mimeType,
+              totalBytes: extra.image.size,
+            })),
+          }
+        : {}),
     });
     if (
       imessageAttachment &&

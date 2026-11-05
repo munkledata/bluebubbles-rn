@@ -46,7 +46,13 @@ jest.mock('@/services/send/sendService', () => ({
 jest.mock('@/services/send/sendAttachmentService', () => {
   class UnsendableAttachmentNameError extends Error {}
   class RcsAttachmentTooLargeError extends Error {}
-  return { sendImageMessage: jest.fn(), UnsendableAttachmentNameError, RcsAttachmentTooLargeError };
+  class SeveralFilesUnavailableError extends Error {}
+  return {
+    sendImageMessage: jest.fn(),
+    UnsendableAttachmentNameError,
+    RcsAttachmentTooLargeError,
+    SeveralFilesUnavailableError,
+  };
 });
 jest.mock('@/services/send/outgoingPasteOwnership', () => ({
   createOutgoingPasteOwnershipPreparer: jest.fn(() => jest.fn()),
@@ -142,6 +148,7 @@ import { sendTextMessage } from '@/services/send/sendService';
 import {
   RcsAttachmentTooLargeError,
   sendImageMessage,
+  SeveralFilesUnavailableError,
   UnsendableAttachmentNameError,
 } from '@/services/send/sendAttachmentService';
 // eslint-disable-next-line import/first
@@ -972,7 +979,109 @@ describe('UI send account lease', () => {
     ]);
   });
 
-  it('uploads several iMessage files of one pick one at a time, in pick order', async () => {
+  it('sends several iMessage files of one pick as one message when they can go together', async () => {
+    mockSendImage.mockClear();
+    // The real sender writes one message for all of them and reports it once queued.
+    mockSendImage.mockImplementation(async (...call: unknown[]) => {
+      const onQueued = call[8] as (tempGuid: string) => void;
+      onQueued('temp-together');
+      return { tempGuid: 'temp-together' };
+    });
+    const admissions: unknown[] = [];
+    const sent = await sendImages(
+      {
+        chatGuid: 'any;+;chat-group',
+        service: 'iMessage',
+        images: ['a.jpg', 'b.heic', 'c.mov'].map((name) => ({
+          uri: `file:///${name}`,
+          name,
+          mimeType: 'image/jpeg',
+          size: 1,
+        })),
+      },
+      undefined,
+      undefined,
+      (admission) => admissions.push(admission),
+    );
+
+    expect(sent).toEqual([{ tempGuid: 'temp-together' }]);
+    expect(mockSendImage).toHaveBeenCalledTimes(1);
+    const args = mockSendImage.mock.calls[0]![2] as {
+      image: { name: string };
+      additionalImages?: { name: string }[];
+    };
+    expect(args.image.name).toBe('a.jpg');
+    expect(args.additionalImages?.map((image) => image.name)).toEqual(['b.heic', 'c.mov']);
+    expect(admissions).toEqual(
+      ['a.jpg', 'b.heic', 'c.mov'].map((name) => ({
+        uri: `file:///${name}`,
+        queued: true,
+        tempGuid: 'temp-together',
+      })),
+    );
+  });
+
+  it('never sends RCS files or a pick that mixes shared and picked files as one message', async () => {
+    const cases: { chatGuid: string; service?: 'iMessage'; origins: ('share' | undefined)[] }[] = [
+      { chatGuid: rcsChatGuid('rcs-pick'), origins: [undefined, undefined] },
+      { chatGuid: 'any;+;chat-group', service: 'iMessage', origins: ['share', undefined] },
+    ];
+    for (const { chatGuid, service, origins } of cases) {
+      mockSendImage.mockClear();
+      mockSendImage.mockImplementation(async (...call: unknown[]) => ({
+        tempGuid: `temp-${(call[2] as { image: { name: string } }).image.name}`,
+      }));
+      const sent = await sendImages({
+        chatGuid,
+        ...(service ? { service } : {}),
+        ...(origins.includes('share')
+          ? { shareIntake: { batchId: 'batch-1', manifestSha256: 'a'.repeat(64) } as never }
+          : {}),
+        images: origins.map((origin, index) => ({
+          uri: `file:///${index}.jpg`,
+          name: `${index}.jpg`,
+          mimeType: 'image/jpeg',
+          size: 1,
+          ...(origin ? { origin, shareItemIndex: index } : {}),
+        })),
+      });
+      expect(sent).toEqual([{ tempGuid: 'temp-0.jpg' }, { tempGuid: 'temp-1.jpg' }]);
+      expect(mockSendImage).toHaveBeenCalledTimes(2);
+      for (const call of mockSendImage.mock.calls) {
+        expect(call[2]).not.toHaveProperty('additionalImages');
+      }
+    }
+  });
+
+  it('a one-message attempt that fails for another reason reports every file and stops', async () => {
+    mockSendImage.mockClear();
+    mockSendImage.mockRejectedValueOnce(new Error('server info unavailable'));
+    const admissions: unknown[] = [];
+    await expect(
+      sendImages(
+        {
+          chatGuid: 'any;+;chat-group',
+          service: 'iMessage',
+          images: ['a.jpg', 'b.jpg'].map((name) => ({
+            uri: `file:///${name}`,
+            name,
+            mimeType: 'image/jpeg',
+            size: 1,
+          })),
+        },
+        undefined,
+        undefined,
+        (admission) => admissions.push(admission),
+      ),
+    ).rejects.toThrow('server info unavailable');
+    expect(mockSendImage).toHaveBeenCalledTimes(1);
+    expect(admissions).toEqual([
+      { uri: 'file:///a.jpg', queued: false },
+      { uri: 'file:///b.jpg', queued: false },
+    ]);
+  });
+
+  it('when a pick cannot go as one message, its iMessage files upload one at a time, in pick order', async () => {
     const uploads: Array<{ name: string; finish: Deferred<{ guid: string }> }> = [];
     const mockUploader = jest.requireMock('@/services/send/attachmentUpload')
       .expoAttachmentUploader as jest.Mock;
@@ -981,9 +1090,16 @@ describe('UI send account lease', () => {
       uploads.push({ name, finish });
       return finish.promise;
     });
-    // Each queued file runs its upload through the uploader sendImages hands it.
+    // These files can't go together (say, over 200 MiB in all), so the combined attempt declines
+    // before writing anything; then each queued file runs its upload through the uploader.
     mockSendImage.mockImplementation(
-      async (_db: unknown, http: unknown, args: { image: { name: string } }, upload: Function) => {
+      async (
+        _db: unknown,
+        http: unknown,
+        args: { image: { name: string }; additionalImages?: unknown[] },
+        upload: Function,
+      ) => {
+        if (args.additionalImages) throw new SeveralFilesUnavailableError();
         await upload({
           http,
           service: 'iMessage',
@@ -994,18 +1110,28 @@ describe('UI send account lease', () => {
       },
     );
 
-    const images = sendImages({
-      chatGuid: 'any;+;chat-group',
-      service: 'iMessage',
-      images: ['a.mov', 'b.mov', 'c.mov'].map((name) => ({
-        uri: `file:///${name}`,
-        name,
-        mimeType: 'video/quicktime',
-        size: 1,
-      })),
-    });
+    const admissions: unknown[] = [];
+    const images = sendImages(
+      {
+        chatGuid: 'any;+;chat-group',
+        service: 'iMessage',
+        images: ['a.mov', 'b.mov', 'c.mov'].map((name) => ({
+          uri: `file:///${name}`,
+          name,
+          mimeType: 'video/quicktime',
+          size: 1,
+        })),
+      },
+      undefined,
+      undefined,
+      (admission) => admissions.push(admission),
+    );
+    // Observed from the start, so a broken send fails this test instead of escaping it.
+    images.catch(() => undefined);
 
     await waitUntil(() => uploads.length === 1);
+    // The declined one-message attempt reports nothing: no file reads as "not queued".
+    expect(admissions).toEqual([]);
     expect(uploads.map((u) => u.name)).toEqual(['a.mov']);
     uploads[0]!.finish.resolve({ guid: 'g-a' });
     await waitUntil(() => uploads.length === 2);
@@ -1032,8 +1158,16 @@ describe('UI send account lease', () => {
       return finish.promise;
     });
     const outcomes: Record<string, string> = {};
+    // These files can't go together as one message (say, over 200 MiB in all), so the combined
+    // attempt declines before writing anything and each file waits its turn in the lane.
     mockSendImage.mockImplementation(
-      async (_db: unknown, http: unknown, args: { image: { name: string } }, upload: Function) => {
+      async (
+        _db: unknown,
+        http: unknown,
+        args: { image: { name: string }; additionalImages?: unknown[] },
+        upload: Function,
+      ) => {
+        if (args.additionalImages) throw new SeveralFilesUnavailableError();
         try {
           await upload({
             http,

@@ -20,10 +20,16 @@ import { MAX_RCS_ATTACHMENT_UPLOAD_BYTES } from '@core/models/serverInfo';
 import {
   RcsAttachmentTooLargeError,
   sendImageMessage,
+  SeveralFilesUnavailableError,
   UnsendableAttachmentNameError,
   type AttachmentOwnershipPreparer,
   type AttachmentUploader,
+  type PickedImage,
 } from '@/services/send/sendAttachmentService';
+import {
+  claimShareIntakeFileWithinTransaction,
+  type ShareIntakeManifestIdentity,
+} from '@db/repositories/shareIntakeReceipts';
 import {
   attachmentCacheCoordinator,
   type AttachmentCacheReservation,
@@ -2040,5 +2046,342 @@ describe('sendImageMessage', () => {
       await expect(send(db, chatGuid, HEIC, up.upload, capability, 'bad\u0007')).rejects.toThrow();
       expect(up.captured).toBeUndefined();
     });
+  });
+});
+
+describe('sendImageMessage: several files as one iMessage (FP-006 restored route)', () => {
+  const ONE_TO_ONE = 'any;-;+15551234567';
+  const GROUP = 'any;+;chat-several';
+  const file = (name: string, mimeType: string, size: number, extra: Partial<PickedImage> = {}) =>
+    ({ uri: `file:///cache/${name}`, name, mimeType, size, ...extra }) as PickedImage;
+  const HEIC = file('IMG_0001.heic', 'image/heic', 3_000_000);
+  const JPG = file('IMG_0002.jpg', 'image/jpeg', 2_000_000);
+  const MOV = file('IMG_0003.mov', 'video/quicktime', 9_000_000);
+  const capability = (switches: { v2?: boolean; group?: boolean } = { v2: true }) =>
+    fixedRcsCapabilitySource(
+      ServerInfo.parse({
+        version: '2.0.48-bbd',
+        private_api: true,
+        supports_imessage_attachment_upload: true,
+        supports_imessage_attachments_v2: switches.v2 ?? false,
+        supports_imessage_group_attachment_upload: switches.group ?? false,
+      }),
+    );
+  const sendSeveral = (
+    db: ReadDb,
+    chatGuid: string,
+    image: PickedImage,
+    additionalImages: PickedImage[],
+    upload: AttachmentUploader,
+    options: {
+      capability?: ReturnType<typeof capability>;
+      text?: string;
+      voice?: true;
+      shareIntake?: ShareIntakeManifestIdentity;
+      prepare?: AttachmentOwnershipPreparer;
+    } = {},
+  ) =>
+    sendImageMessage(
+      db,
+      dummyHttp,
+      {
+        chatGuid,
+        image,
+        service: 'iMessage',
+        additionalImages,
+        ...(options.text === undefined ? {} : { text: options.text }),
+        ...(options.voice ? { voice: true as const } : {}),
+        ...(options.shareIntake ? { shareIntake: options.shareIntake } : {}),
+      },
+      upload,
+      1_000,
+      undefined,
+      { failureNoticeMode: 'suppressed' },
+      options.prepare,
+      undefined,
+      options.capability ?? capability(),
+    );
+  const count = (raw: Database.Database, table: string) =>
+    (one(raw, `SELECT COUNT(*) c FROM ${table}`) as { c: number }).c;
+  const attachmentNames = (raw: Database.Database) =>
+    (
+      raw.prepare('SELECT transfer_name AS name FROM attachments ORDER BY id').all() as {
+        name: string;
+      }[]
+    ).map((row) => row.name);
+
+  it('sends three files to a one-to-one chat as one message in one upload, caption included', async () => {
+    const { db, raw } = await createTestDb();
+    await seedProvenImessageChat(db, ONE_TO_ONE);
+    const up = fakeUploader(async () => {
+      // Admitted first: one message, every file in pick order, one one-shot queue row.
+      expect(count(raw, 'messages')).toBe(1);
+      expect(attachmentNames(raw)).toEqual(['IMG_0001.heic', 'IMG_0002.jpg', 'IMG_0003.mov']);
+      expect(
+        JSON.parse(String(one(raw, 'SELECT payload FROM outgoing_queue').payload)),
+      ).toMatchObject({ imessageAttachmentV1: true });
+      return { guid: 'several-guid', viaPrivateApi: true };
+    });
+
+    const { tempGuid } = await sendSeveral(db, ONE_TO_ONE, HEIC, [JPG, MOV], up.upload, {
+      text: 'Trip',
+    });
+
+    expect(up.captured).toMatchObject({
+      chatGuid: ONE_TO_ONE,
+      service: 'iMessage',
+      restored: true,
+      text: 'Trip',
+      name: 'IMG_0001.heic',
+      attachmentGuid: `${tempGuid}-att`,
+      totalBytes: 3_000_000,
+    });
+    expect(up.captured?.additionalFiles).toEqual([
+      {
+        attachmentGuid: `${tempGuid}-1-att`,
+        name: 'IMG_0002.jpg',
+        uri: 'file:///cache/IMG_0002.jpg',
+        mimeType: 'image/jpeg',
+        totalBytes: 2_000_000,
+      },
+      {
+        attachmentGuid: `${tempGuid}-2-att`,
+        name: 'IMG_0003.mov',
+        uri: 'file:///cache/IMG_0003.mov',
+        mimeType: 'video/quicktime',
+        totalBytes: 9_000_000,
+      },
+    ]);
+    expect(one(raw, 'SELECT guid, text, part_count AS parts FROM messages')).toEqual({
+      guid: 'several-guid',
+      text: 'Trip',
+      parts: 4,
+    });
+    expect(count(raw, 'outgoing_queue')).toBe(0);
+  });
+
+  it('takes the restored route even when the first file could go the narrow way', async () => {
+    const { db } = await createTestDb();
+    await seedProvenImessageChat(db, ONE_TO_ONE);
+    const up = fakeUploader(async () => ({ guid: 'jpg-first-guid', viaPrivateApi: true }));
+    await sendSeveral(db, ONE_TO_ONE, JPG, [HEIC], up.upload);
+    expect(up.captured?.restored).toBe(true);
+    expect(up.captured?.additionalFiles).toHaveLength(1);
+  });
+
+  it('sends to a proven iMessage group when both group switches are on', async () => {
+    const { db, raw } = await createTestDb();
+    const participants = [
+      { address: 'ann@example.com', service: 'iMessage' },
+      { address: 'ben@example.com', service: 'iMessage' },
+    ];
+    const handles = await upsertHandles(db, participants);
+    await upsertChats(db, [Chat.parse({ guid: GROUP, style: 43, participants })], handles);
+    const up = fakeUploader(async () => ({ guid: 'group-several-guid', viaPrivateApi: true }));
+    await sendSeveral(db, GROUP, HEIC, [JPG], up.upload, {
+      capability: capability({ v2: true, group: true }),
+    });
+    expect(up.captured).toMatchObject({ chatGuid: GROUP, restored: true });
+    expect(attachmentNames(raw)).toEqual(['IMG_0001.heic', 'IMG_0002.jpg']);
+  });
+
+  const big = (index: number) => file(`big${index}.mov`, 'video/quicktime', 70 * 1024 * 1024);
+  it.each([
+    ['the restored switch is off', ONE_TO_ONE, HEIC, [JPG], { capability: capability({}) }],
+    ['a group lacks its switch', GROUP, HEIC, [JPG], { capability: capability({ v2: true }) }],
+    ['a file the restored route refuses', ONE_TO_ONE, HEIC, [file('a.webp', 'image/webp', 9)], {}],
+    ['the files pass 200 MiB together', ONE_TO_ONE, big(1), [big(2), big(3)], {}],
+    ['a file name cannot be uploaded', ONE_TO_ONE, HEIC, [file('a"b.jpg', 'image/jpeg', 9)], {}],
+    ['it is a voice note', ONE_TO_ONE, file('v.m4a', 'audio/mp4', 9), [JPG], { voice: true }],
+    ['the chat is RCS', RCS_CHAT_GUID, HEIC, [JPG], {}],
+    [
+      'there are eleven files',
+      ONE_TO_ONE,
+      HEIC,
+      Array.from({ length: 10 }, (_, i) => file(`p${i}.jpg`, 'image/jpeg', 9)),
+      {},
+    ],
+  ] as const)(
+    'declines before writing anything when %s',
+    async (_label, chatGuid, image, additional, options) => {
+      const { db, raw } = await createTestDb();
+      await seedProvenImessageChat(db, ONE_TO_ONE);
+      const participants = [
+        { address: 'ann@example.com', service: 'iMessage' },
+        { address: 'ben@example.com', service: 'iMessage' },
+      ];
+      const handles = await upsertHandles(db, participants);
+      await upsertChats(db, [Chat.parse({ guid: GROUP, style: 43, participants })], handles);
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+      await expect(
+        sendSeveral(db, chatGuid, image, [...additional], up.upload, options),
+      ).rejects.toBeInstanceOf(SeveralFilesUnavailableError);
+      expect(up.captured).toBeUndefined();
+      expect(count(raw, 'messages')).toBe(0);
+      expect(count(raw, 'attachments')).toBe(0);
+      expect(count(raw, 'outgoing_queue')).toBe(0);
+    },
+  );
+
+  function sharedFiles(raw: Database.Database) {
+    const identity: ShareIntakeManifestIdentity = {
+      batchId: '1700000000000-1-0000000000000007',
+      nativeCreatedAtMs: 1_700_000_000_000,
+      hasText: false,
+      fileCount: 3,
+    };
+    const reservations: (AttachmentCacheReservation & { release: jest.Mock })[] = [];
+    const prepare: AttachmentOwnershipPreparer = async ({ image }) => {
+      const path = `file:///documents/attachments/media-temp/generation-7/${image.name}`;
+      raw
+        .prepare(
+          "INSERT OR IGNORE INTO attachment_cache_entries(path, bytes, last_used_at, state, attempts, next_retry_at) VALUES (?, ?, 1, 'reserved', 0, 0)",
+        )
+        .run(path, image.size);
+      const reservation = {
+        path,
+        maxBytes: image.size,
+        generation: 7,
+        beginProtectionHandoff: jest.fn(() => true),
+        rollbackProtectionHandoff: jest.fn(() => true),
+        release: jest.fn(async () => undefined),
+      };
+      reservations.push(reservation);
+      return { image: { ...image, uri: path }, cacheReservation: reservation };
+    };
+    const images = [HEIC, JPG, MOV].map((image, index) =>
+      file(image.name, image.mimeType, image.size, { origin: 'share', shareItemIndex: index }),
+    );
+    return { identity, reservations, prepare, images };
+  }
+
+  it('claims, promotes and releases every shared file for one message, and a replay is that message', async () => {
+    const { db, raw } = await createTestDb();
+    await seedProvenImessageChat(db, ONE_TO_ONE);
+    const { identity, reservations, prepare, images } = sharedFiles(raw);
+    const up = fakeUploader(async () => ({ guid: 'shared-several-guid', viaPrivateApi: true }));
+
+    const first = await sendSeveral(db, ONE_TO_ONE, images[0]!, images.slice(1), up.upload, {
+      shareIntake: identity,
+      prepare,
+    });
+
+    expect(up.captured?.additionalFiles?.map((extra) => extra.uri)).toEqual([
+      'file:///documents/attachments/media-temp/generation-7/IMG_0002.jpg',
+      'file:///documents/attachments/media-temp/generation-7/IMG_0003.mov',
+    ]);
+    expect(raw.prepare('SELECT state FROM attachment_cache_entries').all()).toEqual([
+      { state: 'active' },
+      { state: 'active' },
+      { state: 'active' },
+    ]);
+    // Each file's row keeps its own prepared copy, in pick order.
+    expect(raw.prepare('SELECT local_path AS path FROM attachments ORDER BY id').all()).toEqual(
+      ['IMG_0001.heic', 'IMG_0002.jpg', 'IMG_0003.mov'].map((name) => ({
+        path: `file:///documents/attachments/media-temp/generation-7/${name}`,
+      })),
+    );
+    for (const reservation of reservations) {
+      expect(reservation.beginProtectionHandoff).toHaveBeenCalledTimes(1);
+      expect(reservation.release).toHaveBeenCalledTimes(1);
+    }
+
+    // The same share delivered again belongs to that one message: nothing new is written.
+    const replay = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+    await expect(
+      sendSeveral(db, ONE_TO_ONE, images[0]!, images.slice(1), replay.upload, {
+        shareIntake: identity,
+        prepare,
+      }),
+    ).resolves.toEqual({ tempGuid: first.tempGuid });
+    expect(replay.captured).toBeUndefined();
+    expect(count(raw, 'messages')).toBe(1);
+  });
+
+  it.each([0, 1])(
+    'declines and rolls back when item %i of a shared batch was claimed before',
+    async (claimedIndex) => {
+      const { db, raw } = await createTestDb();
+      await seedProvenImessageChat(db, ONE_TO_ONE);
+      const { identity, reservations, prepare, images } = sharedFiles(raw);
+      await withDbTransaction(db, (db, context) =>
+        claimShareIntakeFileWithinTransaction(context, {
+          identity,
+          chatGuid: ONE_TO_ONE,
+          itemIndex: claimedIndex,
+          ownerGuid: 'temp-older-single',
+          appliedAtMs: 1,
+        }),
+      );
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+      await expect(
+        sendSeveral(db, ONE_TO_ONE, images[0]!, images.slice(1), up.upload, {
+          shareIntake: identity,
+          prepare,
+        }),
+      ).rejects.toBeInstanceOf(SeveralFilesUnavailableError);
+
+      expect(up.captured).toBeUndefined();
+      expect(count(raw, 'messages')).toBe(0);
+      for (const reservation of reservations) expect(reservation.release).toHaveBeenCalledTimes(1);
+      // The other items were not left claimed: each one-file send can still claim its own.
+      for (const itemIndex of [0, 1, 2].filter((index) => index !== claimedIndex)) {
+        await expect(
+          withDbTransaction(db, (db, context) =>
+            claimShareIntakeFileWithinTransaction(context, {
+              identity,
+              chatGuid: ONE_TO_ONE,
+              itemIndex,
+              ownerGuid: `temp-probe-${itemIndex}`,
+              appliedAtMs: 2,
+            }),
+          ),
+        ).resolves.toEqual({ claimed: true, ownerGuid: `temp-probe-${itemIndex}` });
+      }
+    },
+  );
+
+  it('stops and releases what it protected when an extra file can no longer be protected', async () => {
+    const { db, raw } = await createTestDb();
+    await seedProvenImessageChat(db, ONE_TO_ONE);
+    const released: string[] = [];
+    jest
+      .spyOn(attachmentCacheCoordinator, 'protect')
+      .mockImplementation((uri: string) =>
+        uri.endsWith('IMG_0003.mov') ? null : ({ release: () => released.push(uri) } as never),
+      );
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(sendSeveral(db, ONE_TO_ONE, HEIC, [JPG, MOV], up.upload)).rejects.toThrow(
+      'Attachment is no longer available for sending.',
+    );
+
+    expect(released.sort()).toEqual(['file:///cache/IMG_0001.heic', 'file:///cache/IMG_0002.jpg']);
+    expect(count(raw, 'messages')).toBe(0);
+    expect(up.captured).toBeUndefined();
+  });
+
+  it('releases every reservation already taken when a later file cannot be prepared', async () => {
+    const { db, raw } = await createTestDb();
+    await seedProvenImessageChat(db, ONE_TO_ONE);
+    const { identity, reservations, prepare, images } = sharedFiles(raw);
+    const failing: AttachmentOwnershipPreparer = async (input) => {
+      if (input.image.name === 'IMG_0003.mov') throw new Error('share source vanished');
+      return prepare(input);
+    };
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendSeveral(db, ONE_TO_ONE, images[0]!, images.slice(1), up.upload, {
+        shareIntake: identity,
+        prepare: failing,
+      }),
+    ).rejects.toThrow('share source vanished');
+
+    expect(reservations).toHaveLength(2);
+    for (const reservation of reservations) expect(reservation.release).toHaveBeenCalledTimes(1);
+    expect(count(raw, 'messages')).toBe(0);
+    expect(up.captured).toBeUndefined();
   });
 });

@@ -89,6 +89,7 @@ function upload(
     mimeType?: string;
     assertNetworkStart?: () => void;
     signal?: AbortSignal;
+    additionalFiles?: Parameters<typeof expoAttachmentUploader>[0]['additionalFiles'];
   } = {},
 ): ReturnType<typeof expoAttachmentUploader> {
   return expoAttachmentUploader({
@@ -106,10 +107,38 @@ function upload(
     uri: options.uri ?? 'file:///photo.jpg',
     mimeType: options.mimeType ?? 'image/jpeg',
     totalBytes: options.totalBytes ?? 42,
+    ...(options.additionalFiles ? { additionalFiles: options.additionalFiles } : {}),
     signal: options.signal,
     timeoutMs: options.timeoutMs,
   });
 }
+
+const EXTRA_FILES = [
+  {
+    attachmentGuid: 'att-2',
+    name: 'IMG_0002.jpg',
+    uri: 'file:///cache/IMG_0002.jpg',
+    mimeType: 'image/jpeg',
+    totalBytes: 2_000,
+  },
+  {
+    attachmentGuid: 'att-3',
+    name: 'clip.mov',
+    uri: 'file:///cache/clip.mov',
+    mimeType: 'video/quicktime',
+    totalBytes: 9_000,
+  },
+];
+const SEVERAL = {
+  chatGuid: 'any;+;chat-group',
+  service: 'iMessage' as const,
+  restored: true as const,
+  assertNetworkStart: () => undefined,
+  name: 'IMG_0001.heic',
+  uri: 'file:///cache/IMG_0001.heic',
+  mimeType: 'image/heic',
+  totalBytes: 3_000,
+};
 
 describe('native attachment upload account scope', () => {
   it.each(['../report.pdf', 'report".pdf', '\ud800.pdf', 'a'.repeat(256) + '.pdf'])(
@@ -243,6 +272,126 @@ describe('native attachment upload account scope', () => {
       upload(http, { ...base, voice: true, name: 'voice.m4a', totalBytes: 42 }),
     ).rejects.toThrow('one non-voice iMessage file');
     expect(mockGetInfoAsync).not.toHaveBeenCalled();
+    expect(mockCreateUploadTask).not.toHaveBeenCalled();
+  });
+
+  it('sends several restored files in one native request, in pick order, with one progress total', async () => {
+    const sizes: Record<string, number> = {
+      'file:///cache/IMG_0001.heic': 3_000,
+      'file:///cache/IMG_0002.jpg': 2_000,
+      'file:///cache/clip.mov': 9_000,
+    };
+    mockGetInfoAsync.mockImplementation(async (uri: string) => ({
+      exists: true,
+      size: sizes[uri],
+    }));
+    mockUploadAsync.mockResolvedValueOnce({
+      status: 200,
+      body: JSON.stringify({ status: 200, data: { guid: 'several-guid', viaPrivateApi: true } }),
+    });
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+
+    await expect(
+      upload(http, { ...SEVERAL, text: 'Trip', additionalFiles: EXTRA_FILES }),
+    ).resolves.toMatchObject({ guid: 'several-guid' });
+
+    expect(mockCreateUploadTask).toHaveBeenCalledTimes(1);
+    const [url, uri, options] = mockCreateUploadTask.mock.calls[0]!;
+    expect(url).toBe('https://old.example/api/v1/message/attachments/upload');
+    expect(uri).toBe('file:///cache/IMG_0001.heic');
+    expect(options.gatorFileName).toBe('IMG_0001.heic');
+    expect(options.gatorAdditionalFiles).toEqual([
+      { uri: 'file:///cache/IMG_0002.jpg', fileName: 'IMG_0002.jpg', mimeType: 'image/jpeg' },
+      { uri: 'file:///cache/clip.mov', fileName: 'clip.mov', mimeType: 'video/quicktime' },
+    ]);
+    expect(options.parameters).toEqual({
+      chatGuid: 'any;+;chat-group',
+      tempGuid: 'temp-1',
+      text: 'Trip',
+    });
+    // Every file was checked on disk first, and one progress entry covers all of them.
+    expect(mockGetInfoAsync.mock.calls.map(([checked]) => checked)).toEqual([
+      'file:///cache/IMG_0001.heic',
+      'file:///cache/IMG_0002.jpg',
+      'file:///cache/clip.mov',
+    ]);
+    expect(mockUploadStart).toHaveBeenCalledTimes(1);
+    expect(mockUploadStart.mock.calls[0]![1]).toMatchObject({ total: 14_000 });
+  });
+
+  it('refuses extra files outside one bounded restored iMessage before any native work', async () => {
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+    // Answer any file check at once, so an upload that wrongly gets past validation finishes (and
+    // fails the assertions below) instead of hanging.
+    mockGetInfoAsync.mockImplementation(async () => ({ exists: true, size: 42 }));
+    const refusals = [
+      // The narrow one-to-one route and RCS carry one file.
+      upload(http, {
+        chatGuid: 'any;-;+15551234567',
+        service: 'iMessage',
+        assertNetworkStart: () => undefined,
+        name: 'IMG_0001.jpg',
+        totalBytes: 42,
+        additionalFiles: EXTRA_FILES,
+      }),
+      upload(http, { additionalFiles: EXTRA_FILES }),
+      upload(http, {
+        ...SEVERAL,
+        additionalFiles: Array.from({ length: 10 }, (_, index) => ({
+          ...EXTRA_FILES[0]!,
+          attachmentGuid: `att-${index + 10}`,
+        })),
+      }),
+      upload(http, { ...SEVERAL, additionalFiles: [{ ...EXTRA_FILES[0]!, name: 'a"b.jpg' }] }),
+      upload(http, { ...SEVERAL, additionalFiles: [{ ...EXTRA_FILES[0]!, name: 'run.exe' }] }),
+      upload(http, {
+        ...SEVERAL,
+        totalBytes: 80 * 1024 * 1024,
+        additionalFiles: [80, 80].map((mib, index) => ({
+          ...EXTRA_FILES[1]!,
+          attachmentGuid: `att-big-${index}`,
+          totalBytes: mib * 1024 * 1024,
+        })),
+      }),
+    ];
+    const outcomes = await Promise.all(
+      refusals.map((refused) =>
+        refused.then(
+          () => 'sent',
+          (error: unknown) => String(error),
+        ),
+      ),
+    );
+    for (const outcome of outcomes) {
+      expect(outcome).toContain('can’t be sent together to this iMessage chat');
+    }
+    expect(mockGetInfoAsync).not.toHaveBeenCalled();
+    expect(mockCreateUploadTask).not.toHaveBeenCalled();
+  });
+
+  it('checks every extra file on disk and their real sizes together before starting', async () => {
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+    mockGetInfoAsync.mockImplementation(async (uri: string) =>
+      uri === 'file:///cache/clip.mov' ? { exists: false } : { exists: true, size: 3_000 },
+    );
+    await expect(upload(http, { ...SEVERAL, additionalFiles: EXTRA_FILES })).rejects.toMatchObject({
+      kind: 'local_file',
+      message: 'Attachment file is no longer available',
+    });
+
+    mockGetInfoAsync.mockImplementation(async () => ({ exists: true, size: 90 * 1024 * 1024 }));
+    await expect(upload(http, { ...SEVERAL, additionalFiles: EXTRA_FILES })).rejects.toThrow(
+      'Choose files no larger than 200 MiB together',
+    );
     expect(mockCreateUploadTask).not.toHaveBeenCalled();
   });
 

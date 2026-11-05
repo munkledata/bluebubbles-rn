@@ -245,4 +245,10 @@ Jest mocks `expo-file-system` wholesale, so a green suite says **nothing** about
       appearing/disappearing re-lands the message list (it is inside the measured bottom bar, so it
       should ride the existing `onLayout` → scroll-pin convergence);
 - [ ] the bar is legible over a chat wallpaper (frosted, matching the composer chips);
-- [ ] TalkBack announces the bar as one progress bar with both lines.
+- [ ] TalkBack announces the bar as one progress bar with both lines;
+- [ ] several files sent as one iMessage (`gatorAdditionalFiles`): an iPhone shows one stack in
+      pick order (one-to-one and group), a caption arrives with it, the ring and bar count every
+      file's bytes once and reach 100% only when all are sent, and "Cancel Sending" stops the
+      whole request (watch the server log, not just the bubble);
+- [ ] a set over 200 MiB, or one with a file the restored route refuses, still goes one message
+      per file.
