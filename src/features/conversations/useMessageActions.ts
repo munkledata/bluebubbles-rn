@@ -44,7 +44,13 @@ import { isLocalFileUri, isRcsChatGuid, isUserFileAttachment, type BubbleRect } 
 import { devSendFakeReaction } from './devSeed';
 import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
-import { imessageReactionPartIndex, replyTargetPartIndex } from './messageActionEligibility';
+import {
+  currentPartCount,
+  imessageReactionPartIndex,
+  pressedPartIndex,
+  replyTargetPartIndex,
+  type MessagePressTarget,
+} from './messageActionEligibility';
 import type { EnrichedMessage } from './useMessages';
 
 function actionContentOf(msg: EnrichedMessage) {
@@ -264,20 +270,30 @@ export function useMessageActions({
   // Long-press a bubble → open the local-action menu (plus RCS reactions). Stable so the
   // memoized message rows aren't re-rendered by a fresh closure each render.
   const onLongPressMessage = useCallback(
-    (msg: EnrichedMessage, rect: BubbleRect): void => {
+    (msg: EnrichedMessage, rect: BubbleRect, target?: MessagePressTarget): void => {
       if (isAggregateRetractionTombstone(msg)) return;
       const { bodyText, visibleAttachments, visibleAttachmentCount } = actionContentOf(msg);
+      // The photo or text the press landed on, so a several-part message's tapback and reply go
+      // to that exact part. Undefined keeps the whole-message rules.
+      const pressedPart = pressedPartIndex(msg, target);
       const rcsReaction =
         rcsEnabled &&
         rcsProviderEpoch !== null &&
         parseRcsMessageGuid(msg.guid)?.providerEpoch === rcsProviderEpoch;
-      const imessageReaction =
-        imessageReactionsAvailable &&
-        !isRcsChatGuid(guid) &&
-        imessageReactionPartIndex(msg, imessagePartReactionsAvailable) !== undefined;
+      const imessageReactionPart =
+        imessageReactionsAvailable && !isRcsChatGuid(guid)
+          ? imessageReactionPartIndex(msg, imessagePartReactionsAvailable, pressedPart)
+          : undefined;
+      const imessageReaction = imessageReactionPart !== undefined;
       const replyPartIndex = imessageRepliesAvailable
-        ? replyTargetPartIndex(msg, imessagePartRepliesAvailable)
+        ? replyTargetPartIndex(msg, imessagePartRepliesAvailable, pressedPart)
         : undefined;
+      // On a message with several parts only this part's own tapbacks count as yours here, so
+      // choosing one again removes it from the part that actually has it.
+      const onTargetPart = (reaction: EnrichedMessage['reactions'][number]): boolean =>
+        !imessageReaction ||
+        currentPartCount(msg) <= 1 ||
+        reaction.targetPart === imessageReactionPart;
       const imessageEdit = imessageEditsAvailable && canEditExactPlainTextPartZero(msg, Date.now());
       const imessageUnsend =
         imessageUnsendsAvailable && canUnsendExactPlainTextPartZero(msg, Date.now());
@@ -286,14 +302,14 @@ export function useMessageActions({
       const canReact = rcsReaction || imessageReaction;
       const mine = canReact
         ? msg.reactions
-            .filter((r) => r.isFromMe && r.baseType !== 'emoji')
+            .filter((r) => r.isFromMe && r.baseType !== 'emoji' && onTargetPart(r))
             .map((r) => r.baseType)
             .filter((t): t is ReactionBaseType => !!parseReactionType(t))
         : [];
       const emojiReactions = rcsReaction || (imessageReaction && imessageEmojiReactionsAvailable);
       const myEmojis = emojiReactions
         ? msg.reactions
-            .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji)
+            .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji && onTargetPart(r))
             .map((r) => r.emoji as string)
         : [];
       setSelected({
@@ -314,6 +330,7 @@ export function useMessageActions({
         canReact,
         canUseEmojiReactions: emojiReactions,
         replyPartIndex,
+        pressedPartIndex: pressedPart,
         editPartIndex: imessageEdit ? 0 : undefined,
         unsendPartIndex: imessageUnsend ? 0 : undefined,
         canRemoteDeleteFromMac: imessageRemoteDelete,
@@ -379,7 +396,8 @@ export function useMessageActions({
       !setReplyTo ||
       selected?.replyPartIndex === undefined ||
       !current ||
-      replyTargetPartIndex(current, imessagePartRepliesAvailable) !== selected.replyPartIndex
+      replyTargetPartIndex(current, imessagePartRepliesAvailable, selected.pressedPartIndex) !==
+        selected.replyPartIndex
     ) {
       return;
     }
@@ -747,9 +765,14 @@ export function useMessageActions({
       rcsEnabled &&
       rcsProviderEpoch !== null &&
       parseRcsMessageGuid(current?.guid)?.providerEpoch === rcsProviderEpoch;
+    // Re-check the part chosen at long-press against the live message: it may have changed since.
     const imessagePartIndex =
       current != null
-        ? imessageReactionPartIndex(current, imessagePartReactionsAvailable)
+        ? imessageReactionPartIndex(
+            current,
+            imessagePartReactionsAvailable,
+            selected?.pressedPartIndex,
+          )
         : undefined;
     // An emoji tapback is an iMessage option only while the restored emoji switch is on.
     const imessageEmoji = parsed?.baseType === 'emoji' || emoji !== undefined;

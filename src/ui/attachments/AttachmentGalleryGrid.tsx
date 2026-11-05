@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import type { AttachmentRow } from '@db/repositories';
 import { isLocalFileUri } from '@utils';
@@ -13,7 +13,8 @@ interface AttachmentGalleryGridProps {
   /** Image attachments of ONE message (the bubble routes here for image-only sets of ≥2). */
   atts: AttachmentRow[];
   isFromMe: boolean;
-  onLongPress?: () => void;
+  /** Long-press one cell; reports that photo's guid so actions can target its exact part. */
+  onLongPress?: (attachmentGuid: string) => void;
 }
 
 /**
@@ -64,9 +65,14 @@ function ProtectedGalleryCell({
   att: AttachmentRow;
   isFromMe: boolean;
   cellSize: number;
-  onLongPress?: () => void;
+  onLongPress?: (attachmentGuid: string) => void;
 }): React.JSX.Element {
   const protectedPath = useAttachmentCachePathProtection(att.localPath);
+  const attachmentGuid = att.guid;
+  const handleLongPress = useCallback(
+    () => onLongPress?.(attachmentGuid),
+    [onLongPress, attachmentGuid],
+  );
   if (isLocalFileUri(att.localPath) && protectedPath !== att.localPath) {
     // Preserve the two-column geometry without mounting ImageAttachment's decoder or its
     // "undownloaded" auto-fetch effect against a path currently owned by retirement.
@@ -78,7 +84,7 @@ function ProtectedGalleryCell({
       isFromMe={isFromMe}
       showTail={false}
       cellSize={cellSize}
-      onLongPress={onLongPress}
+      onLongPress={onLongPress ? handleLongPress : undefined}
     />
   );
 }

@@ -82,7 +82,14 @@ describe('AttachmentGalleryGrid', () => {
     expect(new Set(sizes).size).toBe(1); // every cell gets the SAME size
     expect(typeof sizes[0]).toBe('number');
     expect(mockCell.mock.calls.every(([p]) => p.showTail === false)).toBe(true);
-    expect(mockCell.mock.calls.every(([p]) => p.onLongPress === onLongPress)).toBe(true);
+    // Each cell reports which photo was pressed, so a tapback can target that exact part.
+    for (const [props] of mockCell.mock.calls) props.onLongPress();
+    expect(onLongPress.mock.calls).toEqual([['a'], ['b'], ['c']]);
+  });
+
+  it('gives cells no long-press handler when the grid has none', async () => {
+    await renderWithTheme(<AttachmentGalleryGrid atts={[att('a'), att('b')]} isFromMe={false} />);
+    expect(mockCell.mock.calls.every(([p]) => p.onLongPress === undefined)).toBe(true);
   });
 
   it('aligns to the right for own messages', async () => {

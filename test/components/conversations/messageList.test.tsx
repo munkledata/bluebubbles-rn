@@ -70,8 +70,12 @@ jest.mock('@ui/conversations/MessageBubble', () => {
     MessageBubble: (props: {
       msg: EnrichedMessage;
       // The real bubble measures itself and forwards its on-screen rectangle (never the raw press
-      // event); emulate that so the row-binding assertion reflects the true (msg, rect) contract.
-      onLongPress?: (rect: { x: number; y: number; width: number; height: number }) => void;
+      // event) plus the pressed part; emulate that so the row-binding assertion reflects the true
+      // (msg, rect, target) contract.
+      onLongPress?: (
+        rect: { x: number; y: number; width: number; height: number },
+        target?: { kind: 'attachment'; attachmentGuid: string } | { kind: 'body' },
+      ) => void;
       onRetry?: () => void;
     }) =>
       ReactLib.createElement(
@@ -82,7 +86,11 @@ jest.mock('@ui/conversations/MessageBubble', () => {
           Pressable,
           {
             testID: `longpress-${props.msg.guid}`,
-            onPress: () => props.onLongPress?.({ x: 0, y: 0, width: 10, height: 10 }),
+            onPress: () =>
+              props.onLongPress?.(
+                { x: 0, y: 0, width: 10, height: 10 },
+                { kind: 'attachment', attachmentGuid: 'att-pressed' },
+              ),
           },
           ReactLib.createElement(Text, null, 'lp'),
         ),
@@ -349,10 +357,12 @@ describe('MessageList — row callback binding', () => {
       />,
     );
     fireEvent.press(screen.getByTestId('longpress-x'));
-    // The row forwards (message, measured bubble rect) — the rect anchors the floating menu.
+    // The row forwards (message, measured bubble rect, pressed part) — the rect anchors the
+    // floating menu, and the pressed part lets a tapback target that exact photo or caption.
     expect(onLongPressMessage).toHaveBeenCalledWith(
       expect.objectContaining({ guid: 'x' }),
       expect.objectContaining({ width: 10, height: 10 }),
+      { kind: 'attachment', attachmentGuid: 'att-pressed' },
     );
   });
 });

@@ -23,6 +23,7 @@ import {
   performMessageEntityAction,
   type MessageEntityActionRequest,
 } from '@/services/messageEntityActions';
+import type { MessagePressTarget } from '@features/conversations/messageActionEligibility';
 import { useUrlPreview, useUrlPreviewProxySupported } from '@features/conversations/useUrlPreview';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { showToast } from '@ui/toast/toastStore';
@@ -68,8 +69,9 @@ interface MessageBubbleProps {
   /** Tap on your own unconfirmed unsend: check it again with the Mac. */
   onCheckUnsend?: () => void;
   /** Long-press the bubble → open the reaction/action menu, anchored to this bubble's
-   *  on-screen rectangle (measured here so the floating menu can pin above/below it). */
-  onLongPress?: (rect: BubbleRect) => void;
+   *  on-screen rectangle (measured here so the floating menu can pin above/below it). `target`
+   *  says which attachment, or the text body, the press landed on; none from accessibility. */
+  onLongPress?: (rect: BubbleRect, target?: MessagePressTarget) => void;
   /** Tap the reply quote → jump to the original message. */
   onJumpToReply?: () => void;
   /** Tap the reaction badges → open the "who reacted" detail. Omit → badges stay inert. */
@@ -88,6 +90,7 @@ interface MessageBubbleProps {
 }
 
 const MESSAGE_ACTIONS = [{ name: 'longpress', label: 'Show message actions' }] as const;
+const BODY_PRESS: MessagePressTarget = { kind: 'body' };
 
 /** iOS message bubble: reply quote + attachments + text, with reactions + long-press.
  * Memoized (it does heavy work: attachments, reactions, URL preview, run rendering). */
@@ -113,17 +116,28 @@ export const MessageBubble = React.memo(function MessageBubble({
   // on-screen position (iMessage-style), rather than sit in a bottom sheet. measureInWindow is
   // async (one frame) — fine for a long-press.
   const bubbleRef = useRef<View>(null);
-  const handleLongPress = useCallback(() => {
-    if (!onLongPress) return;
-    const node = bubbleRef.current;
-    if (!node) return;
-    node.measureInWindow((x, y, width, height) => onLongPress({ x, y, width, height }));
-  }, [onLongPress]);
+  const openActions = useCallback(
+    (target?: MessagePressTarget) => {
+      if (!onLongPress) return;
+      const node = bubbleRef.current;
+      if (!node) return;
+      node.measureInWindow((x, y, width, height) => onLongPress({ x, y, width, height }, target));
+    },
+    [onLongPress],
+  );
+  // A press on the text, a link card or the bubble's edges targets the text body; each attachment
+  // reports its own guid, so a several-part message's tapback can go to the exact photo or caption.
+  const handleLongPress = useCallback(() => openActions(BODY_PRESS), [openActions]);
+  const handleAttachmentLongPress = useCallback(
+    (attachmentGuid: string) => openActions({ kind: 'attachment', attachmentGuid }),
+    [openActions],
+  );
+  // TalkBack can't aim at one part, so its action keeps the whole-message rules.
   const handleAccessibilityAction = useCallback(
     (event: AccessibilityActionEvent): void => {
-      if (event.nativeEvent.actionName === 'longpress') handleLongPress();
+      if (event.nativeEvent.actionName === 'longpress') openActions();
     },
-    [handleLongPress],
+    [openActions],
   );
   const b = theme.color.bubble;
   const isFromMe = msg.isFromMe === 1;
@@ -320,7 +334,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     <AttachmentGalleryGrid
       atts={atts}
       isFromMe={isFromMe}
-      onLongPress={onLongPress ? handleLongPress : undefined}
+      onLongPress={onLongPress ? handleAttachmentLongPress : undefined}
     />
   ) : (
     atts.map((att, i) => (
@@ -329,7 +343,7 @@ export const MessageBubble = React.memo(function MessageBubble({
         att={att}
         isFromMe={isFromMe}
         showTail={showTail && !hasText && i === atts.length - 1}
-        onLongPress={onLongPress ? handleLongPress : undefined}
+        onLongPress={onLongPress ? () => handleAttachmentLongPress(att.guid) : undefined}
       />
     ))
   );

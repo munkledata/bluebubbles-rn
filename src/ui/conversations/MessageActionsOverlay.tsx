@@ -42,10 +42,16 @@ export interface SelectedMessage {
   /** A confirmed RCS message or narrowly admitted iMessage can receive a reaction. */
   canReact?: boolean;
   /**
-   * Exact reply target admitted by the live narrow helper capability: part 0, or (FP-006 restored
-   * part replies) the message's one remaining part above 0.
+   * Exact reply target admitted by the live helper capability: the pressed part when one is known
+   * (a part above 0 needs FP-006 restored part replies), otherwise part 0, or the message's one
+   * remaining part above 0.
    */
   replyPartIndex?: number;
+  /**
+   * The exact message part the long-press landed on (a photo, or the text), when the bubble could
+   * prove one. Tapback and reply re-check it against the live message before sending.
+   */
+  pressedPartIndex?: number;
   /** Exact plain-text edit target admitted by the live narrow helper capability. */
   editPartIndex?: 0;
   /** Exact plain-text unsend target admitted by the live narrow helper capability. */

@@ -1,7 +1,10 @@
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
-import { canTargetReplyPartZero } from '@features/conversations/messageActionEligibility';
+import {
+  canTargetReplyPartZero,
+  type MessagePressTarget,
+} from '@features/conversations/messageActionEligibility';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import {
@@ -39,7 +42,7 @@ interface MessageRowProps {
   // happens here, inside the memoized row, not in the list's renderItem).
   onRetry?: (msg: EnrichedMessage) => void;
   onCheckUnsend?: (msg: EnrichedMessage) => void;
-  onLongPress?: (msg: EnrichedMessage, rect: BubbleRect) => void;
+  onLongPress?: (msg: EnrichedMessage, rect: BubbleRect, target?: MessagePressTarget) => void;
   onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Jump to a replied-to message by its guid (tap the reply quote). */
   onJumpToReply?: (originatorGuid: string) => void;
@@ -115,7 +118,7 @@ export const MessageRow = React.memo(function MessageRow({
   const handleRetry = useCallback(() => onRetry?.(msg), [onRetry, msg]);
   const handleCheckUnsend = useCallback(() => onCheckUnsend?.(msg), [onCheckUnsend, msg]);
   const handleLongPress = useCallback(
-    (rect: BubbleRect) => onLongPress?.(msg, rect),
+    (rect: BubbleRect, target?: MessagePressTarget) => onLongPress?.(msg, rect, target),
     [onLongPress, msg],
   );
   const handleJumpToReply = useCallback(() => {

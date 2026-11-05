@@ -499,7 +499,7 @@ describe('MessageBubble accessibility actions', () => {
   beforeEach(() => mockMeasureInWindow.mockReset());
 
   it.each([1, 2])(
-    'shares the measured bubble menu handler with %i photo targets',
+    'reports the pressed photo of %i through the measured bubble menu handler',
     async (count) => {
       const onLongPress = jest.fn();
       const rect = { x: 11, y: 22, width: 33, height: 44 };
@@ -524,9 +524,15 @@ describe('MessageBubble accessibility actions', () => {
           : attachmentModuleMocks.AttachmentGalleryGrid;
       const props = leaf.mock.calls.at(-1)?.[0];
       expect(props.onLongPress).toEqual(expect.any(Function));
-      await act(async () => props.onLongPress());
+      // A single photo's own view knows its guid; a grid cell reports the photo it holds (the
+      // last one here), so a several-photo message's tapback can target that exact part.
+      const pressed = PRIVATE_GALLERY_ATTACHMENTS[count - 1]!.guid;
+      await act(async () => (count === 1 ? props.onLongPress() : props.onLongPress(pressed)));
       expect(onLongPress).toHaveBeenCalledTimes(1);
-      expect(onLongPress).toHaveBeenCalledWith(rect);
+      expect(onLongPress).toHaveBeenCalledWith(rect, {
+        kind: 'attachment',
+        attachmentGuid: pressed,
+      });
       expect(mockMeasureInWindow).toHaveBeenCalledTimes(1);
     },
   );
@@ -561,7 +567,25 @@ describe('MessageBubble accessibility actions', () => {
     });
     expect(mockMeasureInWindow).toHaveBeenCalledTimes(1);
     expect(onLongPress).toHaveBeenCalledTimes(1);
-    expect(onLongPress).toHaveBeenCalledWith(rect);
+    // TalkBack can't aim at one part, so it reports no target and keeps the whole-message rules.
+    expect(onLongPress).toHaveBeenCalledWith(rect, undefined);
+  });
+
+  it('reports a press on the text as the body target', async () => {
+    const onLongPress = jest.fn();
+    const rect = { x: 1, y: 2, width: 3, height: 4 };
+    mockMeasureInWindow.mockImplementationOnce(
+      (callback: (x: number, y: number, width: number, height: number) => void) =>
+        callback(rect.x, rect.y, rect.width, rect.height),
+    );
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: 'Hello there' })} showTail onLongPress={onLongPress} />,
+    );
+
+    await userEvent.setup().longPress(screen.getByText('Hello there'), { duration: 400 });
+
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(onLongPress).toHaveBeenCalledWith(rect, { kind: 'body' });
   });
 
   it('does not advertise a message action or hint when long-press is unavailable', async () => {
@@ -607,7 +631,7 @@ describe('MessageBubble accessibility actions', () => {
         nativeEvent: { actionName: 'longpress' },
       });
     });
-    expect(onLongPress).toHaveBeenCalledWith(rect);
+    expect(onLongPress).toHaveBeenCalledWith(rect, undefined);
   });
 
   it('holding the link preview card opens the message menu', async () => {
@@ -631,7 +655,8 @@ describe('MessageBubble accessibility actions', () => {
 
     await userEvent.setup().longPress(screen.getByTestId('url-preview-card'), { duration: 400 });
 
-    expect(onLongPress).toHaveBeenCalledWith(rect);
+    // A link card belongs to the text, so it targets the body.
+    expect(onLongPress).toHaveBeenCalledWith(rect, { kind: 'body' });
   });
 });
 

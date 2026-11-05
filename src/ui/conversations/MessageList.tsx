@@ -15,6 +15,7 @@ import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
+import type { MessagePressTarget } from '@features/conversations/messageActionEligibility';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import {
   ClientErrorCode,
@@ -73,7 +74,11 @@ interface MessageListProps {
   topInset?: number;
   /** Same, for the floating composer at the bottom. */
   bottomInset?: number;
-  onLongPressMessage?: (msg: EnrichedMessage, rect: BubbleRect) => void;
+  onLongPressMessage?: (
+    msg: EnrichedMessage,
+    rect: BubbleRect,
+    target?: MessagePressTarget,
+  ) => void;
   /** Tap on your own unsend whose result is unknown: check it again with the Mac. */
   onCheckUnsend?: (msg: EnrichedMessage) => void;
   /** Capability-gated plain-text reply selection for exact iMessage part zero. */
