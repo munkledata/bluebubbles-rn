@@ -1744,8 +1744,57 @@ describe('postNotification — detailed message', () => {
     expect(style.type).toBe(3); // AndroidStyle.MESSAGING
     const sender = style.messages[0].person;
     expect(sender.name).toBe('Alice');
-    expect(sender.id).toBe('contact');
+    expect(sender.id).toBe('contact:0');
     expect(sender.icon).toBe('file:///a.png');
+  });
+
+  // Android groups lines by Person key: one shared key filed every sender under the first name.
+  // A child posted by 0.1.74 ('contact') and one from this build ('contact:<n>') must both merge.
+  it.each(['contact', 'contact:1'])(
+    'gives each sender their own Person key when merging into a %s-keyed child',
+    async (existingKey) => {
+      const existing = displayedMessageChild(1, 101);
+      existing.android.style.messages[0].person.id = existingKey;
+      const state = installStatefulTray([existing]);
+      try {
+        await postNotification(
+          messageIntent({
+            messageGuid: 'msg-2',
+            senderName: 'Bob',
+            isGroup: true,
+            timestamp: 1700000000200,
+          }),
+        );
+
+        const lines = state.tray.get('gator-message-1')!.android.style.messages as {
+          person: { name: string; id: string };
+        }[];
+        expect(lines.map((line) => [line.person.name, line.person.id])).toEqual([
+          ['Contact 1', 'contact:0'],
+          ['Bob', 'contact:1'],
+        ]);
+      } finally {
+        state.restore();
+      }
+    },
+  );
+
+  it('keeps one Person key for a sender who sends several lines', async () => {
+    const existing = displayedMessageChild(1, 101);
+    existing.android.style.messages[0].person.name = 'Bob';
+    const state = installStatefulTray([existing]);
+    try {
+      await postNotification(
+        messageIntent({ messageGuid: 'msg-2', senderName: 'Bob', timestamp: 1700000000200 }),
+      );
+
+      const lines = state.tray.get('gator-message-1')!.android.style.messages as {
+        person: { id: string };
+      }[];
+      expect(lines.map((line) => line.person.id)).toEqual(['contact:0', 'contact:0']);
+    } finally {
+      state.restore();
+    }
   });
 
   it('bounds incoming and adopted message history before every native post', async () => {
@@ -1819,7 +1868,11 @@ describe('postNotification — detailed message', () => {
       const afterWithdrawal = state.tray.get('gator-message-1')!;
       expect(afterWithdrawal.data?.messageHistoryIds).toBe('199');
       expect(afterWithdrawal.android?.style.messages).toHaveLength(1);
-      expect(afterWithdrawal.android?.style.messages[0]).toEqual(lines[1]);
+      // The surviving sender is now the only one, so its Person key renumbers to 0.
+      expect(afterWithdrawal.android?.style.messages[0]).toEqual({
+        ...lines[1],
+        person: { ...lines[1]!.person, id: 'contact:0' },
+      });
     } finally {
       state.restore();
     }
@@ -3304,7 +3357,7 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
         messages: [
           expect.objectContaining({
             text: 'New message',
-            person: { name: 'Contact', id: 'contact' },
+            person: { name: 'Contact', id: 'contact:0' },
           }),
         ],
       }),

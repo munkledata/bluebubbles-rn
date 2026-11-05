@@ -175,6 +175,71 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     if (intent?.kind === 'message') expect(intent.chatTitle).toBe('Doe, Jane, Bob');
   });
 
+  it('keeps a one-to-one chat with two handle rows out of the group layout', async () => {
+    // One person reached through two addresses gives the chat two handle rows. The chat's own
+    // style (45 = one-to-one) decides, as in the chat list, so Android draws the single-person
+    // layout (not its group face pile) and the title is the sender, not a participant list.
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await deliverRaw(
+      router,
+      'new-message',
+      {
+        guid: 'two-handle-dm-message',
+        text: 'hi',
+        dateCreated: 1_700_000_000_002,
+        handle: { address: 'sam@example.test', displayName: 'Sam' },
+        chats: [
+          {
+            guid: 'iMessage;-;sam@example.test',
+            style: 45,
+            participants: [
+              { address: 'sam@example.test', displayName: 'Sam' },
+              { address: 'sam.alt@example.test', displayName: 'Sam' },
+            ],
+          },
+        ],
+      },
+      'socket',
+    );
+
+    const intent = intents[0];
+    expect(intent?.kind).toBe('message');
+    if (intent?.kind === 'message') {
+      expect(intent.isGroup).toBe(false);
+      expect(intent.chatTitle).toBe('Sam');
+    }
+  });
+
+  it('falls back to the handle count only when the chat has no style', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await deliverRaw(
+      router,
+      'new-message',
+      {
+        guid: 'styleless-group-message',
+        text: 'hello',
+        dateCreated: 1_700_000_000_003,
+        handle: { address: 'jane@example.test', displayName: 'Jane' },
+        chats: [
+          {
+            guid: 'iMessage;+;styleless-group',
+            participants: [
+              { address: 'jane@example.test', displayName: 'Jane' },
+              { address: 'bob@example.test', displayName: 'Bob' },
+            ],
+          },
+        ],
+      },
+      'socket',
+    );
+
+    const intent = intents[0];
+    expect(intent?.kind).toBe('message');
+    if (intent?.kind === 'message') expect(intent.isGroup).toBe(true);
+  });
+
   it('does not present or withdraw under a different provider chat for a colliding message GUID', async () => {
     const { db } = await createTestDb();
     const first = wire(db);

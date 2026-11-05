@@ -11,6 +11,7 @@ import {
 import type { AppDatabase } from '@db/types';
 import {
   buildMessageSnippet,
+  isGroupRow,
   isProvenIMessageGroupChat,
   isProvenOneToOneIMessageChat,
   participantDisplayNames,
@@ -112,7 +113,10 @@ async function buildCurrentMessageIntent(
     message.handle?.displayName ??
     address ??
     'Unknown';
-  const isGroup = (header?.participantCount ?? 0) > 1;
+  // Trust the chat's own style (43 = group, 45 = one-to-one), as the chat list does. One person
+  // reached through two addresses (iMessage + SMS) has two handle rows but is still a one-to-one
+  // chat; counting rows made Android draw its group layout for them.
+  const isGroup = header ? isGroupRow(header) : false;
   const chatTitle =
     header?.displayName ||
     (isGroup ? participantDisplayNames(header?.participantNames ?? null) : senderName) ||

@@ -193,16 +193,35 @@ function messageHistoryData(entries: readonly MessageNotificationHistoryEntry[])
   return { [MESSAGE_HISTORY_IDS_KEY]: encodeMessageHistoryIds(entries) };
 }
 
+/**
+ * Android groups consecutive lines by Person key and builds a group's face pile from distinct keys,
+ * so each sender needs a key of their own. One shared key filed every line under the first sender's
+ * name. Senders are numbered by first appearance in this history; the key never carries a name or
+ * address, and the parser below re-derives names from the lines themselves.
+ */
 function messagingStyleLines(entries: readonly MessageNotificationHistoryEntry[]) {
-  return entries.map((entry) => ({
-    text: entry.text,
-    timestamp: entry.timestamp,
-    person: {
-      name: entry.senderName,
-      id: 'contact',
-      ...(entry.avatarUri ? { icon: entry.avatarUri } : {}),
-    },
-  }));
+  const senderKeys = new Map<string, string>();
+  return entries.map((entry) => {
+    let key = senderKeys.get(entry.senderName);
+    if (key == null) {
+      key = `contact:${senderKeys.size}`;
+      senderKeys.set(entry.senderName, key);
+    }
+    return {
+      text: entry.text,
+      timestamp: entry.timestamp,
+      person: {
+        name: entry.senderName,
+        id: key,
+        ...(entry.avatarUri ? { icon: entry.avatarUri } : {}),
+      },
+    };
+  });
+}
+
+/** Builds up to 0.1.74 keyed every sender `contact`; later builds number them `contact:<n>`. */
+function isMessageSenderKey(id: unknown): boolean {
+  return id === 'contact' || (typeof id === 'string' && /^contact:\d{1,3}$/.test(id));
 }
 
 function messageGroupingAndroid(): {
@@ -262,7 +281,7 @@ function parseDisplayedMessageHistory(
       !Number.isFinite(line.timestamp) ||
       typeof line.person?.name !== 'string' ||
       line.person.name.length === 0 ||
-      line.person.id !== 'contact' ||
+      !isMessageSenderKey(line.person.id) ||
       (icon != null && (typeof icon !== 'string' || icon.length === 0))
     ) {
       return null;
@@ -1849,31 +1868,6 @@ export function prepareNotificationPresentationState(): Promise<void> {
   });
 }
 
-// Fallback avatar for a sender with no contact photo: the Gator mark, so the notification shows
-// our icon instead of Android's generic gray silhouette. Resolve it only when the first message
-// notification needs it; importing notification operations must not touch React Native's asset
-// registry. Guarded because resolveAssetSource can return undefined and notify-kit throws on
-// `icon: undefined`.
-let gatorAvatarResolved = false;
-let gatorAvatarUri: string | undefined;
-
-function getGatorAvatarUri(): string | undefined {
-  if (gatorAvatarResolved) return gatorAvatarUri;
-  gatorAvatarResolved = true;
-  try {
-    // Literal requires keep both dependencies in Metro while avoiding a static React Native import
-    // in React-free Node graphs. Any failure simply omits the optional fallback avatar.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports -- static RN import breaks the React-free node/headless import path
-    const { Image } = require('react-native') as typeof import('react-native');
-    gatorAvatarUri = Image.resolveAssetSource(
-      require('../../../assets/notification-avatar.png') as number,
-    )?.uri;
-  } catch {
-    gatorAvatarUri = undefined;
-  }
-  return gatorAvatarUri;
-}
-
 let channelReady: Promise<string> | null = null;
 function ensureChannel(): Promise<string> {
   // Don't memoize a REJECTED promise — clear the cache on failure so a later call retries.
@@ -2235,7 +2229,9 @@ async function postNotificationNow(
   const senderName = normalizedSenderName ?? 'Contact';
   const title =
     normalizeMessageNotificationTitle(intent.chatTitle) ?? normalizedSenderName ?? 'Conversation';
-  const avatarUri = normalizeMessageNotificationAvatarUri(intent.avatarUri ?? getGatorAvatarUri());
+  // No contact photo → no icon: Android draws a colored letter circle (a person glyph for a bare
+  // number), matching the app. A Gator-logo stand-in sat beside Gator's own app badge.
+  const avatarUri = normalizeMessageNotificationAvatarUri(intent.avatarUri);
   const history = mergeMessageNotificationHistory(existingHistory, {
     messageId: route.messageId,
     text: body,
