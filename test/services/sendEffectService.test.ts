@@ -283,3 +283,98 @@ describe('sendIMessageEffect', () => {
     expect(transport.post).toHaveBeenCalledTimes(1);
   });
 });
+
+// FP-006: a group effect needs the group switch and a stored all-iMessage group row, then goes to
+// the same one-shot route with the group's guid.
+describe('sendIMessageEffect in an iMessage group (FP-006)', () => {
+  const GROUP = 'any;+;chat-effects-1';
+  let db: AppDatabase;
+  let raw: Database.Database;
+
+  function seedGroup(services: string[] = ['iMessage', 'iMessage']): void {
+    const chat = raw.prepare('INSERT INTO chats(guid, style) VALUES (?, 43)').run(GROUP);
+    services.forEach((service, index) => {
+      const handle = raw
+        .prepare('INSERT INTO handles(address, service) VALUES (?, ?)')
+        .run(`member${index}@example.com`, service);
+      raw
+        .prepare('INSERT INTO chat_handles(chat_id, handle_id) VALUES (?, ?)')
+        .run(Number(chat.lastInsertRowid), Number(handle.lastInsertRowid));
+    });
+  }
+
+  const source = (fields: Record<string, unknown>) =>
+    fixedRcsCapabilitySource(ServerInfo.parse({ version: 'test', ...fields }));
+
+  const rowCount = () =>
+    one(raw, 'SELECT COUNT(*) AS count FROM messages WHERE date_deleted IS NULL').count;
+
+  beforeEach(async () => {
+    ({ db, raw } = await createTestDb());
+  });
+
+  afterEach(() => raw.close());
+
+  it('sends a group effect once with the group guid while the group switch is on', async () => {
+    seedGroup();
+    const transport = fakeHttp(async () => ({ guid: 'group-effect-guid', viaPrivateApi: true }));
+    const result = await sendIMessageEffect(
+      db,
+      transport.http,
+      { chatGuid: GROUP, text: 'boom', effectId: SLAM },
+      10_000,
+      undefined,
+      source({ supports_imessage_group_effects: true }),
+    );
+    expect(result).toMatchObject({ status: 'accepted' });
+    expect(transport.post).toHaveBeenCalledTimes(1);
+    expect(transport.post.mock.calls[0]?.[0]).toBe('/message/effect');
+    expect(transport.post.mock.calls[0]?.[2]).toMatchObject({
+      retry: false,
+      json: { chatGuid: GROUP, message: 'boom', effectId: SLAM },
+    });
+    expect(
+      one(raw, `SELECT guid, send_state AS state FROM messages WHERE date_deleted IS NULL`),
+    ).toEqual({ guid: 'group-effect-guid', state: 'sent' });
+  });
+
+  it.each([
+    ['only the one-to-one switch is on', { supports_imessage_effects: true }, undefined],
+    ['the group switch is off', {}, undefined],
+    ['a member is not iMessage', { supports_imessage_group_effects: true }, ['iMessage', 'SMS']],
+  ])(
+    'refuses a group effect before anything is stored when %s',
+    async (_label, flags, services) => {
+      seedGroup(services);
+      const transport = fakeHttp(async () => ({ guid: 'never' }));
+      await expect(
+        sendIMessageEffect(
+          db,
+          transport.http,
+          { chatGuid: GROUP, text: 'boom', effectId: SLAM },
+          10_000,
+          undefined,
+          source(flags),
+        ),
+      ).resolves.toEqual({ status: 'rejected' });
+      expect(transport.post).not.toHaveBeenCalled();
+      expect(rowCount()).toBe(0);
+    },
+  );
+
+  it('the group switch never opens a one-to-one effect', async () => {
+    seedChat(raw);
+    const transport = fakeHttp(async () => ({ guid: 'never' }));
+    await expect(
+      sendIMessageEffect(
+        db,
+        transport.http,
+        { chatGuid: CHAT_GUID, text: 'boom', effectId: SLAM },
+        10_000,
+        undefined,
+        source({ supports_imessage_group_effects: true }),
+      ),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(transport.post).not.toHaveBeenCalled();
+  });
+});

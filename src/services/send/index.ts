@@ -1026,7 +1026,7 @@ export function sendEffect(
       if (
         !capability ||
         isRcsChatGuid(snapshot.chatGuid) ||
-        capability.serverInfo?.supports_imessage_effects !== true ||
+        !messageChangeSupported(capability.serverInfo, snapshot.chatGuid, 'effect') ||
         !capability.isCurrent()
       ) {
         throw new SendCapabilityUnavailableError();
@@ -1125,25 +1125,33 @@ export function sendFormatted(
 }
 
 /**
- * Whether the server will take this edit or unsend right now: the reviewed one-to-one command, or
- * (FP-006) the restored group command while its own group switch is on. A group never borrows the
- * one-to-one switch, and a one-to-one chat never borrows a group switch.
+ * Whether the server will take this edit, unsend or effect right now: the reviewed one-to-one
+ * command, or (FP-006) the restored group command while its own group switch is on. A group never
+ * borrows the one-to-one switch, and a one-to-one chat never borrows a group switch.
  */
 function messageChangeSupported(
   info: Parameters<typeof canUseRestoredIMessageGroupFeature>[0],
   chatGuid: string,
-  change: 'edit' | 'unsend',
+  change: 'edit' | 'unsend' | 'effect',
 ): boolean {
   if (restoredChatKind(chatGuid) === 'group') {
     return canUseRestoredIMessageGroupFeature(
       info,
       chatGuid,
-      change === 'edit' ? 'supports_imessage_group_edit' : 'supports_imessage_group_unsend',
+      change === 'edit'
+        ? 'supports_imessage_group_edit'
+        : change === 'unsend'
+          ? 'supports_imessage_group_unsend'
+          : 'supports_imessage_group_effects',
     );
   }
-  return (
-    (change === 'edit' ? info?.supports_imessage_edit : info?.supports_imessage_unsend) === true
-  );
+  const direct =
+    change === 'edit'
+      ? info?.supports_imessage_edit
+      : change === 'unsend'
+        ? info?.supports_imessage_unsend
+        : info?.supports_imessage_effects;
+  return direct === true;
 }
 
 /** UI-facing edit of a sent message's text (optimistic + revert on failure). */

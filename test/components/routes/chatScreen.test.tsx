@@ -1084,7 +1084,7 @@ describe('ChatScreen — FP-006 part 1 offers only what it can send', () => {
     supports_imessage_subject: true,
   };
 
-  it('in a group with every restored flag on, offers tapbacks, Reply, Edit and Unsend but no other restored action', async () => {
+  it('in a group with every restored flag on, offers tapbacks, Reply, Edit, Unsend and effects but no other restored action', async () => {
     mockGuid = RESTORED_GROUP;
     useSessionStore.setState({
       serverInfo: { version: 'test', ...EVERY_RESTORED_FLAG } as any,
@@ -1128,9 +1128,9 @@ describe('ChatScreen — FP-006 part 1 offers only what it can send', () => {
     expect(overlay.selected.unsendPartIndex).toBe(0);
     expect(overlay.onEdit).toEqual(expect.any(Function));
     expect(overlay.onUnsend).toEqual(expect.any(Function));
-    // Advertised but not sendable yet: no group effect, contact card or location in the composer.
+    // Effects are offered in the composer; contact cards and location are not sendable yet.
     const composer = mockCaptured.composer!;
-    expect(composer.onSendEffect).toBeUndefined();
+    expect(composer.onSendEffect).toEqual(expect.any(Function));
     expect(composer.onPickContact).toBeUndefined();
     expect(composer.onShareLocation).toBeUndefined();
   });

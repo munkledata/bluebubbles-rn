@@ -2,6 +2,8 @@ import { sendEffect } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { isSupportedIMessageEffectId } from '@core/effects';
+import { canUseRestoredIMessageGroupFeature, restoredChatKind } from '@core/models';
+import type { ServerInfo } from '@core/models';
 import {
   discardOutgoingMessageWithinTransaction,
   getChatHeader,
@@ -9,7 +11,7 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { isProvenOneToOneIMessageChat } from '@utils';
+import { isProvenIMessageGroupChat, isProvenOneToOneIMessageChat } from '@utils';
 import { utf8Decode, utf8Encode } from '@utils/bytes';
 import {
   resolveRcsAttemptOwnership,
@@ -30,6 +32,7 @@ const DEFINITE_EFFECT_FAILURES = new Set([
 ]);
 
 export interface SendEffectArgs {
+  /** An existing one-to-one iMessage chat, or (FP-006) an all-iMessage group. */
   chatGuid: string;
   text: string;
   effectId: string;
@@ -64,7 +67,7 @@ function requireEffectArgs(args: SendEffectArgs): void {
   const textBytes = utf8Encode(args.text);
   const chatGuidBytes = utf8Encode(args.chatGuid);
   if (
-    !/^(?:iMessage|any);-;.+$/u.test(args.chatGuid) ||
+    !/^(?:iMessage|any);[+-];.+$/u.test(args.chatGuid) ||
     args.chatGuid.trim() !== args.chatGuid ||
     CONTROL_CHARACTER.test(args.chatGuid) ||
     chatGuidBytes.byteLength === 0 ||
@@ -80,15 +83,27 @@ function requireEffectArgs(args: SendEffectArgs): void {
   }
 }
 
+/**
+ * The stored row proves this exact chat: one-to-one with one participant, or (FP-006) an
+ * all-iMessage group. An `any;+;` guid alone also fits SMS and RCS groups, so the participant set
+ * decides, as for the restored tapback and reply.
+ */
 function isExactEffectChat(
   header: Awaited<ReturnType<typeof getChatHeader>>,
   chatGuid: string,
 ): boolean {
-  return (
-    header?.guid === chatGuid &&
-    header.participantCount === 1 &&
-    isProvenOneToOneIMessageChat(header)
-  );
+  if (header?.guid !== chatGuid) return false;
+  if (restoredChatKind(chatGuid) === 'group') {
+    return isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true });
+  }
+  return header.participantCount === 1 && isProvenOneToOneIMessageChat(header);
+}
+
+/** A group effect needs the group switch; a one-to-one effect needs the reviewed switch. */
+function effectSwitchOn(info: ServerInfo | null | undefined, chatGuid: string): boolean {
+  return restoredChatKind(chatGuid) === 'group'
+    ? canUseRestoredIMessageGroupFeature(info, chatGuid, 'supports_imessage_group_effects')
+    : info?.supports_imessage_effects === true;
 }
 
 function isDefiniteEffectFailure(error: unknown): boolean {
@@ -141,7 +156,7 @@ export async function sendIMessageEffect(
       { requireServerInfo: true },
     );
     const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
-    if (capability.serverInfo?.supports_imessage_effects !== true) {
+    if (!effectSwitchOn(capability.serverInfo, args.chatGuid)) {
       return { status: 'rejected' };
     }
 
@@ -212,12 +227,16 @@ export async function sendIMessageEffect(
     try {
       // All endpoint validation was already proved above. From this boundary onward, conservatively
       // assume the pinned request may have reached the server even if the await rejects immediately.
-      const ack = await sendEffect(transport.http, {
-        chatGuid: args.chatGuid,
-        tempGuid,
-        message: args.text,
-        effectId: args.effectId,
-      });
+      const ack = await sendEffect(
+        transport.http,
+        {
+          chatGuid: args.chatGuid,
+          tempGuid,
+          message: args.text,
+          effectId: args.effectId,
+        },
+        { restoredGroup: restoredChatKind(args.chatGuid) === 'group' },
+      );
       if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
       await reconcileSendOutcome(db, tempGuid, ack, now, capabilityGuard, {
         expectedChatGuid: args.chatGuid,

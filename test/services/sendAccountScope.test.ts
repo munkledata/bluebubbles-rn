@@ -56,6 +56,7 @@ jest.mock('@/services/send/sendEditService', () => ({
   sendEdit: jest.fn(),
   sendUnsend: jest.fn(),
 }));
+jest.mock('@/services/send/sendEffectService', () => ({ sendIMessageEffect: jest.fn() }));
 jest.mock('@/services/send/rcsAttemptCapability', () => ({
   ...jest.requireActual('@/services/send/rcsAttemptCapability'),
   captureSessionRcsCapabilityLease: jest.fn(),
@@ -101,6 +102,7 @@ import {
   retry,
   send,
   sendContactCard,
+  sendEffect,
   sendImage,
   sendImages,
   sendTextAttachment,
@@ -1148,6 +1150,38 @@ describe('UI send account lease', () => {
           expect(mockSendEdit.mock.calls[0]?.[2]).toMatchObject({ chatGuid, restoredGroup });
           expect(mockSendUnsend.mock.calls[0]?.[2]).toMatchObject({ chatGuid, restoredGroup });
         }
+      }
+    },
+  );
+
+  it.each([
+    ['the one-to-one switch only', { supports_imessage_effects: true }, false, true],
+    ['the group switch only', { supports_imessage_group_effects: true }, true, false],
+  ])(
+    'FP-006: with %s, a group effect is sent %s and a one-to-one effect %s',
+    async (_label, flags, groupSent, directSent) => {
+      const { sendIMessageEffect } = jest.requireMock('@/services/send/sendEffectService') as {
+        sendIMessageEffect: jest.Mock;
+      };
+      sendIMessageEffect.mockResolvedValue({ status: 'accepted', tempGuid: 'temp-effect' });
+      mockCaptureCapability.mockReturnValue({
+        kind: 'session',
+        origin: 'https://capability.test',
+        revision: 1,
+        serverInfo: { ...RCS_SERVER_INFO, ...flags },
+        isCurrent: () => true,
+        publish: () => true,
+      });
+      const slam = 'com.apple.MobileSMS.expressivesend.impact';
+      for (const [chatGuid, sent] of [
+        ['any;+;chat-group', groupSent],
+        ['iMessage;-;+15551234567', directSent],
+      ] as const) {
+        sendIMessageEffect.mockClear();
+        await expect(sendEffect({ chatGuid, text: 'boom', effectId: slam })).resolves.toEqual(
+          sent ? { status: 'accepted', tempGuid: 'temp-effect' } : null,
+        );
+        expect(sendIMessageEffect).toHaveBeenCalledTimes(sent ? 1 : 0);
       }
     },
   );

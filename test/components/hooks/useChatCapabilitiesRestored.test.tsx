@@ -93,7 +93,7 @@ const RESTORED_ON = {
 
 const ANY_GROUP_HEADER = { ...GROUP_HEADER, guid: ANY_GROUP };
 
-/** The restored group features this app can send: tapbacks, replies, edits and unsends. */
+/** The restored group features this app can send: tapbacks, replies, edits, unsends, effects. */
 const PART_ONE_KEYS = [
   'imessageReactionsAvailable',
   'imessageEmojiReactionsAvailable',
@@ -102,14 +102,11 @@ const PART_ONE_KEYS = [
   'imessagePartRepliesAvailable',
   'imessageEditsAvailable',
   'imessageUnsendsAvailable',
+  'imessageEffectsAvailable',
 ] as const;
 
 /** Group features whose restored switches the app ignores, because it cannot send them yet. */
-const NOT_YET_SENDABLE_KEYS = [
-  'imessageEffectsAvailable',
-  'contactCardAvailable',
-  'currentLocationAvailable',
-] as const;
+const NOT_YET_SENDABLE_KEYS = ['contactCardAvailable', 'currentLocationAvailable'] as const;
 
 const GROUP_RESTORED_KEYS = [...PART_ONE_KEYS, ...NOT_YET_SENDABLE_KEYS] as const;
 
@@ -148,7 +145,7 @@ describe('useChatCapabilities FP-006 restored flags', () => {
       ['supports_imessage_group_replies', ['imessageRepliesAvailable']],
       ['supports_imessage_group_edit', ['imessageEditsAvailable']],
       ['supports_imessage_group_unsend', ['imessageUnsendsAvailable']],
-      ['supports_imessage_group_effects', []],
+      ['supports_imessage_group_effects', ['imessageEffectsAvailable']],
       ['supports_imessage_group_read_state', []],
       ['supports_imessage_group_contact', []],
       ['supports_imessage_group_location', []],
