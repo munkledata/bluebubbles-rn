@@ -140,6 +140,27 @@ class ShareShortcutAvatarTest {
   }
 
   @Test
+  fun lruCacheKeepsTheMostRecentlyUsedEntries() {
+    val cache = AvatarLruCache<String, Int>(2)
+    cache.put("a", 1)
+    cache.put("b", 2)
+    assertEquals(1, cache.get("a")) // touch a, so b is now the eldest
+    cache.put("c", 3)
+    assertNull(cache.get("b"))
+    assertEquals(1, cache.get("a"))
+    assertEquals(3, cache.get("c"))
+    cache.clear()
+    assertEquals(0, cache.size())
+  }
+
+  @Test
+  fun aReplacedFileGetsADifferentCacheKey() {
+    val spec = ShareShortcutAvatarSpec("file:///x.jpg", "A", 0, 0)
+    assertTrue(AvatarCacheKey(spec, "100:5") != AvatarCacheKey(spec, "200:5"))
+    assertEquals(AvatarCacheKey(spec, "100:5"), AvatarCacheKey(spec, "100:5"))
+  }
+
+  @Test
   fun shortcutSpecsFallBackToANeutralPictureNeverTheAppIcon() {
     val record = ShareShortcutRecord().apply {
       guid = "iMessage;-;+15551234567"

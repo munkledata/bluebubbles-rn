@@ -138,17 +138,66 @@ internal fun normalizeAvatarSpec(
   return if (photo != null) fallback.copy(photoUri = photo) else null
 }
 
+/**
+ * A small least-recently-used cache. Publishing runs on the JS thread on every inbox reorder (every
+ * new message), so drawn pictures are reused instead of decoding up to ten photos each time. Pure,
+ * JVM-testable.
+ */
+internal class AvatarLruCache<K, V>(private val maxEntries: Int) {
+  private val entries = object : LinkedHashMap<K, V>(16, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean = size > maxEntries
+  }
+
+  @Synchronized fun get(key: K): V? = entries[key]
+
+  @Synchronized fun put(key: K, value: V) {
+    entries[key] = value
+  }
+
+  @Synchronized fun clear() = entries.clear()
+
+  @Synchronized fun size(): Int = entries.size
+}
+
+/**
+ * Cache key for a drawn picture: the spec, plus a stamp that changes when a file Gator stores is
+ * replaced (modified time and size), so a new group photo at the same path is redrawn. A contact
+ * photo has no cheap stamp and is refreshed when the process restarts.
+ */
+internal data class AvatarCacheKey(val spec: ShareShortcutAvatarSpec, val stamp: String)
+
+private const val MAX_CACHED_AVATARS = 32
+
 /** Draws avatar icons. Not JVM-testable (android.graphics); covered by device proof. */
 internal class ShareShortcutAvatarRenderer(private val context: Context) {
+  companion object {
+    /** At most 32 x 192 x 192 x 4 bytes, about 4.7 MB. Process-wide, cleared on account cleanup. */
+    internal val cache = AvatarLruCache<AvatarCacheKey, Bitmap>(MAX_CACHED_AVATARS)
+  }
+
   private val ownDirectories: List<String> by lazy {
     listOfNotNull(context.filesDir, context.cacheDir, context.noBackupFilesDir)
       .mapNotNull { runCatching { it.canonicalPath }.getOrNull() }
   }
 
   fun iconFor(spec: ShareShortcutAvatarSpec): IconCompat {
-    val photo = spec.photoUri?.let { loadPhoto(it) }
-    val bitmap = photo?.let { circularCrop(it) } ?: letterCircle(spec)
+    val key = AvatarCacheKey(spec, stampFor(spec))
+    val bitmap = cache.get(key) ?: run {
+      val photo = spec.photoUri?.let { loadPhoto(it) }
+      (photo?.let { circularCrop(it) } ?: letterCircle(spec)).also { cache.put(key, it) }
+    }
     return IconCompat.createWithBitmap(bitmap)
+  }
+
+  private fun stampFor(spec: ShareShortcutAvatarSpec): String {
+    val uri = spec.photoUri ?: return ""
+    val source = resolveAvatarSource(uri, ownDirectories) {
+      runCatching { File(it).canonicalPath }.getOrNull()
+    }
+    return when (source) {
+      is AvatarSource.OwnFile -> File(source.canonicalPath).let { "${it.lastModified()}:${it.length()}" }
+      else -> ""
+    }
   }
 
   private fun loadPhoto(uri: String): Bitmap? {

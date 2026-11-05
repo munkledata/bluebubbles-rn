@@ -328,6 +328,7 @@ class GatorShareShortcutsModule : Module() {
 
     Function("clearAllShareShortcuts") { revision: Double ->
       mutate(revision) { context ->
+        ShareShortcutAvatarRenderer.cache.clear()
         val store = AndroidLegacyShortcutStore(context)
         clearLegacyShareShortcuts(store)
         clearCurrentShareShortcuts(store)
@@ -386,6 +387,8 @@ class GatorShareShortcutsModule : Module() {
   }
 
   private fun clearCurrentAndRotate(context: Context) {
+    // Drawn pictures belong to the account being cleared; never reuse them for the next one.
+    ShareShortcutAvatarRenderer.cache.clear()
     clearCurrentShareShortcuts(AndroidLegacyShortcutStore(context))
     check(ShareShortcutTokenOwner(context).rotate()) {
       "Direct Share account scope could not be rotated"
