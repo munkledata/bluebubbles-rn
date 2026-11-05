@@ -73,6 +73,7 @@ import {
 import { PRESET_ORDER, PRESETS } from '@ui/theme/tokens';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 import { textInputAccentProps } from '@ui/theme/controlColors';
+import { restoredIMessageFeaturesLabel } from '@utils';
 
 /** Where auto-downloaded images are additionally saved (the picker in the DOWNLOADS section). */
 const AUTO_DOWNLOAD_DEST_OPTIONS: { value: AutoDownloadDestination; label: string }[] = [
@@ -859,6 +860,10 @@ export default function SettingsScreen(): React.JSX.Element {
             <InfoRow label="Server" value={visibleOrigin ?? '—'} />
             <InfoRow label="Server Version" value={visibleServerInfo?.server_version ?? '—'} />
             <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? '—'} />
+            <InfoRow
+              label="Restored iMessage features"
+              value={restoredIMessageFeaturesLabel(visibleServerInfo)}
+            />
             <NavRow
               label="Privacy & Storage…"
               onPress={() => router.push('/storage-privacy')}

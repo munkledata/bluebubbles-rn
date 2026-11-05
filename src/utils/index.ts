@@ -16,6 +16,7 @@ export * from './uploadProgress';
 export * from './urls';
 export * from './contactMatch';
 export * from './handleFormat';
+export * from './restoredFeatures';
 export * from './vcard';
 export * from './vlocation';
 export * from './location';

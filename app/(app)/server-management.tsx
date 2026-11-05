@@ -40,6 +40,7 @@ import { useSyncStore, type SyncRepairStatus } from '@state/syncStore';
 import { InfoRow, PairingQr, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 import { textInputAccentProps } from '@ui/theme/controlColors';
+import { restoredIMessageFeaturesLabel } from '@utils';
 
 /**
  * Read-only queries do not hold Disconnect open. Their account-generation and transport-revision
@@ -582,6 +583,10 @@ export default function ServerManagementScreen(): React.JSX.Element {
           />
           <InfoRow label="Server version" value={visibleServerInfo?.server_version ?? 'Unknown'} />
           <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? 'Unknown'} />
+          <InfoRow
+            label="Restored iMessage features"
+            value={restoredIMessageFeaturesLabel(visibleServerInfo)}
+          />
           <InfoRow
             label="iMessage availability"
             value={iMessageAvailabilityCopy(visibleServerInfo?.supports_imessage_availability)}

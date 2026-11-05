@@ -1035,6 +1035,16 @@ describe('SettingsScreen — destructive/confirm dialogs', () => {
 });
 
 describe('SettingsScreen — account-owned server display', () => {
+  it('shows the restored iMessage features as On when the server routes them', async () => {
+    useSessionStore.setState({
+      ...PRIVATE_SERVER_SESSION,
+      serverInfo: { ...PRIVATE_SERVER_SESSION.serverInfo, supports_imessage_group_edit: true },
+    });
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText('Restored iMessage features')).toBeTruthy();
+    expect(screen.getByRole('text', { name: 'On' })).toBeTruthy();
+  });
+
   it('renders exact installed and connected-server details without restoring the retired account route', async () => {
     useSessionStore.setState(PRIVATE_SERVER_SESSION);
 
@@ -1054,8 +1064,11 @@ describe('SettingsScreen — account-owned server display', () => {
     expect(
       screen.getByRole('text', { name: PRIVATE_SERVER_SESSION.serverInfo.os_version }),
     ).toBeTruthy();
-    // The old "Private API: Retired" row is gone: it named a setting that no longer exists.
+    // "Private API: Retired" became the restored-features status. This server lists no restored
+    // switches; the legacy private_api flag in the fixture does not count as one.
     expect(screen.queryByText('Private API')).toBeNull();
+    expect(screen.getByText('Restored iMessage features')).toBeTruthy();
+    expect(screen.getByRole('text', { name: 'Not on this server' })).toBeTruthy();
     expect(screen.queryByText('fallback-version')).toBeNull();
     expect(screen.queryByText('999')).toBeNull();
     expect(screen.queryByText('iMessage Account…')).toBeNull();

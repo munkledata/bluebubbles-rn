@@ -317,8 +317,10 @@ describe('ServerManagementScreen — status queries', () => {
     await renderScreen();
     expect(await screen.findByText('9.9.9')).toBeTruthy();
     expect(screen.getByText('26.0')).toBeTruthy();
-    // No retired "Private API" row: it named a setting that no longer exists.
+    // No retired "Private API" row; the restored-features status replaces it.
     expect(screen.queryByText('Private API')).toBeNull();
+    expect(screen.getByText('Restored iMessage features')).toBeTruthy();
+    expect(screen.getByText('Not on this server')).toBeTruthy();
     await waitFor(() =>
       expect(useSessionStore.getState().serverInfo?.server_version).toBe('9.9.9'),
     );
