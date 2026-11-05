@@ -20362,7 +20362,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationAction.<callback:383ea8d776>:mutator-call:f5e067703ee5",
       "path": "src/services/notifications/actions.ts",
-      "line": 199,
+      "line": 204,
       "symbol": "handleNotificationAction.<callback:383ea8d776>",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#handleNotificationActionForAccount",
@@ -20375,7 +20375,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:d1008c7afb46",
       "path": "src/services/notifications/actions.ts",
-      "line": 275,
+      "line": 287,
       "symbol": "handleNotificationActionForAccount",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#replyTo",
@@ -20388,7 +20388,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:6c2fa704827f",
       "path": "src/services/notifications/actions.ts",
-      "line": 296,
+      "line": 308,
       "symbol": "handleNotificationActionForAccount",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#loveMessage",
@@ -20401,7 +20401,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPress.<callback:57842c3968>:mutator-call:34d83832cc06",
       "path": "src/services/notifications/actions.ts",
-      "line": 337,
+      "line": 349,
       "symbol": "handleNotificationPress.<callback:57842c3968>",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#handleNotificationPressForAccount",
@@ -20414,7 +20414,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPressForAccount:mutator-call:44e77ef8d7a9",
       "path": "src/services/notifications/actions.ts",
-      "line": 400,
+      "line": 412,
       "symbol": "handleNotificationPressForAccount",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -20427,7 +20427,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPressForAccount:mutator-call:b83aedcb7b5e",
       "path": "src/services/notifications/actions.ts",
-      "line": 402,
+      "line": 414,
       "symbol": "handleNotificationPressForAccount",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationId",
@@ -20440,7 +20440,7 @@
     {
       "id": "src/services/notifications/actions.ts#replyTo:mutator-call:ef1e4d9c2bf6",
       "path": "src/services/notifications/actions.ts",
-      "line": 438,
+      "line": 450,
       "symbol": "replyTo",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -20453,7 +20453,7 @@
     {
       "id": "src/services/notifications/actions.ts#replyTo:mutator-call:16685310e2e9",
       "path": "src/services/notifications/actions.ts",
-      "line": 441,
+      "line": 453,
       "symbol": "replyTo",
       "operation": "mutator-call",
       "target": "src/services/send/sendService.ts#sendTextMessage",
@@ -20464,9 +20464,61 @@
       "evidence": "scripts/check-db-writes.test.mjs; scripts/check-scheduled-recovery.test.mjs; test/services/notificationActions.test.ts; test/services/sendService.test.ts; test/services/sendAccountScope.test.ts"
     },
     {
+      "id": "src/services/notifications/actions.ts#loveIMessage:mutator-call:ccfa95b29619",
+      "path": "src/services/notifications/actions.ts",
+      "line": 494,
+      "symbol": "loveIMessage",
+      "operation": "mutator-call",
+      "target": "src/services/databaseControl.ts#ensureDatabase",
+      "detectedContext": "startup-single-flight-delegation",
+      "owner": "loveIMessage",
+      "transactionContext": "startup-single-flight-delegation",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
+    },
+    {
+      "id": "src/services/notifications/actions.ts#loveIMessage:mutator-call:06fc19b8a4b1",
+      "path": "src/services/notifications/actions.ts",
+      "line": 511,
+      "symbol": "loveIMessage",
+      "operation": "mutator-call",
+      "target": "src/services/send/sendRestoredReactionService.ts#sendRestoredIMessageReactionMessage",
+      "detectedContext": "coordinated-delegation",
+      "owner": "loveIMessage",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendRestoredReactionReply.test.ts"
+    },
+    {
+      "id": "src/services/notifications/actions.ts#loveIMessage:mutator-call:d15e7a509628",
+      "path": "src/services/notifications/actions.ts",
+      "line": 524,
+      "symbol": "loveIMessage",
+      "operation": "mutator-call",
+      "target": "src/services/send/sendReactionService.ts#sendIMessageReactionMessage",
+      "detectedContext": "coordinated-delegation",
+      "owner": "loveIMessage",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts; test/services/sendReactionService.test.ts; test/services/sendRestoredReactionReply.test.ts"
+    },
+    {
+      "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:97eec18b09e8",
+      "path": "src/services/notifications/actions.ts",
+      "line": 547,
+      "symbol": "loveMessage",
+      "operation": "mutator-call",
+      "target": "src/services/notifications/actions.ts#loveIMessage",
+      "detectedContext": "coordinated-delegation",
+      "owner": "loveMessage",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/notificationActions.test.ts"
+    },
+    {
       "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:ba76a076dbe4",
       "path": "src/services/notifications/actions.ts",
-      "line": 467,
+      "line": 554,
       "symbol": "loveMessage",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -20479,7 +20531,7 @@
     {
       "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:24b12380d8b6",
       "path": "src/services/notifications/actions.ts",
-      "line": 502,
+      "line": 589,
       "symbol": "loveMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendReactionService.ts#sendReactionMessage",
@@ -20622,7 +20674,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#sanitizeDisplayedNotifications:mutator-call:fc0ca0b8b11a",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1242,
+      "line": 1264,
       "symbol": "sanitizeDisplayedNotifications",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId",
@@ -20635,7 +20687,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#sanitizeCurrentDisplayedReminders:mutator-call:eaf56e29329b",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1330,
+      "line": 1352,
       "symbol": "sanitizeCurrentDisplayedReminders",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId",
@@ -20648,7 +20700,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#armSanitizedReminder:mutator-call:f8804eee4845",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1417,
+      "line": 1439,
       "symbol": "armSanitizedReminder",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId",
@@ -20661,7 +20713,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#armSanitizedReminders:mutator-call:988bcd2108e5",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1457,
+      "line": 1479,
       "symbol": "armSanitizedReminders",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#armSanitizedReminder",
@@ -20674,7 +20726,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#sanitizeTriggerNotifications:mutator-call:fd918617393f",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1526,
+      "line": 1548,
       "symbol": "sanitizeTriggerNotifications",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#armSanitizedReminders",
@@ -20687,7 +20739,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:e85e19312cb9",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1595,
+      "line": 1617,
       "symbol": "sanitizeLegacyNotificationPayloadsIfPresent",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#sanitizeTriggerNotifications",
@@ -20700,7 +20752,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:e85e19312cb9:2",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1609,
+      "line": 1631,
       "symbol": "sanitizeLegacyNotificationPayloadsIfPresent",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#sanitizeTriggerNotifications",
@@ -20713,7 +20765,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:9e429c36e49b",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1615,
+      "line": 1637,
       "symbol": "sanitizeLegacyNotificationPayloadsIfPresent",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#sanitizeDisplayedNotifications",
@@ -20726,7 +20778,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:636ff0e2c483",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1761,
+      "line": 1783,
       "symbol": "prepareNotificationPresentationStateNow",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent",
@@ -20739,7 +20791,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:72595637777d",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1772,
+      "line": 1794,
       "symbol": "prepareNotificationPresentationStateNow",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes",
@@ -20752,7 +20804,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:d69db4ac60cd",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1801,
+      "line": 1823,
       "symbol": "prepareNotificationPresentationStateNow",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#sanitizeCurrentDisplayedReminders",
@@ -20765,7 +20817,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#prepareNotificationPresentationState.<callback:2d26413326>.<callback:aaa5db8dfb>:mutator-call:49cfa621c037",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 1821,
+      "line": 1843,
       "symbol": "prepareNotificationPresentationState.<callback:2d26413326>.<callback:aaa5db8dfb>",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow",
@@ -20778,7 +20830,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#postNotification.<callback:8bc766ee78>:mutator-call:51a350ad5620",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2091,
+      "line": 2113,
       "symbol": "postNotification.<callback:8bc766ee78>",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#postNotificationNow",
@@ -20791,7 +20843,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#postNotificationNow:mutator-call:3715d5ebf0b8",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2138,
+      "line": 2160,
       "symbol": "postNotificationNow",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#cancelFaceTimeNotificationNow",
@@ -20804,7 +20856,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#postSendFailureNotification.<callback:733692bd31>:mutator-call:69ad00d25654",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2359,
+      "line": 2382,
       "symbol": "postSendFailureNotification.<callback:733692bd31>",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#postNotificationNow",
@@ -20817,7 +20869,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#cancelFaceTimeNotification.<callback:4ef3145a64>:mutator-call:dd3a6cf045a8",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2382,
+      "line": 2405,
       "symbol": "cancelFaceTimeNotification.<callback:4ef3145a64>",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#cancelFaceTimeNotificationNow",
@@ -20830,7 +20882,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#cancelFaceTimeNotificationNow:mutator-call:22faf30a92fa",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2488,
+      "line": 2511,
       "symbol": "cancelFaceTimeNotificationNow",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute",
@@ -20843,7 +20895,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#cancelAllNotifications.<callback:d88b914181>:mutator-call:5e1eda48b4c7",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2516,
+      "line": 2539,
       "symbol": "cancelAllNotifications.<callback:d88b914181>",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes",

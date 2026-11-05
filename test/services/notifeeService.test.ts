@@ -2261,11 +2261,29 @@ describe('postNotification — detailed message', () => {
     expect(sender).not.toHaveProperty('icon'); // the AGENTS.md conditional-spread rule
   });
 
-  it('keeps iMessage actions to Reply and Mark Read even under injected private_api:true', async () => {
+  it('keeps an unproven chat to Reply and Mark Read even under injected private_api:true', async () => {
     await postNotification(messageIntent());
     const actions = lastNotif().android?.actions as any[];
     expect(actions.map((a) => a.pressAction.id)).toEqual([ACTION_REPLY, ACTION_MARK_READ]);
     expect(actions[0].input.allowFreeFormInput).toBe(true);
+  });
+
+  // iMessage parity: ♥ Love appears when the intent proved an all-iMessage chat (one-to-one or
+  // group) and the message has a real server guid; the tap re-proves the live switch.
+  it.each([
+    ['a proven one-to-one iMessage chat', 'iMessage;-;+15551230000', 'msg-1', true, true],
+    ['a proven iMessage group', 'any;+;chat-love', 'msg-1', true, true],
+    ['an iMessage chat the intent did not prove', 'iMessage;-;+15551230000', 'msg-1', false, false],
+    ['a proven chat but a temporary message id', 'iMessage;-;+15551230000', 'temp-1', true, false],
+    ['an SMS chat even with the hint', 'SMS;-;+15551230000', 'msg-1', true, false],
+  ])('iMessage Love on %s', async (_label, chatGuid, messageGuid, hint, shown) => {
+    await postNotification(
+      messageIntent({ chatGuid, messageGuid, ...(hint ? { imessageReactable: true } : {}) }),
+    );
+    const actions = lastNotif().android?.actions as any[];
+    expect(actions.map((action) => action.pressAction.id)).toEqual(
+      shown ? [ACTION_REPLY, ACTION_MARK_READ, ACTION_LOVE] : [ACTION_REPLY, ACTION_MARK_READ],
+    );
   });
 
   it('exposes Love only for a canonical RCS chat with live RCS capability', async () => {

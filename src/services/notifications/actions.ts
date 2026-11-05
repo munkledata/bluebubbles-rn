@@ -6,9 +6,10 @@ import {
   isCurrentRcsMessageGuid,
 } from '@core/rcs/providerIdentity';
 import { logger, readAccountRevocationState } from '@core/secure';
-import { deleteReminderByNotificationId } from '@db/repositories';
+import { canSendRestoredIMessageTapback, restoredChatKind } from '@core/models';
+import { deleteReminderByNotificationId, getChatHeader } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
-import { isRcsChatGuid } from '@utils/chat';
+import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils/chat';
 import { useLockStore } from '@state/lockStore';
 import { sessionAccessors } from '@state/sessionStore';
 import { accountHttp, accountRevocationMarker, fixedCredentialClient, vault } from '../clients';
@@ -28,7 +29,11 @@ import {
   resolveRcsAttemptOwnership,
   type RcsCapabilitySource,
 } from '@/services/send/rcsAttemptCapability';
-import { sendReactionMessage } from '@/services/send/sendReactionService';
+import {
+  sendIMessageReactionMessage,
+  sendReactionMessage,
+} from '@/services/send/sendReactionService';
+import { sendRestoredIMessageReactionMessage } from '@/services/send/sendRestoredReactionService';
 import { logicalSendQueue } from '@/services/send/logicalSendQueue';
 import {
   ACTION_ANSWER_FACETIME,
@@ -242,9 +247,16 @@ async function handleNotificationActionForAccount(
   if (!chatGuid) return;
 
   // Old Android notifications can outlive an app upgrade. Their Love button is inert unless its
-  // resolved encrypted route is a canonical RCS chat; task-local capability discovery below must
-  // separately prove that the RCS bridge is live before any reaction is sent.
-  if (actionId === ACTION_LOVE && !isRcsChatGuid(chatGuid)) return;
+  // resolved encrypted route is a canonical RCS chat or an iMessage chat; loveMessage separately
+  // proves the RCS bridge is live, or the stored iMessage chat and its live tapback switch, before
+  // any reaction is sent.
+  if (
+    actionId === ACTION_LOVE &&
+    !isRcsChatGuid(chatGuid) &&
+    restoredChatKind(chatGuid) === undefined
+  ) {
+    return;
+  }
 
   // Only inline action buttons act. A body/main press (open-chat, reminder) is EventType.PRESS,
   // not ACTION_PRESS — handled by handleNotificationPress (side-effects) + openFromNotification
@@ -454,13 +466,88 @@ async function replyTo(
   }
 }
 
+/**
+ * ♥ Love on an iMessage notification, through the same routes as the in-app tapback: a group
+ * needs the FP-006 group-tapback switch (the restored sender re-proves the group), and a
+ * one-to-one chat needs the reviewed tapback switch plus a stored one-to-one iMessage row. The
+ * server info comes from a task-local fetch, because a killed-process action has no trustworthy
+ * foreground store. Anything unproven sends nothing, as an unavailable RCS bridge does.
+ */
+async function loveIMessage(
+  chatGuid: string,
+  messageGuid: string,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  const kind = restoredChatKind(chatGuid);
+  if (
+    kind === undefined ||
+    messageGuid.length === 0 ||
+    messageGuid.trim() !== messageGuid ||
+    messageGuid.startsWith('temp-')
+  ) {
+    return;
+  }
+  if (isDevServer()) return;
+  const turn = await logicalSendQueue.acquire(accountLease, chatGuid);
+  try {
+    assertCurrentAccount(accountLease);
+    const db = await ensureDatabase();
+    assertCurrentAccount(accountLease);
+    const transport = await resolveNotificationActionTransport(accountLease);
+    assertCurrentTransport(transport);
+    const capability = await resolveRcsAttemptOwnership(
+      transport.http,
+      chatGuid,
+      transport.accountIsCurrent,
+      transport.capabilitySource,
+      { requireServerInfo: true },
+    );
+    assertCurrentTransport(transport);
+    const info = capability.serverInfo;
+    const args = { chatGuid, targetGuid: messageGuid, reaction: 'love', partIndex: 0 };
+    const serverAuthorization = messageTargetServerAuthorization(info, () => transport.isCurrent());
+    if (kind === 'group') {
+      if (!canSendRestoredIMessageTapback(info, args)) return;
+      await sendRestoredIMessageReactionMessage(
+        db,
+        transport.http,
+        args,
+        transport.accountIsCurrent,
+        serverAuthorization,
+        () => (transport.isCurrent() ? info : null),
+      );
+    } else {
+      if (info?.supports_imessage_reactions !== true) return;
+      const header = await getChatHeader(db, chatGuid);
+      assertCurrentAccount(accountLease);
+      if (header?.guid !== chatGuid || !isProvenOneToOneIMessageChat(header)) return;
+      await sendIMessageReactionMessage(
+        db,
+        transport.http,
+        args,
+        transport.accountIsCurrent,
+        serverAuthorization,
+        () => transport.isCurrent() && info?.supports_imessage_reactions === true,
+        () => transport.isCurrent() && info?.supports_imessage_reaction_temp_guid === true,
+      );
+    }
+    assertCurrentAccount(accountLease);
+  } finally {
+    turn.release();
+  }
+}
+
 /** Send a 'love' tapback for the notification's message (mirrors the in-app react path). */
 async function loveMessage(
   chatGuid: string,
   messageGuid: string,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
-  if (!isRcsChatGuid(chatGuid) || !messageGuid.startsWith('rcs-')) return;
+  if (!isRcsChatGuid(chatGuid)) {
+    await loveIMessage(chatGuid, messageGuid, accountLease);
+    return;
+  }
+  if (!messageGuid.startsWith('rcs-')) return;
   const turn = await logicalSendQueue.acquire(accountLease, chatGuid);
   try {
     assertCurrentAccount(accountLease);

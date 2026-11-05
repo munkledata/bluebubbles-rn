@@ -114,6 +114,37 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     }
   });
 
+  // ♥ Love parity: the intent carries the hint only when the stored row proves an all-iMessage chat.
+  it.each([
+    ['a one-to-one iMessage chat', 'iMessage;-;+15550001111', 45, ['iMessage'], true],
+    ['an all-iMessage any;+; group', 'any;+;chat-love', 43, ['iMessage', 'iMessage'], true],
+    ['a group with an SMS member', 'any;+;chat-mixed', 43, ['iMessage', 'SMS'], false],
+    ['an SMS chat', 'SMS;-;+15550001111', 45, ['SMS'], false],
+  ])('sets the Love hint correctly for %s', async (_label, chatGuid, style, services, expected) => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    const participants = services.map((service, index) => ({
+      address: `member${index}@x.com`,
+      service,
+    }));
+    await deliverRaw(
+      router,
+      'new-message',
+      {
+        guid: `love-${chatGuid}`,
+        text: 'hi',
+        dateCreated: 1700000000000,
+        handle: participants[0],
+        chats: [{ guid: chatGuid, style, participants }],
+      },
+      'socket',
+    );
+    expect(intents).toHaveLength(1);
+    const intent = intents[0]!;
+    expect(intent.kind).toBe('message');
+    if (intent.kind === 'message') expect(intent.imessageReactable === true).toBe(expected);
+  });
+
   it('decodes the ordered participant projection for a group notification title', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);

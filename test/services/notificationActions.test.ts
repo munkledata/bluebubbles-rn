@@ -2,7 +2,7 @@
  * Unit tests for the notification-action handler (`src/services/notifications/actions.ts`).
  *
  * This is the code that runs when a user taps an inline notification button (Reply,
- * Mark as read, RCS-only ♥ Love) or cleans up a retired FaceTime action — possibly HEADLESS (killed app,
+ * Mark as read, ♥ Love) or cleans up a retired FaceTime action — possibly HEADLESS (killed app,
  * no React tree, DB never opened by boot). The invariants pinned here:
  *   - each action performs the right DB write / service call and clears the chat notif;
  *   - unknown / missing actions are ignored (no side effects);
@@ -189,9 +189,14 @@ jest.mock('@/services/send/sendService', () => ({
 }));
 jest.mock('@/services/send/sendReactionService', () => ({
   sendReactionMessage: jest.fn(async () => undefined),
+  sendIMessageReactionMessage: jest.fn(async () => ({ guid: 'tapback-guid' })),
+}));
+jest.mock('@/services/send/sendRestoredReactionService', () => ({
+  sendRestoredIMessageReactionMessage: jest.fn(async () => ({ guid: 'tapback-guid' })),
 }));
 jest.mock('@db/repositories', () => ({
   deleteReminderByNotificationId: jest.fn(async () => undefined),
+  getChatHeader: jest.fn(async () => null),
 }));
 jest.mock('@utils/isDev', () => ({ isDevServer: jest.fn(() => false) }));
 jest.mock('@features/conversations/devSeed', () => ({
@@ -665,14 +670,111 @@ describe('handleNotificationAction — group mark read', () => {
 });
 
 describe('handleNotificationAction — love (tapback)', () => {
-  it('ignores an iMessage Love action even under injected private_api:true', async () => {
-    await handleNotificationAction(
-      safeChatDetail(ACTION_LOVE, { chatGuid: 'iMessage;-;+15551230000', messageGuid: 'm2' }),
+  // iMessage parity: ♥ Love goes through the same tapback routes as the app, and only when the
+  // task-local server info turns on the matching switch and the stored chat proves iMessage.
+  describe('iMessage', () => {
+    const { sendIMessageReactionMessage } = jest.requireMock(
+      '@/services/send/sendReactionService',
+    ) as { sendIMessageReactionMessage: jest.Mock };
+    const { sendRestoredIMessageReactionMessage } = jest.requireMock(
+      '@/services/send/sendRestoredReactionService',
+    ) as { sendRestoredIMessageReactionMessage: jest.Mock };
+    const { getChatHeader } = jest.requireMock('@db/repositories') as {
+      getChatHeader: jest.Mock;
+    };
+    const DIRECT = 'iMessage;-;+15551230000';
+    const GROUP = 'any;+;chat-love';
+    const directHeader = (service = 'iMessage') => ({
+      guid: DIRECT,
+      style: 45,
+      participantCount: 1,
+      handleServices: service,
+    });
+    const serverInfo = (fields: Record<string, unknown>) => {
+      mockResolveRcsAttemptOwnership.mockResolvedValueOnce({
+        attemptAware: true,
+        serverInfo: { private_api: false, ...fields },
+      });
+    };
+
+    afterEach(() => {
+      sendIMessageReactionMessage.mockClear();
+      sendRestoredIMessageReactionMessage.mockClear();
+      getChatHeader.mockReset();
+      getChatHeader.mockResolvedValue(null);
+    });
+
+    it('loves a proven one-to-one iMessage through the reviewed tapback, then clears the notif', async () => {
+      serverInfo({ supports_imessage_reactions: true });
+      getChatHeader.mockResolvedValue(directHeader());
+      await handleNotificationAction(
+        safeChatDetail(ACTION_LOVE, { chatGuid: DIRECT, messageGuid: 'imessage-guid-1' }),
+      );
+      expect(sendIMessageReactionMessage).toHaveBeenCalledTimes(1);
+      expect(sendIMessageReactionMessage.mock.calls[0]?.[2]).toEqual({
+        chatGuid: DIRECT,
+        targetGuid: 'imessage-guid-1',
+        reaction: 'love',
+        partIndex: 0,
+      });
+      const allow = sendIMessageReactionMessage.mock.calls[0]?.[5] as () => boolean;
+      expect(allow()).toBe(true);
+      expect(sendRestoredIMessageReactionMessage).not.toHaveBeenCalled();
+      expect(mockSendReaction).not.toHaveBeenCalled();
+      expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
+    });
+
+    it.each([
+      ['the tapback switch is off', {}, directHeader()],
+      ['the stored chat is SMS', { supports_imessage_reactions: true }, directHeader('SMS')],
+      ['the chat row is missing', { supports_imessage_reactions: true }, null],
+    ])(
+      'sends nothing one-to-one when %s, but still clears the notif',
+      async (_l, flags, header) => {
+        serverInfo(flags);
+        getChatHeader.mockResolvedValue(header);
+        await handleNotificationAction(
+          safeChatDetail(ACTION_LOVE, { chatGuid: DIRECT, messageGuid: 'imessage-guid-1' }),
+        );
+        expect(sendIMessageReactionMessage).not.toHaveBeenCalled();
+        expect(sendRestoredIMessageReactionMessage).not.toHaveBeenCalled();
+        expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
+      },
     );
 
-    expect(mockSendReaction).not.toHaveBeenCalled();
-    expect(mockResolveRcsAttemptOwnership).not.toHaveBeenCalled();
-    expect(mockNotifeeCancel).not.toHaveBeenCalled();
+    it('loves a group message through the restored group tapback only with its switch on', async () => {
+      serverInfo({ supports_imessage_group_reactions: true });
+      await handleNotificationAction(
+        safeChatDetail(ACTION_LOVE, { chatGuid: GROUP, messageGuid: 'group-guid-1' }),
+      );
+      expect(sendRestoredIMessageReactionMessage).toHaveBeenCalledTimes(1);
+      expect(sendRestoredIMessageReactionMessage.mock.calls[0]?.[2]).toEqual({
+        chatGuid: GROUP,
+        targetGuid: 'group-guid-1',
+        reaction: 'love',
+        partIndex: 0,
+      });
+      expect(sendIMessageReactionMessage).not.toHaveBeenCalled();
+
+      sendRestoredIMessageReactionMessage.mockClear();
+      // The one-to-one switch never opens a group tapback.
+      serverInfo({ supports_imessage_reactions: true });
+      await handleNotificationAction(
+        safeChatDetail(ACTION_LOVE, { chatGuid: GROUP, messageGuid: 'group-guid-1' }),
+      );
+      expect(sendRestoredIMessageReactionMessage).not.toHaveBeenCalled();
+      expect(sendIMessageReactionMessage).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an SMS chat', 'SMS;-;+15551230000', 'imessage-guid-1'],
+      ['a temporary message id', DIRECT, 'temp-abc'],
+    ])('ignores Love on %s without asking the server', async (_label, chatGuid, messageGuid) => {
+      await handleNotificationAction(safeChatDetail(ACTION_LOVE, { chatGuid, messageGuid }));
+      expect(mockResolveRcsAttemptOwnership).not.toHaveBeenCalled();
+      expect(sendIMessageReactionMessage).not.toHaveBeenCalled();
+      expect(sendRestoredIMessageReactionMessage).not.toHaveBeenCalled();
+    });
   });
 
   it('sends a love reaction for a live canonical RCS chat, then clears the notif', async () => {

@@ -13,7 +13,7 @@ import {
 } from './nativeNotificationAdapter';
 import type { EventDeliveryContext, NotificationIntent } from '@core/realtime';
 import { isExactMessagePartTopology } from '@core/messages/retraction';
-import { parseMessagePartTopology } from '@core/models';
+import { parseMessagePartTopology, restoredChatKind } from '@core/models';
 import { logger } from '@core/secure';
 import type { AppDatabase } from '@db/types';
 import { useLockStore } from '@state/lockStore';
@@ -143,9 +143,21 @@ function messageActions(
   includeLove: boolean,
   chatGuid?: string,
   messageGuid?: string,
+  imessageReactable = false,
 ): NonNullable<Notification['android']>['actions'] {
-  const reactionAvailable =
+  const rcsReactionAvailable =
     !!chatGuid && isRcsChatGuid(chatGuid) && !!messageGuid && messageGuid.startsWith('rcs-');
+  // iMessage parity: only when the intent proved an all-iMessage chat from its stored row and the
+  // message has a real server guid. The tap re-proves the chat and the live server switch.
+  const imessageReactionAvailable =
+    imessageReactable &&
+    !!chatGuid &&
+    restoredChatKind(chatGuid) !== undefined &&
+    !!messageGuid &&
+    messageGuid.trim() === messageGuid &&
+    !messageGuid.startsWith('temp-') &&
+    !messageGuid.startsWith('rcs-');
+  const reactionAvailable = rcsReactionAvailable || imessageReactionAvailable;
   return [
     {
       title: 'Reply',
@@ -288,7 +300,12 @@ function findDisplayedMessageHistory(
 
 function messageNotificationFromHistory(
   history: DisplayedMessageHistory,
-  options: { onlyAlertOnce?: boolean; chatGuid?: string; messageGuid?: string } = {},
+  options: {
+    onlyAlertOnce?: boolean;
+    chatGuid?: string;
+    messageGuid?: string;
+    imessageReactable?: boolean;
+  } = {},
 ): Notification {
   const entries = normalizeMessageNotificationHistory(history.entries);
   const latest = entries.at(-1);
@@ -318,7 +335,12 @@ function messageNotificationFromHistory(
         group: history.isGroup,
         messages: messagingStyleLines(entries),
       },
-      actions: messageActions(true, options.chatGuid, options.messageGuid),
+      actions: messageActions(
+        true,
+        options.chatGuid,
+        options.messageGuid,
+        options.imessageReactable === true,
+      ),
     },
   };
 }
@@ -2266,6 +2288,7 @@ async function postNotificationNow(
       // A delayed event can merge behind a newer line. Only expose a reaction action when the
       // route we just resolved is still the notification's latest visible message.
       messageGuid: latest.messageId === route.messageId ? intent.messageGuid : undefined,
+      imessageReactable: intent.imessageReactable === true,
     },
   );
   if (

@@ -9,7 +9,12 @@ import {
   isMessageNotificationEligible,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import { buildMessageSnippet, participantDisplayNames } from '@utils';
+import {
+  buildMessageSnippet,
+  isProvenIMessageGroupChat,
+  isProvenOneToOneIMessageChat,
+  participantDisplayNames,
+} from '@utils';
 import { localFailedMessageRoute } from './notificationRouting';
 
 type MessageIntent = Extract<NotificationIntent, { kind: 'message' }>;
@@ -62,6 +67,21 @@ async function resolvePersistedDeletionChatGuid(
     chatGuid: rowChatGuid ?? ledgerChatGuid,
     conflict: rowChatGuid != null && ledgerChatGuid != null && rowChatGuid !== ledgerChatGuid,
   };
+}
+
+/**
+ * ♥ Love parity with RCS: an iMessage notification offers it only when the stored row proves an
+ * all-iMessage chat, one-to-one or group (an `any;+;` guid alone also fits SMS and RCS groups).
+ */
+function isIMessageReactableChat(
+  header: Awaited<ReturnType<typeof getChatHeader>>,
+  chatGuid: string,
+): boolean {
+  return (
+    header?.guid === chatGuid &&
+    (isProvenOneToOneIMessageChat(header) ||
+      isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true }))
+  );
 }
 
 /** Build one notification line from current encrypted-DB truth after its event has committed. */
@@ -118,6 +138,7 @@ async function buildCurrentMessageIntent(
     messageGuid: message.guid,
     timestamp: currentPreview.dateCreated ?? message.dateCreated ?? Date.now(),
     isGroup,
+    ...(isIMessageReactableChat(header, chatGuid) ? { imessageReactable: true } : {}),
   };
 }
 

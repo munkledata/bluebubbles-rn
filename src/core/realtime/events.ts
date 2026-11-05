@@ -211,6 +211,12 @@ export type NotificationIntent =
       timestamp: number;
       isGroup: boolean;
       avatarUri?: string;
+      /**
+       * The stored chat row proves an all-iMessage chat (one-to-one or group), so the notification
+       * may offer ♥ Love. Only a hint for the button: the tap re-proves the chat and the live
+       * server switch before anything is sent.
+       */
+      imessageReactable?: boolean;
     }
   /** Fixed-copy local notice for an outgoing row that is durably in the error state. */
   | { kind: 'send-failure'; chatGuid: string; messageGuid: string }
