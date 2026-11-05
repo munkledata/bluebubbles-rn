@@ -66,3 +66,80 @@ index f262b43..998a871 100644
              extras.getBundle(KEY_DETAIL_PRESS_ACTION)?.let { pressAction ->
                  eventDetailMap.putMap(KEY_DETAIL_PRESS_ACTION, Arguments.fromBundle(pressAction))
              }
+diff --git a/node_modules/react-native-notify-kit/dist/types/NotificationAndroid.d.ts b/node_modules/react-native-notify-kit/dist/types/NotificationAndroid.d.ts
+index 372d6b3..d5d73a3 100644
+--- a/node_modules/react-native-notify-kit/dist/types/NotificationAndroid.d.ts
++++ b/node_modules/react-native-notify-kit/dist/types/NotificationAndroid.d.ts
+@@ -38,6 +38,10 @@ export interface NotificationAndroid {
+      * Defaults to `false`.
+      */
+     lightUpScreen?: boolean;
++    /**
++     * Id of a long-lived sharing shortcut that makes this a conversation notification (Gator patch).
++     */
++    shortcutId?: string;
+     /**
+      * Setting this flag will make it so the notification is automatically canceled when the user
+      * presses it in the panel.
+diff --git a/node_modules/react-native-notify-kit/dist/validators/validateAndroidNotification.js b/node_modules/react-native-notify-kit/dist/validators/validateAndroidNotification.js
+index 890b0e6..de4248a 100644
+--- a/node_modules/react-native-notify-kit/dist/validators/validateAndroidNotification.js
++++ b/node_modules/react-native-notify-kit/dist/validators/validateAndroidNotification.js
+@@ -90,6 +90,15 @@ export default function validateAndroidNotification(android) {
+         }
+         out.lightUpScreen = android.lightUpScreen;
+     }
++    /**
++     * shortcutId (Gator patch: the native side already applies it; the validator dropped it)
++     */
++    if (objectHasProperty(android, 'shortcutId')) {
++        if (!isString(android.shortcutId) || android.shortcutId.length === 0 || android.shortcutId.length > 256) {
++            throw new Error("'notification.android.shortcutId' expected a non-empty string of at most 256 characters.");
++        }
++        out.shortcutId = android.shortcutId;
++    }
+     /**
+      * autoCancel
+      */
+diff --git a/node_modules/react-native-notify-kit/src/types/NotificationAndroid.ts b/node_modules/react-native-notify-kit/src/types/NotificationAndroid.ts
+index ced6c8f..230cfba 100644
+--- a/node_modules/react-native-notify-kit/src/types/NotificationAndroid.ts
++++ b/node_modules/react-native-notify-kit/src/types/NotificationAndroid.ts
+@@ -45,6 +45,10 @@ export interface NotificationAndroid {
+    * Defaults to `false`.
+    */
+   lightUpScreen?: boolean;
++  /**
++   * Id of a long-lived sharing shortcut that makes this a conversation notification (Gator patch).
++   */
++  shortcutId?: string;
+ 
+   /**
+    * Setting this flag will make it so the notification is automatically canceled when the user
+diff --git a/node_modules/react-native-notify-kit/src/validators/validateAndroidNotification.ts b/node_modules/react-native-notify-kit/src/validators/validateAndroidNotification.ts
+index 8741112..684d665 100644
+--- a/node_modules/react-native-notify-kit/src/validators/validateAndroidNotification.ts
++++ b/node_modules/react-native-notify-kit/src/validators/validateAndroidNotification.ts
+@@ -146,6 +146,22 @@ export default function validateAndroidNotification(
+     out.lightUpScreen = android.lightUpScreen;
+   }
+ 
++  /**
++   * shortcutId (Gator patch: the native side already applies it; the validator dropped it)
++   */
++  if (objectHasProperty(android, 'shortcutId')) {
++    if (
++      !isString(android.shortcutId) ||
++      android.shortcutId.length === 0 ||
++      android.shortcutId.length > 256
++    ) {
++      throw new Error(
++        "'notification.android.shortcutId' expected a non-empty string of at most 256 characters.",
++      );
++    }
++    out.shortcutId = android.shortcutId;
++  }
++
+   /**
+    * autoCancel
+    */
