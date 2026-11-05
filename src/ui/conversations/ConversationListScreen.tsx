@@ -38,6 +38,7 @@ import { ChatActionsSheet, type ChatActionTarget, toChatActionTarget } from './C
 import { ConversationTile } from './ConversationTile';
 import { InboxSeparator } from './FilteredChatListScreen';
 import { InboxFiltersSheet } from './InboxFiltersSheet';
+import { InboxFolderChips } from './InboxFolderChips';
 import { PinnedGrid } from './PinnedGrid';
 import { SearchResultsView } from './SearchResultsView';
 import { textInputAccentProps } from '@ui/theme/controlColors';
@@ -600,6 +601,7 @@ export function ConversationListScreen({
     <Screen>
       <KeyboardAvoidingView style={styles.flex} behavior="padding" enabled={kbVisible}>
         {titleRow}
+        {!fixtureMode && !searching ? <InboxFolderChips /> : null}
         <View style={styles.list}>
           {searching ? (
             <SearchResultsView query={search} accountLease={accountLease} />

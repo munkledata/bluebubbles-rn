@@ -193,6 +193,10 @@ jest.mock('@ui/conversations/PinnedGrid', () => {
   };
 });
 
+jest.mock('@ui/conversations/InboxFolderChips', () => {
+  const { Text } = jest.requireActual('react-native');
+  return { InboxFolderChips: () => <Text>folder chips</Text> };
+});
 jest.mock('@ui/conversations/SearchResultsView', () => {
   const ReactLib = require('react');
   const { Text } = require('react-native');
@@ -335,6 +339,16 @@ describe('ConversationListScreen — pinned/list split', () => {
     // A pinned chat is NOT also a list tile, and a list chat is NOT in the pinned grid.
     expect(screen.queryByTestId('tile-p1')).toBeNull();
     expect(screen.queryByTestId('pinned-l1')).toBeNull();
+  });
+
+  it('shows the folder chips, but not while searching', async () => {
+    setChats({ data: [makeRow({ guid: 'l1', isPinned: 0 })] });
+    await renderWithTheme(<ConversationListScreen />);
+    expect(screen.getByText('folder chips')).toBeTruthy();
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Search messages & chats'), 'hello');
+    });
+    expect(screen.queryByText('folder chips')).toBeNull();
   });
 
   it('renders no pinned grid when nothing is pinned', async () => {
