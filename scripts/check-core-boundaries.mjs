@@ -37,6 +37,8 @@ const RAW_DB_DRIVER_HANDLE_TYPES = new Set([
 ]);
 const REVIEWED_UI_DB_REPOSITORY_VALUES = new Set([
   'DRAFT_KV_PREFIX',
+  // Key-prefix constant for a draft's saved reply target, read with kvGet like DRAFT_KV_PREFIX.
+  'DRAFT_REPLY_KV_PREFIX',
   'MAX_CUSTOM_FOLDER_MEMBERS',
   'findChatsByParticipantAddresses',
   'getChatHeader',
@@ -56,7 +58,10 @@ const REVIEWED_UI_DB_REPOSITORY_VALUES = new Set([
 ]);
 const REVIEWED_UI_DB_QUERY_VALUES = new Set(
   [...REVIEWED_UI_DB_REPOSITORY_VALUES].filter(
-    (value) => value !== 'DRAFT_KV_PREFIX' && value !== 'MAX_CUSTOM_FOLDER_MEMBERS',
+    (value) =>
+      value !== 'DRAFT_KV_PREFIX' &&
+      value !== 'DRAFT_REPLY_KV_PREFIX' &&
+      value !== 'MAX_CUSTOM_FOLDER_MEMBERS',
   ),
 );
 

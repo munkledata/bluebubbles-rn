@@ -9,6 +9,7 @@ import {
   chatExistsWithinTransaction,
   clearChatTombstoneWithinTransaction,
   DRAFT_KV_PREFIX,
+  DRAFT_REPLY_KV_PREFIX,
   deleteChatLocal,
   deleteReminderByNotificationIdWithinTransaction,
   deleteScheduledWithinTransaction,
@@ -62,6 +63,7 @@ import {
   type RealtimeDeliveryLease,
 } from './realtime/deliveryCoordinator';
 import { getSocket } from './realtimeControl';
+import { serializeDraftReplyTarget, type DraftReplyTarget } from '@utils/draftReply';
 
 /** Private rollback signal for a create-chat mutation whose account was disconnected. */
 const STALE_CREATE_CHAT = Symbol('stale-create-chat');
@@ -493,6 +495,31 @@ export function saveChatDraft(
       async (context) => {
         assertChatActionLease(activeLease);
         await kvSetWithinTransaction(context, `${DRAFT_KV_PREFIX}${chatGuid}`, text);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
+}
+
+/** Persist (or clear, with null) the reply target the conversation's draft is replying to. */
+export function saveChatDraftReply(
+  chatGuid: string,
+  target: DraftReplyTarget | null,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await kvSetWithinTransaction(
+          context,
+          `${DRAFT_REPLY_KV_PREFIX}${chatGuid}`,
+          serializeDraftReplyTarget(target),
+        );
         assertChatActionLease(activeLease);
       },
       () => activeLease.isCurrent(),

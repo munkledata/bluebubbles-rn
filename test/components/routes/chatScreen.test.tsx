@@ -239,6 +239,7 @@ jest.mock('@utils/isDev', () => ({
 // takes the intentional failure fallback, and prints one misleading debug line per render.
 jest.mock('@db/repositories', () => ({
   DRAFT_KV_PREFIX: 'draft.',
+  DRAFT_REPLY_KV_PREFIX: 'draft.reply.',
   getChatIdByGuid: jest.fn(async () => null),
   getChatParticipants: jest.fn(async () => []),
   getFirstUnreadInChat: jest.fn(async () => null),
@@ -254,6 +255,7 @@ jest.mock('@/services', () => ({
   syncGroupPhotos: jest.fn(() => Promise.resolve(0)),
   markRead: jest.fn(),
   saveChatDraft: jest.fn().mockResolvedValue(undefined),
+  saveChatDraftReply: jest.fn().mockResolvedValue(undefined),
   sendTyping: jest.fn(),
 }));
 jest.mock('@/services/share/shareIntake', () => ({
@@ -332,7 +334,13 @@ import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
 // eslint-disable-next-line import/first
 import { useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 // eslint-disable-next-line import/first
-import { ensureChatSynced, markRead, saveChatDraft, sendTyping } from '@/services';
+import {
+  ensureChatSynced,
+  markRead,
+  saveChatDraft,
+  saveChatDraftReply,
+  sendTyping,
+} from '@/services';
 // eslint-disable-next-line import/first
 import { getContactsPermissionState } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
@@ -381,7 +389,7 @@ import { useTypingStore } from '@state/typingStore';
 // eslint-disable-next-line import/first
 import { useShareIntentStore } from '@state/shareIntentStore';
 // eslint-disable-next-line import/first
-import { getMessagePreviewByGuid, isChatHiddenByDeletion } from '@db/repositories';
+import { getMessagePreviewByGuid, isChatHiddenByDeletion, kvGet } from '@db/repositories';
 // eslint-disable-next-line import/first
 import {
   captureRealtimeDeliveryLease,
@@ -513,6 +521,8 @@ beforeEach(() => {
   mockLocationAdapter.watchPositionAsync.mockReset();
   mockGetDatabase.mockReset().mockReturnValue(ACCOUNT_A_DB);
   (saveChatDraft as jest.Mock).mockReset().mockResolvedValue(undefined);
+  (saveChatDraftReply as jest.Mock).mockReset().mockResolvedValue(undefined);
+  (kvGet as jest.Mock).mockReset().mockResolvedValue(null);
   (fireDueScheduledWithDevelopmentSender as jest.Mock).mockReset().mockResolvedValue(0);
   mockIsDevServer.mockReturnValue(false);
   mockGetContactsPermissionState.mockResolvedValue({ status: 'granted', canAskAgain: true });
@@ -1959,6 +1969,80 @@ describe('ChatScreen — send routing', () => {
       useSessionStore.setState({ serverInfo: enabled });
     });
     expect(mockCaptured.composer?.replyTo).toBeUndefined();
+  });
+
+  describe('a draft remembers its reply target', () => {
+    const TOPOLOGY = JSON.stringify({
+      complete: true,
+      originalPartIndexes: [0],
+      currentParts: [{ index: 0, kind: 'text' }],
+      attachmentOwnership: [],
+    });
+    const enableReplies = (): void => {
+      useSessionStore.setState({
+        serverInfo: { version: 'test', supports_imessage_replies: true } as any,
+      });
+      useChatHeaderMock.mockReturnValue({
+        data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+        error: null,
+      });
+    };
+    const storedTarget = (guid: string): void => {
+      (kvGet as jest.Mock).mockImplementation(async (_db: unknown, key: string) =>
+        key === `draft.reply.${GUID}` ? JSON.stringify({ v: 1, guid, part: 0 }) : null,
+      );
+    };
+
+    it('restores the saved target on open, and opening writes nothing', async () => {
+      enableReplies();
+      storedTarget('saved-target');
+      mockMessagePreview = makeMsg({
+        guid: 'saved-target',
+        text: 'Saved target',
+        messagePartTopology: TOPOLOGY,
+      });
+      await renderWithTheme(<ChatScreen />);
+      await waitFor(() => expect(mockCaptured.composer?.replyTo?.guid).toBe('saved-target'));
+      expect(saveChatDraftReply).not.toHaveBeenCalled();
+    });
+
+    it('clears a saved target whose message is gone', async () => {
+      enableReplies();
+      storedTarget('deleted-target');
+      mockMessagePreview = null;
+      await renderWithTheme(<ChatScreen />);
+      await waitFor(() =>
+        expect(saveChatDraftReply).toHaveBeenCalledWith(GUID, null, expect.any(Object)),
+      );
+      expect(mockCaptured.composer?.replyTo).toBeUndefined();
+    });
+
+    it('saves a chosen target and clears it on cancel', async () => {
+      enableReplies();
+      await renderWithTheme(<ChatScreen />);
+      await waitFor(() =>
+        expect(
+          (kvGet as jest.Mock).mock.calls.some(([, key]) => key === `draft.reply.${GUID}`),
+        ).toBe(true),
+      );
+      expect(saveChatDraftReply).not.toHaveBeenCalled();
+
+      const target = makeMsg({ guid: 'chosen', text: 'Chosen', messagePartTopology: TOPOLOGY });
+      await longPressMessage(target);
+      await run(() => mockCaptured.overlay!.onReply());
+      await waitFor(() =>
+        expect(saveChatDraftReply).toHaveBeenLastCalledWith(
+          GUID,
+          { guid: 'chosen', part: 0 },
+          expect.any(Object),
+        ),
+      );
+
+      await run(() => mockCaptured.composer!.onCancelReply!());
+      await waitFor(() =>
+        expect(saveChatDraftReply).toHaveBeenLastCalledWith(GUID, null, expect.any(Object)),
+      );
+    });
   });
 
   it('cancels editing when the target disappears even if the row returns', async () => {

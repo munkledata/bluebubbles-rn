@@ -31,6 +31,13 @@ export const DELETION_SNAPSHOT_INITIALIZED_KV_KEY = 'sync.deletionSnapshotInitia
  * writer, the route's read path, and account cleanup.
  */
 export const DRAFT_KV_PREFIX = 'draft.';
+/**
+ * A draft's reply target (`draft.reply.<chat guid>`). It sits inside the `draft.` prefix on purpose,
+ * so every account wipe and wipe check that matches `draft.%` covers it too. Chat guids always start
+ * with a service prefix (`iMessage;`, `any;`, `RCS;` …), never `reply.`, so it cannot collide with
+ * a real draft key.
+ */
+export const DRAFT_REPLY_KV_PREFIX = 'draft.reply.';
 
 /**
  * Account-scoped marker for a customized chat shell hidden by Full Repair. A later authoritative

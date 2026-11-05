@@ -60,6 +60,7 @@ export {
   markUnread,
   markAllChatsRead,
   saveChatDraft,
+  saveChatDraftReply,
   setChatMuted,
   setChatArchived,
   setChatAutoUnarchive,

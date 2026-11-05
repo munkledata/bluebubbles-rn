@@ -20,7 +20,11 @@ import {
   messageHasVisibleContentSql,
 } from './chatVisibility';
 import { handleMapKey, upsertHandlesWithinTransaction } from './handles';
-import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
+import {
+  DRAFT_KV_PREFIX,
+  DRAFT_REPLY_KV_PREFIX,
+  FULL_REPAIR_RETIRED_CHAT_KV_PREFIX,
+} from './maintenance';
 import {
   getTrustedMessageStateLedgersWithinTransaction,
   trustedMessageStateLedgerSql,
@@ -665,6 +669,7 @@ export async function deleteChatLocal(
         ),
       );
       await db.delete(kv).where(eq(kv.key, `${DRAFT_KV_PREFIX}${guid}`));
+      await db.delete(kv).where(eq(kv.key, `${DRAFT_REPLY_KV_PREFIX}${guid}`));
       return deletion;
     },
     commitGuard,

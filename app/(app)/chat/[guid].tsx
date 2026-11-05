@@ -15,11 +15,13 @@ import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DRAFT_KV_PREFIX,
+  DRAFT_REPLY_KV_PREFIX,
   kvGet,
   type MessagePreview,
   type MessageWindowAnchor,
 } from '@db/repositories';
-import { saveChatDraft, sendTyping } from '@/services';
+import { saveChatDraft, saveChatDraftReply, sendTyping } from '@/services';
+import { parseDraftReplyTarget, serializeDraftReplyTarget } from '@utils/draftReply';
 import { readMessagePreview } from '@/services/messagePreview';
 import { getDatabase } from '@db/database';
 import {
@@ -464,6 +466,48 @@ function ChatScreenInner({
     },
     [accountLease, guid],
   );
+
+  // The draft's reply target ("replying to …") survives switching chats. It is restored once on
+  // open, only if that message still exists in this chat (the exact-target refresh above keeps it
+  // honest afterwards), and saved only when it actually changes, so opening a chat writes nothing.
+  // `replyRestoredFor` is state, not a ref, so a target chosen before the restore finished is still
+  // saved once it does.
+  const savedReplyRef = useRef('');
+  const [replyRestoredFor, setReplyRestoredFor] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setReplyRestoredFor(null);
+    void runTrackedRealtimeWork(accountLease, async () => {
+      const raw = (await kvGet(getDatabase(), `${DRAFT_REPLY_KV_PREFIX}${guid}`)) ?? '';
+      const target = parseDraftReplyTarget(raw);
+      const preview = target ? await readMessagePreview(guid, target.guid, target.part) : null;
+      if (!alive || !accountLease.isCurrent()) return;
+      // Record what is stored. If nothing is restored, a stored value that is stale (its message is
+      // gone) or malformed differs from '' and is cleared by the save below.
+      savedReplyRef.current = raw;
+      if (target && preview) {
+        setReplyTo((current) => current ?? { ...preview, targetPartIndex: target.part });
+      }
+      setReplyRestoredFor(guid);
+    }).catch(() => {
+      if (!alive || !accountLease.isCurrent()) return;
+      savedReplyRef.current = '';
+      setReplyRestoredFor(guid);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [accountLease, guid]);
+  useEffect(() => {
+    if (replyRestoredFor !== guid || !accountLease.isCurrent()) return;
+    const target = replyTargetGuid ? { guid: replyTargetGuid, part: replyTargetPartIndex } : null;
+    const value = serializeDraftReplyTarget(target);
+    if (value === savedReplyRef.current) return;
+    savedReplyRef.current = value;
+    void saveChatDraftReply(guid, target, accountLease).catch(() => {
+      // Best-effort, like the draft text.
+    });
+  }, [accountLease, guid, replyRestoredFor, replyTargetGuid, replyTargetPartIndex]);
 
   const {
     ownedShareIdentity,

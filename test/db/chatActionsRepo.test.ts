@@ -456,6 +456,7 @@ describe('chat actions repo', () => {
       scheduledFor: 9_000,
     });
     await kvSet(db, 'draft.queued-delete', 'half typed');
+    await kvSet(db, 'draft.reply.queued-delete', '{"v":1,"guid":"m1","part":0}');
 
     let releaseNeighbour!: () => void;
     let markNeighbourStarted!: () => void;
@@ -495,6 +496,7 @@ describe('chat actions repo', () => {
       expect(counts(raw, 'outgoing_queue')).toBe(1);
       expect(counts(raw, 'scheduled_messages')).toBe(1);
       expect(await kvGet(db, 'draft.queued-delete')).toBe('half typed');
+      expect(await kvGet(db, 'draft.reply.queued-delete')).not.toBeNull();
       expect(await kvGet(db, 'chat.delete.neighbour.phantom')).toBe('rollback');
 
       releaseNeighbour();
@@ -510,6 +512,7 @@ describe('chat actions repo', () => {
       expect(counts(raw, 'outgoing_queue')).toBe(0);
       expect(counts(raw, 'scheduled_messages')).toBe(0);
       expect(await kvGet(db, 'draft.queued-delete')).toBeNull();
+      expect(await kvGet(db, 'draft.reply.queued-delete')).toBeNull();
       expect(await kvGet(db, 'chat.delete.neighbour.phantom')).toBeNull();
     } finally {
       releaseNeighbour();
