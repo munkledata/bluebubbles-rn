@@ -129,13 +129,22 @@ export default function NewChatScreen(): React.JSX.Element {
   const [accountInvalidated, setAccountInvalidated] = useState(() => !accountLease.isCurrent());
   // A forwarded message pre-fills the composer. File paths stay out of this public route: the
   // only attachment parameter is an opaque, one-time key into a process-local handoff.
-  const { forwardText, forwardAttachmentHandoff, shareBatch } = useLocalSearchParams<{
+  // `to`/`body` come from an `imessage:` link another app opened (see app/+native-intent.tsx). They
+  // only pre-fill the screen; nothing is sent until the person taps Start.
+  const { forwardText, forwardAttachmentHandoff, shareBatch, to, body } = useLocalSearchParams<{
+    to?: string;
+    body?: string;
     forwardText?: string;
     forwardAttachmentHandoff?: string;
     shareBatch?: string;
   }>();
   const [initialForwardHandoff] = useState(forwardAttachmentHandoff);
-  const [recipients, setRecipients] = useState<Recipient[]>([]);
+  const [recipients, setRecipients] = useState<Recipient[]>(() => {
+    const linked = typeof to === 'string' ? to.trim() : '';
+    if (!looksLikeAddress(linked)) return [];
+    const address = recipientAddressFor(linked);
+    return [{ address, name: address }];
+  });
   const [query, setQuery] = useState('');
   // Capture only the exact native claim named by this route. A stale/external URL cannot consume
   // whichever share happens to be ambient in the process.
@@ -153,7 +162,11 @@ export default function NewChatScreen(): React.JSX.Element {
               fileCount: files.length,
             } satisfies ShareIntakeManifestIdentity)
           : null,
-      message: (forwardText ?? '') || (ownsShare ? text : null) || '',
+      message:
+        (forwardText ?? '') ||
+        (ownsShare ? text : null) ||
+        (typeof body === 'string' ? body : '') ||
+        '',
       attachments: ownsShare ? files : [],
     };
   });

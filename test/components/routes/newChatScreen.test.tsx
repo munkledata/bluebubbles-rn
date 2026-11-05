@@ -34,6 +34,8 @@ const mockBack = jest.fn();
 const mockReplace = jest.fn();
 const mockRouter = { push: mockPush, back: mockBack, replace: mockReplace };
 let mockSearchParams: {
+  to?: string;
+  body?: string;
   forwardText?: string;
   forwardAttachmentHandoff?: string;
   shareBatch?: string;
@@ -2416,5 +2418,25 @@ describe('NewChatScreen — RCS find-or-create', () => {
 
     await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
     expect(mockFindOrCreateRcsChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('NewChatScreen — opened from an imessage: link', () => {
+  it('fills in the recipient and text, and sends nothing until Start', async () => {
+    mockSearchParams = { to: '+15559990000', body: 'Hi from a website' };
+    await renderWithTheme(<NewChatScreen />);
+
+    expect(screen.getByLabelText('Remove +15559990000')).toBeTruthy();
+    expect(screen.getByDisplayValue('Hi from a website')).toBeTruthy();
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
+  it('ignores a recipient that is not an address', async () => {
+    mockSearchParams = { to: 'not an address' };
+    await renderWithTheme(<NewChatScreen />);
+
+    expect(screen.queryByLabelText('Remove not an address')).toBeNull();
+    expect(screen.getByPlaceholderText('Phone or email')).toBeTruthy();
   });
 });
