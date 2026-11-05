@@ -793,7 +793,7 @@ export default function SettingsScreen(): React.JSX.Element {
               decrementLabel="Fewer messages per chat"
               incrementLabel="More messages per chat"
             />
-            <NoteRow text="Caps the initial sync per chat (full history still loads when you open a chat)." />
+            <NoteRow text="Caps the first sync per chat. Opening a chat later loads up to its newest 500 messages." />
           </SettingsSection>
         )}
 

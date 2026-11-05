@@ -760,6 +760,17 @@ describe('SettingsScreen — theme presets', () => {
   });
 });
 
+describe('SettingsScreen — sync notes', () => {
+  it('says how far opening a chat loads after the first sync', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    // Not "full history": opening a chat loads at most its newest 500 messages.
+    expect(
+      screen.getByText(/Opening a chat later loads up to its newest 500 messages/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/full history still loads/)).toBeNull();
+  });
+});
+
 describe('SettingsScreen — navigation rows', () => {
   it.each([
     ['Server Management', 'Server Management…'],
