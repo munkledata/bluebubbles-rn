@@ -40,6 +40,7 @@ const DEFAULTS = {
   autoDownloadAttachments: true,
   autoDownloadOnWifiOnly: false,
   sendWithReturn: false,
+  doubleTapToLove: true,
   showDeliveryTimestamps: true,
   compactChatList: false,
   messageNotifications: true,
@@ -208,6 +209,18 @@ describe('featureSettingsStore', () => {
       ...DEFAULTS,
       autoDownloadAttachments: false,
       sendWithReturn: true,
+      hydrated: true,
+    });
+  });
+
+  it('double-tap ♥ is on by default and remembers being turned off', async () => {
+    const db = await openTestDb();
+    expect(useFeatureSettingsStore.getState().doubleTapToLove).toBe(true);
+    await kvSet(db, 'conversation.doubleTapToLove', '0');
+    await useFeatureSettingsStore.getState().hydrate();
+    expect(useFeatureSettingsStore.getState()).toMatchObject({
+      ...DEFAULTS,
+      doubleTapToLove: false,
       hydrated: true,
     });
   });

@@ -202,6 +202,7 @@ beforeEach(() => {
     autoDownloadAttachments: true,
     autoDownloadOnWifiOnly: false,
     sendWithReturn: false,
+    doubleTapToLove: true,
     showDeliveryTimestamps: true,
     compactChatList: false,
     messageNotifications: true,
@@ -235,6 +236,29 @@ beforeEach(() => {
 
 afterEach(() => {
   resumeRealtimeDeliveries();
+});
+
+describe('SettingsScreen — Double-Tap to Love', () => {
+  it('shows the switch on by default and saves turning it off', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    const toggle = screen.getByLabelText(
+      'Double-tap a message to send a heart tapback, and again to remove it',
+    );
+    expect(screen.getByText('Double-Tap to Love')).toBeTruthy();
+    expect(toggle.props.value).toBe(true);
+
+    await act(async () => {
+      fireEvent(toggle, 'valueChange', false);
+    });
+    expect(useFeatureSettingsStore.getState().doubleTapToLove).toBe(false);
+    await waitFor(() =>
+      expect(
+        mockKvSetWithinTransaction.mock.calls.some(
+          (call) => call[1] === 'conversation.doubleTapToLove' && call[2] === '0',
+        ),
+      ).toBe(true),
+    );
+  });
 });
 
 describe('SettingsScreen — toggles wire to the real stores + persist', () => {

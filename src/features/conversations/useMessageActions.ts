@@ -800,8 +800,14 @@ export function useMessageActions({
     );
   };
 
-  const onReact = (reaction: string, emoji?: string): void => {
-    const current = currentSelectedMessage();
+  // Send (or remove) a tapback on `current`, re-checking the pressed part against the live
+  // message. Shared by the long-press menu and double-tap ♥.
+  const sendReactionTo = (
+    current: EnrichedMessage | null,
+    pressedPart: number | undefined,
+    reaction: string,
+    emoji?: string,
+  ): void => {
     const parsed = parseReactionType(reaction);
     const rcsReaction =
       rcsEnabled &&
@@ -810,11 +816,7 @@ export function useMessageActions({
     // Re-check the part chosen at long-press against the live message: it may have changed since.
     const imessagePartIndex =
       current != null
-        ? imessageReactionPartIndex(
-            current,
-            imessagePartReactionsAvailable,
-            selected?.pressedPartIndex,
-          )
+        ? imessageReactionPartIndex(current, imessagePartReactionsAvailable, pressedPart)
         : undefined;
     // An emoji tapback is an iMessage option only while the restored emoji switch is on.
     const imessageEmoji = parsed?.baseType === 'emoji' || emoji !== undefined;
@@ -865,6 +867,42 @@ export function useMessageActions({
         });
     }
   };
+
+  const onReact = (reaction: string, emoji?: string): void =>
+    sendReactionTo(currentSelectedMessage(), selected?.pressedPartIndex, reaction, emoji);
+
+  // Double-tap ♥: love the tapped part, or take your ♥ back when it is already there. It reads the
+  // live message, so the toggle follows what the chat shows now; a message that can't take a
+  // tapback (still sending, unsent, another RCS provider) is left alone by sendReactionTo.
+  const toggleLoveRef = useRef<(msg: EnrichedMessage, target: MessagePressTarget) => void>(
+    () => undefined,
+  );
+  toggleLoveRef.current = (msg, target) => {
+    const current = messagesRef.current.find((message) => message.guid === msg.guid);
+    if (!current || isAggregateRetractionTombstone(current) || current.guid.startsWith('temp-')) {
+      return;
+    }
+    const pressedPart = pressedPartIndex(current, target);
+    const imessagePart =
+      imessageReactionsAvailable && !isRcsChatGuid(guid)
+        ? imessageReactionPartIndex(current, imessagePartReactionsAvailable, pressedPart)
+        : undefined;
+    // The same "is it yours on this part" rule the long-press menu uses for its toggles.
+    const loved = current.reactions.some(
+      (reaction) =>
+        reaction.isFromMe &&
+        reaction.baseType === 'love' &&
+        (imessagePart === undefined ||
+          currentPartCount(current) <= 1 ||
+          reaction.targetPart === imessagePart),
+    );
+    sendReactionTo(current, pressedPart, loved ? '-love' : 'love');
+  };
+  // Stable for the memoized MessageList → MessageRow chain (the ref always holds the latest rules).
+  const onDoubleTapMessage = useCallback(
+    (msg: EnrichedMessage, target: MessagePressTarget): void => toggleLoveRef.current(msg, target),
+    [],
+  );
 
   const onCopySelected = (): void => {
     const current = currentSelectedMessage();
@@ -1078,6 +1116,7 @@ export function useMessageActions({
     setTextSelection,
     onSelectTextSelected,
     onLongPressMessage,
+    onDoubleTapMessage,
     ...(imessageRepliesAvailable ? { onSwipeReply, onReplyToSelected } : {}),
     ...(imessageEditsAvailable ? { onEditSelected } : {}),
     ...(imessageUnsendsAvailable ? { onUnsendSelected, onCheckUnsend } : {}),

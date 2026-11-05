@@ -71,6 +71,8 @@ import {
 import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
+import { useScreenReaderEnabled } from '@ui/hooks/useScreenReaderEnabled';
+import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { EdgeFade } from '@ui/conversations/EdgeFade';
 import { useTypingStore } from '@state/typingStore';
@@ -350,6 +352,7 @@ function ChatScreenInner({
     details,
     setDetails,
     onDetailsSelected,
+    onDoubleTapMessage,
     textSelection,
     setTextSelection,
     onSelectTextSelected,
@@ -393,6 +396,14 @@ function ChatScreenInner({
     directMessageService: directMessageServiceFor(chatService),
     newChatAvailable,
   });
+  // Double-tap ♥ needs a chat that takes tapbacks. A screen reader's double-tap means "activate",
+  // so TalkBack users keep the long-press menu's ♥ instead.
+  const doubleTapToLove = useFeatureSettingsStore((s) => s.doubleTapToLove);
+  const screenReaderEnabled = useScreenReaderEnabled();
+  const doubleTapLoveAvailable =
+    doubleTapToLove &&
+    !screenReaderEnabled &&
+    (rcsInteractiveFeaturesAvailable || imessageReactionsAvailable);
   const actionSelected = useMemo(() => {
     if (!selected) return null;
     return {
@@ -817,6 +828,11 @@ function ChatScreenInner({
       topInset={hasWallpaper ? topBar + BAR_GAP : 0}
       bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
       onLongPressMessage={searchOpen ? undefined : onLongPressMessage}
+      onDoubleTapMessage={
+        !searchOpen && doubleTapLoveAvailable && selectedGuids == null
+          ? onDoubleTapMessage
+          : undefined
+      }
       onCheckUnsend={searchOpen ? undefined : onCheckUnsend}
       onSwipeReply={
         !searchOpen && imessageRepliesAvailable && selectedGuids == null ? onSwipeReply : undefined

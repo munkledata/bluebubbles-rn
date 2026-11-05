@@ -44,6 +44,7 @@ export type FeatureFlag =
   | 'autoDownloadAttachments'
   | 'autoDownloadOnWifiOnly'
   | 'sendWithReturn'
+  | 'doubleTapToLove'
   | 'showDeliveryTimestamps'
   | 'compactChatList'
   | 'messageNotifications'
@@ -55,6 +56,7 @@ const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
   autoDownloadAttachments: { key: 'attachments.autoDownload', def: true },
   autoDownloadOnWifiOnly: { key: 'attachments.autoDownloadWifiOnly', def: false },
   sendWithReturn: { key: 'conversation.sendWithReturn', def: false },
+  doubleTapToLove: { key: 'conversation.doubleTapToLove', def: true },
   showDeliveryTimestamps: { key: 'conversation.showDeliveryTimestamps', def: true },
   compactChatList: { key: 'chatList.compact', def: false },
   messageNotifications: { key: 'notifications.messages', def: true },
@@ -223,6 +225,8 @@ interface FeatureSettingsState {
   autoDownloadAttachments: boolean;
   autoDownloadOnWifiOnly: boolean;
   sendWithReturn: boolean;
+  /** Double-tap a message's text to send a ♥ tapback (again to remove it). */
+  doubleTapToLove: boolean;
   showDeliveryTimestamps: boolean;
   compactChatList: boolean;
   messageNotifications: boolean;
@@ -257,6 +261,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
   autoDownloadAttachments: FLAGS.autoDownloadAttachments.def,
   autoDownloadOnWifiOnly: FLAGS.autoDownloadOnWifiOnly.def,
   sendWithReturn: FLAGS.sendWithReturn.def,
+  doubleTapToLove: FLAGS.doubleTapToLove.def,
   showDeliveryTimestamps: FLAGS.showDeliveryTimestamps.def,
   compactChatList: FLAGS.compactChatList.def,
   messageNotifications: FLAGS.messageNotifications.def,

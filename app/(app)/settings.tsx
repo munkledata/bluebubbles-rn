@@ -121,6 +121,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const autoDownloadWifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
   const autoDownloadDestination = useFeatureSettingsStore((s) => s.autoDownloadDestination);
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
+  const doubleTapToLove = useFeatureSettingsStore((s) => s.doubleTapToLove);
   const showDeliveryTimestamps = useFeatureSettingsStore((s) => s.showDeliveryTimestamps);
   const compactChatList = useFeatureSettingsStore((s) => s.compactChatList);
   const filterUnknownSenders = useFeatureSettingsStore((s) => s.filterUnknownSenders);
@@ -208,7 +209,8 @@ export default function SettingsScreen(): React.JSX.Element {
     general:
       'general app lock biometric secure screen screenshot recording capture reminders backup find my location facetime link call audio video',
     messaging: 'messaging typing indicators read receipts rcs privacy',
-    conversation: 'conversation message view send with return enter delivery timestamps',
+    conversation:
+      'conversation message view send with return enter delivery timestamps double tap love heart tapback reaction',
     chatlist:
       'chat list conversations compact dense appearance unknown senders filter spam folders groups organize',
     notifications:
@@ -676,6 +678,12 @@ export default function SettingsScreen(): React.JSX.Element {
               value={sendWithReturn}
               onValueChange={(v) => void setFlag('sendWithReturn', v)}
               accessibilityLabel="Pressing return sends the message instead of adding a new line"
+            />
+            <SwitchRow
+              label="Double-Tap to Love"
+              value={doubleTapToLove}
+              onValueChange={(v) => void setFlag('doubleTapToLove', v)}
+              accessibilityLabel="Double-tap a message to send a heart tapback, and again to remove it"
             />
             <SwitchRow
               label="Show Delivery Timestamps"

@@ -389,6 +389,7 @@ const BACKUP_KV_KEYS: ReadonlySet<string> = new Set([
   'attachments.autoDownload',
   'attachments.autoDownloadWifiOnly',
   'conversation.sendWithReturn',
+  'conversation.doubleTapToLove',
   'conversation.showDeliveryTimestamps',
   'chatList.compact',
   'chatList.filterUnknownSenders',

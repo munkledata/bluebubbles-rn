@@ -96,7 +96,7 @@ jest.mock('@features/conversations/useUrlPreview', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import { MessageBubble } from '@ui/conversations/MessageBubble';
+import { DOUBLE_TAP_MS, MessageBubble } from '@ui/conversations/MessageBubble';
 // eslint-disable-next-line import/first
 import { darkTheme, gatorTheme } from '@ui/theme/tokens';
 // eslint-disable-next-line import/first
@@ -289,6 +289,7 @@ const PRIVATE_CANARIES = [
 
 interface PressabilityConfig {
   onLongPress?: (event: object) => void;
+  onPress?: (event: object) => void;
 }
 
 const mockMeasureInWindow = (View as unknown as { prototype: { measureInWindow: jest.Mock } })
@@ -657,6 +658,63 @@ describe('MessageBubble accessibility actions', () => {
 
     // A link card belongs to the text, so it targets the body.
     expect(onLongPress).toHaveBeenCalledWith(rect, { kind: 'body' });
+  });
+});
+
+function configuredPress(node: TestInstance): PressabilityConfig['onPress'] {
+  const responder = pressableHost(node).props.onStartShouldSetResponder as () => unknown;
+  const readConfig = (
+    responder as typeof responder & {
+      testOnly_pressabilityConfig: () => PressabilityConfig;
+    }
+  ).testOnly_pressabilityConfig;
+  return readConfig().onPress;
+}
+
+describe('MessageBubble double-tap ♥', () => {
+  let now = 10_000;
+  let dateNow: jest.SpyInstance;
+  beforeEach(() => {
+    now = 10_000;
+    dateNow = jest.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+  afterEach(() => dateNow.mockRestore());
+
+  it('reports two quick taps on the text as one double-tap on the body', async () => {
+    const onDoubleTap = jest.fn();
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: 'Hello there' })} showTail onDoubleTap={onDoubleTap} />,
+    );
+    const text = screen.getByText('Hello there');
+    await fireEvent.press(text);
+    expect(onDoubleTap).not.toHaveBeenCalled();
+    now += DOUBLE_TAP_MS - 100;
+    await fireEvent.press(text);
+    expect(onDoubleTap).toHaveBeenCalledTimes(1);
+    expect(onDoubleTap).toHaveBeenCalledWith({ kind: 'body' });
+    // A third quick tap starts a new pair instead of a second ♥.
+    now += 100;
+    await fireEvent.press(text);
+    expect(onDoubleTap).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not count two taps further apart than the double-tap window', async () => {
+    const onDoubleTap = jest.fn();
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: 'Hello there' })} showTail onDoubleTap={onDoubleTap} />,
+    );
+    const text = screen.getByText('Hello there');
+    await fireEvent.press(text);
+    now += DOUBLE_TAP_MS + 1;
+    await fireEvent.press(text);
+    expect(onDoubleTap).not.toHaveBeenCalled();
+  });
+
+  it('gives the bubble no tap handler when double-tap is off', async () => {
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: 'Hello there' })} showTail onLongPress={jest.fn()} />,
+    );
+    expect(configuredPress(screen.getByText('Hello there'))).toBeUndefined();
   });
 });
 

@@ -80,6 +80,8 @@ interface MessageListProps {
     rect: BubbleRect,
     target?: MessagePressTarget,
   ) => void;
+  /** Double-tap a message's text → ♥ tapback (stable callback; omit to keep taps inert). */
+  onDoubleTapMessage?: (msg: EnrichedMessage, target: MessagePressTarget) => void;
   /** Tap on your own unsend whose result is unknown: check it again with the Mac. */
   onCheckUnsend?: (msg: EnrichedMessage) => void;
   /** Capability-gated plain-text reply selection for exact iMessage part zero. */
@@ -124,6 +126,7 @@ export function MessageList({
   topInset = 0,
   bottomInset = 0,
   onLongPressMessage,
+  onDoubleTapMessage,
   onCheckUnsend,
   onSwipeReply,
   onRefresh,
@@ -492,6 +495,7 @@ export function MessageList({
             onRetry={handleRetry}
             onCheckUnsend={onCheckUnsend}
             onLongPress={onLongPressMessage}
+            onDoubleTap={onDoubleTapMessage}
             onSwipeReply={onSwipeReply}
             selecting={selectedGuids != null}
             isSelected={selectedGuids?.has(item.guid) ?? false}

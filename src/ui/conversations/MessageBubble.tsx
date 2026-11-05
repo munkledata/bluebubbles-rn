@@ -72,6 +72,8 @@ interface MessageBubbleProps {
    *  on-screen rectangle (measured here so the floating menu can pin above/below it). `target`
    *  says which attachment, or the text body, the press landed on; none from accessibility. */
   onLongPress?: (rect: BubbleRect, target?: MessagePressTarget) => void;
+  /** Double-tap the text → a ♥ tapback, or its removal. Omit → a tap on the text stays inert. */
+  onDoubleTap?: (target: MessagePressTarget) => void;
   /** Tap the reply quote → jump to the original message. */
   onJumpToReply?: () => void;
   /** Tap the reaction badges → open the "who reacted" detail. Omit → badges stay inert. */
@@ -91,6 +93,8 @@ interface MessageBubbleProps {
 
 const MESSAGE_ACTIONS = [{ name: 'longpress', label: 'Show message actions' }] as const;
 const BODY_PRESS: MessagePressTarget = { kind: 'body' };
+/** Two taps on the text within this many milliseconds are a double-tap. */
+export const DOUBLE_TAP_MS = 300;
 
 /** iOS message bubble: reply quote + attachments + text, with reactions + long-press.
  * Memoized (it does heavy work: attachments, reactions, URL preview, run rendering). */
@@ -102,6 +106,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   onRetry,
   onCheckUnsend,
   onLongPress,
+  onDoubleTap,
   onJumpToReply,
   onShowReactions,
   deferEdited,
@@ -128,6 +133,19 @@ export const MessageBubble = React.memo(function MessageBubble({
   // A press on the text, a link card or the bubble's edges targets the text body; each attachment
   // reports its own guid, so a several-part message's tapback can go to the exact photo or caption.
   const handleLongPress = useCallback(() => openActions(BODY_PRESS), [openActions]);
+  // A double-tap on the text. A single tap on the text still does nothing, so nothing waits for a
+  // second tap; photos and link cards keep their own single tap and take no double-tap.
+  const lastTextTapAtRef = useRef(0);
+  const handleTextPress = useCallback(() => {
+    if (!onDoubleTap) return;
+    const now = Date.now();
+    if (now - lastTextTapAtRef.current <= DOUBLE_TAP_MS) {
+      lastTextTapAtRef.current = 0;
+      onDoubleTap(BODY_PRESS);
+      return;
+    }
+    lastTextTapAtRef.current = now;
+  }, [onDoubleTap]);
   const handleAttachmentLongPress = useCallback(
     (attachmentGuid: string) => openActions({ kind: 'attachment', attachmentGuid }),
     [openActions],
@@ -410,6 +428,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   const bubble = (
     <Pressable
       ref={bubbleRef}
+      onPress={onDoubleTap ? handleTextPress : undefined}
       onLongPress={onLongPress ? handleLongPress : undefined}
       delayLongPress={onLongPress ? 350 : undefined}
       // An accessible Pressable groups all descendants on Android. Keep the existing grouping for
