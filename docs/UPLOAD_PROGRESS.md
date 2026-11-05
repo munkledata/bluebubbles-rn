@@ -47,6 +47,14 @@ native bits injected, so most of it is tested directly without any mock: the sam
 - **Filename (`gatorFileName`):** the picker often caches a file under a random UUID. The patched
   `createUploadTask` (`patches/expo-file-system+57.0.7.patch`) takes `gatorFileName` and sends it as
   the multipart filename, so the server sees the original name on both routes.
+- **Several files in one request (`gatorAdditionalFiles`):** the server's restored route takes 1-10
+  files as one iMessage, but the stock task carries one file. The same patch adds
+  `gatorAdditionalFiles: [{ uri, fileName, mimeType }]` (at most nine): each extra file passes the
+  main file's read-permission and existence checks plus the filename validator, and is sent after
+  the main file, in order, under the same field name, after every text field. It is still one
+  native request, so one `cancelAsync` stops every file. `scripts/check-android-build.mjs` pins the
+  wiring and requires its strings in the packaged DEX: without them the runtime would ignore the
+  extra files and upload only the first.
 
 ---
 
@@ -66,7 +74,9 @@ Two details that matter:
 
 - **Multipart progress is accurate.** `createRequestBody`'s `MULTIPART` branch applies the decorator
   to `file.asRequestBody(...)` specifically, not to the assembled `MultipartBody` — so
-  `totalBytesExpectedToSend` is the file's exact length, not the envelope.
+  `totalBytesExpectedToSend` is the file's exact length, not the envelope. The one deliberate
+  exception is a several-file upload: there the decorator wraps the whole form, so one bar covers
+  every file, and the total also counts the text fields and a few hundred bytes of form framing.
 - **Events are throttled natively** to one per 100 ms (`MIN_EVENT_DT_MS`), plus a guaranteed final
   event at 100%.
 

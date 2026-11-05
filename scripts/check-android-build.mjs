@@ -121,6 +121,15 @@ export const UPLOAD_FILENAME_SOURCE_PATHS = {
   typesSource: 'node_modules/expo-file-system/src/legacy/FileSystem.types.ts',
   declarationsSource: 'node_modules/expo-file-system/build/legacy/FileSystem.types.d.ts',
 };
+/** Sources of the several-files-in-one-upload bridge (one iMessage carrying 1-10 files). */
+export const UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS = {
+  legacyModuleSource: EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH,
+  recordsSource: UPLOAD_FILENAME_SOURCE_PATHS.recordsSource,
+  helperSource:
+    'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/GatorUploadFiles.kt',
+  typesSource: UPLOAD_FILENAME_SOURCE_PATHS.typesSource,
+  declarationsSource: UPLOAD_FILENAME_SOURCE_PATHS.declarationsSource,
+};
 const EXPO_ROUTER_PATCH_PATH = `patches/expo-router+${EXPO_ROUTER_VERSION}.patch`;
 const EXPO_ROUTER_EXPERIMENTAL_STACK_PATH =
   'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js';
@@ -178,6 +187,14 @@ export const REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS = [
 export const REQUIRED_UPLOAD_FILENAME_DEX_MARKERS = [
   'gatorFileName',
   'Invalid Gator multipart filename',
+];
+
+// These strings exist only in the patched several-files upload. Without them the packaged runtime
+// would ignore the extra files and upload only the first one.
+export const REQUIRED_UPLOAD_ADDITIONAL_FILES_DEX_MARKERS = [
+  'gatorAdditionalFiles',
+  'Too many Gator upload files',
+  'Gator additional files need a multipart upload',
 ];
 
 // These messages exist only in the patched task-manager sources. They prove the packaged runtime
@@ -1486,6 +1503,113 @@ export function validateUploadFilenameBridge({
   return errors;
 }
 
+/**
+ * Bind the several-files-in-one-upload extension to the installed sources and durable patch: each
+ * extra file passes the main file's read and existence checks, the count stays within the server's
+ * ten files, a one-file upload keeps its exact legacy body, and several files count progress over
+ * the whole form.
+ */
+export function validateUploadAdditionalFilesBridge({
+  patchSource,
+  legacyModuleSource,
+  recordsSource,
+  helperSource,
+  typesSource,
+  declarationsSource,
+}) {
+  const errors = [];
+  const nativeFunction = (name) =>
+    withoutKotlinComments(
+      String(legacyModuleSource ?? '').match(
+        new RegExp(`(?:^|\\n)  private fun ${name}\\([\\s\\S]*?\\n  }`),
+      )?.[0] ?? '',
+    );
+  const uploadRequest = nativeFunction('createUploadRequest');
+  const requestChecks = [
+    'GatorUploadFiles.requireBounded(additionalFiles.size, options.uploadType == FileSystemUploadType.MULTIPART)',
+    'ensurePermission(extraUri, FilePermissionService.Permission.READ)',
+    'extraUri.checkIfFileExists()',
+    'GatorUploadFiles.part(extraUri.toFile(), extra.fileName, extra.mimeType)',
+    'createRequestBody(options, decorator, fileUri.toFile(), additionalParts)',
+  ];
+  if (requestChecks.some((marker) => !uploadRequest.includes(marker))) {
+    errors.push(
+      'legacy upload request must bound every extra file and check it like the main file',
+    );
+  }
+  const requestBody = nativeFunction('createRequestBody');
+  const bodyChecks = [
+    'if (additionalParts.isEmpty()) {',
+    'bodyBuilder.addFormDataPart(fieldName, uploadName, decorator.decorate(file.asRequestBody(mimeType.toMediaTypeOrNull())))',
+    'bodyBuilder.addFormDataPart(fieldName, uploadName, file.asRequestBody(mimeType.toMediaTypeOrNull()))',
+    'GatorUploadFiles.addParts(bodyBuilder, fieldName, additionalParts)',
+    'decorator.decorate(bodyBuilder.build())',
+  ];
+  if (bodyChecks.some((marker) => !requestBody.includes(marker))) {
+    errors.push(
+      'legacy multipart body must keep one file unchanged and count progress over several files',
+    );
+  }
+  if (
+    !/@Field\s+val gatorAdditionalFiles: List<GatorUploadFile>\? = null/.test(
+      withoutKotlinComments(recordsSource ?? ''),
+    )
+  ) {
+    errors.push('native upload options must expose the nullable gatorAdditionalFiles record field');
+  }
+  const helper = withoutKotlinComments(helperSource ?? '');
+  const helperChecks = [
+    'require(count == 0 || multipart)',
+    'require(count <= MAX_ADDITIONAL_FILES)',
+    'require(file.isFile)',
+    'mimeType.isNotBlank() && mimeType.toMediaTypeOrNull() != null',
+    'GatorUploadPart(file, GatorUploadFilename.validate(fileName), mimeType)',
+    'builder.addFormDataPart(fieldName, part.fileName, part.file.asRequestBody(part.mimeType.toMediaTypeOrNull()))',
+  ];
+  if (
+    !/\bconst val MAX_ADDITIONAL_FILES = 9\b/.test(helper) ||
+    helperChecks.some((marker) => !helper.includes(marker))
+  ) {
+    errors.push('native extra-file helper must keep its count, file, name and type checks');
+  }
+  for (const [label, source] of [
+    ['source', typesSource],
+    ['declarations', declarationsSource],
+  ]) {
+    if (
+      !/gatorAdditionalFiles\?: \{\s*uri: string;\s*fileName: string;\s*mimeType: string;?\s*\}\[\];/.test(
+        source ?? '',
+      )
+    )
+      errors.push(`legacy upload ${label} must expose gatorAdditionalFiles`);
+  }
+  const patchMarkers = [
+    `b/${UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS.helperSource}`,
+    '+  val gatorAdditionalFiles: List<GatorUploadFile>? = null',
+    '+    GatorUploadFiles.requireBounded(additionalFiles.size, options.uploadType == FileSystemUploadType.MULTIPART)',
+    '+      ensurePermission(extraUri, FilePermissionService.Permission.READ)',
+    '+          decorator.decorate(bodyBuilder.build())',
+    '+  fun `several files follow the text fields in order and progress counts the whole form`() {',
+    '+  fun `a real request carries every file and its progress never goes backwards`() {',
+    '+  fun `extra files need a real file, a safe name, a type and a bounded multipart form`() {',
+  ];
+  // The helper is wholly patch-owned: every nonblank source line must be restored by npm ci.
+  const patchLines = String(patchSource ?? '').split(/\r?\n/);
+  const helperLines = String(helperSource ?? '')
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
+  if (
+    patchMarkers.some((marker) => !patchSource?.includes(marker)) ||
+    helperLines.length === 0 ||
+    helperLines.some((line) => !patchLines.includes(`+${line}`))
+  ) {
+    errors.push(
+      'expo-file-system patch must restore the extra-file bridge, helper, types, and native tests',
+    );
+  }
+  return errors;
+}
+
 // Expo's dev-client overlay legitimately needs this in a debuggable build. It remains forbidden
 // in the release manifest and packaged AAB, which are the artifacts shipped to users.
 const DEBUG_ONLY_ALLOWED_PERMISSIONS = new Set(['android.permission.SYSTEM_ALERT_WINDOW']);
@@ -2119,6 +2243,11 @@ export function validatePackagedAndroidBundle({
         errors.push(`packaged DEX is missing required upload-filename marker: ${marker}`);
       }
     }
+    for (const marker of REQUIRED_UPLOAD_ADDITIONAL_FILES_DEX_MARKERS) {
+      if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
+        errors.push(`packaged DEX is missing required upload extra-files marker: ${marker}`);
+      }
+    }
     for (const marker of REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS) {
       if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
         errors.push(`packaged DEX is missing required background-task retry marker: ${marker}`);
@@ -2594,6 +2723,17 @@ export function runAndroidBuildCheck({
         ]),
       ),
     }).map((error) => `upload filename bridge: ${error}`),
+  );
+  errors.push(
+    ...validateUploadAdditionalFilesBridge({
+      patchSource: readFileSync(resolve(root, EXPO_FILE_SYSTEM_PATCH_PATH), 'utf8'),
+      ...Object.fromEntries(
+        Object.entries(UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS).map(([key, path]) => [
+          key,
+          readFileSync(resolve(root, path), 'utf8'),
+        ]),
+      ),
+    }).map((error) => `upload extra-files bridge: ${error}`),
   );
   errors.push(
     ...validateExpoBackgroundTaskRetryBridge({

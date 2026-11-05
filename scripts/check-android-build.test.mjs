@@ -23,7 +23,9 @@ import {
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
   REQUIRED_SHARE_INTAKE_DEX_MARKERS,
   REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS,
+  REQUIRED_UPLOAD_ADDITIONAL_FILES_DEX_MARKERS,
   REQUIRED_UPLOAD_FILENAME_DEX_MARKERS,
+  UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS,
   UPLOAD_FILENAME_SOURCE_PATHS,
   BACKGROUND_EXECUTION_SOURCE_PATHS,
   REQUIRED_PERMISSIONS,
@@ -32,6 +34,7 @@ import {
   validateExpoBackgroundTaskRetryBridge,
   validateBackgroundExecutionLifetime,
   validateExpoFileSystemRedirectContainment,
+  validateUploadAdditionalFilesBridge,
   validateUploadFilenameBridge,
   validateExpoRouterPredictiveBackBridge,
   validateExpoActivityResultWait,
@@ -673,6 +676,18 @@ function uploadFilenameInput() {
   };
 }
 
+function uploadAdditionalFilesInput() {
+  return {
+    patchSource: readFileSync(join(ROOT, 'patches/expo-file-system+57.0.7.patch'), 'utf8'),
+    ...Object.fromEntries(
+      Object.entries(UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS).map(([key, path]) => [
+        key,
+        readFileSync(join(ROOT, path), 'utf8'),
+      ]),
+    ),
+  };
+}
+
 const PATCHED_REGISTRY_EXCERPT = `
         launchedKeys.add(key)
         // Gator patch: save the launch now.
@@ -799,6 +814,76 @@ test('upload filename guard rejects missing native wiring, types, validation, or
   );
 });
 
+test('extra-files DEX markers are real patched strings, including the option name JS sends', () => {
+  const { helperSource, recordsSource } = uploadAdditionalFilesInput();
+  assert.ok(REQUIRED_UPLOAD_ADDITIONAL_FILES_DEX_MARKERS.includes('gatorAdditionalFiles'));
+  assert.ok(REQUIRED_UPLOAD_ADDITIONAL_FILES_DEX_MARKERS.length >= 2);
+  for (const marker of REQUIRED_UPLOAD_ADDITIONAL_FILES_DEX_MARKERS) {
+    assert.ok(`${helperSource}\n${recordsSource}`.includes(marker), marker);
+  }
+});
+
+test('upload extra-files guard rejects a missing check, per-file progress, types, or a stale patch', () => {
+  const failsWith = (input, text) =>
+    validateUploadAdditionalFilesBridge(input).some((message) => message.includes(text));
+  assert.deepEqual(validateUploadAdditionalFilesBridge(uploadAdditionalFilesInput()), []);
+  for (const field of [...Object.keys(UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS), 'patchSource']) {
+    const input = uploadAdditionalFilesInput();
+    input[field] = '';
+    assert.ok(validateUploadAdditionalFilesBridge(input).length > 0, field);
+  }
+  // Every extra file must pass the main file's read, existence and count checks.
+  for (const removed of [
+    'ensurePermission(extraUri, FilePermissionService.Permission.READ)',
+    'extraUri.checkIfFileExists()',
+    'GatorUploadFiles.requireBounded(additionalFiles.size, options.uploadType == FileSystemUploadType.MULTIPART)',
+  ]) {
+    const input = uploadAdditionalFilesInput();
+    input.legacyModuleSource = input.legacyModuleSource.replace(removed, 'Unit');
+    assert.ok(failsWith(input, 'check it like the main file'), removed);
+  }
+  // A check that is only commented in does not count.
+  const commented = uploadAdditionalFilesInput();
+  commented.legacyModuleSource = commented.legacyModuleSource.replace(
+    '      extraUri.checkIfFileExists()',
+    '      // extraUri.checkIfFileExists()',
+  );
+  assert.ok(failsWith(commented, 'check it like the main file'));
+  // Several files count progress over the whole form; one file keeps its exact legacy body.
+  const perFile = uploadAdditionalFilesInput();
+  perFile.legacyModuleSource = perFile.legacyModuleSource.replace(
+    'decorator.decorate(bodyBuilder.build())',
+    'bodyBuilder.build()',
+  );
+  assert.ok(failsWith(perFile, 'count progress over several files'));
+  const noSingleBranch = uploadAdditionalFilesInput();
+  noSingleBranch.legacyModuleSource = noSingleBranch.legacyModuleSource.replace(
+    'if (additionalParts.isEmpty()) {',
+    'if (false) {',
+  );
+  assert.ok(failsWith(noSingleBranch, 'keep one file unchanged'));
+  // The helper's cap is exact, a folder is not a file, and every extra name is validated.
+  for (const [oldValue, newValue] of [
+    ['const val MAX_ADDITIONAL_FILES = 9', 'const val MAX_ADDITIONAL_FILES = 99'],
+    ['require(file.isFile)', 'require(file.exists())'],
+    [
+      'GatorUploadPart(file, GatorUploadFilename.validate(fileName), mimeType)',
+      'GatorUploadPart(file, fileName, mimeType)',
+    ],
+  ]) {
+    const input = uploadAdditionalFilesInput();
+    input.helperSource = input.helperSource.replace(oldValue, newValue);
+    assert.ok(failsWith(input, 'count, file, name and type checks'), oldValue);
+  }
+  const untyped = uploadAdditionalFilesInput();
+  untyped.declarationsSource = untyped.declarationsSource.replace('gatorAdditionalFiles?:', 'x?:');
+  assert.ok(failsWith(untyped, 'declarations must expose gatorAdditionalFiles'));
+  // npm ci must restore exactly the installed helper.
+  const stalePatch = uploadAdditionalFilesInput();
+  stalePatch.patchSource = stalePatch.patchSource.replace('require(file.isFile)', 'require(true)');
+  assert.ok(failsWith(stalePatch, 'patch must restore the extra-file bridge'));
+});
+
 function backgroundTaskRetryInput(overrides = {}) {
   return {
     packageJson: structuredClone(redirectContainmentPackageJson),
@@ -905,7 +990,10 @@ function writeRedirectContainmentFixture(root) {
     join(root, 'patches/expo-file-system+57.0.7.patch'),
     uploadFilenameInput().patchSource,
   );
-  for (const path of Object.values(UPLOAD_FILENAME_SOURCE_PATHS)) {
+  for (const path of new Set([
+    ...Object.values(UPLOAD_FILENAME_SOURCE_PATHS),
+    ...Object.values(UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS),
+  ])) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), readFileSync(join(ROOT, path), 'utf8'));
   }
@@ -1062,6 +1150,9 @@ function cleanupDexFixture({ omitRequiredMarker, extraMarkers = [] } = {}) {
         (marker) => marker !== omitRequiredMarker,
       ),
       ...REQUIRED_UPLOAD_FILENAME_DEX_MARKERS.filter((marker) => marker !== omitRequiredMarker),
+      ...REQUIRED_UPLOAD_ADDITIONAL_FILES_DEX_MARKERS.filter(
+        (marker) => marker !== omitRequiredMarker,
+      ),
       ...REQUIRED_SHARE_INTAKE_DEX_MARKERS.filter((marker) => marker !== omitRequiredMarker),
       ...REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS.filter(
         (marker) => marker !== omitRequiredMarker,
@@ -2915,6 +3006,17 @@ test('validates the packaged manifest, owned share target, and native intake mar
     );
   }
 
+  for (const marker of REQUIRED_UPLOAD_ADDITIONAL_FILES_DEX_MARKERS) {
+    const errors = validatePackagedAndroidBundle({
+      manifestProto,
+      dexBytes: cleanupDexFixture({ omitRequiredMarker: marker }),
+    });
+    assert.ok(
+      errors.includes(`packaged DEX is missing required upload extra-files marker: ${marker}`),
+      marker,
+    );
+  }
+
   for (const marker of REQUIRED_SHARE_INTAKE_DEX_MARKERS) {
     const missingOwnedIntake = validatePackagedAndroidBundle({
       manifestProto,
@@ -3166,6 +3268,20 @@ test('artifact runner inspects both variants and the final release AAB contents'
       /background task retry bridge:.*reviewed retry flow/s,
     );
     writeFileSync(backgroundSchedulerPath, backgroundSchedulerSource);
+
+    const extraFilesHelperPath = join(root, UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS.helperSource);
+    const extraFilesHelperSource = readFileSync(extraFilesHelperPath, 'utf8');
+    const folderAccepted = extraFilesHelperSource.replace(
+      'require(file.isFile)',
+      'require(file.exists())',
+    );
+    assert.notEqual(folderAccepted, extraFilesHelperSource);
+    writeFileSync(extraFilesHelperPath, folderAccepted);
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      /upload extra-files bridge:.*count, file, name and type checks/s,
+    );
+    writeFileSync(extraFilesHelperPath, extraFilesHelperSource);
 
     assert.equal(
       inspectPackagedAndroidBundle(join(root, releaseBundlePath)).googleMapsApiKeySha256,
