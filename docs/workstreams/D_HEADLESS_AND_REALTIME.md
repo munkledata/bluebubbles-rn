@@ -321,11 +321,12 @@ outgoing-recovery grace so the recovery worker does not mistake a still-owned se
 
 Since review M089 (2026-10-18) every entry names its chat and ordering turns are per chat: queued
 sends to one chat always start in order, the window applies per chat, and the 32-job cap stays
-shared. `LOGICAL_SEND_MAX_ACTIVE_CHATS` bounds how many chats may send at once and is **1**, which
-is the single global FIFO described above. Raise it (to 3) only after the device step in
-`docs/DEVICE_VERIFICATION_CHECKLIST.md` shows the Mac's AppleScript and RCS paths accept
-simultaneous sends to different chats; if that check fails, leave it at 1. Two queue tests pin the
-shipped value on purpose, so raising it also means updating them.
+shared. `LOGICAL_SEND_MAX_ACTIVE_CHATS` bounds how many chats may send at once. It is **3** since
+0.1.76: the owner chose (2026-11-05) to raise it before the full device step in
+`docs/DEVICE_VERIFICATION_CHECKLIST.md`, checking the internal build with their own self-chats
+only. A cap of 1 is the single global FIFO described above; if a send lands in the wrong chat,
+arrives twice or fails with an AppleScript error, set it back to 1. A queue test pins the shipped
+value on purpose.
 
 Manual Retry, the automatic retry of failed sends (the outgoing queue), scheduled sends and
 new-chat creation never take a turn, before or after M089, so they can overlap a queued send to

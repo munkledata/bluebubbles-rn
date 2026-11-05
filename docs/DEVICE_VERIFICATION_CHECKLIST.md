@@ -1128,7 +1128,9 @@ those rows is a current remediation or candidate requirement.
       the offline server) cleared the message, and pairing with a working server then connected. Not
       tried: scanning a code while the message was showing.
 - [ ] **LOCAL DEV, before raising `LOGICAL_SEND_MAX_ACTIVE_CHATS` above 1 (M089, added
-      2026-10-18):** Build with the constant set to 3 against the real Mac. (1) With a slow uplink,
+      2026-10-18):** *Raised to 3 in 0.1.76 by the owner's choice (2026-11-05) before this step;
+      the internal build is checked with the owner's own self-chats only, so steps (2), (3) and (6)
+      stay open.* Build with the constant set to 3 against the real Mac. (1) With a slow uplink,
       send a 10 MiB image in chat A, then text chat B at once: B sends promptly. (2) Send texts to
       two iMessage chats within a second (composer plus a notification inline reply): each arrives
       exactly once, in the right chat, on the recipients and in the Mac's Messages app. (3) Repeat

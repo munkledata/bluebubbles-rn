@@ -6,11 +6,13 @@ export const LOGICAL_SEND_ORDER_WINDOW_MS = 20_000;
 /** Bound retained private callbacks; the newest admission fails visibly when full. */
 export const LOGICAL_SEND_MAX_RETAINED = 32;
 /**
- * Chats that may send at the same time (review M089). One keeps today's single global order.
- * Raise it (to 3) only after a Mac + phone test shows Messages.app and the RCS bridge accept
- * simultaneous sends to different chats; two queue tests pin this value on purpose.
+ * Chats that may send at the same time (review M089); each chat still sends strictly in order.
+ * Raised from 1 to 3 for 0.1.76 by the owner's choice (2026-11-05), before the full Mac + phone
+ * check in docs/DEVICE_VERIFICATION_CHECKLIST.md: the internal build is checked with the owner's
+ * own self-chats only. If a send lands in the wrong chat, arrives twice or fails with an AppleScript
+ * error, set this back to 1. A queue test pins this value on purpose.
  */
-export const LOGICAL_SEND_MAX_ACTIVE_CHATS = 1;
+export const LOGICAL_SEND_MAX_ACTIVE_CHATS = 3;
 
 const MAX_TIMER_MS = 2_147_483_647;
 
@@ -278,10 +280,9 @@ export function createLogicalSendQueue(options: LogicalSendQueueOptions = {}): L
 /**
  * One process-wide queue; account-generation invalidation retires its queued closures.
  *
- * Turns are per chat (review M089), but LOGICAL_SEND_MAX_ACTIVE_CHATS is 1 until a device test
- * shows the Mac's AppleScript and RCS paths accept sends to different chats at the same time. Until
- * then a send that is slow inside its turn (an attachment upload, say) can still delay a send to
- * another chat by up to LOGICAL_SEND_ORDER_WINDOW_MS.
+ * Turns are per chat (review M089), and up to LOGICAL_SEND_MAX_ACTIVE_CHATS chats send at once, so
+ * a send that is slow inside its turn (an attachment upload, say) no longer holds up a send to
+ * another chat unless that many chats are already busy.
  */
 export const logicalSendQueue = createLogicalSendQueue({
   onOrderWindowElapsed: () => {

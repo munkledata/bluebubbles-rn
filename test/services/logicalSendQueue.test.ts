@@ -245,7 +245,7 @@ describe('logical send queue', () => {
   });
 });
 
-// Review M089: ordering turns are per chat with a shared cap; one active chat keeps today's order.
+// Review M089: ordering turns are per chat with a shared cap; a cap of one keeps one global order.
 describe('per-chat send turns', () => {
   const job =
     (starts: string[], label: string, gate?: Deferred<void>) => async (): Promise<void> => {
@@ -253,13 +253,17 @@ describe('per-chat send turns', () => {
       if (gate) await gate.promise;
     };
 
-  it('ships with one active chat until a Mac and phone test allows more', () => {
-    expect(LOGICAL_SEND_MAX_ACTIVE_CHATS).toBe(1);
+  it('ships with three active chats (0.1.76, owner-approved before the full device check)', () => {
+    // Setting this back to 1 restores one global send order (the next test).
+    expect(LOGICAL_SEND_MAX_ACTIVE_CHATS).toBe(3);
   });
 
-  it('keeps one global order across chats with the default of one active chat', async () => {
+  it('keeps one global order across chats with a cap of one active chat', async () => {
     const owner = generationHarness();
-    const queue = createLogicalSendQueue({ subscribeInvalidation: owner.subscribe });
+    const queue = createLogicalSendQueue({
+      subscribeInvalidation: owner.subscribe,
+      maxActiveChats: 1,
+    });
     const a1 = deferred<void>();
     const starts: string[] = [];
     const runs = [
@@ -376,6 +380,35 @@ describe('per-chat send turns', () => {
     await Promise.all(runs);
   });
 
+  it('at the shipped limit, three chats send together and a fourth waits for a free slot', async () => {
+    const owner = generationHarness();
+    // No maxActiveChats: this is the shipped default.
+    const queue = createLogicalSendQueue({ subscribeInvalidation: owner.subscribe });
+    const a1 = deferred<void>();
+    const b1 = deferred<void>();
+    const c1 = deferred<void>();
+    const starts: string[] = [];
+    const runs = [
+      queue.run(owner.lease(), CHAT_A, job(starts, 'A1', a1)),
+      queue.run(owner.lease(), CHAT_B, job(starts, 'B1', b1)),
+      queue.run(owner.lease(), CHAT_C, job(starts, 'C1', c1)),
+      queue.run(owner.lease(), CHAT_D, job(starts, 'D1')),
+      // A second send to a busy chat still waits for that chat's own turn.
+      queue.run(owner.lease(), CHAT_A, job(starts, 'A2')),
+    ];
+    await flushMicrotasks();
+    expect(starts).toEqual(['A1', 'B1', 'C1']);
+
+    b1.resolve(undefined);
+    await flushMicrotasks();
+    expect(starts).toEqual(['A1', 'B1', 'C1', 'D1']);
+
+    a1.resolve(undefined);
+    c1.resolve(undefined);
+    await Promise.all(runs);
+    expect(starts).toEqual(['A1', 'B1', 'C1', 'D1', 'A2']);
+  });
+
   it('starts waiting chats in submission order once a chat slot frees', async () => {
     const owner = generationHarness();
     const queue = createLogicalSendQueue({
@@ -441,7 +474,11 @@ describe('per-chat send turns', () => {
 
   it('skips a send whose owner went stale while queued and starts the next chat', async () => {
     const owner = generationHarness();
-    const queue = createLogicalSendQueue({ subscribeInvalidation: owner.subscribe });
+    // One shared turn (the rollback setting): chats queue behind each other.
+    const queue = createLogicalSendQueue({
+      subscribeInvalidation: owner.subscribe,
+      maxActiveChats: 1,
+    });
     const a = deferred<void>();
     const starts: string[] = [];
     let staleCurrent = true;
@@ -463,7 +500,11 @@ describe('per-chat send turns', () => {
   it('does not let a late finish free the turn its chat already passed on', async () => {
     jest.useFakeTimers();
     const owner = generationHarness();
-    const queue = createLogicalSendQueue({ subscribeInvalidation: owner.subscribe });
+    // One shared turn (the rollback setting): chats queue behind each other.
+    const queue = createLogicalSendQueue({
+      subscribeInvalidation: owner.subscribe,
+      maxActiveChats: 1,
+    });
     const first = deferred<void>();
     const second = deferred<void>();
     const starts: string[] = [];
@@ -492,10 +533,14 @@ describe('per-chat send turns', () => {
     }
   });
 
-  it('hands the one turn to the next chat after the ordering window at the shipped limit', async () => {
+  it('hands the one turn to the next chat after the ordering window with a cap of one', async () => {
     jest.useFakeTimers();
     const owner = generationHarness();
-    const queue = createLogicalSendQueue({ subscribeInvalidation: owner.subscribe });
+    // One shared turn (the rollback setting): chats queue behind each other.
+    const queue = createLogicalSendQueue({
+      subscribeInvalidation: owner.subscribe,
+      maxActiveChats: 1,
+    });
     const a1 = deferred<void>();
     const b1 = deferred<void>();
     const starts: string[] = [];

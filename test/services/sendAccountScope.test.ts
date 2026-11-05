@@ -878,7 +878,7 @@ describe('UI send account lease', () => {
     resumeRealtimeDeliveries();
   });
 
-  it('publishes mixed logical sends in order while one multi-image job keeps sibling concurrency', async () => {
+  it('sends up to three chats at once, keeps a multi-image job together and queues a fourth chat', async () => {
     const starts: string[] = [];
     const textResult = deferred<{ tempGuid: string }>();
     const contactResult = deferred<{ tempGuid: string }>();
@@ -925,24 +925,25 @@ describe('UI send account lease', () => {
       reaction: 'love',
     });
 
-    await waitUntil(() => starts.length === 1);
-    expect(starts).toEqual(['text']);
-
-    textResult.resolve({ tempGuid: 'temp-text' });
-    await waitUntil(() => starts.length === 2);
-    expect(starts).toEqual(['text', 'contact']);
-
-    contactResult.resolve({ tempGuid: 'temp-contact' });
+    // Up to three chats send at once (LOGICAL_SEND_MAX_ACTIVE_CHATS): the text, the contact card and
+    // the two-image job start together, the job's images side by side. The reaction, in a fourth
+    // chat, waits for a free slot.
     await waitUntil(() => starts.length === 4);
-    expect(starts).toEqual(['text', 'contact', 'image-1', 'image-2']);
+    expect([...starts].sort()).toEqual(['contact', 'image-1', 'image-2', 'text']);
+    expect(starts.indexOf('image-1')).toBeLessThan(starts.indexOf('image-2'));
 
+    // One image finishing does not end its job's turn while the other image is still sending.
     firstImageResult.resolve({ tempGuid: 'temp-image-1' });
     await Promise.resolve();
     expect(starts).toHaveLength(4);
-    secondImageResult.resolve({ tempGuid: 'temp-image-2' });
+
+    // A finished chat frees its slot for the waiting fourth chat.
+    textResult.resolve({ tempGuid: 'temp-text' });
     await waitUntil(() => starts.length === 5);
     expect(starts[4]).toBe('reaction');
 
+    contactResult.resolve({ tempGuid: 'temp-contact' });
+    secondImageResult.resolve({ tempGuid: 'temp-image-2' });
     reactionResult.resolve({ tempGuid: 'temp-reaction' });
 
     await expect(Promise.all([text, contact, images, reaction])).resolves.toEqual([
