@@ -1598,8 +1598,10 @@ describe('ChatSettingsScreen source and account ownership', () => {
     await fireEvent.press(screen.getByRole('imagebutton', { name: 'Shared photo 1 of 1' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Shared documents, 1' }));
     await fireEvent.press(screen.getByText(PRIVATE_LINK));
+    await fireEvent.press(screen.getByRole('button', { name: 'All Attachments' }));
     expect(mockPush).toHaveBeenCalledWith(`/media/${encodeURIComponent(MEDIA_GUID)}`);
     expect(mockPush).toHaveBeenCalledWith(`/documents/${encodeURIComponent(CHAT_GUID)}`);
+    expect(mockPush).toHaveBeenCalledWith(`/chat-attachments/${encodeURIComponent(CHAT_GUID)}`);
     expect(mockSafeOpenUrl).toHaveBeenCalledWith(PRIVATE_LINK);
   });
 

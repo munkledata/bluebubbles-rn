@@ -1016,6 +1016,10 @@ function ChatSettingsScreen({
     if (!grantIsCurrent(renderGrant)) return;
     router.push(`/documents/${encodeURIComponent(guid)}`);
   };
+  const openAllAttachments = (): void => {
+    if (!grantIsCurrent(renderGrant)) return;
+    router.push(`/chat-attachments/${encodeURIComponent(guid)}`);
+  };
   const openLink = (url: string): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant) || activeLinkOpenRef.current) return;
@@ -1268,6 +1272,7 @@ function ChatSettingsScreen({
           }
           onOpenMedia={openMedia}
           onOpenDocuments={openDocuments}
+          onOpenAll={openAllAttachments}
           onOpenLink={openLink}
         />
 

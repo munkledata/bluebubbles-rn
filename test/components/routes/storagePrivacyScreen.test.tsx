@@ -35,7 +35,8 @@ jest.mock('@ui', () => ({
   ...jest.requireActual('@ui/theme'),
   ...jest.requireActual('@ui/primitives'),
 }));
-jest.mock('expo-router', () => ({ useRouter: () => ({ back: jest.fn() }) }));
+const mockPush = jest.fn();
+jest.mock('expo-router', () => ({ useRouter: () => ({ back: jest.fn(), push: mockPush }) }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
@@ -44,6 +45,14 @@ jest.mock('react-native-safe-area-context', () => ({
 import StoragePrivacyScreen from '../../../app/(app)/storage-privacy';
 
 describe('StoragePrivacyScreen', () => {
+  it('opens the Storage Analyzer from Cleanup', async () => {
+    await renderWithTheme(<StoragePrivacyScreen />);
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Storage Analyzer: see which chats use the most space' }),
+    );
+    expect(mockPush).toHaveBeenCalledWith('/storage-analyzer');
+  });
+
   it('explains what leaves the device, where it goes, and what disconnect does not delete', async () => {
     await renderWithTheme(<StoragePrivacyScreen />);
 

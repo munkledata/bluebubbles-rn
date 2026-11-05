@@ -242,6 +242,11 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
         </SettingsSection>
 
         <SettingsSection label="CLEANUP" style={styles.gap}>
+          <NavRow
+            label="Storage Analyzer"
+            onPress={() => router.push('/storage-analyzer')}
+            accessibilityLabel="Storage Analyzer: see which chats use the most space"
+          />
           {downloadsPaused ? (
             <>
               <Text style={textStyle}>

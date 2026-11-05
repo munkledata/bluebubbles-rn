@@ -104,6 +104,7 @@ export function MediaSections({
   onOpenLink,
   documentSummary,
   onOpenDocuments,
+  onOpenAll,
 }: {
   media: ChatMediaByKind | null | undefined;
   onOpenMedia: (attachmentGuid: string) => void;
@@ -111,6 +112,8 @@ export function MediaSections({
   onOpenLink: (url: string) => unknown;
   documentSummary?: { loadedCount: number; hasMore: boolean } | null;
   onOpenDocuments?: () => void;
+  /** Opens the paged All Attachments page (every photo, video, file and link). */
+  onOpenAll?: () => void;
 }): React.JSX.Element | null {
   const theme = useTheme();
   const photos = media?.photos ?? [];
@@ -128,6 +131,24 @@ export function MediaSections({
   return (
     <>
       <Text style={labelStyle}>SHARED MEDIA</Text>
+      {onOpenAll ? (
+        <Pressable
+          onPress={onOpenAll}
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel="All Attachments"
+          accessibilityHint="Opens every photo, video, file and link in this conversation"
+          style={[
+            styles.group,
+            styles.row,
+            styles.allRow,
+            { backgroundColor: theme.color.secondaryBackground },
+          ]}
+        >
+          <Text style={[styles.rowLabel, { color: theme.color.label }]}>All Attachments</Text>
+          <Text style={rowValueStyle}>›</Text>
+        </Pressable>
+      ) : null}
       {photos.length > 0 ? (
         <>
           <Text style={[styles.mediaStripLabel, { color: theme.color.tertiaryLabel }]}>
@@ -243,6 +264,7 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: 16 },
   rowValue: { fontSize: 15 },
+  allRow: { marginBottom: 10 },
   mediaStripLabel: { fontSize: 13, marginLeft: 12, marginBottom: 6, marginTop: 4 },
   strip: { marginBottom: 8 },
   thumb: {
