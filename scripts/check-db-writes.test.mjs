@@ -2404,7 +2404,7 @@ test('certifies exactly the reviewed migration, handle-color, retry, backup, and
         detectedContext: 'transaction-coordinator',
       },
       {
-        id: 'src/services/send/index.ts#sendMention.<callback:600cd90cf8>:mutator-call:5f9c3e4a193e',
+        id: 'src/services/send/index.ts#sendMention.<callback:5b64ad267f>:mutator-call:4312bcd22a52',
         target: 'src/services/send/sendMentionService.ts#sendIMessageMention',
         detectedContext: 'coordinated-delegation',
       },
@@ -2579,12 +2579,12 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'transaction-coordinator',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:7d215588bc>:mutator-call:8834e4abf3ac',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:1cc5dfde5a>:mutator-call:8cbe4561f624',
         target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
         detectedContext: 'withDbTransaction',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:881b071cbb>:mutator-call:d68b4a18047c',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:71afdbec2f>:mutator-call:f38d8e900c40',
         target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
         detectedContext: 'withDbTransaction',
       },
@@ -2604,12 +2604,12 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:0f419c7f91f6',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:71516607433d',
         target: 'src/db/transaction.ts#withDbTransaction',
         detectedContext: 'transaction-coordinator',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:33dda488e2fa',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:5c4cc5335124',
         target: 'src/db/transaction.ts#withDbTransaction',
         detectedContext: 'transaction-coordinator',
       },
@@ -2629,8 +2629,8 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:90b4bf3cbace',
-        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:881b071cbb>',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c2133193a7b',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:71afdbec2f>',
         detectedContext: 'withDbTransaction',
       },
       {
@@ -2639,8 +2639,8 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:e41ef298ce57',
-        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:7d215588bc>',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:638e0fa45f4a',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:1cc5dfde5a>',
         detectedContext: 'withDbTransaction',
       },
     ].sort(byId),
@@ -3512,7 +3512,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#sendImage.<callback:ba5c0362fc>:mutator-call:efc3756a201f',
       'src/services/send/index.ts#sendFormatted.<callback:a6fdee4f2c>:mutator-call:63a9ed12033f',
       'src/services/send/index.ts#sendImages.<callback:84ef35880b>.<callback:e4983ee008>:mutator-call:8bd9a889f487',
-      'src/services/send/index.ts#sendMention.<callback:600cd90cf8>:mutator-call:5f9c3e4a193e',
+      'src/services/send/index.ts#sendMention.<callback:5b64ad267f>:mutator-call:4312bcd22a52',
       'src/services/send/index.ts#sendTextAttachment.<callback:528e229137>:mutator-call:ccc84ddd3899',
       'src/services/send/index.ts#sendVoice.<callback:2b1d4eb2d6>:mutator-call:b8b4b25f8b41',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:b57de385513f',

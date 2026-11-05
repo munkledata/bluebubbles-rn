@@ -6,6 +6,7 @@ import {
   type MessageMention,
 } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
+import { restoredGroupCommandsAcceptAnyPrefix } from '@core/models/imessageRestoredFeatures';
 import {
   discardOutgoingMessageWithinTransaction,
   getChatHeader,
@@ -67,8 +68,11 @@ function isExactMentionTarget(
   participants: readonly ChatParticipant[],
   chatGuid: string,
   mentions: readonly MessageMention[],
+  allowAnyGroupPrefix: boolean,
 ): boolean {
-  if (header?.guid !== chatGuid || !isProvenIMessageGroupChat(header)) return false;
+  if (header?.guid !== chatGuid || !isProvenIMessageGroupChat(header, { allowAnyGroupPrefix })) {
+    return false;
+  }
   if (
     participants.length !== header.participantCount ||
     participants.length < 2 ||
@@ -90,11 +94,12 @@ function exactMentionTargetWithinTransaction(
   context: DbTransactionContext,
   chatGuid: string,
   mentions: readonly MessageMention[],
+  allowAnyGroupPrefix: boolean,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     const header = await getChatHeader(db, chatGuid);
     const participants = await getChatParticipants(db, chatGuid);
-    return isExactMentionTarget(header, participants, chatGuid, mentions);
+    return isExactMentionTarget(header, participants, chatGuid, mentions, allowAnyGroupPrefix);
   });
 }
 
@@ -130,7 +135,9 @@ export async function sendIMessageMention(
   accountGuard?: DbCommitGuard,
   capabilitySource?: RcsCapabilitySource,
 ): Promise<SendMentionResult> {
-  requireIMessageMentionContent(args.chatGuid, args.text, args.mentions);
+  // The group-prefix shape only: whether the server takes an `any;+;` group right now is proved
+  // below from its live switches, by the target proof and again at the HTTP boundary.
+  requireIMessageMentionContent(args.chatGuid, args.text, args.mentions, { restoredGroup: true });
   const request: SendMentionArgs = {
     chatGuid: args.chatGuid,
     text: args.text,
@@ -152,6 +159,9 @@ export async function sendIMessageMention(
     if (capability.serverInfo?.supports_imessage_mentions !== true) {
       return { status: 'rejected' };
     }
+    // bbd also accepts an `any;+;` group while its FP-006 gate is open. The capability key covers
+    // every restored switch, so the gate closing later retires this lease like any other change.
+    const restoredGroup = restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo);
 
     const tempGuid = generateTempGuid();
     try {
@@ -163,6 +173,7 @@ export async function sendIMessageMention(
               context,
               request.chatGuid,
               request.mentions,
+              restoredGroup,
             ))
           ) {
             throw new MentionTargetRejectedError();
@@ -214,6 +225,7 @@ export async function sendIMessageMention(
             context,
             request.chatGuid,
             request.mentions,
+            restoredGroup,
           );
           if (!current) {
             await discardOutgoingMessageWithinTransaction(context, tempGuid, now);
@@ -240,12 +252,16 @@ export async function sendIMessageMention(
     try {
       // All request validation is complete. From this call onward a rejected await may still mean
       // the helper dispatched the message, so only an exact acknowledgement can report acceptance.
-      const ack = await sendMention(transport.http, {
-        chatGuid: request.chatGuid,
-        tempGuid,
-        message: request.text,
-        mentions: [...request.mentions],
-      });
+      const ack = await sendMention(
+        transport.http,
+        {
+          chatGuid: request.chatGuid,
+          tempGuid,
+          message: request.text,
+          mentions: [...request.mentions],
+        },
+        { restoredGroup },
+      );
       if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
       await reconcileSendOutcome(db, tempGuid, ack, now, capabilityGuard, {
         expectedChatGuid: request.chatGuid,

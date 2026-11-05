@@ -81,6 +81,41 @@ describe('message mention endpoint', () => {
     expect(transport.post).not.toHaveBeenCalled();
   });
 
+  it('takes an any;+; group only from a caller that proved the restored gate', async () => {
+    const transport = fakeHttp({ guid: 'real-mention-guid', viaPrivateApi: true });
+    const params = {
+      chatGuid: 'any;+;chat-mention-1',
+      tempGuid: TEMP_GUID,
+      message: 'Hello Alice and Bob',
+      mentions: MENTIONS,
+    };
+
+    await expect(sendMention(transport.http, params)).rejects.toThrow(
+      'exact existing iMessage group',
+    );
+    await expect(sendMention(transport.http, params, { restoredGroup: false })).rejects.toThrow(
+      'exact existing iMessage group',
+    );
+    // The gate widens the group prefix only: a one-to-one chat is never a mention target.
+    for (const chatGuid of ['any;-;+15551234567', 'iMessage;-;+15551234567', 'SMS;+;chat-1']) {
+      await expect(
+        sendMention(transport.http, { ...params, chatGuid }, { restoredGroup: true }),
+      ).rejects.toThrow('exact existing iMessage group');
+    }
+    expect(transport.post).not.toHaveBeenCalled();
+
+    await expect(sendMention(transport.http, params, { restoredGroup: true })).resolves.toEqual({
+      guid: 'real-mention-guid',
+      viaPrivateApi: true,
+    });
+    expect(transport.post).toHaveBeenCalledTimes(1);
+    expect(transport.post.mock.calls[0]?.[2]).toEqual({
+      captureErrorDetail: true,
+      retry: false,
+      json: { ...params },
+    });
+  });
+
   it('types malformed acknowledgements as outcome-unknown and preserves reviewed refusals', async () => {
     const malformed = fakeHttp({ guid: 'real-mention-guid', viaPrivateApi: false });
     const malformedError = await sendMention(malformed.http, {

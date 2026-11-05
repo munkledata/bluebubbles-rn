@@ -10,6 +10,7 @@ import {
   canUseRestoredIMessageGroupFeature,
   IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
   restoredChatKind,
+  restoredGroupCommandsAcceptAnyPrefix,
 } from '@core/models/imessageRestoredFeatures';
 import { logger } from '@core/secure';
 import {
@@ -1060,7 +1061,11 @@ export function sendMention(
       const capability = captureSessionRcsCapabilityLease();
       if (
         !capability ||
-        !/^iMessage;\+;.+$/u.test(snapshot.chatGuid) ||
+        !(
+          restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo)
+            ? /^(?:iMessage|any);\+;.+$/u
+            : /^iMessage;\+;.+$/u
+        ).test(snapshot.chatGuid) ||
         capability.serverInfo?.supports_imessage_mentions !== true ||
         !capability.isCurrent()
       ) {

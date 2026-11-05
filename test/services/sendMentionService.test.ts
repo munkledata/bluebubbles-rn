@@ -18,6 +18,8 @@ import { sendIMessageMention } from '@/services/send/sendMentionService';
 import { createTestDb } from '../support/testDb';
 
 const CHAT_GUID = 'iMessage;+;chat-mention-service';
+/** How macOS 26+ stores the same group; bbd takes it only while its FP-006 gate is open. */
+const ANY_CHAT_GUID = 'any;+;chat-mention-service';
 const TEXT = 'Hello Alice and Bob';
 const MENTIONS = [
   { start: 6, length: 5, address: 'alice@example.test' },
@@ -36,11 +38,14 @@ function seedGroup(raw: Database.Database): void {
   }
 }
 
-function capability(enabled = true) {
+function capability(enabled = true, restoredFlags: Record<string, boolean> = {}) {
   return fixedRcsCapabilitySource(
-    ServerInfo.parse({ version: 'test', supports_imessage_mentions: enabled }),
+    ServerInfo.parse({ version: 'test', supports_imessage_mentions: enabled, ...restoredFlags }),
   );
 }
+
+/** Any one restored switch being on proves bbd's FP-006 gate is open. */
+const GATE_OPEN = { supports_imessage_group_reactions: true };
 
 function fakeHttp(impl: (options: RequestOptions) => Promise<unknown>): {
   http: HttpClient;
@@ -232,6 +237,58 @@ describe('sendIMessageMention', () => {
     expect(transport.post).not.toHaveBeenCalled();
     expect(one(raw, 'SELECT COUNT(*) AS count FROM messages').count).toBe(0);
     expect(one(raw, 'SELECT COUNT(*) AS count FROM outgoing_queue').count).toBe(0);
+  });
+
+  it('mentions in an any;+; group only while the restored gate is open', async () => {
+    raw.prepare('UPDATE chats SET guid = ? WHERE guid = ?').run(ANY_CHAT_GUID, CHAT_GUID);
+    const transport = fakeHttp(async () => ({
+      guid: 'real-any-group-mention',
+      viaPrivateApi: true,
+    }));
+    const args = { chatGuid: ANY_CHAT_GUID, text: TEXT, mentions: MENTIONS };
+
+    // Gate closed: the mention switch alone keeps the reviewed iMessage;+; proof.
+    await expect(
+      sendIMessageMention(db, transport.http, args, 10_000, undefined, capability()),
+    ).resolves.toEqual({ status: 'rejected' });
+    // Gate open, but one member is SMS: the participant set must still be all iMessage.
+    raw.prepare("UPDATE handles SET service = 'SMS' WHERE address = 'alice@example.test'").run();
+    await expect(
+      sendIMessageMention(db, transport.http, args, 10_000, undefined, capability(true, GATE_OPEN)),
+    ).resolves.toEqual({ status: 'rejected' });
+    // The gate never stands in for the mention switch itself.
+    raw
+      .prepare("UPDATE handles SET service = 'iMessage' WHERE address = 'alice@example.test'")
+      .run();
+    await expect(
+      sendIMessageMention(
+        db,
+        transport.http,
+        args,
+        10_000,
+        undefined,
+        capability(false, GATE_OPEN),
+      ),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(one(raw, 'SELECT COUNT(*) AS count FROM messages').count).toBe(0);
+
+    const result = await sendIMessageMention(
+      db,
+      transport.http,
+      args,
+      10_000,
+      undefined,
+      capability(true, GATE_OPEN),
+    );
+    expect(result).toEqual({ status: 'accepted', tempGuid: expect.any(String) });
+    expect(transport.post).toHaveBeenCalledTimes(1);
+    expect(transport.post.mock.calls[0]?.[2]).toMatchObject({
+      json: { chatGuid: ANY_CHAT_GUID, message: TEXT, mentions: MENTIONS },
+    });
+    expect(
+      one(raw, 'SELECT guid, text, send_state AS state FROM messages WHERE date_deleted IS NULL'),
+    ).toEqual({ guid: 'real-any-group-mention', text: TEXT, state: 'sent' });
   });
 
   it.each([

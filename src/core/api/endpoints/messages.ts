@@ -522,9 +522,13 @@ export function requireIMessageMentionContent(
   chatGuid: string,
   message: string,
   mentions: readonly MessageMention[],
+  /** FP-006: the caller proved the restored gate is open, so the server also takes `any;+;`. */
+  restored: { restoredGroup?: boolean } = {},
 ): void {
   if (
-    !/^iMessage;\+;.+$/u.test(chatGuid) ||
+    !(restored.restoredGroup === true ? /^(?:iMessage|any);\+;.+$/u : /^iMessage;\+;.+$/u).test(
+      chatGuid,
+    ) ||
     chatGuid.trim() !== chatGuid ||
     MENTION_ID_CONTROL_CHARACTER.test(chatGuid)
   ) {
@@ -594,8 +598,13 @@ function mentionOutcomeUnknown(cause: unknown): ApiError {
 }
 
 /** POST one exact group message with bounded Apple mention ranges and no automatic HTTP retry. */
-export async function sendMention(http: HttpClient, params: SendMentionParams): Promise<SendAck> {
-  requireIMessageMentionContent(params.chatGuid, params.message, params.mentions);
+export async function sendMention(
+  http: HttpClient,
+  params: SendMentionParams,
+  /** FP-006: the caller proved the restored gate is open, so the server also takes `any;+;`. */
+  restored: { restoredGroup?: boolean } = {},
+): Promise<SendAck> {
+  requireIMessageMentionContent(params.chatGuid, params.message, params.mentions, restored);
   if (
     !params.tempGuid.startsWith('temp-') ||
     params.tempGuid.trim() !== params.tempGuid ||
@@ -1405,9 +1414,15 @@ export interface RemoteDeleteMessageParams {
 export function remoteDeleteMessage(
   http: HttpClient,
   p: RemoteDeleteMessageParams,
+  /** FP-006: the caller proved the restored gate is open, so the server also takes `any;+;`. */
+  restored: { restoredGroup?: boolean } = {},
 ): Promise<RemoteDeleteAck> {
   if (
-    !/^(?:(?:iMessage|any);-;.+|iMessage;\+;.+)$/u.test(p.chatGuid) ||
+    !(
+      restored.restoredGroup === true
+        ? RESTORED_IMESSAGE_CHAT_GUID
+        : /^(?:(?:iMessage|any);-;.+|iMessage;\+;.+)$/u
+    ).test(p.chatGuid) ||
     p.chatGuid.trim() !== p.chatGuid ||
     REMOTE_DELETE_CONTROL_CHARACTER.test(p.chatGuid)
   ) {

@@ -9,6 +9,8 @@ import { createTestDb } from '../support/testDb';
 
 const DM_GUID = 'iMessage;-;+15551234567';
 const GROUP_GUID = 'iMessage;+;chat123456789';
+/** How macOS 26+ stores the same group; bbd takes it only while its FP-006 gate is open. */
+const ANY_GROUP_GUID = 'any;+;chat123456789';
 const MESSAGE_GUID = 'message-delete-1';
 
 function seedChatAndMessage(raw: Database.Database, chatGuid: string, style: 43 | 45): void {
@@ -30,11 +32,18 @@ function seedChatAndMessage(raw: Database.Database, chatGuid: string, style: 43 
     .run(MESSAGE_GUID, Number(chat.lastInsertRowid));
 }
 
-function capability(enabled = true) {
+function capability(enabled = true, restoredFlags: Record<string, boolean> = {}) {
   return fixedRcsCapabilitySource(
-    ServerInfo.parse({ version: 'test', supports_imessage_remote_delete: enabled }),
+    ServerInfo.parse({
+      version: 'test',
+      supports_imessage_remote_delete: enabled,
+      ...restoredFlags,
+    }),
   );
 }
+
+/** Any one restored switch being on proves bbd's FP-006 gate is open. */
+const GATE_OPEN = { supports_imessage_group_reactions: true };
 
 function fakeHttp(impl: (path: string, options: RequestOptions) => Promise<unknown>): {
   http: HttpClient;
@@ -105,6 +114,71 @@ describe('whole-message remote deletion', () => {
       ).toEqual({ date_deleted: 6_000 });
     },
   );
+
+  it('deletes in an any;+; group only while the restored gate is open', async () => {
+    seedChatAndMessage(raw, ANY_GROUP_GUID, 43);
+    const transport = fakeHttp(async () => ({ deleted: true, guid: MESSAGE_GUID }));
+    const args = { chatGuid: ANY_GROUP_GUID, messageGuid: MESSAGE_GUID };
+
+    // Gate closed: the remote-delete switch alone keeps the reviewed iMessage;+; proof.
+    await expect(
+      remoteDeleteExactIMessage(db, transport.http, args, 6_000, undefined, capability()),
+    ).resolves.toEqual({ status: 'rejected' });
+    // The gate never stands in for the remote-delete switch itself.
+    await expect(
+      remoteDeleteExactIMessage(
+        db,
+        transport.http,
+        args,
+        6_000,
+        undefined,
+        capability(false, GATE_OPEN),
+      ),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(transport.post).not.toHaveBeenCalled();
+
+    await expect(
+      remoteDeleteExactIMessage(
+        db,
+        transport.http,
+        args,
+        6_000,
+        undefined,
+        capability(true, GATE_OPEN),
+      ),
+    ).resolves.toEqual({ status: 'accepted' });
+    expect(transport.post.mock.calls).toEqual([
+      [
+        '/message/message-delete-1/remote-delete',
+        expect.anything(),
+        { captureErrorDetail: true, retry: false, json: { chatGuid: ANY_GROUP_GUID } },
+      ],
+    ]);
+    expect(
+      raw.prepare('SELECT date_deleted FROM messages WHERE guid = ?').get(MESSAGE_GUID),
+    ).toEqual({ date_deleted: 6_000 });
+  });
+
+  it('never deletes in an any;+; group whose members are not all iMessage', async () => {
+    seedChatAndMessage(raw, ANY_GROUP_GUID, 43);
+    raw.prepare("UPDATE handles SET service = 'SMS' WHERE address = '+15550000002'").run();
+    const transport = fakeHttp(async () => ({ deleted: true, guid: MESSAGE_GUID }));
+
+    await expect(
+      remoteDeleteExactIMessage(
+        db,
+        transport.http,
+        { chatGuid: ANY_GROUP_GUID, messageGuid: MESSAGE_GUID },
+        6_000,
+        undefined,
+        capability(true, GATE_OPEN),
+      ),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(
+      raw.prepare('SELECT date_deleted FROM messages WHERE guid = ?').get(MESSAGE_GUID),
+    ).toEqual({ date_deleted: null });
+  });
 
   it('reports a deletion the Mac confirmed even when the connection changed meanwhile', async () => {
     seedChatAndMessage(raw, DM_GUID, 45);

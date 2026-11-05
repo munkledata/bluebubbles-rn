@@ -1,5 +1,8 @@
 import { useMemo } from 'react';
-import { canSendRestoredIMessageAttachments } from '@core/models/imessageRestoredFeatures';
+import {
+  canSendRestoredIMessageAttachments,
+  restoredGroupCommandsAcceptAnyPrefix,
+} from '@core/models/imessageRestoredFeatures';
 import { currentRcsProviderEpoch, isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import type { ChatHeaderRow } from '@db/repositories';
 import type { ServerCapabilityFlag } from '@/services/capabilityGatedAction';
@@ -134,6 +137,12 @@ export function useChatCapabilities(
   // this wider proof; the participant set must still be explicitly all iMessage.
   const restoredGroup =
     exactIMessageHeader && isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true });
+  // Mentions and Delete from Mac keep their own switches. bbd also takes them in an `any;+;` group,
+  // exactly while its FP-006 gate is open, which any restored switch being on proves.
+  const anyGroupPrefixAccepted = useSessionStore((s) =>
+    restoredGroupCommandsAcceptAnyPrefix(s.serverInfo),
+  );
+  const narrowGroupTarget = anyGroupPrefixAccepted ? restoredGroup : group;
   const imessageReactionsAvailable =
     (reactionSupported && oneToOne) || (groupReactionsSupported && restoredGroup);
   const imessageRepliesAvailable =
@@ -145,7 +154,7 @@ export function useChatCapabilities(
     restoredAttachmentsSupported && (oneToOne || restoredGroup);
   const imessageAttachmentFeaturesAvailable =
     imessageNarrowAttachmentsAvailable || imessageRestoredAttachmentsAvailable;
-  const imessageMentionsAvailable = mentionsSupported && group;
+  const imessageMentionsAvailable = mentionsSupported && narrowGroupTarget;
   const mentionParticipants = useMemo((): MentionParticipant[] => {
     if (!imessageMentionsAvailable || !header) return [];
     const names = participantList(header.participantNames);
@@ -200,7 +209,7 @@ export function useChatCapabilities(
     imessageEditsAvailable: (editSupported && oneToOne) || (groupEditSupported && restoredGroup),
     imessageUnsendsAvailable:
       (unsendSupported && oneToOne) || (groupUnsendSupported && restoredGroup),
-    imessageRemoteDeleteAvailable: remoteDeleteSupported && (oneToOne || group),
+    imessageRemoteDeleteAvailable: remoteDeleteSupported && (oneToOne || narrowGroupTarget),
     imessageEffectsAvailable: effectsSupported && oneToOne && header?.participantCount === 1,
     imessageFormattedAvailable: formattedSupported && oneToOne,
     imessageMentionsAvailable,

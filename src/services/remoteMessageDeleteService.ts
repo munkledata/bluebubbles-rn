@@ -1,6 +1,7 @@
 import { remoteDeleteMessage as postRemoteDeleteMessage } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
+import { restoredGroupCommandsAcceptAnyPrefix } from '@core/models/imessageRestoredFeatures';
 import { looksLikeRcsMessageGuid } from '@core/rcs/providerIdentity';
 import { logger } from '@core/secure';
 import {
@@ -70,9 +71,10 @@ function isBoundedIdentifier(value: string): boolean {
   return utf8Decode(bytes) === value;
 }
 
+/** The shape only: whether the server takes an `any;+;` group right now is proved later. */
 function hasExactRemoteDeleteShape(args: RemoteDeleteMessageArgs): boolean {
   return (
-    /^(?:(?:iMessage|any);-;.+|iMessage;\+;.+)$/u.test(args.chatGuid) &&
+    /^(?:iMessage|any);[+-];.+$/u.test(args.chatGuid) &&
     isBoundedIdentifier(args.chatGuid) &&
     !args.messageGuid.startsWith('temp-') &&
     !looksLikeRcsMessageGuid(args.messageGuid as unknown) &&
@@ -88,10 +90,12 @@ function isDefiniteRemoteDeleteFailure(error: unknown): boolean {
 function isEligibleIMessageChat(
   header: Awaited<ReturnType<typeof getChatHeader>>,
   chatGuid: string,
+  allowAnyGroupPrefix: boolean,
 ): boolean {
   return (
     header?.guid === chatGuid &&
-    (isProvenOneToOneIMessageChat(header) || isProvenIMessageGroupChat(header))
+    (isProvenOneToOneIMessageChat(header) ||
+      isProvenIMessageGroupChat(header, { allowAnyGroupPrefix }))
   );
 }
 
@@ -132,11 +136,16 @@ export async function remoteDeleteExactIMessage(
     if (capability.serverInfo?.supports_imessage_remote_delete !== true) {
       return { status: 'rejected' };
     }
+    // bbd also accepts an `any;+;` group while its FP-006 gate is open. The capability guard below
+    // covers every restored switch, and bbd itself refuses `any;+;` once its gate has closed.
+    const restoredGroup = restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo);
 
     try {
       const header = await getChatHeader(db, args.chatGuid);
       if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
-      if (!isEligibleIMessageChat(header, args.chatGuid)) return { status: 'rejected' };
+      if (!isEligibleIMessageChat(header, args.chatGuid, restoredGroup)) {
+        return { status: 'rejected' };
+      }
 
       const target = await getMessagePreviewByGuid(db, args.chatGuid, args.messageGuid);
       if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
@@ -152,7 +161,7 @@ export async function remoteDeleteExactIMessage(
 
     let acknowledged = false;
     try {
-      const ack = await postRemoteDeleteMessage(transport.http, args);
+      const ack = await postRemoteDeleteMessage(transport.http, args, { restoredGroup });
       // A retired account stays silent. A same-account connection change is handled below: this
       // one-shot request has already reached the Mac.
       if (accountGuard?.() === false) throw new DbCommitGuardRejectedError();

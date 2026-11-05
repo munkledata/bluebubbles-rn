@@ -137,7 +137,7 @@ describe('useChatCapabilities FP-006 restored flags', () => {
       for (const key of PART_ONE_KEYS) expect([key, caps[key]]).toEqual([key, true]);
       // Advertised but not yet sendable by this app: never offered.
       for (const key of NOT_YET_SENDABLE_KEYS) expect([key, caps[key]]).toEqual([key, false]);
-      // Mentions and remote delete keep their reviewed iMessage;+; proof.
+      // Mentions keep their own switch, which is off here (useChatCapabilitiesGroupCommands.test).
       expect(caps.imessageMentionsAvailable).toBe(false);
     }
   });
