@@ -340,7 +340,7 @@ const redirectContainmentPackageJson = {
     'expo-background-task': '57.0.21',
     'expo-file-system': '57.0.7',
     'expo-router': '~57.0.24',
-    'expo-sharing': '~57.0.24',
+    'expo-sharing': '~57.0.25',
     'expo-task-manager': '57.0.21',
     'react-native-screens': '~4.26.0',
   },
@@ -366,7 +366,7 @@ const redirectContainmentPackageLock = {
         'expo-background-task': '57.0.21',
         'expo-file-system': '57.0.7',
         'expo-router': '~57.0.24',
-        'expo-sharing': '~57.0.24',
+        'expo-sharing': '~57.0.25',
         'expo-task-manager': '57.0.21',
         'react-native-screens': '~4.26.0',
       },
@@ -375,9 +375,9 @@ const redirectContainmentPackageLock = {
     'node_modules/expo-background-task': { version: '57.0.21' },
     'node_modules/expo-file-system': { version: '57.0.7' },
     'node_modules/expo-router': { version: '57.0.24' },
-    'node_modules/expo-sharing': { version: '57.0.24' },
-    'node_modules/expo': { version: '57.0.31' },
-    'node_modules/expo-modules-core': { version: '57.0.24' },
+    'node_modules/expo-sharing': { version: '57.0.25' },
+    'node_modules/expo': { version: '57.0.32' },
+    'node_modules/expo-modules-core': { version: '57.0.25' },
     'node_modules/expo-task-manager': { version: '57.0.21' },
     'node_modules/react-native-screens': { version: '4.26.2' },
     'node_modules/unimodules-app-loader': { version: '57.0.2' },
@@ -689,7 +689,7 @@ const PATCHED_REGISTRY_EXCERPT = `
 function launchStateInput() {
   return {
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-    patchSource: readFileSync(join(ROOT, 'patches/expo-modules-core+57.0.24.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-modules-core+57.0.25.patch'), 'utf8'),
     registrySource: PATCHED_REGISTRY_EXCERPT,
   };
 }
@@ -730,7 +730,7 @@ const PATCHED_WRAPPER_EXCERPT = `
 function resultWaitInput() {
   return {
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-    patchSource: readFileSync(join(ROOT, 'patches/expo+57.0.31.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo+57.0.32.patch'), 'utf8'),
     wrapperSource: PATCHED_WRAPPER_EXCERPT,
   };
 }
@@ -930,8 +930,8 @@ function writeRedirectContainmentFixture(root) {
     readFileSync(join(ROOT, 'patches/expo-router+57.0.24.patch'), 'utf8'),
   );
   writeFileSync(
-    join(root, 'patches/expo-sharing+57.0.24.patch'),
-    readFileSync(join(ROOT, 'patches/expo-sharing+57.0.24.patch'), 'utf8'),
+    join(root, 'patches/expo-sharing+57.0.25.patch'),
+    readFileSync(join(ROOT, 'patches/expo-sharing+57.0.25.patch'), 'utf8'),
   );
   mkdirSync(dirname(join(root, EXPO_SHARING_MODULE_FIXTURE_PATH)), { recursive: true });
   writeFileSync(
@@ -939,14 +939,14 @@ function writeRedirectContainmentFixture(root) {
     readFileSync(join(ROOT, EXPO_SHARING_MODULE_FIXTURE_PATH), 'utf8'),
   );
   writeFileSync(
-    join(root, 'patches/expo-modules-core+57.0.24.patch'),
-    readFileSync(join(ROOT, 'patches/expo-modules-core+57.0.24.patch'), 'utf8'),
+    join(root, 'patches/expo-modules-core+57.0.25.patch'),
+    readFileSync(join(ROOT, 'patches/expo-modules-core+57.0.25.patch'), 'utf8'),
   );
   mkdirSync(dirname(join(root, EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH)), { recursive: true });
   writeFileSync(join(root, EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH), PATCHED_REGISTRY_EXCERPT);
   writeFileSync(
-    join(root, 'patches/expo+57.0.31.patch'),
-    readFileSync(join(ROOT, 'patches/expo+57.0.31.patch'), 'utf8'),
+    join(root, 'patches/expo+57.0.32.patch'),
+    readFileSync(join(ROOT, 'patches/expo+57.0.32.patch'), 'utf8'),
   );
   mkdirSync(dirname(join(root, EXPO_DELEGATE_WRAPPER_FIXTURE_PATH)), { recursive: true });
   writeFileSync(join(root, EXPO_DELEGATE_WRAPPER_FIXTURE_PATH), PATCHED_WRAPPER_EXCERPT);
@@ -1223,7 +1223,7 @@ test('guards the expo-sharing self-share settlement against drift', () => {
   const currentInput = () => ({
     packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-    patchSource: readFileSync(join(ROOT, 'patches/expo-sharing+57.0.24.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-sharing+57.0.25.patch'), 'utf8'),
     moduleSource: readFileSync(join(ROOT, EXPO_SHARING_MODULE_FIXTURE_PATH), 'utf8'),
   });
 
@@ -1233,23 +1233,23 @@ test('guards the expo-sharing self-share settlement against drift', () => {
     {
       label: 'loose version range',
       mutate(input) {
-        input.packageJson.dependencies['expo-sharing'] = '^57.0.24';
+        input.packageJson.dependencies['expo-sharing'] = '^57.0.25';
       },
-      error: /expo-sharing must remain pinned to ~57\.0\.24/,
+      error: /expo-sharing must remain pinned to ~57\.0\.25/,
     },
     {
       label: 'lock root range',
       mutate(input) {
-        input.packageLock.packages[''].dependencies['expo-sharing'] = '~57.0.25';
+        input.packageLock.packages[''].dependencies['expo-sharing'] = '~57.0.26';
       },
       error: /package-lock root must pin expo-sharing/,
     },
     {
       label: 'resolved version moved past the patch',
       mutate(input) {
-        input.packageLock.packages['node_modules/expo-sharing'].version = '57.0.25';
+        input.packageLock.packages['node_modules/expo-sharing'].version = '57.0.26';
       },
-      error: /package-lock must resolve expo-sharing 57\.0\.24/,
+      error: /package-lock must resolve expo-sharing 57\.0\.25/,
     },
     {
       label: 'prebuilt AAR instead of the patched source',

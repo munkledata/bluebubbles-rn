@@ -1,13 +1,6 @@
 {
   "exceptions": [
     {
-      "id": "GHSA-mrhx-c7xc-m3w5",
-      "package": "zod",
-      "paths": ["node_modules/expo/node_modules/zod"],
-      "reason": "Build-machine only: the zod 3.25.76 copy nested under Expo CLI. Expo CLI uses it only for its DevTools plugin and MCP CLI-extension schemas (@expo/cli build/src/start/server/DevToolsPlugin.schema.js and createMCPDevToolsExtensionSchema.js), which check developer-machine input: plugin metadata from locally installed packages and, in the optional MCP mode, local tool-call arguments. Absent from the app bundle; the app's own zod is 4.6.7, and this exception does not cover it. The fix shipped only in zod 4.6.6 (no fixed zod 3 release), and the newest @expo/cli for SDK 57 (57.0.32) still requires zod ^3.25.76. Remove when Expo CLI depends on zod 4.6.6 or later.",
-      "expires": "2027-01-31"
-    },
-    {
       "id": "GHSA-qr28-fpjm-wq7f",
       "package": "decode-uri-component",
       "paths": ["node_modules/decode-uri-component"],
