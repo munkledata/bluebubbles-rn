@@ -3,6 +3,7 @@
  * can be found and operated through its accessibility role, without relying on adjacent text.
  */
 import React from 'react';
+import { TextInput } from 'react-native';
 import { renderWithTheme, screen, fireEvent, act } from '../support/renderWithTheme';
 
 const mockReplace = jest.fn();
@@ -122,5 +123,20 @@ describe('ManualSetupScreen', () => {
     expect(screen.getByRole('switch', { name: 'Allow insecure connection' }).props.value).toBe(
       true,
     );
+  });
+  it('moves from the address to the password with the keyboard Next key', async () => {
+    const focus = jest.spyOn(TextInput.prototype, 'focus');
+    await renderWithTheme(<ManualSetupScreen />);
+    const address = screen.getByPlaceholderText('https://your-server.ngrok.io');
+    // Next keeps the keyboard up and hands focus on rather than closing it.
+    expect(address.props.returnKeyType).toBe('next');
+    expect(address.props.submitBehavior).toBe('submit');
+
+    focus.mockClear();
+    await act(async () => {
+      fireEvent(address, 'submitEditing');
+    });
+    expect(focus).toHaveBeenCalledTimes(1);
+    focus.mockRestore();
   });
 });

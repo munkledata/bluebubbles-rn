@@ -96,6 +96,8 @@ function gesture(dx = 0, dy = 0): PanResponderGestureState {
 }
 
 const EVENT = {} as GestureResponderEvent;
+// A closed row's buttons are hidden from screen readers; tests that press them include hidden elements.
+const HIDDEN = { includeHiddenElements: true } as const;
 
 describe('SwipeableRow', () => {
   beforeEach(() => {
@@ -194,18 +196,35 @@ describe('SwipeableRow', () => {
       ],
     });
 
-    expect(screen.getByLabelText('Pin')).toBeTruthy();
-    expect(screen.getByLabelText('Delete')).toBeTruthy();
-    expect(screen.getByLabelText('Archive')).toBeTruthy();
-    await drive(() => fireEvent.press(screen.getByLabelText('Archive')));
+    expect(screen.getByLabelText('Pin', HIDDEN)).toBeTruthy();
+    expect(screen.getByLabelText('Delete', HIDDEN)).toBeTruthy();
+    expect(screen.getByLabelText('Archive', HIDDEN)).toBeTruthy();
+    await drive(() => fireEvent.press(screen.getByLabelText('Archive', HIDDEN)));
     expect(onPin).not.toHaveBeenCalled();
     expect(onDelete).not.toHaveBeenCalled();
     expect(onArchive).toHaveBeenCalledTimes(1);
 
-    await drive(() => fireEvent.press(screen.getByLabelText('Pin')));
+    await drive(() => fireEvent.press(screen.getByLabelText('Pin', HIDDEN)));
     expect(onPin).toHaveBeenCalledTimes(1);
     expect(onDelete).not.toHaveBeenCalled();
     expect(onArchive).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides closed-row buttons from screen readers and exposes only the opened side', async () => {
+    await mount({
+      left: [action({ key: 'pin', label: 'Pin' })],
+      right: [action({ key: 'del', label: 'Delete' })],
+    });
+    expect(screen.queryByLabelText('Pin')).toBeNull();
+    expect(screen.queryByLabelText('Delete')).toBeNull();
+
+    await drive(() => config().onPanResponderMove(EVENT, gesture(-100, 0)));
+    await drive(() => config().onPanResponderRelease(EVENT, gesture(-100, 0)));
+    expect(screen.getByLabelText('Delete')).toBeTruthy();
+    expect(screen.queryByLabelText('Pin')).toBeNull();
+
+    await drive(() => fireEvent.press(screen.getByLabelText('Delete')));
+    expect(screen.queryByLabelText('Delete')).toBeNull();
   });
 
   it('mounts the complete action tree but refuses gestures and actions when interaction is disabled', async () => {
@@ -215,12 +234,12 @@ describe('SwipeableRow', () => {
       right: [action({ key: 'delete', label: 'Delete', onPress: onDelete })],
     });
 
-    expect(screen.getByLabelText('Delete')).toBeDisabled();
+    expect(screen.getByLabelText('Delete', HIDDEN)).toBeDisabled();
     expect(config().onMoveShouldSetPanResponder(EVENT, gesture(60, 2))).toBe(false);
     expect(config().onMoveShouldSetPanResponderCapture(EVENT, gesture(60, 2))).toBe(false);
     await drive(() => config().onPanResponderMove(EVENT, gesture(-100, 0)));
     await drive(() => config().onPanResponderRelease(EVENT, gesture(-100, 0)));
-    await drive(() => fireEvent.press(screen.getByLabelText('Delete')));
+    await drive(() => fireEvent.press(screen.getByLabelText('Delete', HIDDEN)));
     expect(onDelete).not.toHaveBeenCalled();
   });
 
@@ -456,7 +475,7 @@ describe('SwipeableRow', () => {
       );
     });
 
-    await drive(() => fireEvent.press(screen.getByLabelText('Delete')));
+    await drive(() => fireEvent.press(screen.getByLabelText('Delete', HIDDEN)));
     expect(first).not.toHaveBeenCalled();
     expect(latest).toHaveBeenCalledTimes(1);
     expectExistingSpringConfig(animations.spring, 0, 0);

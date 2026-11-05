@@ -36,7 +36,7 @@ import {
   useReduceMotionPreference,
   useReduceMotionPreferenceRef,
 } from '../hooks/useReduceMotionPreference';
-import { usePullToRefresh } from '../primitives';
+import { Icon, usePullToRefresh } from '../primitives';
 import { readableTextOn, useTheme, withAlpha } from '../theme';
 import { MessageRow } from './MessageRow';
 import { FailedMessageSheet } from './FailedMessageSheet';
@@ -147,10 +147,16 @@ export function MessageList({
   );
 
   // Resting content clears the floating bars + their edge fades; scrolled content still travels
-  // through the padding zones (under the bars), which is what the fades are for.
+  // through the padding zones (under the bars), which is what the fades are for. An anchored session
+  // (a search result) always shows the jump button, so the newest messages also clear it: a match
+  // near the end of the chat could otherwise sit under the button.
+  const anchored = onExitAnchor != null;
   const contentStyle = useMemo(
-    () => ({ paddingTop: 12 + topInset, paddingBottom: 12 + bottomInset }),
-    [topInset, bottomInset],
+    () => ({
+      paddingTop: 12 + topInset,
+      paddingBottom: 12 + bottomInset + (anchored ? FAB_CLEARANCE : 0),
+    }),
+    [topInset, bottomInset, anchored],
   );
 
   // The chat's own outgoing service — from-me rows have no joined handle, so this is what colours an
@@ -528,7 +534,7 @@ export function MessageList({
           accessibilityRole="button"
           accessibilityLabel="Scroll to newest message"
         >
-          <Text style={[styles.fabGlyph, { color: theme.color.tint }]}>↓</Text>
+          <Icon name="arrow-down" size={22} color={theme.color.tint} />
           {missed > 0 ? (
             <View style={[styles.fabBadge, { backgroundColor: theme.color.tint }]}>
               <Text style={[styles.fabBadgeText, { color: readableTextOn(theme.color.tint) }]}>
@@ -592,6 +598,9 @@ export function MessageList({
   );
 }
 
+/** Room under the newest message for the 40px jump button (at bottom 16) plus a small gap. */
+const FAB_CLEARANCE = 48;
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   empty: {
@@ -616,7 +625,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     elevation: 3,
   },
-  fabGlyph: { fontSize: 20, fontWeight: '600', lineHeight: 24 },
   fabBadge: {
     position: 'absolute',
     top: -6,

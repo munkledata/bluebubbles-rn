@@ -17,8 +17,11 @@ export function ThemePreviewCard({ tokens }: ThemePreviewCardProps): React.JSX.E
   const c = tokens.color;
   const b = c.bubble;
   return (
+    // One element for screen readers: a labelled plain View is ignored without `accessible`, and
+    // the sample bubbles alone would read as real messages.
     <View
       style={[styles.card, { backgroundColor: c.background, borderColor: c.separator }]}
+      accessible
       accessibilityLabel="Theme preview"
     >
       <View style={styles.row}>

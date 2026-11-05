@@ -81,6 +81,7 @@ const ENGLISH_MESSAGES = {
   'permissions.title': 'Choose what {appName} can access',
   'product.serverName': 'Gator Server',
   'scan.action.manual': 'Enter Manually',
+  'scan.action.scanAgain': 'Scan Again',
   'scan.error.empty': 'No data was scanned. Please try again.',
   'scan.error.invalid': 'Invalid QR code.',
   'scan.error.invalidJson': 'That code is not a valid {appName} setup QR code.',
@@ -91,6 +92,9 @@ const ENGLISH_MESSAGES = {
     'The QR code does not contain a valid server URL and password or paired-client credential.',
   'scan.instruction.pointCamera': 'Point your camera at the server QR code',
   'scan.permission.action.grant': 'Grant Camera Access',
+  'scan.permission.action.settings': 'Open Settings',
+  'scan.permission.blocked':
+    'Camera access is turned off for {appName}. Turn it on in Settings, or enter your server details manually.',
   'scan.permission.message': 'Allow camera access to scan your server’s setup QR code.',
   'scan.permission.title': 'Camera access needed',
   'scan.status.connecting': 'Connecting…',

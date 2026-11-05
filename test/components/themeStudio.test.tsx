@@ -1,10 +1,25 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { Keyboard, StyleSheet, type EmitterSubscription } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from './support/renderWithTheme';
 import { ThemeStudio } from '@ui/theme/ThemeStudio';
 import { auditThemeContrast, cloneTokens } from '@ui/theme/editableTokens';
 import { gatorTheme, lightTheme } from '@ui/theme/tokens';
+
+let mockKavProps: Record<string, unknown> = {};
+// RNTL exposes only the host tree, so capture the composite KeyboardAvoidingView props through a
+// small stand-in (as manualSetupScreen.test does). Its native movement remains device-only evidence.
+jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const R = require('react');
+  return {
+    __esModule: true,
+    default: (props: Record<string, unknown>) => {
+      mockKavProps = props;
+      return R.createElement(R.Fragment, null, props.children as React.ReactNode);
+    },
+  };
+});
 
 function darkThemeWithPrimaryText(color: string): typeof gatorTheme {
   const tokens = cloneTokens(gatorTheme);
@@ -170,5 +185,42 @@ describe('ThemeStudio dark-only editor', () => {
       fireEvent.press(screen.getByText('Discard'));
     });
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+  it('keeps the color fields above the keyboard inside its Modal', async () => {
+    const listeners: Record<string, () => void> = {};
+    const addListener = jest.spyOn(Keyboard, 'addListener').mockImplementation((event, cb) => {
+      listeners[event] = cb as () => void;
+      return { remove: jest.fn() } as unknown as EmitterSubscription;
+    });
+    try {
+      await renderWithTheme(
+        <SafeAreaProvider
+          initialMetrics={{
+            frame: { x: 0, y: 0, width: 390, height: 844 },
+            insets: { top: 0, right: 0, bottom: 0, left: 0 },
+          }}
+        >
+          <ThemeStudio
+            initialTokens={gatorTheme}
+            initialName="Mine"
+            onApply={jest.fn()}
+            onCancel={jest.fn()}
+          />
+        </SafeAreaProvider>,
+        { preset: 'gator' },
+      );
+      // The live preview reads as one element, not as sample messages.
+      expect(screen.getByLabelText('Theme preview').props.accessible).toBe(true);
+      expect(mockKavProps.behavior).toBe('padding');
+      expect(mockKavProps.enabled).toBe(false);
+      expect(mockKavProps.keyboardVerticalOffset).toBeUndefined();
+
+      await act(async () => {
+        listeners['keyboardDidShow']?.();
+      });
+      expect(mockKavProps.enabled).toBe(true);
+    } finally {
+      addListener.mockRestore();
+    }
   });
 });

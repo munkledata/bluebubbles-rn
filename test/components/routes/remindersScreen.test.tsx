@@ -85,7 +85,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 // eslint-disable-next-line import/first
-import { reminderSubtitle } from '@utils';
+import { formatScheduledTime } from '@utils';
 
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockUseReactiveQuery = useReactiveQuery as jest.Mock;
@@ -153,7 +153,7 @@ function setRows(rows: Reminder[]): void {
 }
 
 function reminderRowSubtitle(row: Reminder): string {
-  const when = reminderSubtitle(row.scheduledFor);
+  const when = formatScheduledTime(row.scheduledFor);
   return row.senderName ? `${row.senderName} · ${when}` : when;
 }
 
@@ -184,7 +184,9 @@ describe('RemindersScreen', () => {
 
     expect(screen.getByText(PRIVATE_PREVIEW)).toBeTruthy();
     expect(screen.getByText(reminderRowSubtitle(row))).toBeTruthy();
-    expect(screen.getByText(`Private Sender · ${reminderSubtitle(row.scheduledFor)}`)).toBeTruthy();
+    expect(
+      screen.getByText(`Private Sender · ${formatScheduledTime(row.scheduledFor)}`),
+    ).toBeTruthy();
     expect(screen.getByRole('button', { name: reminderA11yName(row) })).toBeTruthy();
     await act(async () => {
       fireEvent.press(screen.getByText('‹ Back'));

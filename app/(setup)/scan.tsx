@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { AppState, Linking, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   connect,
@@ -35,18 +35,34 @@ export default function Scan(): React.JSX.Element {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const i18n = useMemo(() => createI18n(), []);
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const scanned = useRef(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [insecureCode, setInsecureCode] = useState(false);
+  const [awaitingRescan, setAwaitingRescan] = useState(false);
   const status = useSessionStore((s) => s.status);
   const connectError = useSessionStore((s) => s.error);
 
   useEffect(() => {
     if (status === 'connected') router.replace('/syncing');
-    // Allow re-scanning after a failed connection.
-    if (status === 'error') scanned.current = false;
+    // A failed connection waits for Scan Again. Re-arming at once retried the same code in a loop
+    // while it stayed in view, so its error (and the Forget action) kept vanishing.
+    if (status === 'error' && scanned.current) setAwaitingRescan(true);
   }, [status, router]);
+
+  // Coming back from Android Settings: read the camera permission again.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void getPermission?.();
+    });
+    return () => subscription.remove();
+  }, [getPermission]);
+
+  const scanAgain = (): void => {
+    scanned.current = false;
+    setAwaitingRescan(false);
+    setScanError(null);
+  };
 
   const onBarcodeScanned = ({ data }: BarcodeScanningResult): void => {
     if (scanned.current || status === 'connecting') return;
@@ -74,6 +90,8 @@ export default function Scan(): React.JSX.Element {
   }
 
   if (!permission.granted) {
+    // Once Android stops asking ("Don't allow" twice), only Settings can grant the camera.
+    const blocked = permission.canAskAgain === false;
     return (
       <Screen>
         <View
@@ -86,12 +104,21 @@ export default function Scan(): React.JSX.Element {
             {i18n.text('scan.permission.title')}
           </Text>
           <Text style={[styles.permText, { color: theme.color.secondaryLabel }]}>
-            {i18n.text('scan.permission.message')}
+            {blocked
+              ? i18n.format('scan.permission.blocked', { appName: i18n.text('welcome.brand') })
+              : i18n.text('scan.permission.message')}
           </Text>
-          <Button
-            title={i18n.text('scan.permission.action.grant')}
-            onPress={() => void requestPermission()}
-          />
+          {blocked ? (
+            <Button
+              title={i18n.text('scan.permission.action.settings')}
+              onPress={() => void Linking.openSettings()}
+            />
+          ) : (
+            <Button
+              title={i18n.text('scan.permission.action.grant')}
+              onPress={() => void requestPermission()}
+            />
+          )}
           <Button
             title={i18n.text('scan.action.manual')}
             variant="plain"
@@ -123,6 +150,13 @@ export default function Scan(): React.JSX.Element {
         </Text>
         <View style={styles.reticle} />
         {message ? <Text style={styles.error}>{message}</Text> : <View />}
+        {awaitingRescan && status === 'error' ? (
+          <Button
+            title={i18n.text('scan.action.scanAgain')}
+            onPress={scanAgain}
+            style={styles.spaced}
+          />
+        ) : null}
         {insecureCode && scanError ? (
           <Button
             title={i18n.text('scan.action.manual')}

@@ -4,11 +4,14 @@ import { useTheme } from '../theme';
 
 interface TextFieldProps extends TextInputProps {
   label?: string;
+  /** The underlying input, so a form can move focus to it (e.g. the keyboard's Next key). */
+  ref?: React.Ref<TextInput>;
 }
 
 /** Labeled iOS-style text input bound to the theme. */
 export function TextField({
   label,
+  ref,
   style,
   accessibilityLabel,
   accessibilityLabelledBy,
@@ -36,6 +39,7 @@ export function TextField({
         </Text>
       ) : null}
       <TextInput
+        ref={ref}
         accessibilityLabel={accessibilityLabel}
         accessibilityLabelledBy={
           accessibilityLabelledBy ?? (hasExplicitAccessibleName ? undefined : visualLabelId)

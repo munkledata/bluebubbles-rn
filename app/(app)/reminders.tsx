@@ -12,7 +12,7 @@ import {
 } from '@/services/notifications/remindersService';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
-import { reminderSubtitle } from '@utils';
+import { formatScheduledTime } from '@utils';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** Saved message reminders, reactive; tap to reschedule, Delete to cancel. */
@@ -61,7 +61,7 @@ export default function RemindersScreen(): React.JSX.Element {
         data={rows}
         keyExtractor={(r: Reminder) => String(r.id)}
         renderItem={({ item }: { item: Reminder }) => {
-          const when = reminderSubtitle(item.scheduledFor);
+          const when = formatScheduledTime(item.scheduledFor);
           const subtitle = item.senderName ? `${item.senderName} · ${when}` : when;
           return (
             <ActionListRow

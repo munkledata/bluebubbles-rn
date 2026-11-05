@@ -1,4 +1,5 @@
 import React from 'react';
+import { Linking } from 'react-native';
 import { act, fireEvent, renderWithTheme, screen } from '../support/renderWithTheme';
 
 const mockReplace = jest.fn();
@@ -8,7 +9,9 @@ interface MockCameraViewProps {
 }
 
 let mockCameraViewProps: MockCameraViewProps = {};
-let mockPermission: { readonly granted: boolean } | null = { granted: false };
+let mockPermission: { readonly granted: boolean; readonly canAskAgain?: boolean } | null = {
+  granted: false,
+};
 let mockSessionState: { readonly status: string; readonly error: string | null } = {
   status: 'unauthenticated',
   error: null,
@@ -142,5 +145,54 @@ describe('ScanScreen', () => {
       expect(screen.getByText(message)).toBeTruthy();
     }
     expect(mockConnect).not.toHaveBeenCalled();
+  });
+  it('offers Open Settings once Android stops asking for the camera', async () => {
+    mockPermission = { granted: false, canAskAgain: false };
+    const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
+    await renderWithTheme(<ScanScreen />);
+
+    expect(
+      screen.getByText(/Turn it on in Settings, or enter your server details manually/),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Grant Camera Access' })).toBeNull();
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Open Settings' }));
+    });
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    expect(mockRequestPermission).not.toHaveBeenCalled();
+    // Manual entry stays available.
+    expect(screen.getByRole('button', { name: 'Enter Manually' })).toBeTruthy();
+    openSettings.mockRestore();
+  });
+
+  it('waits for Scan Again after a failed connection instead of retrying the code in view', async () => {
+    mockPermission = { granted: true };
+    const view = await renderWithTheme(<ScanScreen />);
+    const code = { data: JSON.stringify(['secret', 'https://gator.example']) };
+    await act(async () => {
+      mockCameraViewProps.onBarcodeScanned?.(code);
+    });
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+
+    mockSessionState = { status: 'error', error: 'SERVER_CANARY_42' };
+    await act(async () => {
+      view.rerender(<ScanScreen />);
+    });
+    // The camera keeps reporting the same code while it stays in view: no silent retry.
+    for (let index = 0; index < 3; index += 1) {
+      await act(async () => {
+        mockCameraViewProps.onBarcodeScanned?.(code);
+      });
+    }
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('SERVER_CANARY_42')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Scan Again' }));
+    });
+    await act(async () => {
+      mockCameraViewProps.onBarcodeScanned?.(code);
+    });
+    expect(mockConnect).toHaveBeenCalledTimes(2);
   });
 });

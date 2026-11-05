@@ -147,6 +147,9 @@ afterEach(() => {
   resumeRealtimeDeliveries();
 });
 
+// Swipe buttons stay hidden from screen readers while the row is closed (SwipeableRow).
+const SWIPE_HIDDEN = { includeHiddenElements: true } as const;
+
 describe('ConversationTile — title (resolveTitle semantics)', () => {
   it('shows a custom chat name above everything else', async () => {
     await renderWithTheme(
@@ -338,7 +341,7 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
       <ConversationTile row={makeRow({ guid: 'same-guid', unreadCount: 2 })} onPress={() => {}} />,
     );
 
-    await fireEvent.press(screen.getByLabelText('Read'));
+    await fireEvent.press(screen.getByLabelText('Read', SWIPE_HIDDEN));
 
     expect(mockMarkRead).toHaveBeenCalledWith(
       'same-guid',
@@ -355,7 +358,7 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
       />,
     );
 
-    await fireEvent.press(screen.getByLabelText('Unread'));
+    await fireEvent.press(screen.getByLabelText('Unread', SWIPE_HIDDEN));
 
     const originalLease = mockMarkUnread.mock.calls[0]?.[1] as { isCurrent(): boolean };
     expect(mockMarkUnread).toHaveBeenCalledWith('read-row-guid', originalLease);
@@ -370,7 +373,7 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
     await renderWithTheme(
       <ConversationTile row={makeRow({ guid: 'same-guid' })} onPress={() => {}} />,
     );
-    await fireEvent.press(screen.getByLabelText('Delete'));
+    await fireEvent.press(screen.getByLabelText('Delete', SWIPE_HIDDEN));
     const buttons = (mockShowDialog.mock.calls[0]?.[2] ?? []) as Array<{
       style?: string;
       onPress?: () => void;
@@ -391,8 +394,12 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
     const first = await renderWithTheme(
       <ConversationTile row={makeRow({ guid })} onPress={() => {}} />,
     );
-    const staleMute = retainConfiguredPress(screen.getByRole('button', { name: 'Mute' }));
-    const staleArchive = retainConfiguredPress(screen.getByRole('button', { name: 'Archive' }));
+    const staleMute = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Mute', ...SWIPE_HIDDEN }),
+    );
+    const staleArchive = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Archive', ...SWIPE_HIDDEN }),
+    );
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
 
@@ -408,8 +415,12 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
 
     await first.unmount();
     await renderWithTheme(<ConversationTile row={makeRow({ guid })} onPress={() => {}} />);
-    const freshMute = retainConfiguredPress(screen.getByRole('button', { name: 'Mute' }));
-    const freshArchive = retainConfiguredPress(screen.getByRole('button', { name: 'Archive' }));
+    const freshMute = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Mute', ...SWIPE_HIDDEN }),
+    );
+    const freshArchive = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Archive', ...SWIPE_HIDDEN }),
+    );
     await invokeConfiguredPress(freshMute);
     await invokeConfiguredPress(freshArchive);
 
@@ -426,8 +437,8 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
     const guid = 'iMessage;-;+15556781234';
     await renderWithTheme(<ConversationTile row={makeRow({ guid })} onPress={() => {}} />);
 
-    await fireEvent.press(screen.getByLabelText('Mute'));
-    await fireEvent.press(screen.getByLabelText('Archive'));
+    await fireEvent.press(screen.getByLabelText('Mute', SWIPE_HIDDEN));
+    await fireEvent.press(screen.getByLabelText('Archive', SWIPE_HIDDEN));
 
     const muteLease = mockSetChatMuted.mock.calls[0]?.[2] as { isCurrent(): boolean };
     const archiveLease = mockSetChatArchived.mock.calls[0]?.[2] as { isCurrent(): boolean };
@@ -444,7 +455,7 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
       <ConversationTile row={makeRow({ guid, muteType: 'mute' })} onPress={() => {}} />,
     );
 
-    await fireEvent.press(screen.getByLabelText('Unmute'));
+    await fireEvent.press(screen.getByLabelText('Unmute', SWIPE_HIDDEN));
 
     await waitFor(() => expect(mockSetChatMuted).toHaveBeenCalledTimes(1));
     expect(mockSetChatMuted).toHaveBeenCalledWith(
@@ -469,7 +480,7 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
       />,
     );
 
-    await fireEvent.press(screen.getByLabelText('Delete'));
+    await fireEvent.press(screen.getByLabelText('Delete', SWIPE_HIDDEN));
     expect(mockShowDialog).toHaveBeenNthCalledWith(
       1,
       'Delete Conversation',
@@ -480,7 +491,7 @@ describe('ConversationTile — account-bound swipe callbacks', () => {
     const firstDelete = dialogButtons(0).find((button) => button.style === 'destructive');
     expect(firstDelete?.onPress).toEqual(expect.any(Function));
 
-    await fireEvent.press(screen.getByLabelText('Delete'));
+    await fireEvent.press(screen.getByLabelText('Delete', SWIPE_HIDDEN));
     expect(mockShowDialog).toHaveBeenNthCalledWith(
       2,
       'Delete Conversation',

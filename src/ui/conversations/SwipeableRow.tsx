@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native';
 import { isHorizontalSwipe } from '@utils';
 import { useReduceMotionPreferenceRef } from '../hooks/useReduceMotionPreference';
@@ -47,6 +47,16 @@ export function SwipeableRow({
 }: SwipeableRowProps): React.JSX.Element {
   const tx = useRef(new Animated.Value(0)).current;
   const offset = useRef(0); // committed open offset (0 = closed)
+  // Which panel is showing. A closed row's buttons sit hidden behind it, so screen readers must not
+  // announce them on every chat; the long-press menu offers the same actions. Stored with the row's
+  // resetKey so a recycled row starts closed (and hidden) without an extra render.
+  const resetKeyRef = useRef(resetKey);
+  resetKeyRef.current = resetKey;
+  const [open, setOpen] = useState<{
+    key: typeof resetKey;
+    side: 'left' | 'right' | null;
+  }>({ key: resetKey, side: null });
+  const openSide = open.key === resetKey ? open.side : null;
   const activeSnap = useRef<Animated.CompositeAnimation | null>(null);
   const leftW = (left?.length ?? 0) * ACTION_W;
   const rightW = (right?.length ?? 0) * ACTION_W;
@@ -73,6 +83,7 @@ export function SwipeableRow({
   const snap = (to: number): void => {
     stopActiveSnap();
     offset.current = to;
+    setOpen({ key: resetKeyRef.current, side: to > 0 ? 'left' : to < 0 ? 'right' : null });
     if (reduceMotion.current !== false) {
       tx.setValue(to);
       return;
@@ -156,7 +167,11 @@ export function SwipeableRow({
     <View style={styles.wrap}>
       {/* Left panel (revealed on swipe-right), pinned to the left edge behind the row. */}
       {leftW > 0 ? (
-        <View style={[styles.panel, styles.panelLeft]}>
+        <View
+          style={[styles.panel, styles.panelLeft]}
+          importantForAccessibility={openSide === 'left' ? 'auto' : 'no-hide-descendants'}
+          accessibilityElementsHidden={openSide !== 'left'}
+        >
           {left!.map((a) => (
             <ActionButton
               key={a.key}
@@ -169,7 +184,11 @@ export function SwipeableRow({
       ) : null}
       {/* Right panel (revealed on swipe-left), pinned to the right edge behind the row. */}
       {rightW > 0 ? (
-        <View style={[styles.panel, styles.panelRight]}>
+        <View
+          style={[styles.panel, styles.panelRight]}
+          importantForAccessibility={openSide === 'right' ? 'auto' : 'no-hide-descendants'}
+          accessibilityElementsHidden={openSide !== 'right'}
+        >
           {right!.map((a) => (
             <ActionButton
               key={a.key}

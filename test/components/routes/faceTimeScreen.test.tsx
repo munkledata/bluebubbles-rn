@@ -159,11 +159,11 @@ it('keeps invalid spelling local and gives outcome-unknown copy that points to F
   const input = screen.getByLabelText('FaceTime call address');
 
   await act(async () => {
-    fireEvent.changeText(input, 'Alice@example.com');
+    fireEvent.changeText(input, 'alice@@example');
     fireEvent.press(screen.getByRole('button', { name: 'Video Call' }));
   });
   expect(mockStartAppleFaceTimeCall).not.toHaveBeenCalled();
-  expect(input.props.value).toBe('Alice@example.com');
+  expect(input.props.value).toBe('alice@@example');
 
   await act(async () => {
     fireEvent.changeText(input, '+15551234567');
@@ -177,6 +177,37 @@ it('keeps invalid spelling local and gives outcome-unknown copy that points to F
   });
   expect(screen.getByText(/Check FaceTime before trying again/)).toBeTruthy();
   expect(screen.getByLabelText('FaceTime call address').props.value).toBe('+15551234567');
+});
+
+it('accepts a number or email typed the usual way and shows exactly what it will call', async () => {
+  setCapabilities(false, true);
+  mockStartAppleFaceTimeCall.mockResolvedValue({ status: 'accepted' });
+  await renderWithTheme(<FaceTimeScreen />);
+  const input = screen.getByLabelText('FaceTime call address');
+
+  await act(async () => {
+    fireEvent.changeText(input, '(555) 123-4567');
+  });
+  expect(screen.getByText('Calls +15551234567')).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(screen.getByRole('button', { name: 'Audio Call' }));
+  });
+  expect(mockStartAppleFaceTimeCall).toHaveBeenLastCalledWith({
+    address: '+15551234567',
+    video: false,
+  });
+
+  await act(async () => {
+    fireEvent.changeText(input, ' Alice@Example.com ');
+  });
+  expect(screen.getByText('Calls alice@example.com')).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(screen.getByRole('button', { name: 'Video Call' }));
+  });
+  expect(mockStartAppleFaceTimeCall).toHaveBeenLastCalledWith({
+    address: 'alice@example.com',
+    video: true,
+  });
 });
 
 it('discards the in-memory call address when its session owner changes', async () => {

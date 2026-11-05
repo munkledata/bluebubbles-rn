@@ -7,6 +7,30 @@ import { createAppleFaceTimeLink, startAppleFaceTimeCall } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
 import { Button, Screen, ScreenHeader, SettingsSection, TextField, useTheme } from '@ui';
 
+/**
+ * What the person typed, in the one exact shape the Mac accepts: "+15551234567" or a lowercase
+ * email. Spaces, brackets, dots and dashes are dropped, and a 10-digit number is read as US/Canada
+ * (+1), as the rest of the app formats it. The screen shows the result before calling. Null when the
+ * text still isn't a callable address.
+ */
+function canonicalCallAddress(typed: string): string | null {
+  const trimmed = typed.trim();
+  if (trimmed.includes('@')) {
+    const email = trimmed.toLowerCase();
+    return isCanonicalFaceTimeCallAddress(email) ? email : null;
+  }
+  if (!/^\+?[\d\s().-]+$/u.test(trimmed)) return null;
+  const digits = trimmed.replace(/\D/gu, '');
+  const candidate = trimmed.startsWith('+')
+    ? `+${digits}`
+    : digits.length === 10
+      ? `+1${digits}`
+      : digits.length === 11 && digits.startsWith('1')
+        ? `+${digits}`
+        : null;
+  return candidate && isCanonicalFaceTimeCallAddress(candidate) ? candidate : null;
+}
+
 type LinkResultNotice = 'rejected' | 'outcome-unknown' | 'copied' | 'copy-failed' | 'share-failed';
 type CallResultNotice = 'started' | 'rejected' | 'outcome-unknown';
 type BusyAction = 'link' | 'audio-call' | 'video-call';
@@ -87,7 +111,8 @@ function FaceTimeOwnerBody({
   const [linkNotice, setLinkNotice] = useState<LinkResultNotice | null>(null);
   const [callNotice, setCallNotice] = useState<CallResultNotice | null>(null);
   const busy = busyAction != null;
-  const validCallAddress = isCanonicalFaceTimeCallAddress(address);
+  const callAddress = canonicalCallAddress(address);
+  const validCallAddress = callAddress != null;
 
   const beginAction = (action: BusyAction): boolean => {
     if (busyRef.current) return false;
@@ -122,10 +147,10 @@ function FaceTimeOwnerBody({
   };
 
   const onStartCall = (video: boolean): void => {
-    if (!canStartCall || !validCallAddress) return;
+    if (!canStartCall || callAddress == null) return;
     const action: BusyAction = video ? 'video-call' : 'audio-call';
     if (!beginAction(action)) return;
-    const submittedAddress = address;
+    const submittedAddress = callAddress;
     setCallNotice(null);
     void startAppleFaceTimeCall({ address: submittedAddress, video })
       .then((result) => {
@@ -175,8 +200,8 @@ function FaceTimeOwnerBody({
         <SettingsSection label="FACETIME CALL" style={styles.sectionGap}>
           <View style={styles.actionRow}>
             <Text style={[styles.body, { color: theme.color.secondaryLabel }]}>
-              Enter one full international number or lowercase email address. Gator sends one
-              call-start request and does not manage the call afterward.
+              Enter a phone number or email address. Gator asks your Mac to start the call, and the
+              call itself happens on the Mac.
             </Text>
             <TextField
               label="Phone or email"
@@ -190,6 +215,11 @@ function FaceTimeOwnerBody({
               keyboardType="email-address"
               returnKeyType="done"
             />
+            {callAddress != null && callAddress !== address.trim() ? (
+              <Text style={[styles.body, { color: theme.color.secondaryLabel }]}>
+                {`Calls ${callAddress}`}
+              </Text>
+            ) : null}
             <View style={styles.callActions}>
               <Button
                 title="Audio Call"

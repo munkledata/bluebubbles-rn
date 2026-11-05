@@ -59,7 +59,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 // eslint-disable-next-line import/first
-import { formatChatDate, formatTime } from '@utils';
+import { formatScheduledTime, formatTime } from '@utils';
 
 const mockGetScheduledById = getScheduledById as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
@@ -71,9 +71,9 @@ const PRIVATE_BODY = 'scheduled-edit-private-body-83af';
 const OLD_ACCOUNT_CANARY = 'scheduled-edit-old-account-body-f612';
 const SAVE_ERROR_CANARY = 'scheduled-edit-save-error-a614';
 const PICKED_TIME = new Date(2035, 6, 15, 9, 15).getTime();
-const PICKED_TIME_LABEL = `${formatChatDate(PICKED_TIME)} ${formatTime(PICKED_TIME)}`;
+const PICKED_TIME_LABEL = formatScheduledTime(PICKED_TIME);
 const ORIGINAL_TIME = 1_700_000_000_000;
-const ORIGINAL_TIME_LABEL = `${formatChatDate(ORIGINAL_TIME)} ${formatTime(ORIGINAL_TIME)}`;
+const ORIGINAL_TIME_LABEL = formatScheduledTime(ORIGINAL_TIME);
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -169,6 +169,32 @@ describe('ScheduledEditScreen', () => {
     expect(screen.queryByPlaceholderText('Message')).toBeNull();
   });
 
+  it('says the message is no longer scheduled when its row is gone', async () => {
+    mockGetScheduledById.mockResolvedValue(null);
+    await renderWithTheme(<ScheduledEditScreen />);
+    expect(
+      await screen.findByText(
+        'This message is no longer scheduled. It may have been sent or cancelled.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByPlaceholderText('Message')).toBeNull();
+  });
+
+  it('shows one readable send time and tells screen readers what it is', async () => {
+    const at = new Date();
+    at.setDate(at.getDate() + 40);
+    at.setHours(9, 0, 0, 0);
+    mockGetScheduledById.mockResolvedValue(makeRow({ scheduledFor: at.getTime() }));
+    await renderWithTheme(<ScheduledEditScreen />);
+    await screen.findByDisplayValue('Happy birthday!');
+    const label = formatScheduledTime(at.getTime());
+    // Forty days out is a date, never just a weekday name.
+    expect(label).toMatch(/\d/);
+    expect(label.split(formatTime(at.getTime())).length - 1).toBe(1);
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.getByRole('button', { name: `Reschedule. Sends ${label}` })).toBeTruthy();
+  });
+
   it('renders the recurrence chips with the loaded cadence selected', async () => {
     mockGetScheduledById.mockResolvedValue(makeRow({ recurrence: 'weekly' }));
     await renderWithTheme(<ScheduledEditScreen />);
@@ -253,7 +279,7 @@ describe('ScheduledEditScreen — picker and account ownership', () => {
     mockGetScheduledById.mockResolvedValue(makeRow({ text: PRIVATE_BODY }));
     await renderWithTheme(<ScheduledEditScreen />);
     await screen.findByDisplayValue(PRIVATE_BODY);
-    await fireEvent.press(screen.getByRole('button', { name: 'Reschedule' }));
+    await fireEvent.press(screen.getByRole('button', { name: /^Reschedule\. Sends / }));
     expect(screen.getByRole('header', { name: 'Reschedule message' })).toBeTruthy();
     expect(screen.queryByRole('radio', { name: 'Repeat daily' })).toBeNull();
     await chooseTime();
@@ -272,13 +298,13 @@ describe('ScheduledEditScreen — picker and account ownership', () => {
     mockGetScheduledById.mockResolvedValue(makeRow({ text: PRIVATE_BODY }));
     await renderWithTheme(<ScheduledEditScreen />);
     await screen.findByDisplayValue(PRIVATE_BODY);
-    await fireEvent.press(screen.getByRole('button', { name: 'Reschedule' }));
+    await fireEvent.press(screen.getByRole('button', { name: /^Reschedule\. Sends / }));
     await chooseTime();
     await fireEvent.press(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByText(ORIGINAL_TIME_LABEL)).toBeTruthy();
     expect(screen.getByDisplayValue(PRIVATE_BODY)).toBeTruthy();
     expect(mockEditScheduled).not.toHaveBeenCalled();
-    await fireEvent.press(screen.getByRole('button', { name: 'Reschedule' }));
+    await fireEvent.press(screen.getByRole('button', { name: /^Reschedule\. Sends / }));
     expect(screen.getByLabelText('Schedule date').props.value).not.toBe('2035-07-15');
   });
 
@@ -286,7 +312,7 @@ describe('ScheduledEditScreen — picker and account ownership', () => {
     mockGetScheduledById.mockResolvedValue(makeRow({ text: PRIVATE_BODY }));
     const view = await renderWithTheme(<ScheduledEditScreen />);
     await screen.findByDisplayValue(PRIVATE_BODY);
-    await fireEvent.press(screen.getByRole('button', { name: 'Reschedule' }));
+    await fireEvent.press(screen.getByRole('button', { name: /^Reschedule\. Sends / }));
     await chooseTime();
     const confirm = retainConfiguredPress(screen.getByRole('button', { name: 'Use this time' }));
     await view.unmount();
@@ -300,8 +326,10 @@ describe('ScheduledEditScreen — picker and account ownership', () => {
     const view = await renderWithTheme(<ScheduledEditScreen />);
     await screen.findByDisplayValue(PRIVATE_BODY);
     const saveA = retainConfiguredPress(screen.getByRole('button', { name: 'Save' }));
-    const rescheduleA = retainConfiguredPress(screen.getByRole('button', { name: 'Reschedule' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Reschedule' }));
+    const rescheduleA = retainConfiguredPress(
+      screen.getByRole('button', { name: /^Reschedule\. Sends / }),
+    );
+    await fireEvent.press(screen.getByRole('button', { name: /^Reschedule\. Sends / }));
     await chooseTime();
     const confirmA = retainConfiguredPress(screen.getByRole('button', { name: 'Use this time' }));
     await pauseRealtimeDeliveries();
@@ -321,7 +349,7 @@ describe('ScheduledEditScreen — picker and account ownership', () => {
     mockGetScheduledById.mockResolvedValue(makeRow({ text: 'new-account-draft' }));
     await renderWithTheme(<ScheduledEditScreen />);
     await screen.findByDisplayValue('new-account-draft');
-    await fireEvent.press(screen.getByRole('button', { name: 'Reschedule' }));
+    await fireEvent.press(screen.getByRole('button', { name: /^Reschedule\. Sends / }));
     await chooseTime();
     await fireEvent.press(screen.getByRole('button', { name: 'Use this time' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Save' }));

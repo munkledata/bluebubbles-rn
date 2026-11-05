@@ -1,6 +1,14 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  type TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   connect,
@@ -22,6 +30,7 @@ export default function Manual(): React.JSX.Element {
   const kbVisible = useKeyboardVisible();
   const [url, setUrl] = useState('');
   const [password, setPassword] = useState('');
+  const passwordRef = useRef<TextInput>(null);
   const [allowInsecure, setAllowInsecure] = useState(false);
   const status = useSessionStore((s) => s.status);
   const error = useSessionStore((s) => s.error);
@@ -62,8 +71,12 @@ export default function Manual(): React.JSX.Element {
             value={url}
             onChangeText={setUrl}
             returnKeyType="next"
+            // Next moves to the password instead of closing the keyboard.
+            submitBehavior="submit"
+            onSubmitEditing={() => passwordRef.current?.focus()}
           />
           <TextField
+            ref={passwordRef}
             label={i18n.text('manual.field.password.label')}
             placeholder={i18n.text('manual.field.password.placeholder')}
             secureTextEntry

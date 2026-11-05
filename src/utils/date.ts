@@ -46,6 +46,33 @@ export function formatTime(ms: number | null | undefined): string {
   return timeOnly(new Date(ms));
 }
 
+/**
+ * A scheduled moment (a scheduled message or a reminder), usually in the FUTURE:
+ * "Today 11:30 PM", "Tomorrow 9:00 AM", "Sunday 9:00 AM" within the next six days,
+ * "Mar 3, 9:00 AM" later this year and "Mar 3, 2027, 9:00 AM" in another year. A moment that has
+ * passed reads "Yesterday 9:00 AM" or its date. formatChatDate is for PAST timestamps: it turned
+ * every future date into a weekday name, so a message months away read "Sunday", and pairing it
+ * with formatTime showed today's clock twice.
+ *
+ * `now` is injectable so this is deterministic under test.
+ */
+export function formatScheduledTime(ms: number, now: number = Date.now()): string {
+  const d = new Date(ms);
+  const today = new Date(now);
+  const time = timeOnly(d);
+  const daysAhead = calendarDaysBetween(today, d);
+  if (daysAhead === 0) return `Today ${time}`;
+  if (daysAhead === 1) return `Tomorrow ${time}`;
+  if (daysAhead === -1) return `Yesterday ${time}`;
+  if (daysAhead > 1 && daysAhead < 7) return `${weekday(d)} ${time}`;
+  const date = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(d.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }),
+  }).format(d);
+  return `${date}, ${time}`;
+}
+
 /** Full date + time for a conversation date separator (e.g. "Mon, Jan 5, 2:14 PM"). */
 export function formatSeparatorDate(
   ms: number | null | undefined,
@@ -73,22 +100,4 @@ function shortDate(d: Date): string {
     month: 'numeric',
     day: 'numeric',
   }).format(d);
-}
-
-/**
- * Subtitle for a saved message reminder: "7:45 PM" when it's due TODAY, "Thu, Jul 30 · 7:45 PM"
- * otherwise.
- *
- * {@link formatChatDate} already collapses to time-only for today, so naively pairing it with
- * {@link formatTime} rendered the same clock TWICE ("7:45 PM · 7:45 PM") — seen on device on the
- * Reminders screen. The de-dupe compares the two RENDERED strings rather than re-deriving "is it
- * today", so it stays correct if formatChatDate's bucketing thresholds ever change.
- *
- * `now` is injectable so this is deterministic under test (the today/not-today branch is the
- * entire point of the function).
- */
-export function reminderSubtitle(scheduledFor: number, now: number = Date.now()): string {
-  const day = formatChatDate(scheduledFor, now);
-  const time = formatTime(scheduledFor);
-  return day === time || day === '' ? time : `${day} · ${time}`;
 }

@@ -1,6 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Button } from '../primitives/Button';
 import {
   auditThemeContrast,
@@ -79,6 +88,7 @@ export function ThemeStudio({
 }: ThemeStudioProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardVisible();
   // Fall back to the active global theme as a starting point when no tokens are passed.
   const seed = darkThemeOrFallback(initialTokens, theme);
   const [initialDraft] = useState<Draft>(() => draftFrom(seed, initialName ?? 'My Theme'));
@@ -224,119 +234,123 @@ export function ThemeStudio({
           <Text style={[styles.errorText, { color: theme.color.destructive }]}>{error}</Text>
         </View>
       ) : null}
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <ThemePreviewCard tokens={previewTokens} />
+      {/* The editor lives in a Modal: keep the focused color field above the keyboard, as the
+          schedule sheet does (padding while the keyboard is up, no vertical offset). */}
+      <KeyboardAvoidingView style={styles.sheet} behavior="padding" enabled={keyboardVisible}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <ThemePreviewCard tokens={previewTokens} />
 
-        {contrastIssues.length > 0 ? (
-          <View
-            style={[
-              styles.contrastWarning,
-              {
-                backgroundColor: theme.color.secondaryBackground,
-                borderColor: theme.color.destructive,
-              },
-            ]}
-          >
-            <Text style={[styles.contrastTitle, { color: theme.color.label }]}>Low contrast</Text>
-            <Text style={[styles.contrastSummary, { color: theme.color.secondaryLabel }]}>
-              {contrastConfirmation
-                ? 'These colors can be hard to read. Fix them, or choose Apply anyway to confirm.'
-                : 'These text roles are below the 4.5:1 readability target.'}
-            </Text>
-            {contrastIssues.map((issue) => (
-              <View
-                key={issue.id}
-                style={styles.contrastRole}
-                accessible
-                accessibilityLabel={`${issue.label}: ${issue.ratio.toFixed(2)} to 1 on ${issue.backgroundLabel}; needs ${issue.requiredRatio.toFixed(1)} to 1`}
-              >
+          {contrastIssues.length > 0 ? (
+            <View
+              style={[
+                styles.contrastWarning,
+                {
+                  backgroundColor: theme.color.secondaryBackground,
+                  borderColor: theme.color.destructive,
+                },
+              ]}
+            >
+              <Text style={[styles.contrastTitle, { color: theme.color.label }]}>Low contrast</Text>
+              <Text style={[styles.contrastSummary, { color: theme.color.secondaryLabel }]}>
+                {contrastConfirmation
+                  ? 'These colors can be hard to read. Fix them, or choose Apply anyway to confirm.'
+                  : 'These text roles are below the 4.5:1 readability target.'}
+              </Text>
+              {contrastIssues.map((issue) => (
                 <View
-                  style={[
-                    styles.contrastSample,
-                    { backgroundColor: issue.background, borderColor: theme.color.separator },
-                  ]}
+                  key={issue.id}
+                  style={styles.contrastRole}
+                  accessible
+                  accessibilityLabel={`${issue.label}: ${issue.ratio.toFixed(2)} to 1 on ${issue.backgroundLabel}; needs ${issue.requiredRatio.toFixed(1)} to 1`}
                 >
-                  <Text style={[styles.contrastSampleText, { color: issue.foreground }]}>Aa</Text>
+                  <View
+                    style={[
+                      styles.contrastSample,
+                      { backgroundColor: issue.background, borderColor: theme.color.separator },
+                    ]}
+                  >
+                    <Text style={[styles.contrastSampleText, { color: issue.foreground }]}>Aa</Text>
+                  </View>
+                  <View style={styles.contrastCopy}>
+                    <Text style={[styles.contrastRoleLabel, { color: theme.color.label }]}>
+                      {issue.label}
+                    </Text>
+                    <Text style={[styles.contrastRatio, { color: theme.color.secondaryLabel }]}>
+                      {issue.ratio.toFixed(2)}:1 on {issue.backgroundLabel}; needs{' '}
+                      {issue.requiredRatio.toFixed(1)}:1
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.contrastCopy}>
-                  <Text style={[styles.contrastRoleLabel, { color: theme.color.label }]}>
-                    {issue.label}
-                  </Text>
-                  <Text style={[styles.contrastRatio, { color: theme.color.secondaryLabel }]}>
-                    {issue.ratio.toFixed(2)}:1 on {issue.backgroundLabel}; needs{' '}
-                    {issue.requiredRatio.toFixed(1)}:1
-                  </Text>
-                </View>
-              </View>
-            ))}
-            <Button
-              title="Auto-fix text colors"
-              variant="tinted"
-              onPress={autoFixContrast}
-              style={styles.contrastButton}
-              accessibilityHint="Replaces failing text colors with readable light or dark colors"
-            />
-          </View>
-        ) : null}
-
-        {showName ? (
-          <TextInput
-            value={draft.name}
-            onChangeText={(name) => updateDraft({ ...draft, name })}
-            // A longer name would make every backup fail; keep it within what a backup holds.
-            maxLength={BACKUP_LIMITS.themeNameCharacters}
-            accessibilityLabel="Theme name"
-            placeholder="Theme name"
-            placeholderTextColor={theme.color.tertiaryLabel}
-            style={[
-              styles.nameInput,
-              {
-                color: theme.color.label,
-                backgroundColor: theme.color.secondaryBackground,
-                borderColor: theme.color.separator,
-              },
-            ]}
-          />
-        ) : null}
-
-        {EDITABLE_COLORS.map((f) => {
-          const val = draft.hex[f.key] ?? '';
-          const ok = isValidHex(val);
-          const contrastIssue = contrastIssueKeys.has(f.key);
-          return (
-            <View key={f.key} style={styles.colorRow}>
-              <Text style={[styles.colorLabel, { color: theme.color.label }]}>{f.label}</Text>
-              <View
-                style={[
-                  styles.swatch,
-                  {
-                    backgroundColor: ok ? val.trim() : 'transparent',
-                    borderColor: theme.color.separator,
-                  },
-                ]}
-              />
-              <TextInput
-                value={val}
-                accessibilityLabel={f.label}
-                autoCapitalize="none"
-                autoCorrect={false}
-                onChangeText={(v) => updateDraft({ ...draft, hex: { ...draft.hex, [f.key]: v } })}
-                placeholder="#RRGGBB"
-                placeholderTextColor={theme.color.tertiaryLabel}
-                style={[
-                  styles.hexInput,
-                  {
-                    color: ok && !contrastIssue ? theme.color.label : theme.color.destructive,
-                    backgroundColor: theme.color.secondaryBackground,
-                    borderColor:
-                      ok && !contrastIssue ? theme.color.separator : theme.color.destructive,
-                  },
-                ]}
+              ))}
+              <Button
+                title="Auto-fix text colors"
+                variant="tinted"
+                onPress={autoFixContrast}
+                style={styles.contrastButton}
+                accessibilityHint="Replaces failing text colors with readable light or dark colors"
               />
             </View>
-          );
-        })}
-      </ScrollView>
+          ) : null}
+
+          {showName ? (
+            <TextInput
+              value={draft.name}
+              onChangeText={(name) => updateDraft({ ...draft, name })}
+              // A longer name would make every backup fail; keep it within what a backup holds.
+              maxLength={BACKUP_LIMITS.themeNameCharacters}
+              accessibilityLabel="Theme name"
+              placeholder="Theme name"
+              placeholderTextColor={theme.color.tertiaryLabel}
+              style={[
+                styles.nameInput,
+                {
+                  color: theme.color.label,
+                  backgroundColor: theme.color.secondaryBackground,
+                  borderColor: theme.color.separator,
+                },
+              ]}
+            />
+          ) : null}
+
+          {EDITABLE_COLORS.map((f) => {
+            const val = draft.hex[f.key] ?? '';
+            const ok = isValidHex(val);
+            const contrastIssue = contrastIssueKeys.has(f.key);
+            return (
+              <View key={f.key} style={styles.colorRow}>
+                <Text style={[styles.colorLabel, { color: theme.color.label }]}>{f.label}</Text>
+                <View
+                  style={[
+                    styles.swatch,
+                    {
+                      backgroundColor: ok ? val.trim() : 'transparent',
+                      borderColor: theme.color.separator,
+                    },
+                  ]}
+                />
+                <TextInput
+                  value={val}
+                  accessibilityLabel={f.label}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onChangeText={(v) => updateDraft({ ...draft, hex: { ...draft.hex, [f.key]: v } })}
+                  placeholder="#RRGGBB"
+                  placeholderTextColor={theme.color.tertiaryLabel}
+                  style={[
+                    styles.hexInput,
+                    {
+                      color: ok && !contrastIssue ? theme.color.label : theme.color.destructive,
+                      backgroundColor: theme.color.secondaryBackground,
+                      borderColor:
+                        ok && !contrastIssue ? theme.color.separator : theme.color.destructive,
+                    },
+                  ]}
+                />
+              </View>
+            );
+          })}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }

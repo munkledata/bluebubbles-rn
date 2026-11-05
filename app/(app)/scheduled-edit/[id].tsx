@@ -10,7 +10,7 @@ import { editScheduled, ScheduledEditChangedError } from '@/services/send';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
 import { ScheduleSheet, SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/ScheduleSheet';
-import { formatChatDate, formatTime } from '@utils';
+import { formatScheduledTime } from '@utils';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 import { serverFailureKind } from '@ui/serverFailure';
@@ -106,6 +106,9 @@ export default function ScheduledEditScreen(): React.JSX.Element {
             serverId: row.serverId,
             scheduledFor: row.scheduledFor,
           });
+        } else {
+          // Sent or cancelled since the list was opened: say so instead of a blank editor.
+          setLoadError('This message is no longer scheduled. It may have been sent or cancelled.');
         }
       } catch (e) {
         if (!accountLease.isCurrent()) return;
@@ -205,11 +208,14 @@ export default function ScheduledEditScreen(): React.JSX.Element {
             onPress={reschedule}
             style={[styles.timeRow, { backgroundColor: theme.color.secondaryBackground }]}
             accessibilityRole="button"
-            accessibilityLabel="Reschedule"
+            // Screen readers hear the current time too, not just the action.
+            accessibilityLabel={
+              when != null ? `Reschedule. Sends ${formatScheduledTime(when)}` : 'Pick a time'
+            }
           >
             <Text style={[styles.timeLabel, { color: theme.color.label }]}>Send</Text>
             <Text style={[styles.timeValue, { color: theme.color.tint }]}>
-              {when != null ? `${formatChatDate(when)} ${formatTime(when)}` : 'Pick a time'}
+              {when != null ? formatScheduledTime(when) : 'Pick a time'}
             </Text>
           </Pressable>
           <Text style={[styles.timingNote, { color: theme.color.secondaryLabel }]}>
