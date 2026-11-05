@@ -1135,6 +1135,16 @@ describe('FCM native callback ownership', () => {
   it.each([
     ['your own message', 'new-message', '{"guid":"v3-message","isFromMe":true}'],
     ['a read receipt', 'updated-message', '{"guid":"v3-message","dateRead":1700000000000}'],
+    [
+      'a removed tapback',
+      'new-message',
+      '{"guid":"v3-message","isFromMe":false,"associatedMessageType":"-love","associatedMessageGuid":"p:0/v3-target"}',
+    ],
+    [
+      'a removed sticker',
+      'new-message',
+      '{"guid":"v3-message","isFromMe":false,"associatedMessageType":"-sticker","associatedMessageGuid":"p:0/v3-target"}',
+    ],
   ])(
     'admits locked V3 %s without the generic new-message notice',
     async (_label, eventName, plaintext) => {
@@ -1153,6 +1163,23 @@ describe('FCM native callback ownership', () => {
       expect(mockPostLockedNotification).not.toHaveBeenCalled();
     },
   );
+
+  it('keeps the generic notice for a new tapback while locked', async () => {
+    // Locked, Gator can't check whose message the tapback is on, so a new one still alerts.
+    jest.spyOn(Date, 'now').mockReturnValue(V3_NOW);
+    configureV3Delivery({
+      locked: true,
+      eventName: 'new-message',
+      plaintext:
+        '{"guid":"v3-message","isFromMe":false,"associatedMessageType":"love","associatedMessageGuid":"p:0/v3-target"}',
+      identity: v3Identity({ eventType: 'new-message' }),
+    });
+
+    await mockBackgroundHandler!(message);
+
+    expect(mockPersistAuthenticatedLockedFcmV3Event).toHaveBeenCalledTimes(1);
+    expect(mockPostLockedNotification).toHaveBeenCalledTimes(1);
+  });
 
   it('keeps the generic notice for the server test notification while locked', async () => {
     jest.spyOn(Date, 'now').mockReturnValue(V3_NOW);
@@ -1313,6 +1340,11 @@ describe('FCM native callback ownership', () => {
   it.each([
     ['your own message', 'new-message', '{"guid":"v2-own","isFromMe":true}'],
     ['a read receipt', 'updated-message', '{"guid":"v2-message","dateRead":1700000000000}'],
+    [
+      'removed tapback',
+      'new-message',
+      '{"guid":"v2-removal","isFromMe":false,"associatedMessageType":"-love","associatedMessageGuid":"p:0/v2-target"}',
+    ],
   ])(
     'does not post the generic locked notice for an authenticated V2 %s',
     async (_label, eventName, plaintext) => {

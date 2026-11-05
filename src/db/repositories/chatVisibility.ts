@@ -1,5 +1,6 @@
 import { sql, type SQL } from 'drizzle-orm';
 import { normalizeInboxFilters, type InboxFilters, type InboxSenderFilter } from '@core/models';
+import { REACTION_BASE_TYPES } from '@core/reactions/reactionType';
 import { APPLE_EXTENSION_PAYLOAD_SUFFIX } from '@utils/attachment';
 
 /** Shared chat-list visibility policy, isolated so commands and queries can depend on it. */
@@ -85,6 +86,66 @@ export function chatUnreadMessagePredicateSql(chatAlias: string, messageAlias: s
       0
     )
     AND (${c}.deleted_at IS NULL OR ${m}.date_created > ${c}.deleted_at)`;
+}
+
+/** The tapbacks that can notify: the six classic ones and an emoji tapback. Never a removal or a sticker. */
+export const NOTIFYING_TAPBACK_TYPES: readonly string[] = [...REACTION_BASE_TYPES, 'emoji'];
+
+/**
+ * Whether an incoming tapback may notify (fix plan 2.2), as on an iPhone: someone else added it to
+ * a message you sent. Every notice and every rebuild of the tray uses this one rule:
+ * - the tapback is an add from someone else, and an emoji tapback carries its emoji;
+ * - it is still that sender's newest tapback of its kind on that exact part. A later removal or
+ *   re-add replaces it, mirroring how `listReactionsByMessageGuids` folds add/remove pairs;
+ * - its target is an undeleted message of yours in the same chat with nothing unsent. A partly
+ *   unsent target fails closed, so unsending any part withdraws its tapback lines at the next
+ *   rebuild rather than leaving a quote of the unsent part in the tray;
+ * - it is newer than the chat's read point, and the chat was not deleted on this phone.
+ * Tapbacks still never count as unread: this rule is separate from `chatUnreadMessagePredicateSql`,
+ * so badges and filters don't change. Callers check mute, as they do for messages.
+ */
+export function chatTapbackNotificationPredicateSql(chatAlias: string, messageAlias: string) {
+  const c = sql.raw(chatAlias);
+  const m = sql.raw(messageAlias);
+  const types = sql.join(
+    NOTIFYING_TAPBACK_TYPES.map((type) => sql`${type}`),
+    sql`, `,
+  );
+  return sql`${m}.chat_id = ${c}.id AND ${m}.is_from_me = 0
+    AND ${m}.associated_message_type IN (${types})
+    AND (${m}.associated_message_type <> 'emoji' OR COALESCE(${m}.associated_message_emoji, '') <> '')
+    AND ${m}.date_deleted IS NULL
+    AND ${c}.deleted_at IS NULL
+    AND ${m}.date_created > COALESCE(
+      (SELECT lm.date_created FROM messages lm WHERE lm.guid = ${c}.last_read_message_guid),
+      0
+    )
+    AND EXISTS (
+      SELECT 1 FROM messages target
+       WHERE target.guid = ${m}.associated_message_guid
+         AND target.chat_id = ${m}.chat_id
+         AND target.is_from_me = 1
+         AND target.date_deleted IS NULL
+         AND ${messageHasVisibleContentSql('target')}
+         AND target.retraction_state IS NOT 'partial'
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM messages later
+       WHERE later.chat_id = ${m}.chat_id
+         AND later.associated_message_guid = ${m}.associated_message_guid
+         AND later.associated_message_part IS ${m}.associated_message_part
+         AND later.is_from_me = 0
+         AND later.handle_id IS ${m}.handle_id
+         AND later.date_deleted IS NULL
+         AND later.associated_message_type IN (
+           ${m}.associated_message_type, '-' || ${m}.associated_message_type
+         )
+         AND (${m}.associated_message_type <> 'emoji'
+           OR later.associated_message_emoji IS ${m}.associated_message_emoji)
+         AND (COALESCE(later.date_created, 0) > COALESCE(${m}.date_created, 0)
+           OR (COALESCE(later.date_created, 0) = COALESCE(${m}.date_created, 0)
+             AND later.id > ${m}.id))
+    )`;
 }
 
 /**

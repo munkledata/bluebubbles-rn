@@ -12,6 +12,7 @@ import { toFtsQuery } from './_shared';
 // message queries, so this dependency stays acyclic.
 import {
   attachmentIsUserFileSql,
+  chatTapbackNotificationPredicateSql,
   chatUnreadMessagePredicateSql,
   chatVisible,
   messageHasVisibleContentSql,
@@ -1077,4 +1078,47 @@ export async function isMessageNotificationEligible(
          AND ${chatUnreadMessagePredicateSql('c', 'm')}
     ) AS eligible`);
   return rows[0]?.eligible === 1;
+}
+
+/** What a tapback notice needs about one stored tapback. */
+export interface TapbackNotificationFacts {
+  /** `love` … `question`, or `emoji`. */
+  readonly reactionType: string;
+  /** The glyph of an emoji tapback; null for a classic one. */
+  readonly emoji: string | null;
+  readonly targetGuid: string;
+  /** The exact part reacted to; null when the wire carried no part. */
+  readonly targetPart: number | null;
+  readonly dateCreated: number | null;
+  /** Who sent the tapback, as stored. */
+  readonly senderAddress: string | null;
+  readonly senderName: string | null;
+}
+
+/**
+ * The stored tapback behind a possible tapback notice, or null unless the tapback rule
+ * (`chatTapbackNotificationPredicateSql`) holds for it right now. Like
+ * `isMessageNotificationEligible`, this re-checks current DB truth on every (re)presentation.
+ */
+export async function getTapbackNotificationFacts(
+  db: AppDatabase,
+  messageGuid: string,
+): Promise<TapbackNotificationFacts | null> {
+  const rows = await db.all<TapbackNotificationFacts>(sql`
+    SELECT m.associated_message_type AS reactionType,
+           m.associated_message_emoji AS emoji,
+           m.associated_message_guid AS targetGuid,
+           m.associated_message_part AS targetPart,
+           m.date_created AS dateCreated,
+           h.address AS senderAddress,
+           COALESCE(h.display_name, h.address) AS senderName
+      FROM messages m JOIN chats c ON c.id = m.chat_id
+      LEFT JOIN handles h ON h.id = m.handle_id
+     WHERE m.guid = ${messageGuid}
+       AND ${chatTapbackNotificationPredicateSql('c', 'm')}
+     LIMIT 1`);
+  const row = rows[0];
+  return row != null && typeof row.targetGuid === 'string' && row.targetGuid.length > 0
+    ? row
+    : null;
 }

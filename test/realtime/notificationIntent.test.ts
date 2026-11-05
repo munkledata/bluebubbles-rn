@@ -211,6 +211,53 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     }
   });
 
+  it('keeps a tapback in a one-to-one chat with two handle rows out of the group layout', async () => {
+    // The same rule for a tapback line (fix plan 2.2): the chat's style decides, not its rows.
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    const chat = {
+      guid: 'iMessage;-;sam@example.test',
+      style: 45,
+      participants: [
+        { address: 'sam@example.test', displayName: 'Sam' },
+        { address: 'sam.alt@example.test', displayName: 'Sam' },
+      ],
+    };
+    await deliverRaw(
+      router,
+      'new-message',
+      {
+        guid: 'two-handle-mine',
+        text: 'dinner at 7?',
+        isFromMe: true,
+        dateCreated: 1_700_000_000_001,
+        chats: [chat],
+      },
+      'socket',
+    );
+    await deliverRaw(
+      router,
+      'new-message',
+      {
+        guid: 'two-handle-tapback',
+        dateCreated: 1_700_000_000_002,
+        associatedMessageType: 'love',
+        associatedMessageGuid: 'p:0/two-handle-mine',
+        handle: { address: 'sam@example.test', displayName: 'Sam' },
+        chats: [chat],
+      },
+      'socket',
+    );
+
+    const tapback = intents.find((intent) => intent.kind === 'message' && intent.tapback === true);
+    expect(tapback).toMatchObject({
+      kind: 'message',
+      isGroup: false,
+      chatTitle: 'Sam',
+      body: 'Loved “dinner at 7?”',
+    });
+  });
+
   it('shows a sender with no contact name as a formatted number', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);

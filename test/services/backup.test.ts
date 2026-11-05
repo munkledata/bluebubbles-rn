@@ -97,6 +97,8 @@ describe('isBackupKey (the export ALLOW-list)', () => {
     expect(isBackupKey('privacy.redactedMode')).toBe(false);
     expect(isBackupKey('attachments.autoDownloadDestination')).toBe(true);
     expect(isBackupKey('downloads.maxConcurrent')).toBe(true);
+    expect(isBackupKey('notifications.messages')).toBe(true);
+    expect(isBackupKey('notifications.reactions')).toBe(true);
     // Consent must be granted on this device, not silently restored onto a fresh install.
     expect(isBackupKey('diagnostics.errorReporting')).toBe(false);
     expect(isBackupKey('diagnostics.errorReportingConsent.v1')).toBe(false);

@@ -214,6 +214,7 @@ beforeEach(() => {
     showDeliveryTimestamps: true,
     compactChatList: false,
     messageNotifications: true,
+    reactionNotifications: true,
     errorReportingEnabled: false,
     maxConcurrentDownloads: 2,
     hydrated: true,
@@ -359,6 +360,31 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
       }),
     );
     expect(useFeatureSettingsStore.getState().sendReadReceipts).toBe(true);
+  });
+
+  it('saves Reaction Notifications, which needs Message Notifications on', async () => {
+    const label = 'Show notifications when someone reacts to your message';
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByText('Reaction Notifications')).toBeTruthy();
+    expect(screen.getByLabelText(label).props.value).toBe(true);
+    expect(screen.getByLabelText(label).props.disabled).toBe(false);
+
+    await act(async () => {
+      fireEvent(screen.getByLabelText(label), 'valueChange', false);
+    });
+    expect(useFeatureSettingsStore.getState().reactionNotifications).toBe(false);
+    await waitFor(() =>
+      expect(
+        mockKvSetWithinTransaction.mock.calls.some(
+          (call) => call[1] === 'notifications.reactions' && call[2] === '0',
+        ),
+      ).toBe(true),
+    );
+
+    await act(async () => {
+      useFeatureSettingsStore.setState({ messageNotifications: false });
+    });
+    expect(screen.getByLabelText(label).props.disabled).toBe(true);
   });
 
   it('steps the Parallel Downloads cap up through the store', async () => {

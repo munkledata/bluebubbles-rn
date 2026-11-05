@@ -113,12 +113,23 @@ async function postNotificationSafely(
   });
 }
 
-/** Unknown feature settings must never opt a user into message presentation by default. */
-export function shouldPresentMessageNotification(settings: {
-  readonly hydrated: boolean;
-  readonly messageNotifications: boolean;
-}): boolean {
-  return settings.hydrated && settings.messageNotifications;
+/**
+ * Unknown feature settings must never opt a user into message presentation by default. A tapback
+ * line also needs "Reaction notifications" on; a missing value counts as off.
+ */
+export function shouldPresentMessageNotification(
+  settings: {
+    readonly hydrated: boolean;
+    readonly messageNotifications: boolean;
+    readonly reactionNotifications?: boolean;
+  },
+  tapback = false,
+): boolean {
+  return (
+    settings.hydrated &&
+    settings.messageNotifications &&
+    (!tapback || settings.reactionNotifications === true)
+  );
 }
 
 class RealtimeNotificationSettingsUnavailableError extends Error {
@@ -722,8 +733,9 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
                 async (intent, context) => {
                   if (context && !context.isCurrent()) return;
                   // Honor the global "Message Notifications" toggle (message-kind only; calls/reminders
-                  // still post). Gated here (not in the pure buildMessageIntents) so the Node tests don't
-                  // pull the kv-backed store — and the DB is still written regardless.
+                  // still post), and "Reaction notifications" for a tapback line. Gated here (not in
+                  // the pure buildMessageIntents) so the Node tests don't pull the kv-backed store —
+                  // and the DB is still written regardless.
                   if (
                     intent.kind === 'message' &&
                     !(await prepareMessageNotificationSettings(context))
@@ -733,7 +745,7 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
                   const featureSettings = useFeatureSettingsStore.getState();
                   if (
                     intent.kind === 'message' &&
-                    !shouldPresentMessageNotification(featureSettings)
+                    !shouldPresentMessageNotification(featureSettings, intent.tapback === true)
                   ) {
                     return;
                   }

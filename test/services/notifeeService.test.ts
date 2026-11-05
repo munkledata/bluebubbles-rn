@@ -2352,6 +2352,24 @@ describe('postNotification — detailed message', () => {
     ]);
   });
 
+  // Each case matches one above that shows Love; only the tapback flag differs.
+  it.each([
+    ['an RCS chat', { chatGuid: 'RCS;-;thread-1', messageGuid: 'rcs-message-1' }],
+    [
+      'a proven iMessage chat',
+      { chatGuid: 'iMessage;-;+15551230000', messageGuid: 'msg-1', imessageReactable: true },
+    ],
+  ])('hides Love on a tapback line in %s: it would react to the tapback', async (_label, over) => {
+    await postNotification(messageIntent({ ...over, tapback: true }));
+
+    const actions = lastNotif().android?.actions as any[];
+    expect(actions.map((action) => action.pressAction.id)).toEqual([
+      ACTION_REPLY,
+      ACTION_MARK_READ,
+    ]);
+    expect(lastNotif().android?.style.messages.at(-1)?.text).toBe('secret plans');
+  });
+
   it('hides Love when an RCS chat notification has a noncanonical message target', async () => {
     await postNotification(
       messageIntent({ chatGuid: 'RCS;-;thread-1', messageGuid: 'legacy-message' }),

@@ -3,6 +3,7 @@ import type { AppDatabase } from '@db/types';
 import { NOTIFICATION_ROUTE_KV_PREFIX } from '@db/repositories';
 import {
   attachmentIsUserFileSql,
+  chatTapbackNotificationPredicateSql,
   messageHasVisibleContentSql,
 } from '@db/repositories/chatVisibility';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
@@ -201,18 +202,23 @@ export async function listMessageNotificationTruth(
       SELECT m.id AS messageId,
              m.chat_id AS chatId,
              c.guid AS chatGuid,
-             CASE WHEN
-               m.is_from_me = 0
-               AND m.associated_message_type IS NULL
-               AND ${messageHasVisibleContentSql('m')}
-               AND m.date_deleted IS NULL
-               AND m.date_created > COALESCE(
-                 (SELECT lm.date_created
-                    FROM messages lm
-                   WHERE lm.guid = c.last_read_message_guid),
-                 0
+             CASE WHEN (
+               (
+                 m.is_from_me = 0
+                 AND m.associated_message_type IS NULL
+                 AND ${messageHasVisibleContentSql('m')}
+                 AND m.date_deleted IS NULL
+                 AND m.date_created > COALESCE(
+                   (SELECT lm.date_created
+                      FROM messages lm
+                     WHERE lm.guid = c.last_read_message_guid),
+                   0
+                 )
+                 AND (c.deleted_at IS NULL OR m.date_created > c.deleted_at)
                )
-               AND (c.deleted_at IS NULL OR m.date_created > c.deleted_at)
+               -- A tapback line keeps its own rule, the one that posted it (fix plan 2.2).
+               OR (${chatTapbackNotificationPredicateSql('c', 'm')})
+             )
                AND (c.mute_type IS NULL OR c.mute_type <> 'mute')
              THEN 1 ELSE 0 END AS notificationEligible,
              m.retraction_state AS retractionState,

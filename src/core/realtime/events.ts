@@ -217,6 +217,11 @@ export type NotificationIntent =
        * server switch before anything is sent.
        */
       imessageReactable?: boolean;
+      /**
+       * Someone's tapback on a message you sent (`messageGuid` is the tapback's own row). It
+       * follows the "Reaction notifications" switch and never offers the "♥ Love" action.
+       */
+      tapback?: true;
     }
   /** Fixed-copy local notice for an outgoing row that is durably in the error state. */
   | { kind: 'send-failure'; chatGuid: string; messageGuid: string }

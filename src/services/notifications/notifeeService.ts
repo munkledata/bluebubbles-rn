@@ -2282,8 +2282,12 @@ async function postNotificationNow(
       onlyAlertOnce: replacesExistingLine,
       chatGuid: intent.chatGuid,
       // A delayed event can merge behind a newer line. Only expose a reaction action when the
-      // route we just resolved is still the notification's latest visible message.
-      messageGuid: latest.messageId === route.messageId ? intent.messageGuid : undefined,
+      // route we just resolved is still the notification's latest visible message. A tapback
+      // line never gets one, on RCS or iMessage: "♥ Love" would react to the tapback itself.
+      messageGuid:
+        intent.tapback !== true && latest.messageId === route.messageId
+          ? intent.messageGuid
+          : undefined,
       imessageReactable: intent.imessageReactable === true,
     },
   );

@@ -44,6 +44,7 @@ const DEFAULTS = {
   showDeliveryTimestamps: true,
   compactChatList: false,
   messageNotifications: true,
+  reactionNotifications: true,
   errorReportingEnabled: false,
   permissionOnboardingCompleted: false,
 } as const;
@@ -233,7 +234,12 @@ describe('featureSettingsStore', () => {
     expect(useFeatureSettingsStore.getState().compactChatList).toBe(true);
   });
 
-  it.each(['sendReadReceipts', 'sendTypingIndicators', 'messageNotifications'] as const)(
+  it.each([
+    'sendReadReceipts',
+    'sendTypingIndicators',
+    'messageNotifications',
+    'reactionNotifications',
+  ] as const)(
     'setFlag switches the %s privacy choice back and rejects when the persist fails',
     async (flag) => {
       // A silent revert at the next launch would quietly undo what the owner turned off.

@@ -498,7 +498,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onDisconnect.onPress:mutator-call:d4cf58af3ec2",
       "path": "app/(app)/settings.tsx",
-      "line": 267,
+      "line": 272,
       "symbol": "SettingsScreen.onDisconnect.onPress",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#forget",
@@ -511,7 +511,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>:mutator-call:ac9fcd609606",
       "path": "app/(app)/settings.tsx",
-      "line": 310,
+      "line": 315,
       "symbol": "SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#rotateDatabaseKey",
@@ -20596,7 +20596,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:e737f4b3c52e",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 422,
+      "line": 431,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event",
@@ -20609,7 +20609,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:bed88bf25470",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 439,
+      "line": 448,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -20622,7 +20622,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:fbf723b9add6",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 485,
+      "line": 494,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -20635,7 +20635,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock:mutator-call:6ad0e1b99aa0",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 564,
+      "line": 573,
       "symbol": "deliverRespectingLock",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliver",
@@ -20648,7 +20648,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock:mutator-call:23ef353517cd",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 566,
+      "line": 575,
       "symbol": "deliverRespectingLock",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliver",
@@ -20661,7 +20661,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>:mutator-call:328a2817af6d",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 606,
+      "line": 615,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
@@ -20674,7 +20674,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>:mutator-call:cb1a4da13a12",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 610,
+      "line": 619,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock",
@@ -20687,7 +20687,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>:mutator-call:cb1a4da13a12:2",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 618,
+      "line": 627,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock",
@@ -20700,7 +20700,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleBackgroundFcm:mutator-call:bbd38b366234",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 667,
+      "line": 676,
       "symbol": "handleBackgroundFcm",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm",
@@ -20713,7 +20713,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#startFcm.<callback:a43a320bdb>:mutator-call:b2b3d2f6880a",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 688,
+      "line": 697,
       "symbol": "startFcm.<callback:a43a320bdb>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm",
@@ -20908,7 +20908,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#postSendFailureNotification.<callback:733692bd31>:mutator-call:69ad00d25654",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2378,
+      "line": 2382,
       "symbol": "postSendFailureNotification.<callback:733692bd31>",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#postNotificationNow",
@@ -20921,7 +20921,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#cancelFaceTimeNotification.<callback:4ef3145a64>:mutator-call:dd3a6cf045a8",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2401,
+      "line": 2405,
       "symbol": "cancelFaceTimeNotification.<callback:4ef3145a64>",
       "operation": "mutator-call",
       "target": "src/services/notifications/notifeeService.ts#cancelFaceTimeNotificationNow",
@@ -20934,7 +20934,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#cancelFaceTimeNotificationNow:mutator-call:22faf30a92fa",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2507,
+      "line": 2511,
       "symbol": "cancelFaceTimeNotificationNow",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute",
@@ -20947,7 +20947,7 @@
     {
       "id": "src/services/notifications/notifeeService.ts#cancelAllNotifications.<callback:d88b914181>:mutator-call:5e1eda48b4c7",
       "path": "src/services/notifications/notifeeService.ts",
-      "line": 2535,
+      "line": 2539,
       "symbol": "cancelAllNotifications.<callback:d88b914181>",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes",
@@ -20973,7 +20973,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:mutator-call:44918d382fdf",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 547,
+      "line": 553,
       "symbol": "migrateReminderNotificationId",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId.<callback:e98741237f>",
@@ -20986,7 +20986,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:mutator-call:7ac9ad737605",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 547,
+      "line": 553,
       "symbol": "migrateReminderNotificationId",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20999,7 +20999,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:sql-update:d6c50c44f83d",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 551,
+      "line": 557,
       "symbol": "migrateReminderNotificationId",
       "operation": "sql-update",
       "target": "reminders",
@@ -21012,7 +21012,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:mutator-call:8f5d1e4c3bf5",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 572,
+      "line": 578,
       "symbol": "deleteFaceTimeRoute",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute.<callback:9a6e587f1c>",
@@ -21025,7 +21025,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:mutator-call:a02fbb26ec7f",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 572,
+      "line": 578,
       "symbol": "deleteFaceTimeRoute",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -21038,7 +21038,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:sql-delete:cb58d0dd06c4",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 575,
+      "line": 581,
       "symbol": "deleteFaceTimeRoute",
       "operation": "sql-delete",
       "target": "kv",
@@ -21051,7 +21051,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:mutator-call:701b9879b8ce",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 585,
+      "line": 591,
       "symbol": "clearNotificationRoutes",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes.<callback:bffe50ba8a>",
@@ -21064,7 +21064,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:mutator-call:afd841a9a6e0",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 585,
+      "line": 591,
       "symbol": "clearNotificationRoutes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -21077,7 +21077,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:sql-delete:f27d9c134c56",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 588,
+      "line": 594,
       "symbol": "clearNotificationRoutes",
       "operation": "sql-delete",
       "target": "kv",
@@ -21935,7 +21935,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeRecoveredRealtimeEvents:mutator-call:08e1b915b538",
       "path": "src/services/realtimeControl.ts",
-      "line": 453,
+      "line": 464,
       "symbol": "resumeRecoveredRealtimeEvents",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.resume",
@@ -21948,7 +21948,7 @@
     {
       "id": "src/services/realtimeControl.ts#finishRealtimeRecoveryCollector:mutator-call:4b930e6e8a7e",
       "path": "src/services/realtimeControl.ts",
-      "line": 505,
+      "line": 516,
       "symbol": "finishRealtimeRecoveryCollector",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRecoveredRealtimeEvents",
@@ -21961,7 +21961,7 @@
     {
       "id": "src/services/realtimeControl.ts#realtimeSink.<callback:89559db620>.<callback:3919eab140>:mutator-call:402aaff7ad8a",
       "path": "src/services/realtimeControl.ts",
-      "line": 646,
+      "line": 657,
       "symbol": "realtimeSink.<callback:89559db620>.<callback:3919eab140>",
       "operation": "mutator-call",
       "target": "src/services/download/autoDownloadAttachments.ts#autoDownloadMessageAttachmentsForRealtimeEvent",
@@ -21974,7 +21974,7 @@
     {
       "id": "src/services/realtimeControl.ts#realtimeSink.<callback:89559db620>:mutator-call:256d15b4f657",
       "path": "src/services/realtimeControl.ts",
-      "line": 689,
+      "line": 700,
       "symbol": "realtimeSink.<callback:89559db620>",
       "operation": "mutator-call",
       "target": "src/services/download/autoDownloadAttachments.ts#autoDownloadMessageAttachmentsForRealtimeEvent",
@@ -21987,7 +21987,7 @@
     {
       "id": "src/services/realtimeControl.ts#realtimeSink.<callback:68fe0014d7>:mutator-call:017af705079d",
       "path": "src/services/realtimeControl.ts",
-      "line": 700,
+      "line": 711,
       "symbol": "realtimeSink.<callback:68fe0014d7>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -22000,7 +22000,7 @@
     {
       "id": "src/services/realtimeControl.ts#realtimeSink.<callback:68fe0014d7>:mutator-call:83761d97b204",
       "path": "src/services/realtimeControl.ts",
-      "line": 703,
+      "line": 714,
       "symbol": "realtimeSink.<callback:68fe0014d7>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -22013,7 +22013,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchWithContext:mutator-call:1b8f244e24e1",
       "path": "src/services/realtimeControl.ts",
-      "line": 952,
+      "line": 964,
       "symbol": "dispatchWithContext",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -22026,7 +22026,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchWithContext:mutator-call:52bcfe0b9200",
       "path": "src/services/realtimeControl.ts",
-      "line": 958,
+      "line": 970,
       "symbol": "dispatchWithContext",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.handle",
@@ -22039,7 +22039,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchWithContext:mutator-call:723b4235f7f7",
       "path": "src/services/realtimeControl.ts",
-      "line": 961,
+      "line": 973,
       "symbol": "dispatchWithContext",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#finishRealtimeRecoveryCollector",
@@ -22052,7 +22052,7 @@
     {
       "id": "src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:24a72c935b54",
       "path": "src/services/realtimeControl.ts",
-      "line": 1034,
+      "line": 1046,
       "symbol": "persistAuthenticatedLockedFcmV3Event",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -22065,7 +22065,7 @@
     {
       "id": "src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:0783b2ad479c",
       "path": "src/services/realtimeControl.ts",
-      "line": 1037,
+      "line": 1049,
       "symbol": "persistAuthenticatedLockedFcmV3Event",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persistLockedFcmV3WithoutDrain",
@@ -22078,7 +22078,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchRealtimeEvent.<callback:83dbff7b14>:mutator-call:49708f331ebc",
       "path": "src/services/realtimeControl.ts",
-      "line": 1092,
+      "line": 1104,
       "symbol": "dispatchRealtimeEvent.<callback:83dbff7b14>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchWithContext",
@@ -22091,7 +22091,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchRealtimeEvent.<callback:83dbff7b14>:mutator-call:49708f331ebc:2",
       "path": "src/services/realtimeControl.ts",
-      "line": 1102,
+      "line": 1114,
       "symbol": "dispatchRealtimeEvent.<callback:83dbff7b14>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchWithContext",
@@ -22104,7 +22104,7 @@
     {
       "id": "src/services/realtimeControl.ts#devPersistRealtimeEventWithoutDrain:mutator-call:6e5ab18cc859",
       "path": "src/services/realtimeControl.ts",
-      "line": 1175,
+      "line": 1187,
       "symbol": "devPersistRealtimeEventWithoutDrain",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -22117,7 +22117,7 @@
     {
       "id": "src/services/realtimeControl.ts#devPersistRealtimeEventWithoutDrain:mutator-call:aef29daf2c33",
       "path": "src/services/realtimeControl.ts",
-      "line": 1182,
+      "line": 1194,
       "symbol": "devPersistRealtimeEventWithoutDrain",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persistWithoutDrainForDev",
@@ -22130,7 +22130,7 @@
     {
       "id": "src/services/realtimeControl.ts#devResumePersistedRealtimeEvents:mutator-call:e21851c784e7",
       "path": "src/services/realtimeControl.ts",
-      "line": 1211,
+      "line": 1223,
       "symbol": "devResumePersistedRealtimeEvents",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -22143,7 +22143,7 @@
     {
       "id": "src/services/realtimeControl.ts#devResumePersistedRealtimeEvents:mutator-call:b3b56902cbb1",
       "path": "src/services/realtimeControl.ts",
-      "line": 1215,
+      "line": 1227,
       "symbol": "devResumePersistedRealtimeEvents",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.resume",
@@ -22156,7 +22156,7 @@
     {
       "id": "src/services/realtimeControl.ts#inject:mutator-call:e94b748b753f",
       "path": "src/services/realtimeControl.ts",
-      "line": 1229,
+      "line": 1241,
       "symbol": "inject",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -22169,7 +22169,7 @@
     {
       "id": "src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376",
       "path": "src/services/realtimeControl.ts",
-      "line": 1244,
+      "line": 1256,
       "symbol": "startRealtime.<callback:edf3121ba2>",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#resumeScopedCredentialUpgrade",
@@ -22182,7 +22182,7 @@
     {
       "id": "src/services/realtimeControl.ts#startRealtime:mutator-call:d95a386d71e0",
       "path": "src/services/realtimeControl.ts",
-      "line": 1261,
+      "line": 1273,
       "symbol": "startRealtime",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -22195,7 +22195,7 @@
     {
       "id": "src/services/realtimeControl.ts#startRealtime:mutator-reference:75992e767e3c",
       "path": "src/services/realtimeControl.ts",
-      "line": 1283,
+      "line": 1295,
       "symbol": "startRealtime",
       "operation": "mutator-reference",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -22208,7 +22208,7 @@
     {
       "id": "src/services/realtimeControl.ts#startRealtime.<callback:31d740386d>:mutator-call:ab8cd05669e0",
       "path": "src/services/realtimeControl.ts",
-      "line": 1317,
+      "line": 1329,
       "symbol": "startRealtime.<callback:31d740386d>",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.resume",
@@ -22221,7 +22221,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:edf3121ba2>:mutator-call:ab508913e108",
       "path": "src/services/realtimeControl.ts",
-      "line": 1457,
+      "line": 1469,
       "symbol": "resumeDesiredRealtime.<callback:edf3121ba2>",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#resumeScopedCredentialUpgrade",
@@ -22234,7 +22234,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeDesiredRealtime:mutator-call:2c6798b642a8",
       "path": "src/services/realtimeControl.ts",
-      "line": 1474,
+      "line": 1486,
       "symbol": "resumeDesiredRealtime",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -22247,7 +22247,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:e5528a3fb5>:mutator-call:e8033036c343",
       "path": "src/services/realtimeControl.ts",
-      "line": 1487,
+      "line": 1499,
       "symbol": "resumeDesiredRealtime.<callback:e5528a3fb5>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -22260,7 +22260,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:e5528a3fb5>:mutator-call:a6f5f9d66e35",
       "path": "src/services/realtimeControl.ts",
-      "line": 1495,
+      "line": 1507,
       "symbol": "resumeDesiredRealtime.<callback:e5528a3fb5>",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.resume",
@@ -22273,7 +22273,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeRealtime:mutator-call:3bd87f6c9e52",
       "path": "src/services/realtimeControl.ts",
-      "line": 1503,
+      "line": 1515,
       "symbol": "resumeRealtime",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeDesiredRealtime",
@@ -22286,7 +22286,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade:mutator-call:bd79318d30a2",
       "path": "src/services/realtimeControl.ts",
-      "line": 1508,
+      "line": 1520,
       "symbol": "resumeRealtimeAfterCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeDesiredRealtime",
@@ -22299,7 +22299,7 @@
     {
       "id": "src/services/realtimeControl.ts#approveNewServerUrl.reconnect:mutator-call:8f17c75f698b",
       "path": "src/services/realtimeControl.ts",
-      "line": 1642,
+      "line": 1654,
       "symbol": "approveNewServerUrl.reconnect",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -28240,7 +28240,7 @@
     {
       "id": "src/state/featureSettingsStore.ts#enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>:mutator-call:78e11597274a",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 145,
+      "line": 150,
       "symbol": "enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28253,7 +28253,7 @@
     {
       "id": "src/state/featureSettingsStore.ts#enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>:mutator-call:a1b7deaf21a2",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 145,
+      "line": 150,
       "symbol": "enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>",
       "operation": "mutator-call",
       "target": "src/state/featureSettingsStore.ts#enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>.<callback:266c621856>",
@@ -28266,7 +28266,7 @@
     {
       "id": "src/state/featureSettingsStore.ts#enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>.<callback:266c621856>:mutator-call:24c59195e2d2",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 148,
+      "line": 153,
       "symbol": "enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>.<callback:266c621856>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -28279,7 +28279,7 @@
     {
       "id": "src/state/featureSettingsStore.ts#enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>.<callback:266c621856>:mutator-call:f943ba121c15",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 152,
+      "line": 157,
       "symbol": "enqueueErrorReportingConsentWrite.<callback:aa9dca6a8e>.<callback:266c621856>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#clearErrorReportsWithinTransaction",
@@ -28290,49 +28290,36 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/components/routes/settingsScreen.test.tsx; test/db/errorReportsRepo.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.hydrate:mutator-call:290e2520b41f",
-      "path": "src/state/featureSettingsStore.ts",
-      "line": 316,
-      "symbol": "<callback:4279fcaf0b>.hydrate",
-      "operation": "mutator-call",
-      "target": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.hydrate.<callback:58cc503871>",
-      "detectedContext": "withDbTransaction",
-      "owner": "featureSettingsStore retired-feature hydration normalization",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts"
-    },
-    {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.hydrate:mutator-call:3e59a3adcb93",
-      "path": "src/state/featureSettingsStore.ts",
-      "line": 316,
-      "symbol": "<callback:4279fcaf0b>.hydrate",
-      "operation": "mutator-call",
-      "target": "src/db/transaction.ts#withDbTransaction",
-      "detectedContext": "transaction-coordinator",
-      "owner": "featureSettingsStore retired-feature hydration normalization",
-      "transactionContext": "transaction-coordinator",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts"
-    },
-    {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.hydrate.<callback:58cc503871>:mutator-call:cd3aac2d9c58",
-      "path": "src/state/featureSettingsStore.ts",
-      "line": 320,
-      "symbol": "<callback:4279fcaf0b>.hydrate.<callback:58cc503871>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
-      "detectedContext": "withDbTransaction",
-      "owner": "featureSettingsStore retired-feature hydration normalization",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts"
-    },
-    {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.hydrate.<callback:58cc503871>:mutator-call:b7dd189f78f7",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.hydrate:mutator-call:44b1ddb53f2a",
       "path": "src/state/featureSettingsStore.ts",
       "line": 323,
-      "symbol": "<callback:4279fcaf0b>.hydrate.<callback:58cc503871>",
+      "symbol": "<callback:65f7c154e6>.hydrate",
+      "operation": "mutator-call",
+      "target": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.hydrate.<callback:58cc503871>",
+      "detectedContext": "withDbTransaction",
+      "owner": "featureSettingsStore retired-feature hydration normalization",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts"
+    },
+    {
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.hydrate:mutator-call:9c8e877264dc",
+      "path": "src/state/featureSettingsStore.ts",
+      "line": 323,
+      "symbol": "<callback:65f7c154e6>.hydrate",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "featureSettingsStore retired-feature hydration normalization",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts"
+    },
+    {
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.hydrate.<callback:58cc503871>:mutator-call:89b6aa5ea8af",
+      "path": "src/state/featureSettingsStore.ts",
+      "line": 327,
+      "symbol": "<callback:65f7c154e6>.hydrate.<callback:58cc503871>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -28342,23 +28329,23 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setFlag:mutator-call:33cb92b50fbd",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.hydrate.<callback:58cc503871>:mutator-call:55641b26c0b2",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 384,
-      "symbol": "<callback:4279fcaf0b>.setFlag",
+      "line": 330,
+      "symbol": "<callback:65f7c154e6>.hydrate.<callback:58cc503871>",
       "operation": "mutator-call",
-      "target": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setFlag.<callback:2f7b5f0583>",
+      "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
-      "owner": "featureSettingsStore.setFlag",
+      "owner": "featureSettingsStore retired-feature hydration normalization",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setFlag:mutator-call:b2f65dbce6a8",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag:mutator-call:d3a54932e680",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 384,
-      "symbol": "<callback:4279fcaf0b>.setFlag",
+      "line": 391,
+      "symbol": "<callback:65f7c154e6>.setFlag",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -28368,10 +28355,23 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setFlag.<callback:2f7b5f0583>:mutator-call:b340f42e1b59",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag:mutator-call:edab26b4fc19",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 387,
-      "symbol": "<callback:4279fcaf0b>.setFlag.<callback:2f7b5f0583>",
+      "line": 391,
+      "symbol": "<callback:65f7c154e6>.setFlag",
+      "operation": "mutator-call",
+      "target": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag.<callback:2f7b5f0583>",
+      "detectedContext": "withDbTransaction",
+      "owner": "featureSettingsStore.setFlag",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag.<callback:2f7b5f0583>:mutator-call:e5dd46f18290",
+      "path": "src/state/featureSettingsStore.ts",
+      "line": 394,
+      "symbol": "<callback:65f7c154e6>.setFlag.<callback:2f7b5f0583>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -28381,10 +28381,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setFlag.<callback:2f7b5f0583>:mutator-call:c0265dc86a88",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag.<callback:2f7b5f0583>:mutator-call:960ae11d171e",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 389,
-      "symbol": "<callback:4279fcaf0b>.setFlag.<callback:2f7b5f0583>",
+      "line": 396,
+      "symbol": "<callback:65f7c154e6>.setFlag.<callback:2f7b5f0583>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#cancelPendingAttachmentMediaExportsWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -28394,10 +28394,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setMaxConcurrentDownloads:mutator-call:35e221e9d8f5",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setMaxConcurrentDownloads:mutator-call:50b127b5ba11",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 438,
-      "symbol": "<callback:4279fcaf0b>.setMaxConcurrentDownloads",
+      "line": 445,
+      "symbol": "<callback:65f7c154e6>.setMaxConcurrentDownloads",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -28407,12 +28407,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setMaxConcurrentDownloads:mutator-call:c6582c7703c2",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setMaxConcurrentDownloads:mutator-call:d60f88f0efe1",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 438,
-      "symbol": "<callback:4279fcaf0b>.setMaxConcurrentDownloads",
+      "line": 445,
+      "symbol": "<callback:65f7c154e6>.setMaxConcurrentDownloads",
       "operation": "mutator-call",
-      "target": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setMaxConcurrentDownloads.<callback:62a8e00576>",
+      "target": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setMaxConcurrentDownloads.<callback:62a8e00576>",
       "detectedContext": "withDbTransaction",
       "owner": "featureSettingsStore.setMaxConcurrentDownloads",
       "transactionContext": "withDbTransaction",
@@ -28420,10 +28420,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:cc96e367bc63",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:7d80be3cc2ee",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 439,
-      "symbol": "<callback:4279fcaf0b>.setMaxConcurrentDownloads.<callback:62a8e00576>",
+      "line": 446,
+      "symbol": "<callback:65f7c154e6>.setMaxConcurrentDownloads.<callback:62a8e00576>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -28433,12 +28433,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setAutoDownloadDestination:mutator-call:94d6be689168",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination:mutator-call:5d15d91011b1",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 450,
-      "symbol": "<callback:4279fcaf0b>.setAutoDownloadDestination",
+      "line": 457,
+      "symbol": "<callback:65f7c154e6>.setAutoDownloadDestination",
       "operation": "mutator-call",
-      "target": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setAutoDownloadDestination.<callback:0a291c45bf>",
+      "target": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination.<callback:0a291c45bf>",
       "detectedContext": "withDbTransaction",
       "owner": "featureSettingsStore.setAutoDownloadDestination",
       "transactionContext": "withDbTransaction",
@@ -28446,10 +28446,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setAutoDownloadDestination:mutator-call:f03e5ddfde78",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination:mutator-call:6318e75d997f",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 450,
-      "symbol": "<callback:4279fcaf0b>.setAutoDownloadDestination",
+      "line": 457,
+      "symbol": "<callback:65f7c154e6>.setAutoDownloadDestination",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -28459,10 +28459,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:a01bb8d6b43f",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:52cbcfae2e94",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 453,
-      "symbol": "<callback:4279fcaf0b>.setAutoDownloadDestination.<callback:0a291c45bf>",
+      "line": 460,
+      "symbol": "<callback:65f7c154e6>.setAutoDownloadDestination.<callback:0a291c45bf>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -28472,10 +28472,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:1d3ab039bf87",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:b52aca1e6954",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 454,
-      "symbol": "<callback:4279fcaf0b>.setAutoDownloadDestination.<callback:0a291c45bf>",
+      "line": 461,
+      "symbol": "<callback:65f7c154e6>.setAutoDownloadDestination.<callback:0a291c45bf>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentMediaExports.ts#cancelPendingAttachmentMediaExportsWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -28485,10 +28485,23 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/state/featureSettingsStore.test.ts; test/services/featureSettingsCommandsAutoDownload.test.ts; test/db/attachmentMediaExports.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setInboxFilters:mutator-call:46da1156bcab",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setInboxFilters:mutator-call:be6de51b3a45",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 467,
-      "symbol": "<callback:4279fcaf0b>.setInboxFilters",
+      "line": 474,
+      "symbol": "<callback:65f7c154e6>.setInboxFilters",
+      "operation": "mutator-call",
+      "target": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setInboxFilters.<callback:fc105905b5>",
+      "detectedContext": "withDbTransaction",
+      "owner": "featureSettingsStore.setInboxFilters",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/inbox.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setInboxFilters:mutator-call:fb8093562541",
+      "path": "src/state/featureSettingsStore.ts",
+      "line": 474,
+      "symbol": "<callback:65f7c154e6>.setInboxFilters",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -28498,23 +28511,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/inbox.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setInboxFilters:mutator-call:7c23b3b02fd1",
+      "id": "src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setInboxFilters.<callback:fc105905b5>:mutator-call:0d9a536d6af5",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 467,
-      "symbol": "<callback:4279fcaf0b>.setInboxFilters",
-      "operation": "mutator-call",
-      "target": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setInboxFilters.<callback:fc105905b5>",
-      "detectedContext": "withDbTransaction",
-      "owner": "featureSettingsStore.setInboxFilters",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/inbox.test.ts; test/db/kv.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/state/featureSettingsStore.ts#<callback:4279fcaf0b>.setInboxFilters.<callback:fc105905b5>:mutator-call:5819c44ad3a2",
-      "path": "src/state/featureSettingsStore.ts",
-      "line": 468,
-      "symbol": "<callback:4279fcaf0b>.setInboxFilters.<callback:fc105905b5>",
+      "line": 475,
+      "symbol": "<callback:65f7c154e6>.setInboxFilters.<callback:fc105905b5>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -28526,7 +28526,7 @@
     {
       "id": "src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:163756f4a357",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 484,
+      "line": 491,
       "symbol": "completePermissionOnboarding",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28539,7 +28539,7 @@
     {
       "id": "src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:a81286d61932",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 484,
+      "line": 491,
       "symbol": "completePermissionOnboarding",
       "operation": "mutator-call",
       "target": "src/state/featureSettingsStore.ts#completePermissionOnboarding.<callback:4c0b01ae7f>",
@@ -28552,7 +28552,7 @@
     {
       "id": "src/state/featureSettingsStore.ts#completePermissionOnboarding.<callback:4c0b01ae7f>:mutator-call:b1453f9eca38",
       "path": "src/state/featureSettingsStore.ts",
-      "line": 487,
+      "line": 494,
       "symbol": "completePermissionOnboarding.<callback:4c0b01ae7f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",

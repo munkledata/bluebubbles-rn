@@ -9575,7 +9575,7 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      '9243557340a9cb5c356f8e5895f202fb3f0b5fc155445b81841e261b5ef4c562' ||
+      'b989b7365fe47ec23f987118fbc0d458e9655aaaa56bc0fc1eddf8462a92edd3' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
       .digest('hex') !== '55909d52f17e7e73d7ec600c9f18b9ab4dea322963e84ecf1e4700971ef42ff0' ||
@@ -9653,7 +9653,7 @@ function incomingIngressCertifiedNodes({
       .update(normalizedSnippet(authenticateFcmV3Delivery, fcmFile))
       .digest('hex') !== '50312d5c35899dddd6151792863b57ad01ef9fed858785cba036b225e8838ba9' ||
     createHash('sha256').update(normalizedSnippet(fcmFile, fcmFile)).digest('hex') !==
-      '0936139a978a6d1dd4c59c7b0e6579bf4ab84328b5558038136479870e5d13b5' ||
+      'b81ca905d912343ca4e2145e2122b456613eeecf7fa6fddcbd0f46de3dc40bac' ||
     createHash('sha256')
       .update(normalizedSnippet(createFcmHeadlessCallbackLifetime, fcmFile))
       .digest('hex') !== '1b4681d00f4778d7a2d57d83bc39f66059553d54e92f12481862814bfb47eeb5' ||

@@ -48,6 +48,7 @@ export type FeatureFlag =
   | 'showDeliveryTimestamps'
   | 'compactChatList'
   | 'messageNotifications'
+  | 'reactionNotifications'
   | 'filterUnknownSenders';
 
 const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
@@ -60,6 +61,9 @@ const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
   showDeliveryTimestamps: { key: 'conversation.showDeliveryTimestamps', def: true },
   compactChatList: { key: 'chatList.compact', def: false },
   messageNotifications: { key: 'notifications.messages', def: true },
+  // Tapbacks on your own messages (fix plan 2.2). On by default, as upstream; needs Message
+  // Notifications on too.
+  reactionNotifications: { key: 'notifications.reactions', def: true },
   filterUnknownSenders: { key: 'chatList.filterUnknownSenders', def: false },
 };
 
@@ -73,6 +77,7 @@ const SAVE_OR_ROLL_BACK_FLAGS: ReadonlySet<FeatureFlag> = new Set<FeatureFlag>([
   'sendReadReceipts',
   'sendTypingIndicators',
   'messageNotifications',
+  'reactionNotifications',
 ]);
 
 /**
@@ -230,6 +235,7 @@ interface FeatureSettingsState {
   showDeliveryTimestamps: boolean;
   compactChatList: boolean;
   messageNotifications: boolean;
+  reactionNotifications: boolean;
   filterUnknownSenders: boolean;
   errorReportingEnabled: boolean;
   permissionOnboardingCompleted: boolean;
@@ -265,6 +271,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
   showDeliveryTimestamps: FLAGS.showDeliveryTimestamps.def,
   compactChatList: FLAGS.compactChatList.def,
   messageNotifications: FLAGS.messageNotifications.def,
+  reactionNotifications: FLAGS.reactionNotifications.def,
   filterUnknownSenders: FLAGS.filterUnknownSenders.def,
   errorReportingEnabled: false,
   permissionOnboardingCompleted: false,

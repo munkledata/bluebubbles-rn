@@ -131,11 +131,16 @@ export default function SettingsScreen(): React.JSX.Element {
   const compactChatList = useFeatureSettingsStore((s) => s.compactChatList);
   const filterUnknownSenders = useFeatureSettingsStore((s) => s.filterUnknownSenders);
   const messageNotifications = useFeatureSettingsStore((s) => s.messageNotifications);
+  const reactionNotifications = useFeatureSettingsStore((s) => s.reactionNotifications);
   const errorReportingEnabled = useFeatureSettingsStore((s) => s.errorReportingEnabled);
   const setFlag = useFeatureSettingsStore((s) => s.setFlag);
   // The store switches a privacy choice back when it cannot be saved; say so instead of nothing.
   const savePrivacyFlag = (
-    flag: 'sendTypingIndicators' | 'sendReadReceipts' | 'messageNotifications',
+    flag:
+      | 'sendTypingIndicators'
+      | 'sendReadReceipts'
+      | 'messageNotifications'
+      | 'reactionNotifications',
     value: boolean,
   ): void => {
     void setFlag(flag, value).catch(() => {
@@ -227,7 +232,7 @@ export default function SettingsScreen(): React.JSX.Element {
     chatlist:
       'chat list conversations compact dense appearance unknown senders filter spam folders groups organize',
     notifications:
-      'notifications alerts message notifications sound battery optimization background doze delivery reliable',
+      'notifications alerts message notifications reaction notifications reactions tapbacks sound battery optimization background doze delivery reliable',
     downloads:
       'downloads parallel concurrent attachments images media bandwidth auto-download wifi gallery album photos save destination location',
     sync: 'sync messages per chat initial history',
@@ -738,6 +743,13 @@ export default function SettingsScreen(): React.JSX.Element {
               value={messageNotifications}
               onValueChange={(v) => savePrivacyFlag('messageNotifications', v)}
               accessibilityLabel="Show notifications for new messages"
+            />
+            <SwitchRow
+              label="Reaction Notifications"
+              value={reactionNotifications}
+              onValueChange={(v) => savePrivacyFlag('reactionNotifications', v)}
+              disabled={!messageNotifications}
+              accessibilityLabel="Show notifications when someone reacts to your message"
             />
             <NavRow
               label="Notification Access…"

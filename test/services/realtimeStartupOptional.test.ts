@@ -16,6 +16,7 @@ const mockFeatureHydrate = jest.fn<Promise<void>, [MockFeatureHydrationOptions?]
 let mockFeatureState = {
   hydrated: true,
   messageNotifications: true,
+  reactionNotifications: true,
   filterUnknownSenders: false,
   hydrate: mockFeatureHydrate,
 };
@@ -476,6 +477,7 @@ beforeEach(() => {
   mockFeatureState = {
     hydrated: true,
     messageNotifications: true,
+    reactionNotifications: true,
     filterUnknownSenders: false,
     hydrate: mockFeatureHydrate,
   };
@@ -759,6 +761,28 @@ describe('realtime notification callback ownership', () => {
 
     expect(mockFeatureHydrate).not.toHaveBeenCalled();
     expect(mockPostNotification).not.toHaveBeenCalled();
+  });
+
+  it('posts a tapback line while reaction notifications are on', async () => {
+    const tapback = { ...MESSAGE_INTENT, tapback: true };
+    const notify = await startAndCaptureNotifier();
+    const { context } = deliveryContext();
+
+    await expect(Promise.resolve(notify(tapback, context))).resolves.toBeUndefined();
+
+    expect(mockPostNotification).toHaveBeenCalledWith(tapback, context);
+  });
+
+  it('suppresses only tapback lines when reaction notifications are off', async () => {
+    mockFeatureState.reactionNotifications = false;
+    const notify = await startAndCaptureNotifier();
+    const { context } = deliveryContext();
+
+    await notify({ ...MESSAGE_INTENT, tapback: true }, context);
+    expect(mockPostNotification).not.toHaveBeenCalled();
+
+    await notify(MESSAGE_INTENT, context);
+    expect(mockPostNotification).toHaveBeenCalledWith(MESSAGE_INTENT, context);
   });
 
   it('suppresses a message whose sender is not known', async () => {

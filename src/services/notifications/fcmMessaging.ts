@@ -259,15 +259,24 @@ function normalizedMessageId(event: NormalizedEvent): string | undefined {
 /**
  * The locked notice says "You have new messages", so it fires only for what notifies when
  * unlocked and can be told without the database: a new message from someone else, or the
- * server's push self-test. Receipts, your own messages sent from the Mac, deletions and alerts
- * must not alert. The payload is already authenticated and decrypted in memory.
+ * server's push self-test. Receipts, your own messages sent from the Mac, deletions, alerts and a
+ * removed tapback (`-love`, `-emoji`, `-sticker`…) must not alert. A new tapback still does: whose
+ * message it was on can't be checked without the database (fix plan 2.2). The payload is already
+ * authenticated and decrypted in memory.
  */
 function lockedNoticeIsDue(eventName: string, plaintext: string): boolean {
   const event = snapshotIncomingEvent(eventName, plaintext);
   return (
-    (event?.type === 'new-message' && event.message.isFromMe !== true) ||
+    (event?.type === 'new-message' &&
+      event.message.isFromMe !== true &&
+      !isRemovedTapback(event.message.associatedMessageType)) ||
     event?.type === 'test-notification'
   );
+}
+
+/** A removal is any associated type with the `-` prefix, whatever kind it removes. */
+function isRemovedTapback(associatedMessageType: string | null | undefined): boolean {
+  return typeof associatedMessageType === 'string' && associatedMessageType.startsWith('-');
 }
 
 function v3IdentityMatchesPayload(identity: FcmPushEnvelopeIdentityV3, plaintext: string): boolean {

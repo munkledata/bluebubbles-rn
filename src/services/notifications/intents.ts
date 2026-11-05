@@ -6,11 +6,13 @@ import {
   getChatHeader,
   getHandleProfile,
   getMessagePreviewByGuid,
+  getTapbackNotificationFacts,
   isMessageNotificationEligible,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import {
   buildMessageSnippet,
+  buildTapbackNotificationText,
   formatHandleAddress,
   formatParticipantNames,
   isGroupRow,
@@ -107,34 +109,10 @@ async function buildCurrentMessageIntent(
     return null;
   }
 
-  const address = currentPreview.senderAddress ?? message.handle?.address;
-  const profile = address ? await getHandleProfile(db, address) : null;
-  // A sender with no contact name reads "(555) 123-4567", as in the chat list, not "+15551234567".
-  const senderName = formatHandleAddress(
-    profile?.name ??
-      currentPreview.senderName ??
-      message.handle?.displayName ??
-      address ??
-      'Unknown',
-  );
-  // Trust the chat's own style (43 = group, 45 = one-to-one), as the chat list does. One person
-  // reached through two addresses (iMessage + SMS) has two handle rows but is still a one-to-one
-  // chat; counting rows made Android draw its group layout for them.
-  const isGroup = header ? isGroupRow(header) : false;
-  const chatTitle =
-    header?.displayName ||
-    (isGroup
-      ? participantDisplayNames(formatParticipantNames(header?.participantNames ?? null))
-      : senderName) ||
-    senderName;
-
   return {
     kind: 'message',
     chatGuid,
-    chatTitle,
-    senderName,
-    senderHandle: address ?? 'unknown',
-    avatarUri: profile?.avatar ?? undefined,
+    ...(await linePresentation(db, header, message, currentPreview)),
     body:
       buildMessageSnippet({
         text: currentPreview.text,
@@ -147,8 +125,75 @@ async function buildCurrentMessageIntent(
       }) || 'Message',
     messageGuid: message.guid,
     timestamp: currentPreview.dateCreated ?? message.dateCreated ?? Date.now(),
-    isGroup,
     ...(isIMessageReactableChat(header, chatGuid) ? { imessageReactable: true } : {}),
+  };
+}
+
+/**
+ * Build one tapback line ("Loved “dinner at 7?”") from current encrypted-DB truth (fix plan 2.2).
+ * The tapback rule is re-checked on every attempt, so a durable retry can't notify for a tapback
+ * that was removed, read past or whose target was unsent in the meantime.
+ */
+async function buildCurrentTapbackIntent(
+  db: AppDatabase,
+  message: MessageEvent,
+  chatGuid: string,
+): Promise<MessageIntent | null> {
+  const tapback = await getTapbackNotificationFacts(db, message.guid);
+  if (!tapback) return null;
+  // Quote the exact part that was tapbacked. Without a part on the wire (a link preview's `bp:`
+  // target), check the whole message but quote nothing rather than guess which part it was.
+  const target =
+    tapback.targetPart == null
+      ? await getMessagePreviewByGuid(db, chatGuid, tapback.targetGuid)
+      : await getMessagePreviewByGuid(db, chatGuid, tapback.targetGuid, tapback.targetPart);
+  if (!target || target.isRetracted || target.isFromMe !== 1) return null;
+  const header = await getChatHeader(db, chatGuid);
+  if (header?.muteType === 'mute') return null;
+  const body = buildTapbackNotificationText(tapback, tapback.targetPart == null ? null : target);
+  if (!body) return null;
+  return {
+    kind: 'message',
+    chatGuid,
+    ...(await linePresentation(db, header, message, tapback)),
+    body,
+    messageGuid: message.guid,
+    timestamp: tapback.dateCreated ?? message.dateCreated ?? Date.now(),
+    tapback: true,
+  };
+}
+
+/** Who a line is from and how its chat is titled, the same for message and tapback lines. */
+async function linePresentation(
+  db: AppDatabase,
+  header: Awaited<ReturnType<typeof getChatHeader>>,
+  message: MessageEvent,
+  stored: { readonly senderAddress?: string | null; readonly senderName?: string | null },
+): Promise<
+  Pick<MessageIntent, 'chatTitle' | 'senderName' | 'senderHandle' | 'avatarUri' | 'isGroup'>
+> {
+  const address = stored.senderAddress ?? message.handle?.address;
+  const profile = address ? await getHandleProfile(db, address) : null;
+  // A sender with no contact name reads "(555) 123-4567", as in the chat list, not "+15551234567".
+  const senderName = formatHandleAddress(
+    profile?.name ?? stored.senderName ?? message.handle?.displayName ?? address ?? 'Unknown',
+  );
+  // Trust the chat's own style (43 = group, 45 = one-to-one), as the chat list does. One person
+  // reached through two addresses (iMessage + SMS) has two handle rows but is still a one-to-one
+  // chat; counting rows made Android draw its group layout for them.
+  const isGroup = header ? isGroupRow(header) : false;
+  const chatTitle =
+    header?.displayName ||
+    (isGroup
+      ? participantDisplayNames(formatParticipantNames(header?.participantNames ?? null))
+      : senderName) ||
+    senderName;
+  return {
+    chatTitle,
+    senderName,
+    senderHandle: address ?? 'unknown',
+    avatarUri: profile?.avatar ?? undefined,
+    isGroup,
   };
 }
 
@@ -179,8 +224,12 @@ export async function buildMessageIntents(
       const chatGuid = await resolvePersistedMessageChatGuid(db, m, false);
       if (!chatGuid || !m.guid) return [];
       // A durable notification retry must honor CURRENT DB truth, not resurrect the old envelope
-      // after the user read/deleted it or the sender retracted it between attempts.
-      const intent = await buildCurrentMessageIntent(db, m, chatGuid);
+      // after the user read/deleted it or the sender retracted it between attempts. A tapback (or
+      // any other associated row) never counts as unread, so it has its own rule.
+      const intent =
+        m.associatedMessageType != null
+          ? await buildCurrentTapbackIntent(db, m, chatGuid)
+          : await buildCurrentMessageIntent(db, m, chatGuid);
       return intent ? [intent] : [];
     }
     case 'message-deleted': {

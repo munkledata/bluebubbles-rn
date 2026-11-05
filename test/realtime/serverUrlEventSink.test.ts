@@ -113,6 +113,27 @@ describe('headless message-notification feature gate', () => {
     expect(shouldPresentMessageNotification(settings)).toBe(expected);
   });
 
+  // A tapback line also needs "Reaction notifications"; an unknown value never opts in.
+  it.each([
+    [{ hydrated: true, messageNotifications: true, reactionNotifications: true }, true],
+    [{ hydrated: true, messageNotifications: true, reactionNotifications: false }, false],
+    [{ hydrated: true, messageNotifications: true }, false],
+    [{ hydrated: true, messageNotifications: false, reactionNotifications: true }, false],
+    [{ hydrated: false, messageNotifications: true, reactionNotifications: true }, false],
+  ] as const)('maps %p for a tapback line to %p', (settings, expected) => {
+    expect(shouldPresentMessageNotification(settings, true)).toBe(expected);
+  });
+
+  it('leaves message lines alone when only reaction notifications are off', () => {
+    expect(
+      shouldPresentMessageNotification({
+        hydrated: true,
+        messageNotifications: true,
+        reactionNotifications: false,
+      }),
+    ).toBe(true);
+  });
+
   it('enters durable intake before an unresolved feature-settings read', async () => {
     setSocket(null);
     resumeRealtimeDeliveries();

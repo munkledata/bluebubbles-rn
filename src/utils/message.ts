@@ -1,4 +1,5 @@
 import { isReaction } from '@core/models';
+import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 
 export interface PreviewInput {
   lastGuid: string | null;
@@ -94,6 +95,62 @@ const REACTION_LABELS: Record<string, string> = {
 
 function reactionText(type: string): string {
   return REACTION_LABELS[type.toLowerCase()] ?? 'Reacted to a message';
+}
+
+const TAPBACK_NOTIFICATION_VERBS: Record<ReactionBaseType, string> = {
+  love: 'Loved',
+  like: 'Liked',
+  dislike: 'Disliked',
+  laugh: 'Laughed at',
+  emphasize: 'Emphasized',
+  question: 'Questioned',
+};
+
+/** Longest text quoted in a tapback notice, in code points; anything longer ends in "…". */
+const TAPBACK_QUOTE_MAX_CODE_POINTS = 100;
+/** Longest emoji named in an emoji tapback notice, in code points (a long ZWJ family fits). */
+const TAPBACK_EMOJI_MAX_CODE_POINTS = 16;
+
+function shortenTapbackQuote(text: string): string {
+  const points = Array.from(text);
+  return points.length > TAPBACK_QUOTE_MAX_CODE_POINTS
+    ? `${points.slice(0, TAPBACK_QUOTE_MAX_CODE_POINTS).join('').trimEnd()}…`
+    : text;
+}
+
+/**
+ * A tapback notice's line, worded as on an iPhone: `Loved “dinner at 7?”` or
+ * `Reacted 😂 to “dinner at 7?”`. `target` is the exact part that was tapbacked, or null when the
+ * part is unknown. Without its text the line says `an attachment` or `a message` instead of
+ * quoting. Null for a removal, an unknown kind, or a target already unsent.
+ */
+export function buildTapbackNotificationText(
+  reaction: { readonly reactionType: string; readonly emoji: string | null },
+  target: MessageSnippetInput | null,
+): string | null {
+  const parsed = parseReactionType(reaction.reactionType);
+  if (!parsed || parsed.isRemoval || target?.isRetracted) return null;
+  const quoted = target
+    ? (
+        stripAttachmentPlaceholder(target.text) || stripAttachmentPlaceholder(target.subject)
+      ).replace(/\s+/g, ' ')
+    : '';
+  const hasAttachment =
+    target != null &&
+    (target.hasVisibleAttachments != null
+      ? isPresentFlag(target.hasVisibleAttachments)
+      : isPresentFlag(target.hasAttachments));
+  const what = quoted
+    ? `“${shortenTapbackQuote(quoted)}”`
+    : hasAttachment
+      ? 'an attachment'
+      : 'a message';
+  if (parsed.baseType !== 'emoji') return `${TAPBACK_NOTIFICATION_VERBS[parsed.baseType]} ${what}`;
+  const glyph = (reaction.emoji ?? '').trim();
+  const glyphPoints = Array.from(glyph).length;
+  return glyphPoints > 0 && glyphPoints <= TAPBACK_EMOJI_MAX_CODE_POINTS
+    ? `Reacted ${glyph} to ${what}`
+    : `Reacted to ${what}`;
 }
 
 /**
