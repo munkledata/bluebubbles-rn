@@ -5,6 +5,7 @@ import type { AttachmentRow, ChatMediaByKind } from '@db/repositories';
 import { isLocalFileUri } from '@utils';
 import { useTheme } from '../theme';
 import { useAttachmentCachePathProtection } from '../attachments/useAttachmentCachePathProtection';
+import { useVideoPoster } from '../attachments/useVideoPoster';
 
 /**
  * A single attachment thumbnail (image preview or kind glyph): the Details strip, and the grid on
@@ -19,6 +20,7 @@ export function MediaThumb({
   onPress,
   onLongPress,
   size,
+  serverPoster = false,
 }: {
   att: AttachmentRow;
   kind: 'photo' | 'video';
@@ -29,11 +31,15 @@ export function MediaThumb({
   onLongPress?: () => void;
   /** Square side in points; the strip's default is 72 with a right gap. */
   size?: number;
+  /** Ask the server for this video's still picture (iMessage/SMS chats on a supporting server). */
+  serverPoster?: boolean;
 }): React.JSX.Element {
   const theme = useTheme();
-  // expo-image can't decode a video file, so a video renders ONLY its blurhash poster (no file
-  // source) or the ▶ glyph fallback; feeding the video uri to <Image source> would show a blank
-  // tile.
+  // expo-image can't decode a video file, so a video never feeds its own file to <Image source>
+  // (that shows a blank tile). It shows, in order: the server-made poster JPEG, its blurhash, or the
+  // ▶ glyph. The poster is a separate small file, so it needs no attachment-cache protection; if
+  // its file was cleared before the image could read it, the tile fetches it once more.
+  const poster = useVideoPoster(att.guid, kind === 'video' && serverPoster);
   const wantsImage = kind === 'photo' && !!att.localPath;
   const videoPoster = kind === 'video' && !!att.blurhash;
   const hasManagedPath = isLocalFileUri(att.localPath);
@@ -72,6 +78,18 @@ export function MediaThumb({
           contentFit="cover"
           style={styles.thumbImg}
         />
+      ) : poster.uri ? (
+        // The server's still picture from the video, with the same play glyph overlay.
+        <>
+          <Image
+            source={{ uri: poster.uri }}
+            placeholder={att.blurhash ? { blurhash: att.blurhash } : null}
+            contentFit="cover"
+            style={styles.thumbImg}
+            onError={poster.onLoadError}
+          />
+          <Text style={[styles.thumbGlyph, styles.thumbGlyphOverlay]}>▶</Text>
+        </>
       ) : videoPoster ? (
         // Poster-only: blurhash as the image (NO video source) with a play glyph overlay.
         <>
@@ -105,6 +123,7 @@ export function MediaSections({
   documentSummary,
   onOpenDocuments,
   onOpenAll,
+  videoPosters = false,
 }: {
   media: ChatMediaByKind | null | undefined;
   onOpenMedia: (attachmentGuid: string) => void;
@@ -114,6 +133,11 @@ export function MediaSections({
   onOpenDocuments?: () => void;
   /** Opens the paged All Attachments page (every photo, video, file and link). */
   onOpenAll?: () => void;
+  /**
+   * Show each video's server-made still picture. Pass true only while the server reports
+   * `supports_video_poster` and the chat is not RCS (there is no RCS poster route).
+   */
+  videoPosters?: boolean;
 }): React.JSX.Element | null {
   const theme = useTheme();
   const photos = media?.photos ?? [];
@@ -184,6 +208,7 @@ export function MediaSections({
                 position={index + 1}
                 total={videos.length}
                 onPress={() => onOpenMedia(a.guid)}
+                serverPoster={videoPosters}
               />
             ))}
           </ScrollView>

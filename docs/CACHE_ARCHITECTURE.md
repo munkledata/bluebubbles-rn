@@ -169,8 +169,20 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   prevent proof of capacity, the new download is refused rather than bypassing the limit.
 - All shipped native file-download routes share the same actual-byte/timeout boundary: attachment
   transfers use 2-minute automatic or 15-minute manual deadlines; server contact thumbnails use
-  5 MiB / 30 seconds; synced chat wallpapers use 10 MiB / 60 seconds. Each route downloads to a
-  Gator-owned `*.part`, verifies a positive final stat, promotes it, and prunes abandoned partials.
+  5 MiB / 30 seconds; synced chat wallpapers use 10 MiB / 60 seconds; Shared Media video posters
+  use 1 MiB / 30 seconds / 1 MP. Each route downloads to a Gator-owned `*.part`, verifies a
+  positive final stat, promotes it, and prunes abandoned partials.
+- Video posters (`src/services/download/videoPosters.ts`, behind `supports_video_poster`, never for
+  RCS chats) are 512 px JPEG stills the Mac makes from an iMessage/SMS video, shown on the Details
+  Shared Media strip and the All Attachments Videos grid. They live outside the attachment ledger
+  in `Paths.document/video-posters/generation-{account}/`. At most two download at once (the Mac's
+  own limit) and at most 256 wait in line; a tile that goes away withdraws its waiting request.
+  Once a save brings the folder to 300 posters it is cleared the next time nothing is downloading,
+  so it never holds more than 558 (posters are tens of KB and cheap to fetch again). A tile whose
+  poster file was cleared before its image could read it fetches it once more. A 404 or broken
+  answer is not asked again this session; a busy server (503) or timeout waits 30 seconds, doubling
+  to 10 minutes; a phone-side failure is not remembered. Disconnect deletes the whole
+  `video-posters` folder with the other server-mirrored media.
 - Before a new synced wallpaper can start, native cleanup must strictly prove no more than 90 MiB / 255
   files while protecting the DB-referenced current wallpaper. The bounded transfer can then add at
   most 10 MiB / one file, and the post-commit prune retains the final 100 MiB / 256-file ceiling. Each

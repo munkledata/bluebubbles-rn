@@ -23,7 +23,8 @@ import {
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { safeOpenUrl } from '@utils';
+import { useSessionStore } from '@state/sessionStore';
+import { isRcsChatGuid, safeOpenUrl } from '@utils';
 import { SharedDocumentRow } from '../attachments/FileChip';
 import { showDialog, useDialogStore } from '../dialog/dialogStore';
 import { Screen, ScreenHeader } from '../primitives';
@@ -233,6 +234,11 @@ function MediaGrid({
     accountLease,
     screenIsCurrent(),
   );
+  // Same rule as the Details strip: the server's poster route serves Mac (iMessage/SMS) videos only.
+  const videoPostersSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_video_poster === true,
+  );
+  const serverPoster = kind === 'video' && videoPostersSupported && !isRcsChatGuid(chatGuid);
   const total = state.data?.items.length ?? 0;
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<ChatDocumentRow>): React.JSX.Element => (
@@ -247,9 +253,10 @@ function MediaGrid({
           if (screenIsCurrent()) router.push(`/media/${encodeURIComponent(item.guid)}`);
         }}
         onLongPress={() => showInChat(item.messageGuid, kind === 'photo' ? 'Photo' : 'Video')}
+        serverPoster={serverPoster}
       />
     ),
-    [kind, total, size, router, screenIsCurrent, showInChat],
+    [kind, total, size, router, screenIsCurrent, showInChat, serverPoster],
   );
   return (
     <PagedList

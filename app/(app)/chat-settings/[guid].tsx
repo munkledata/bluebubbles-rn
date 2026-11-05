@@ -56,7 +56,13 @@ import {
 import { useSessionStore } from '@state/sessionStore';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { useSharedDocuments } from '@features/conversations/useSharedDocuments';
-import { isGroupRow, isProvenIMessageGroupChat, resolveDisplayTitle, safeOpenUrl } from '@utils';
+import {
+  isGroupRow,
+  isProvenIMessageGroupChat,
+  isRcsChatGuid,
+  resolveDisplayTitle,
+  safeOpenUrl,
+} from '@utils';
 import {
   NavRow,
   Screen,
@@ -255,6 +261,11 @@ function ChatSettingsScreen({
   const appleGroupLeaveSupported = useSessionStore(
     (state) => state.serverInfo?.supports_imessage_group_leave === true,
   );
+  // The server's poster route serves Mac (iMessage/SMS) attachments only; RCS has none.
+  const videoPostersSupported = useSessionStore(
+    (state) => state.serverInfo?.supports_video_poster === true,
+  );
+  const showVideoPosters = videoPostersSupported && !isRcsChatGuid(guid);
   const mountAliveRef = useRef(true);
   const [lifetime] = useState<ChatSettingsLifetime>(() => ({}));
   const activeLifetimeRef = useRef<ChatSettingsLifetime | null>(lifetime);
@@ -1290,6 +1301,7 @@ function ChatSettingsScreen({
           onOpenDocuments={openDocuments}
           onOpenAll={openAllAttachments}
           onOpenLink={openLink}
+          videoPosters={showVideoPosters}
         />
 
         <SettingsSection label="NOTIFICATIONS" style={styles.gap}>

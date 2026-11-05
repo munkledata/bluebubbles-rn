@@ -95,6 +95,12 @@ export const ServerInfo = z
     /** Typed batch presence that may prove a deletion of a message the phone already holds. */
     supports_message_state_presence: z.boolean().nullish(),
     /**
+     * Whether `GET /attachment/:guid/poster?width=N` answers with a still JPEG taken from an
+     * iMessage/SMS video (never the video bytes). Additive; absent/false on older servers, so Shared
+     * Media keeps its blurhash/▶ tiles until support is explicit. RCS videos have no poster route.
+     */
+    supports_video_poster: z.boolean().nullish(),
+    /**
      * Whether the server exposes bounded text search over its live Messages database. Additive;
      * absent/false on older servers, so global search remains local-only until support is explicit.
      */

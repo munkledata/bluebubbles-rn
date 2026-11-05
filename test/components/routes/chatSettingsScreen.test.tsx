@@ -72,6 +72,8 @@ let mockParticipantCount = 2;
 let mockHandleServices: string | null = null;
 let mockDisplayNameOverride: string | null | undefined;
 let mockPendingReactiveGuid: string | null = null;
+let mockVideos: unknown[] = [];
+const mockLoadVideoPoster = jest.fn<Promise<string | null>, [string]>();
 const mockInvalidationListeners = new Map<number, Set<() => void>>();
 let reduceMotionListener: ((enabled: boolean) => void) | undefined;
 let removeReduceMotionListener: jest.Mock;
@@ -334,7 +336,7 @@ jest.mock('@db/useReactiveQuery', () => ({
               service: null,
             },
           ],
-          videos: [],
+          videos: mockVideos,
           documents: [],
           links: [{ url: source.link, messageGuid: `${source.mediaGuid}-link`, dateCreated: 1 }],
         },
@@ -433,7 +435,12 @@ jest.mock('@utils', () => ({
   resolveDisplayTitle: (row: { customName?: string | null; displayName?: string | null }) =>
     row.customName || row.displayName || 'Conversation',
   isLocalFileUri: (uri: string | null | undefined) => !!uri?.startsWith('file://'),
+  isRcsChatGuid: (guid: string | null | undefined) => !!guid?.startsWith('RCS;-;'),
   safeOpenUrl: (...args: unknown[]) => mockSafeOpenUrl(...args),
+}));
+
+jest.mock('@/services/download/videoPosters', () => ({
+  loadVideoPoster: (guid: string) => mockLoadVideoPoster(guid),
 }));
 
 jest.mock('@/services', () => {
@@ -649,6 +656,8 @@ beforeEach(() => {
   mockHandleServices = null;
   mockDisplayNameOverride = undefined;
   mockPendingReactiveGuid = null;
+  mockVideos = [];
+  mockLoadVideoPoster.mockReset().mockResolvedValue(null);
   mockAccountLease = makeLease(73);
   mockInvalidationListeners.clear();
   mockGetDatabase.mockReset().mockReturnValue(mockDatabase);
@@ -2755,5 +2764,57 @@ describe('ChatSettingsScreen targeted repair entry', () => {
     expect(mockShowDialog).toHaveBeenCalledTimes(dialogCountBeforeRetirement);
     expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawStaleError);
     expect(JSON.stringify(view.toJSON())).not.toContain(rawStaleError);
+  });
+});
+
+describe('ChatSettingsScreen video posters', () => {
+  const sharedVideo = {
+    id: 2,
+    guid: 'shared-video-guid',
+    messageId: 92,
+    mimeType: 'video/mp4',
+    transferName: 'clip.mp4',
+    totalBytes: 5000,
+    height: 100,
+    width: 100,
+    blurhash: null,
+    hasLivePhoto: 0,
+    isSticker: 0,
+    hideAttachment: 0,
+    localPath: null,
+    service: null,
+  };
+
+  function serverWithPosters(supported: boolean): void {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', private_api: false, supports_video_poster: supported } as any,
+    });
+  }
+
+  it('asks for a video poster in an iMessage chat when the server makes them', async () => {
+    serverWithPosters(true);
+    mockVideos = [sharedVideo];
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await waitFor(() => expect(mockLoadVideoPoster).toHaveBeenCalledWith('shared-video-guid'));
+  });
+
+  it('never asks in an RCS chat, which has no poster route', async () => {
+    serverWithPosters(true);
+    mockGuid = 'RCS;-;chat-settings-rcs-guid';
+    mockVideos = [sharedVideo];
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    expect(screen.getByText('Videos · 1')).toBeTruthy();
+    expect(mockLoadVideoPoster).not.toHaveBeenCalled();
+  });
+
+  it('never asks a server that does not make posters', async () => {
+    serverWithPosters(false);
+    mockVideos = [sharedVideo];
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    expect(screen.getByText('Videos · 1')).toBeTruthy();
+    expect(mockLoadVideoPoster).not.toHaveBeenCalled();
   });
 });

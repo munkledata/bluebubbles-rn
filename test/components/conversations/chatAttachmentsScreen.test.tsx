@@ -96,6 +96,11 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
   attachmentCacheCoordinator: { protect: (path: string) => ({ path, release: jest.fn() }) },
 }));
 
+const mockLoadVideoPoster = jest.fn<Promise<string | null>, [string]>();
+jest.mock('@/services/download/videoPosters', () => ({
+  loadVideoPoster: (guid: string) => mockLoadVideoPoster(guid),
+}));
+
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => mockLease,
   subscribeRealtimeGenerationInvalidation: (_generation: number, listener: () => void) => {
@@ -109,6 +114,8 @@ import {
   ChatAttachmentsScreen,
   parseChatAttachmentsTab,
 } from '@ui/conversations/ChatAttachmentsScreen';
+// eslint-disable-next-line import/first
+import { useSessionStore } from '@state/sessionStore';
 
 const CHAT = 'iMessage;-;+15551234567';
 const links: ChatLink[] = [
@@ -117,6 +124,8 @@ const links: ChatLink[] = [
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockLoadVideoPoster.mockReset().mockResolvedValue(null);
+  useSessionStore.setState({ serverInfo: null });
   mockLease.current = true;
   mockInvalidationListeners.clear();
   mockRequestedSources.length = 0;
@@ -158,6 +167,37 @@ describe('ChatAttachmentsScreen', () => {
     expect(mockOpenChat).toHaveBeenCalledWith(
       `/chat/${encodeURIComponent(CHAT)}?focus=message-of-photo-2`,
     );
+  });
+
+  it('asks for video posters in the Videos grid when the server makes them', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_video_poster: true } as never,
+    });
+    await renderWithTheme(<ChatAttachmentsScreen chatGuid={CHAT} initialTab="videos" />);
+
+    await waitFor(() => expect(mockLoadVideoPoster).toHaveBeenCalledWith('video-1'));
+    expect(mockLoadVideoPoster).toHaveBeenCalledTimes(1);
+  });
+
+  it('never asks for posters in an RCS chat, on Photos, or without server support', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_video_poster: true } as never,
+    });
+    const rcs = await renderWithTheme(
+      <ChatAttachmentsScreen chatGuid="RCS;-;chat-attachments-rcs" initialTab="videos" />,
+    );
+    expect(screen.getByRole('imagebutton', { name: 'Shared video 1 of 1' })).toBeTruthy();
+    await rcs.unmount();
+
+    const photos = await renderWithTheme(<ChatAttachmentsScreen chatGuid={CHAT} />);
+    expect(screen.getByRole('imagebutton', { name: 'Shared photo 1 of 2' })).toBeTruthy();
+    await photos.unmount();
+
+    useSessionStore.setState({ serverInfo: { version: 'test' } as never });
+    await renderWithTheme(<ChatAttachmentsScreen chatGuid={CHAT} initialTab="videos" />);
+    expect(screen.getByRole('imagebutton', { name: 'Shared video 1 of 1' })).toBeTruthy();
+
+    expect(mockLoadVideoPoster).not.toHaveBeenCalled();
   });
 
   it('switches tabs, each with its own read', async () => {

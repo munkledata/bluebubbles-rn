@@ -680,6 +680,25 @@ Accepted residuals:
   behavior is fail-closed: an existing tombstone wins unless a future protocol supplies an explicit
   restore signal. These are post-remediation designs, not unrecorded completion gaps.
 
+## 🟡 App source ready (2026-11-05) — Shared Media video posters (`supports_video_poster`)
+
+- **Server → App:** `ServerInfoV1.supports_video_poster` and
+  `GET /api/v1/attachment/:guid/poster?width=N`, a still JPEG the Mac takes from an iMessage/SMS
+  video about a second in. `width` is the longest side (the server clamps it to 64–1024; default
+  512). The route never sends the video itself. 200 is the JPEG, with Content-Length and
+  `Cache-Control: private, no-store`. 404 means no poster: not found, not a video, previews off, a
+  video the Mac cannot read, or a bad login (concealed). 503 (`video_poster_unavailable`) means
+  busy: the Mac makes at most two posters at once. No redirects; Bearer or scoped `messages:read`.
+- **App:** video tiles (the Details Shared Media strip and the All Attachments Videos grid) ask for
+  `width=512` only while the flag is true and the chat is not RCS, at most two at a time. The
+  request goes through the pinned transport and the bounded
+  native downloader. That downloader reports every non-200 other than 404/410 as one generic
+  failure, so a 503 or timeout waits 30 seconds (doubling to 10 minutes), and a 404 is never asked
+  again this session. Tiles keep their blurhash/▶ look until a poster arrives; the ▶ stays drawn
+  over the poster.
+- **Status:** app source ready for 0.1.76; the server route is being built on the server's
+  `feat/video-poster` branch. Device proof needs both.
+
 ## 🟡 App source ready (2026-10-29) — Apple screening flags (`isFiltered` / `isSpam`)
 
 - **Server** (branch `feat/expose-filtered-and-spam`): config `exposeAppleScreening` (default OFF) adds

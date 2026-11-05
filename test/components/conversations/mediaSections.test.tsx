@@ -24,6 +24,15 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
   attachmentCacheCoordinator: { protect: (path: string) => mockProtectPath(path) },
 }));
 
+const mockLoadVideoPoster = jest.fn<
+  Promise<string | null>,
+  [string, AbortSignal | undefined, boolean | undefined]
+>();
+jest.mock('@/services/download/videoPosters', () => ({
+  loadVideoPoster: (guid: string, signal?: AbortSignal, replace?: boolean) =>
+    mockLoadVideoPoster(guid, signal, replace),
+}));
+
 jest.mock('expo-image', () => {
   // Test-only loose probes intentionally forward expo-image props onto a marker View.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -36,12 +45,13 @@ jest.mock('expo-image', () => {
         testID: 'expo-image',
         source: props.source,
         placeholder: props.placeholder,
+        onError: props.onError,
       }),
   };
 });
 
 // eslint-disable-next-line import/first
-import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
+import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 // eslint-disable-next-line import/first
 import { MediaSections } from '@ui/conversations/MediaSections';
 
@@ -80,6 +90,7 @@ beforeEach(() => {
     path,
     release: mockReleaseProtection,
   }));
+  mockLoadVideoPoster.mockReset().mockResolvedValue(null);
 });
 
 describe('MediaSections', () => {
@@ -277,6 +288,149 @@ describe('MediaSections', () => {
     expect(tile.props.accessibilityState).toMatchObject({ disabled: true });
     fireEvent.press(tile);
     expect(onOpenMedia).not.toHaveBeenCalled();
+  });
+
+  const POSTER = 'file:///doc/video-posters/generation-0/media-v-1.jpg';
+
+  it('shows the server poster under the play glyph when posters are on', async () => {
+    mockLoadVideoPoster.mockResolvedValue(POSTER);
+    await renderWithTheme(
+      <MediaSections
+        media={media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4', blurhash: 'LEHV6n' })] })}
+        onOpenMedia={() => {}}
+        onOpenLink={() => {}}
+        videoPosters
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('expo-image').props.source).toEqual({ uri: POSTER }),
+    );
+    expect(screen.getByTestId('expo-image').props.placeholder).toEqual({ blurhash: 'LEHV6n' });
+    expect(mockLoadVideoPoster).toHaveBeenCalledWith('v-1', expect.any(AbortSignal), false);
+    const glyph = StyleSheet.flatten(screen.getByText('▶').props.style) as { color?: string };
+    expect(glyph.color).toBe('#FFFFFF');
+  });
+
+  it('withdraws a waiting poster request when the tile goes away, and ignores its late answer', async () => {
+    let answer!: (uri: string | null) => void;
+    mockLoadVideoPoster.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const view = await renderWithTheme(
+      <MediaSections
+        media={media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4', blurhash: 'LEHV6n' })] })}
+        onOpenMedia={() => {}}
+        onOpenLink={() => {}}
+        videoPosters
+      />,
+    );
+    await waitFor(() => expect(mockLoadVideoPoster).toHaveBeenCalledTimes(1));
+    const signal = mockLoadVideoPoster.mock.calls[0]![1]!;
+    expect(signal.aborted).toBe(false);
+
+    await view.unmount();
+    expect(signal.aborted).toBe(true);
+    // A late answer after the tile is gone must not try to update it.
+    await act(async () => {
+      answer(POSTER);
+      await Promise.resolve();
+    });
+  });
+
+  it('fetches a poster once more when its image fails to load, then keeps the blurhash', async () => {
+    mockLoadVideoPoster.mockResolvedValue(POSTER);
+    await renderWithTheme(
+      <MediaSections
+        media={media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4', blurhash: 'LEHV6n' })] })}
+        onOpenMedia={() => {}}
+        onOpenLink={() => {}}
+        videoPosters
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('expo-image').props.source).toEqual({ uri: POSTER }),
+    );
+    expect(mockLoadVideoPoster).toHaveBeenLastCalledWith('v-1', expect.any(AbortSignal), false);
+
+    // The file was cleared before the image could read it: ask again, replacing it.
+    await act(async () => {
+      screen.getByTestId('expo-image').props.onError();
+    });
+    await waitFor(() => expect(mockLoadVideoPoster).toHaveBeenCalledTimes(2));
+    expect(mockLoadVideoPoster).toHaveBeenLastCalledWith('v-1', expect.any(AbortSignal), true);
+    await waitFor(() =>
+      expect(screen.getByTestId('expo-image').props.source).toEqual({ uri: POSTER }),
+    );
+
+    // A second failure gives up for this tile instead of looping.
+    await act(async () => {
+      screen.getByTestId('expo-image').props.onError();
+    });
+    expect(screen.getByTestId('expo-image').props.source).toBeUndefined();
+    expect(screen.getByTestId('expo-image').props.placeholder).toEqual({ blurhash: 'LEHV6n' });
+    expect(mockLoadVideoPoster).toHaveBeenCalledTimes(2);
+  });
+
+  it('drops the poster when posters are switched off for the chat', async () => {
+    mockLoadVideoPoster.mockResolvedValue(POSTER);
+    const props = {
+      media: media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4', blurhash: 'LEHV6n' })] }),
+      onOpenMedia: () => {},
+      onOpenLink: () => {},
+    };
+    const view = await renderWithTheme(<MediaSections {...props} videoPosters />);
+    await waitFor(() =>
+      expect(screen.getByTestId('expo-image').props.source).toEqual({ uri: POSTER }),
+    );
+
+    await view.rerender(<MediaSections {...props} videoPosters={false} />);
+    expect(screen.getByTestId('expo-image').props.source).toBeUndefined();
+    expect(screen.getByTestId('expo-image').props.placeholder).toEqual({ blurhash: 'LEHV6n' });
+  });
+
+  it('shows a poster even for a video that has no blurhash', async () => {
+    mockLoadVideoPoster.mockResolvedValue(POSTER);
+    await renderWithTheme(
+      <MediaSections
+        media={media({ videos: [att({ guid: 'v-1', mimeType: 'video/mp4' })] })}
+        onOpenMedia={() => {}}
+        onOpenLink={() => {}}
+        videoPosters
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('expo-image').props.source).toEqual({ uri: POSTER }),
+    );
+    expect(screen.getByTestId('expo-image').props.placeholder).toBeNull();
+  });
+
+  it('keeps the blurhash tile and asks only about videos while there is no poster', async () => {
+    await renderWithTheme(
+      <MediaSections
+        media={downloaded()}
+        onOpenMedia={() => {}}
+        onOpenLink={() => {}}
+        videoPosters
+      />,
+    );
+
+    await waitFor(() => expect(mockLoadVideoPoster).toHaveBeenCalledTimes(1));
+    expect(mockLoadVideoPoster).toHaveBeenCalledWith('v-1', expect.any(AbortSignal), false);
+    const images = screen.getAllByTestId('expo-image');
+    expect(images[1]!.props.source).toBeUndefined();
+    expect(images[1]!.props.placeholder).toEqual({ blurhash: 'LEHV6n' });
+  });
+
+  it('never asks the server for posters when they are off', async () => {
+    await renderWithTheme(
+      <MediaSections media={downloaded()} onOpenMedia={() => {}} onOpenLink={() => {}} />,
+    );
+
+    expect(mockLoadVideoPoster).not.toHaveBeenCalled();
   });
 });
 
