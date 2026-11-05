@@ -179,7 +179,6 @@ export function startSync(): Promise<void> {
         syncInFlight = null;
         inFlightEpoch = null;
       }
-      lastSyncAt = Date.now();
     });
   syncInFlight = slot;
   inFlightEpoch = epoch;
@@ -206,9 +205,12 @@ export function startSync(): Promise<void> {
 export function runTrackedSync(run: () => Promise<void>): Promise<void> {
   const slot: Promise<void> = settledAll([syncInFlight, trackedInFlight, targetedRepairInFlight])
     .then(run)
+    .then(() => {
+      // Only a run that finished counts as "just synced"; a failed one must not delay the retry.
+      lastSyncAt = Date.now();
+    })
     .finally(() => {
       if (trackedInFlight === slot) trackedInFlight = null;
-      lastSyncAt = Date.now();
     });
   trackedInFlight = slot;
   return slot;
@@ -275,7 +277,6 @@ export function startFullRepair(): Promise<void> {
         syncInFlight = null;
         inFlightEpoch = null;
       }
-      lastSyncAt = Date.now();
     });
   controller.slot = slot;
   activeRepair = controller;
@@ -1067,6 +1068,9 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       if (!repair) sync.fail(failureMessage);
     }
   } finally {
+    // Stamp "just synced" only for a run that finished. A failed, stale or cancelled run leaves the
+    // stamp alone so `maybeResumeSync` can retry as soon as the connection comes back.
+    if (outcome === 'completed') lastSyncAt = Date.now();
     const abandonedSnapshotToken = activeSnapshotToken;
     activeSnapshotToken = null;
     if (abandonedSnapshotToken != null && cancelRepairSnapshot != null) {

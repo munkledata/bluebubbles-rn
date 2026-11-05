@@ -132,6 +132,7 @@ import {
   awaitSyncIdle,
   cancelFullRepair,
   ensureChatSynced,
+  maybeResumeSync,
   runTrackedSync,
   startFullRepair,
   startSync,
@@ -1254,5 +1255,50 @@ describe('startSync vs. the tracked slot', () => {
       messages: 0,
       error: null,
     });
+  });
+});
+
+describe('maybeResumeSync — a failed sync does not hold back the retry', () => {
+  // `lastSyncAt` is module state shared with the other tests, which stamp it with the real clock.
+  // Run this clock far enough ahead that their stamps are always outside the 10 s window.
+  const base = Date.now() + 1_000_000_000;
+  let now = base;
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('retries one second after a failed sync', async () => {
+    now = base;
+    incrementalSync.mockRejectedValueOnce(new Error('offline'));
+    connectSession('https://retry.example');
+    await startSync();
+    expect(useSyncStore.getState().status).toBe('error');
+    const callsAfterFailure = incrementalSync.mock.calls.length;
+
+    now = base + 1_000;
+    maybeResumeSync();
+    await awaitSyncIdle();
+
+    expect(incrementalSync.mock.calls.length).toBe(callsAfterFailure + 1);
+  });
+
+  it('still waits 10 seconds after a sync that finished', async () => {
+    now = base + 100_000;
+    connectSession('https://retry-ok.example');
+    await startSync();
+    const callsAfterSuccess = incrementalSync.mock.calls.length;
+
+    now = base + 101_000;
+    maybeResumeSync();
+    await awaitSyncIdle();
+    expect(incrementalSync.mock.calls.length).toBe(callsAfterSuccess);
+
+    now = base + 111_000;
+    maybeResumeSync();
+    await awaitSyncIdle();
+    expect(incrementalSync.mock.calls.length).toBe(callsAfterSuccess + 1);
   });
 });
