@@ -7,8 +7,8 @@ import { useForegroundBootState } from '@features/boot/useForegroundBootState';
 import { resolvePersistentLogCleanupIssue } from '@/services/boot/foregroundBoot';
 import { fileLogSink } from '@/services/logging/fileLogSink';
 import { formatDiagnosticLogsForShare } from '@/services/logging/shareLogs';
-import { formatTime } from '@utils';
-import { readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
+import { formatScheduledTime, formatTime, isSameDay } from '@utils';
+import { Screen, ScreenHeader, useTheme, withAlpha } from '@ui';
 import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 
 type LevelFilter = 'all' | 'info' | 'warn' | 'error';
@@ -20,10 +20,23 @@ export function filterLogEntries(entries: LogEntry[], filter: LevelFilter): LogE
   return entries.filter((e) => e.level === filter);
 }
 
-/** Never let a corrupt legacy timestamp crash the diagnostic screen. */
-export function formatLogEntryTime(timestamp: number): string {
+/**
+ * Never let a corrupt legacy timestamp crash the diagnostic screen. The saved log spans days, so an
+ * entry from another day carries its date ("Yesterday 9:41 PM", "Jul 20, 9:41 AM"); today's show
+ * only the time.
+ */
+export function formatLogEntryTime(timestamp: number, now: number = Date.now()): string {
   const safeTimestamp = projectErrorReportTimestamp(timestamp);
-  return safeTimestamp === 0 ? 'UNKNOWN TIME' : formatTime(safeTimestamp);
+  if (safeTimestamp === 0) return 'UNKNOWN TIME';
+  return isSameDay(new Date(safeTimestamp), new Date(now))
+    ? formatTime(safeTimestamp)
+    : formatScheduledTime(safeTimestamp, now);
+}
+
+/** What an empty list says: nothing at all, or nothing at the chosen level. */
+export function emptyLogsText(hasEntries: boolean, filter: LevelFilter): string {
+  if (!hasEntries || filter === 'all') return 'No log entries yet';
+  return filter === 'error' ? 'No errors' : filter === 'warn' ? 'No warnings' : 'No info entries';
 }
 
 /**
@@ -143,20 +156,28 @@ export default function LogsScreen(): React.JSX.Element {
             <Pressable
               key={f}
               onPress={() => setFilter(f)}
+              // Selected = the tinted style (tint text on a light tint wash, outlined), which reads
+              // clearly on every preset; dark text on a solid blue fill was hard to read.
               style={[
                 styles.chip,
-                {
-                  backgroundColor:
-                    filter === f ? theme.color.tint : theme.color.secondaryBackground,
-                },
+                filter === f
+                  ? {
+                      backgroundColor: withAlpha(theme.color.tint, 0.18),
+                      borderColor: theme.color.tint,
+                    }
+                  : {
+                      backgroundColor: theme.color.secondaryBackground,
+                      borderColor: 'transparent',
+                    },
               ]}
               accessibilityRole="button"
               accessibilityState={{ selected: filter === f }}
             >
               <Text
                 style={{
-                  color: filter === f ? readableTextOn(theme.color.tint) : theme.color.label,
+                  color: filter === f ? theme.color.tint : theme.color.label,
                   fontSize: 13,
+                  fontWeight: filter === f ? '700' : '400',
                 }}
               >
                 {f.toUpperCase()}
@@ -234,7 +255,7 @@ export default function LogsScreen(): React.JSX.Element {
         )}
         ListEmptyComponent={
           <Text style={[styles.empty, { color: theme.color.tertiaryLabel }]}>
-            No log entries yet
+            {emptyLogsText(entries.length > 0, filter)}
           </Text>
         }
         contentContainerStyle={styles.listContent}
@@ -273,6 +294,7 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   chip: {
+    borderWidth: 1,
     minWidth: 48,
     minHeight: 48,
     paddingHorizontal: 10,

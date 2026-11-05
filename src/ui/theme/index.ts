@@ -1,4 +1,5 @@
 export * from './tokens';
+export * from './controlColors';
 export * from './adaptiveFromImage';
 export * from './ThemeProvider';
 export * from './ThemeStudio';

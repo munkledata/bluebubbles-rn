@@ -49,6 +49,7 @@ import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 import { useShareBatchOwnership } from '@ui/hooks/useShareBatchOwnership';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 /** A chosen recipient chip: an address plus its best display name. */
 interface Recipient {
@@ -1042,6 +1043,7 @@ export default function NewChatScreen(): React.JSX.Element {
                 );
               })}
               <TextInput
+                {...textInputAccentProps(theme)}
                 value={query}
                 editable={!busy && shareResumeReady && !sharePlanPrepared}
                 onChangeText={(text) => {
@@ -1299,6 +1301,7 @@ export default function NewChatScreen(): React.JSX.Element {
           ) : null}
 
           <TextInput
+            {...textInputAccentProps(theme)}
             value={message}
             editable={!busy && shareResumeReady && !sharePlanPrepared}
             onChangeText={(text) => {

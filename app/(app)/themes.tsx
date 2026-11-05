@@ -11,7 +11,7 @@ import {
   selectCustomTheme,
 } from '@/services/themeCommands';
 import { useThemeStore } from '@state/themeStore';
-import { Screen, ScreenHeader, ThemeStudio, useTheme } from '@ui';
+import { Icon, Screen, ScreenHeader, ThemeStudio, useTheme } from '@ui';
 import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
 import {
   darkThemeOrFallback,
@@ -190,7 +190,7 @@ export default function ThemesScreen(): React.JSX.Element {
             accessibilityRole="button"
             accessibilityLabel="Create custom theme"
           >
-            <Text style={[styles.add, { color: theme.color.tint }]}>＋</Text>
+            <Icon name="add" size={28} color={theme.color.tint} />
           </Pressable>
         }
       />
@@ -198,7 +198,7 @@ export default function ThemesScreen(): React.JSX.Element {
       <ScrollView contentContainerStyle={styles.content}>
         {visibleRows.length === 0 ? (
           <Text style={[styles.empty, { color: theme.color.tertiaryLabel }]}>
-            No custom themes yet. Tap ＋ to create one from your current colors.
+            No custom themes yet. Tap + to create one from your current colors.
           </Text>
         ) : null}
         <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
@@ -252,13 +252,9 @@ export default function ThemesScreen(): React.JSX.Element {
                   </Text>
                 </Pressable>
                 {row.id === visibleActiveId ? (
-                  <Text
-                    accessible={false}
-                    importantForAccessibility="no"
-                    style={[styles.check, { color: theme.color.tint }]}
-                  >
-                    ✓
-                  </Text>
+                  <View accessible={false} importantForAccessibility="no" style={styles.check}>
+                    <Icon name="checkmark" size={20} color={theme.color.tint} />
+                  </View>
                 ) : null}
                 <Pressable
                   onPress={() => {
@@ -329,7 +325,6 @@ function modalAnimationFor(reduceMotion: boolean | null): 'none' | 'slide' {
 }
 
 const styles = StyleSheet.create({
-  add: { fontSize: 26, fontWeight: '400', textAlign: 'right' },
   content: { paddingVertical: 12 },
   empty: { textAlign: 'center', marginTop: 40, marginHorizontal: 24, fontSize: 15, lineHeight: 21 },
   group: { marginHorizontal: 16, borderRadius: 12, overflow: 'hidden' },
@@ -343,7 +338,7 @@ const styles = StyleSheet.create({
   rowMain: { flex: 1 },
   rowLabel: { fontSize: 16 },
   rowSub: { fontSize: 12, marginTop: 2 },
-  check: { fontSize: 17, fontWeight: '700' },
+  check: { paddingHorizontal: 4 },
   action: { paddingHorizontal: 4 },
   actionText: { fontSize: 15 },
   revert: { alignItems: 'center', marginTop: 24 },

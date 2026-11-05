@@ -21,6 +21,7 @@ import type { MessageSummaryInfo } from '@core/models';
 import { placeReactionMenu, type BubbleRect } from '@utils';
 import { useReduceMotionPreference } from '../hooks/useReduceMotionPreference';
 import { useTheme } from '../theme';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 export interface SelectedMessage {
   guid: string;
@@ -309,6 +310,7 @@ export function MessageActionsOverlay({
   const emojiInputNode =
     canReactToServerMessage && selected?.canUseEmojiReactions !== false && showEmojiInput ? (
       <TextInput
+        {...textInputAccentProps(theme)}
         value={emojiDraft}
         onChangeText={setEmojiDraft}
         onSubmitEditing={submitEmojiDraft}

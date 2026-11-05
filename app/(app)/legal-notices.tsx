@@ -9,6 +9,34 @@ import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 import { safeOpenUrl } from '@utils';
 
 const GOOGLE_MAPS_ADDITIONAL_TERMS_URL = 'https://maps.google.com/help/terms_maps/';
+
+/** A line that starts its own row: indented text or a list item ("- ", "* ", "• ", "1. ", "(a) "). */
+const OWN_LINE = /^(\s|[-*•]\s|\d+[.)]\s|\([a-z0-9]+\)\s)/u;
+
+/**
+ * The generated notices are hard-wrapped at about 80-100 columns for the repository files. On a
+ * phone those breaks land mid-sentence, so each paragraph's lines are joined. Paragraphs stay
+ * separated by a blank line, and indented or list lines keep their own row. The generated file is
+ * unchanged.
+ */
+export function reflowNoticeText(text: string): string {
+  return text
+    .split(/\n[ \t]*\n/u)
+    .map((paragraph) =>
+      paragraph
+        .split('\n')
+        .filter((line) => line.trim().length > 0)
+        .reduce((joined, line) => {
+          if (!joined) return line.trimEnd();
+          return OWN_LINE.test(line) ? `${joined}\n${line.trimEnd()}` : `${joined} ${line.trim()}`;
+        }, ''),
+    )
+    .filter((paragraph) => paragraph.length > 0)
+    .join('\n\n');
+}
+
+const PROJECT_NOTICE = reflowNoticeText(PROJECT_NOTICE_TEXT);
+const THIRD_PARTY_NOTICES = reflowNoticeText(THIRD_PARTY_NOTICES_TEXT);
 const GOOGLE_PRIVACY_POLICY_URL = 'https://policies.google.com/privacy';
 
 /** Local copy of the project terms and reviewed notices; no network access is needed. */
@@ -23,7 +51,7 @@ export default function LegalNoticesScreen(): React.JSX.Element {
       <ScrollView contentContainerStyle={styles.content}>
         <SettingsSection label="PROJECT TERMS">
           <Text selectable style={textStyle}>
-            {PROJECT_NOTICE_TEXT}
+            {PROJECT_NOTICE}
           </Text>
         </SettingsSection>
 
@@ -51,7 +79,7 @@ export default function LegalNoticesScreen(): React.JSX.Element {
 
         <SettingsSection label="CONFIRMED THIRD-PARTY NOTICE" style={styles.gap}>
           <Text selectable style={textStyle}>
-            {THIRD_PARTY_NOTICES_TEXT}
+            {THIRD_PARTY_NOTICES}
           </Text>
         </SettingsSection>
 

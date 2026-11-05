@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Icon } from '../primitives/Icon';
 import type { MediaDownloadIntent } from './mediaViewerModel';
 import { ProgressRing } from './ProgressRing';
 
@@ -31,7 +32,7 @@ export function MediaViewerTopBar({
         accessibilityRole="button"
         accessibilityLabel="Close media viewer"
       >
-        <Text style={styles.glyph}>✕</Text>
+        <Icon name="close" size={26} color="#fff" />
       </Pressable>
       {/* "N of M" while paging through more than one photo. */}
       {pageCount > 1 ? (
@@ -52,7 +53,7 @@ export function MediaViewerTopBar({
           accessibilityHint="Downloads this media first when needed"
           accessibilityState={{ disabled: !actionsAvailable, busy: actionsBusy }}
         >
-          <Text style={styles.glyph}>⤴</Text>
+          <Icon name="share-outline" size={22} color="#fff" />
         </Pressable>
         <Pressable
           onPress={onSave}
@@ -64,7 +65,7 @@ export function MediaViewerTopBar({
           accessibilityHint="Downloads this media first when needed"
           accessibilityState={{ disabled: !actionsAvailable, busy: actionsBusy }}
         >
-          <Text style={styles.glyph}>⤓</Text>
+          <Icon name="download-outline" size={22} color="#fff" />
         </Pressable>
       </View>
     </View>
@@ -248,5 +249,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   disabled: { opacity: 0.35 },
-  glyph: { color: '#fff', fontSize: 20, fontWeight: '600' },
 });

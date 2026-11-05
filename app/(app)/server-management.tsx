@@ -39,6 +39,7 @@ import {
 import { useSyncStore, type SyncRepairStatus } from '@state/syncStore';
 import { InfoRow, PairingQr, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 /**
  * Read-only queries do not hold Disconnect open. Their account-generation and transport-revision
@@ -842,6 +843,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
               </Text>
               <SettingsSection>
                 <TextInput
+                  {...textInputAccentProps(theme)}
                   value={credentialText}
                   onChangeText={(value) => {
                     setCredentialText(value);

@@ -52,6 +52,7 @@ jest.mock('@ui', () => {
   const { Text, View } = require('react-native');
   return {
     TextField: jest.requireActual('@ui/primitives/TextField').TextField,
+    Icon: ({ name }: { name: string }) => ReactLib.createElement(Text, null, name),
     readableTextOn: () => '#ffffff',
     useTheme: () => ({
       color: {

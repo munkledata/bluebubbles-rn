@@ -24,6 +24,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { ServerBackupSlotsSection } from '@/ui/backup/ServerBackupSlotsSection';
 import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 interface BackupDocumentPickerModule {
   getDocumentAsync(options: { type: string[]; copyToCacheDirectory: boolean }): Promise<{
@@ -247,6 +248,7 @@ export default function BackupScreen(): React.JSX.Element {
 
         <SettingsSection>
           <TextInput
+            {...textInputAccentProps(theme)}
             value={pass}
             onChangeText={setPass}
             placeholder="Passphrase"
@@ -256,6 +258,7 @@ export default function BackupScreen(): React.JSX.Element {
             style={inputStyle}
           />
           <TextInput
+            {...textInputAccentProps(theme)}
             value={pass2}
             onChangeText={setPass2}
             placeholder="Confirm passphrase"
@@ -279,7 +282,8 @@ export default function BackupScreen(): React.JSX.Element {
             <Text
               style={[
                 styles.rowLabel,
-                { color: canExport ? theme.color.tint : theme.color.tertiaryLabel },
+                // Not the placeholder gray: a disabled action must not read as an empty box.
+                { color: canExport ? theme.color.tint : theme.color.secondaryLabel },
               ]}
             >
               Export encrypted backup…
@@ -297,6 +301,7 @@ export default function BackupScreen(): React.JSX.Element {
         </SettingsSection>
         <SettingsSection style={styles.gapSm}>
           <TextInput
+            {...textInputAccentProps(theme)}
             value={paste}
             onChangeText={setPaste}
             placeholder="…or paste backup contents here"
@@ -307,6 +312,7 @@ export default function BackupScreen(): React.JSX.Element {
             style={[styles.paste, { color: theme.color.label }]}
           />
           <TextInput
+            {...textInputAccentProps(theme)}
             value={restorePass}
             onChangeText={setRestorePass}
             placeholder="Passphrase (for encrypted backups)"
@@ -317,11 +323,17 @@ export default function BackupScreen(): React.JSX.Element {
           />
         </SettingsSection>
         <SettingsSection style={styles.gapSm}>
-          <Pressable onPress={confirmImport} disabled={busy || !paste.trim()} style={styles.row}>
+          <Pressable
+            onPress={confirmImport}
+            disabled={busy || !paste.trim()}
+            style={styles.row}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy || !paste.trim() }}
+          >
             <Text
               style={[
                 styles.rowLabel,
-                { color: paste.trim() ? theme.color.tint : theme.color.tertiaryLabel },
+                { color: paste.trim() ? theme.color.tint : theme.color.secondaryLabel },
               ]}
             >
               Restore from backup

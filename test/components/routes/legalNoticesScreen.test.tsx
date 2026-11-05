@@ -15,7 +15,7 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import LegalNoticesScreen from '../../../app/(app)/legal-notices';
+import LegalNoticesScreen, { reflowNoticeText } from '../../../app/(app)/legal-notices';
 
 describe('LegalNoticesScreen', () => {
   beforeEach(() => {
@@ -59,5 +59,22 @@ describe('LegalNoticesScreen', () => {
       fireEvent.press(screen.getByRole('button', { name: /back/i }));
     });
     expect(mockBack).toHaveBeenCalledTimes(1);
+  });
+  it('reads hard-wrapped notices as whole paragraphs', async () => {
+    expect(reflowNoticeText('One line that wraps\nmid-sentence here.\n\nNext paragraph.\n')).toBe(
+      'One line that wraps mid-sentence here.\n\nNext paragraph.',
+    );
+    // Indented and list lines keep their own row.
+    expect(reflowNoticeText('Conditions:\n- keep this notice\n- do not sue\n   indented')).toBe(
+      'Conditions:\n- keep this notice\n- do not sue\n   indented',
+    );
+
+    await renderWithTheme(<LegalNoticesScreen />);
+    // The MIT grant now reads as one paragraph rather than breaking after "a copy".
+    expect(
+      screen.getByText(
+        /Permission is hereby granted, free of charge, to any person obtaining a copy of this software/,
+      ),
+    ).toBeTruthy();
   });
 });

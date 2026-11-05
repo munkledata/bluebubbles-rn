@@ -40,6 +40,7 @@ import { InboxSeparator } from './FilteredChatListScreen';
 import { InboxFiltersSheet } from './InboxFiltersSheet';
 import { PinnedGrid } from './PinnedGrid';
 import { SearchResultsView } from './SearchResultsView';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 /** How long a corrective scroll-to-top stays armed after a message lands. Long enough to outlast
  * FlashList's deferred offset correction and any late row measurement, short enough that the list
@@ -535,6 +536,7 @@ export function ConversationListScreen({
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
           <TextInput
+            {...textInputAccentProps(theme)}
             placeholder="Search messages & chats"
             placeholderTextColor={theme.color.tertiaryLabel}
             autoCapitalize="none"

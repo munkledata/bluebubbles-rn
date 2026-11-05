@@ -14,6 +14,7 @@ import { formatScheduledTime } from '@utils';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 import { serverFailureKind } from '@ui/serverFailure';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 function editFailureMessage(error: unknown): string {
   if (error instanceof ScheduledEditChangedError) {
@@ -194,6 +195,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
       {loaded && !loadError ? (
         <View style={styles.content}>
           <TextInput
+            {...textInputAccentProps(theme)}
             value={text}
             onChangeText={setText}
             multiline

@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
 import { useTheme } from '../theme';
+import { textInputAccentProps } from '../theme/controlColors';
 
 interface TextFieldProps extends TextInputProps {
   label?: string;
@@ -39,6 +40,7 @@ export function TextField({
         </Text>
       ) : null}
       <TextInput
+        {...textInputAccentProps(theme)}
         ref={ref}
         accessibilityLabel={accessibilityLabel}
         accessibilityLabelledBy={

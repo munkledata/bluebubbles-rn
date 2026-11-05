@@ -33,6 +33,18 @@ describe('Button', () => {
     expect(onPress).toHaveBeenCalledTimes(1);
   });
 
+  it.each(PRESET_ORDER)('keeps a disabled label legible for the %s preset', async (preset) => {
+    await renderWithTheme(<Button title="Continue" onPress={jest.fn()} disabled />, { preset });
+    const { color } = PRESETS[preset].tokens;
+    const label = StyleSheet.flatten(screen.getByText('Continue').props.style);
+    const container = StyleSheet.flatten(screen.getByRole('button').props.style);
+    // No 50% fade over the whole control: a neutral fill and the secondary label color instead.
+    expect(container.opacity ?? 1).toBe(1);
+    expect(container.backgroundColor).toBe(color.secondaryBackground);
+    expect(label.color).toBe(color.secondaryLabel);
+    expect(contrastRatio(label.color, color.secondaryBackground)).toBeGreaterThanOrEqual(3);
+  });
+
   it('does NOT fire onPress when disabled', async () => {
     const onPress = jest.fn();
     await renderWithTheme(<Button title="Send" onPress={onPress} disabled />);

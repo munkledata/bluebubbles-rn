@@ -77,6 +77,7 @@ import {
 } from '@ui/theme/tokens';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 import { runAccountOperation } from '@/services/realtime/accountOperation';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 /** Preset accent colors for the per-chat bubble color (plus "Default"). */
 const SWATCHES = ['#1982FC', '#34C759', '#AF52DE', '#FF2D55', '#FF9500', '#5E81AC'] as const;
 const SWATCH_NAMES: Record<(typeof SWATCHES)[number], string> = {
@@ -1059,6 +1060,7 @@ function ChatSettingsScreen({
       <ScrollView contentContainerStyle={styles.content}>
         <SettingsSection label="PHONE-LOCAL NICKNAME">
           <TextInput
+            {...textInputAccentProps(theme)}
             value={customName}
             onChangeText={saveName}
             // A longer nickname would make every backup fail; keep it within what a backup holds.
@@ -1073,6 +1075,7 @@ function ChatSettingsScreen({
         {appleGroupRenameAvailable ? (
           <SettingsSection label="APPLE GROUP NAME" style={styles.gap}>
             <TextInput
+              {...textInputAccentProps(theme)}
               value={appleGroupNameValue}
               onChangeText={setAppleGroupName}
               placeholder="Apple Group Name"
@@ -1130,6 +1133,7 @@ function ChatSettingsScreen({
         {appleGroupParticipantAddAvailable ? (
           <SettingsSection label="ADD TO APPLE GROUP" style={styles.gap}>
             <TextInput
+              {...textInputAccentProps(theme)}
               value={appleGroupParticipantAddress}
               onChangeText={setAppleGroupParticipantAddress}
               placeholder="+15551234567 or person@example.com"

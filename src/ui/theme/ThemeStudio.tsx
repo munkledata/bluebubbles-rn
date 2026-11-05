@@ -22,6 +22,7 @@ import { ThemePreviewCard } from './ThemePreviewCard';
 import { useTheme } from './ThemeProvider';
 import { darkThemeOrFallback, type ThemeTokens } from './tokens';
 import { BACKUP_LIMITS } from '@/services/backup/backupSchema';
+import { textInputAccentProps } from './controlColors';
 
 // ---- Draft model (shared by the global manager + the per-chat studio) -------
 
@@ -294,6 +295,7 @@ export function ThemeStudio({
 
           {showName ? (
             <TextInput
+              {...textInputAccentProps(theme)}
               value={draft.name}
               onChangeText={(name) => updateDraft({ ...draft, name })}
               // A longer name would make every backup fail; keep it within what a backup holds.
@@ -329,6 +331,7 @@ export function ThemeStudio({
                   ]}
                 />
                 <TextInput
+                  {...textInputAccentProps(theme)}
                   value={val}
                   accessibilityLabel={f.label}
                   autoCapitalize="none"

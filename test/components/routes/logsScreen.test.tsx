@@ -2,6 +2,8 @@ import React from 'react';
 import { StyleSheet } from 'react-native';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import type { LogEntry } from '@core/secure';
+import { formatTime } from '@utils';
+import { PRESETS } from '@ui/theme/tokens';
 
 const mockBack = jest.fn();
 const mockClearLogs = jest.fn<Promise<boolean>, []>();
@@ -94,7 +96,7 @@ jest.mock('@ui/dialog/dialogStore', () => ({
 // eslint-disable-next-line import/first
 import { memoryLogSink } from '@core/secure';
 // eslint-disable-next-line import/first
-import LogsScreen from '../../../app/(app)/logs';
+import LogsScreen, { emptyLogsText, formatLogEntryTime } from '../../../app/(app)/logs';
 
 const errorEntry: LogEntry = {
   level: 'error',
@@ -394,5 +396,33 @@ describe('LogsScreen diagnostic sharing', () => {
     await renderWithTheme(<LogsScreen />);
 
     expect(screen.getByText(/UNKNOWN TIME/)).toBeTruthy();
+  });
+  it('dates entries from other days and keeps today compact', () => {
+    const now = new Date(2026, 6, 29, 21, 0, 0).getTime();
+    const today = new Date(2026, 6, 29, 9, 41, 0).getTime();
+    const yesterday = new Date(2026, 6, 28, 9, 41, 0).getTime();
+    const lastWeek = new Date(2026, 6, 20, 9, 41, 0).getTime();
+    expect(formatLogEntryTime(today, now)).toBe(formatTime(today));
+    expect(formatLogEntryTime(yesterday, now)).toBe(`Yesterday ${formatTime(yesterday)}`);
+    expect(formatLogEntryTime(lastWeek, now)).toBe(`Jul 20, ${formatTime(lastWeek)}`);
+  });
+
+  it('says what an empty filter means', () => {
+    expect(emptyLogsText(false, 'warn')).toBe('No log entries yet');
+    expect(emptyLogsText(true, 'all')).toBe('No log entries yet');
+    expect(emptyLogsText(true, 'warn')).toBe('No warnings');
+    expect(emptyLogsText(true, 'error')).toBe('No errors');
+    expect(emptyLogsText(true, 'info')).toBe('No info entries');
+  });
+
+  it('marks the selected filter with readable tint text, not dark text on a solid fill', async () => {
+    entriesSpy.mockReturnValue([{ ...errorEntry }]);
+    await renderWithTheme(<LogsScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'WARN' }));
+    });
+    const label = StyleSheet.flatten(screen.getByText('WARN').props.style);
+    expect(label.color).toBe(PRESETS['oled-dark'].tokens.color.tint);
+    expect(screen.getByText('No warnings')).toBeTruthy();
   });
 });

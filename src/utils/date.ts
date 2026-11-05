@@ -21,7 +21,8 @@ export function formatChatDate(ms: number | null | undefined, now: number = Date
   return shortDate(d);
 }
 
-function isSameDay(a: Date, b: Date): boolean {
+/** Whether two moments fall on the same local calendar day. */
+export function isSameDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&

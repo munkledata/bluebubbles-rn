@@ -32,14 +32,28 @@ export function Button({
   const theme = useTheme();
   const accent = destructive ? theme.color.destructive : theme.color.tint;
   const isDisabled = disabled || loading;
+  // A disabled button stays legible: a neutral outlined fill and the secondary label color. The old
+  // 50% fade left labels nearly invisible. A loading button keeps its accent behind the spinner.
+  const muted = disabled && !loading;
 
-  const containerStyle: ViewStyle = {
-    backgroundColor:
-      variant === 'filled' ? accent : variant === 'tinted' ? `${accent}22` : 'transparent',
-    opacity: isDisabled ? 0.5 : 1,
-    borderRadius: theme.radius.card,
-  };
-  const textColor = variant === 'filled' ? readableTextOn(accent) : accent;
+  const containerStyle: ViewStyle = muted
+    ? {
+        backgroundColor: variant === 'plain' ? 'transparent' : theme.color.secondaryBackground,
+        ...(variant === 'plain'
+          ? {}
+          : { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.color.separator }),
+        borderRadius: theme.radius.card,
+      }
+    : {
+        backgroundColor:
+          variant === 'filled' ? accent : variant === 'tinted' ? `${accent}22` : 'transparent',
+        borderRadius: theme.radius.card,
+      };
+  const textColor = muted
+    ? theme.color.secondaryLabel
+    : variant === 'filled'
+      ? readableTextOn(accent)
+      : accent;
 
   return (
     <Pressable

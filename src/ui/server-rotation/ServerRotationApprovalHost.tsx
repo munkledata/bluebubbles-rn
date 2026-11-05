@@ -19,6 +19,7 @@ import { showToast } from '@ui/toast/toastStore';
 import { Button, TextField } from '../primitives';
 import { useTheme } from '../theme';
 import { useReduceMotionPreference } from '../hooks/useReduceMotionPreference';
+import { switchAccentProps } from '@ui/theme/controlColors';
 
 /** Foreground-only password reconfirmation host for an authenticated `new-server` proposal. */
 export function ServerRotationApprovalHost(): React.JSX.Element | null {
@@ -155,6 +156,7 @@ function ServerRotationPrompt({ request }: { request: ServerRotationRequest }): 
                     </Text>
                   </View>
                   <Switch
+                    {...switchAccentProps(theme)}
                     accessibilityLabel="Allow insecure server change"
                     value={cleartextApproved}
                     onValueChange={setCleartextApproved}

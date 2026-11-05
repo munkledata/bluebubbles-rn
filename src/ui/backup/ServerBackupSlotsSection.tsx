@@ -29,6 +29,7 @@ import {
 import { showDialog } from '../dialog/dialogStore';
 import { NavRow, SettingsSection } from '../primitives';
 import { useTheme } from '../theme';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 interface ServerBackupSlotsSectionProps {
   lease: RealtimeDeliveryLease;
@@ -369,6 +370,7 @@ export function ServerBackupSlotsSection({
           </Text>
         ) : null}
         <TextInput
+          {...textInputAccentProps(theme)}
           value={name}
           onChangeText={setName}
           placeholder="Backup name"
@@ -380,6 +382,7 @@ export function ServerBackupSlotsSection({
           style={[styles.input, { color: theme.color.label }]}
         />
         <TextInput
+          {...textInputAccentProps(theme)}
           value={passphrase}
           onChangeText={setPassphrase}
           placeholder="Passphrase"
@@ -391,6 +394,7 @@ export function ServerBackupSlotsSection({
           style={[styles.input, { color: theme.color.label }]}
         />
         <TextInput
+          {...textInputAccentProps(theme)}
           value={confirmPassphrase}
           onChangeText={setConfirmPassphrase}
           placeholder="Confirm passphrase for saving"

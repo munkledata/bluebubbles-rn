@@ -3,7 +3,7 @@ import { useEffect, useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSyncStore } from '@state/syncStore';
-import { Button, Screen, useTheme } from '@ui';
+import { Button, Icon, Screen, useTheme } from '@ui';
 import { createI18n } from '@utils/i18n';
 
 /**
@@ -42,9 +42,9 @@ export default function Syncing(): React.JSX.Element {
       >
         <View style={styles.center}>
           {done ? (
-            <Text style={[styles.check, { color: theme.color.tint }]}>✓</Text>
+            <Icon name="checkmark-circle" size={64} color={theme.color.tint} />
           ) : errored ? (
-            <Text style={[styles.check, { color: theme.color.destructive }]}>!</Text>
+            <Icon name="alert-circle" size={64} color={theme.color.destructive} />
           ) : (
             <ActivityIndicator size="large" color={theme.color.tint} />
           )}
@@ -80,7 +80,6 @@ export default function Syncing(): React.JSX.Element {
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'space-between', paddingHorizontal: 24 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
-  check: { fontSize: 56, fontWeight: '800' },
   title: { fontSize: 22, fontWeight: '700', marginTop: 8 },
   detail: { fontSize: 15, textAlign: 'center', lineHeight: 21 },
 });

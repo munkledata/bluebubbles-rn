@@ -282,7 +282,7 @@ describe('ThemesScreen reduced motion', () => {
     const view = await renderWithTheme(<ThemesScreen />);
     await screen.findByText('Account A Theme');
 
-    await fireEvent.press(screen.getByText('＋'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Create custom theme' }));
     expect(editorModal().props.animationType).toBe('none');
 
     await act(async () => {
@@ -293,7 +293,7 @@ describe('ThemesScreen reduced motion', () => {
     expect(editorModal().props.animationType).toBe('none');
 
     await closeEditor();
-    await fireEvent.press(screen.getByText('＋'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Create custom theme' }));
     expect(editorModal().props.animationType).toBe('slide');
     expect(mockAddEventListener).toHaveBeenCalledTimes(1);
     expect(mockIsReduceMotionEnabled).toHaveBeenCalledTimes(1);
@@ -303,9 +303,9 @@ describe('ThemesScreen reduced motion', () => {
     const view = await renderWithTheme(<ThemesScreen />);
     await screen.findByText('Account A Theme');
     await settleMotionPreference();
-    const addText = screen.getByText('＋');
-    if (!addText.parent) throw new Error('Expected the add-theme Pressable');
-    const retainedNewTheme = retainConfiguredPress(addText.parent);
+    const retainedNewTheme = retainConfiguredPress(
+      screen.getByRole('button', { name: 'Create custom theme' }),
+    );
 
     await fireEvent.press(screen.getByText('Edit'));
     expect(editorModal().props.animationType).toBe('slide');
@@ -350,7 +350,7 @@ describe('ThemesScreen reduced motion', () => {
     await renderWithTheme(<ThemesScreen />);
     await settleMotionPreference();
 
-    await fireEvent.press(screen.getByText('＋'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Create custom theme' }));
     expect(editorModal().props.animationType).toBe(expected);
   });
 
@@ -370,12 +370,12 @@ describe('ThemesScreen reduced motion', () => {
       staleQuery.resolve(false);
       await staleQuery.promise;
     });
-    await fireEvent.press(screen.getByText('＋'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Create custom theme' }));
     expect(editorModal().props.animationType).toBe('none');
 
     await closeEditor();
     await emitReduceMotion(false);
-    await fireEvent.press(screen.getByText('＋'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Create custom theme' }));
     expect(editorModal().props.animationType).toBe('slide');
 
     await view.unmount();
@@ -465,7 +465,7 @@ describe('ThemesScreen account ownership', () => {
     mockListCustomThemes.mockResolvedValue([]);
     await renderWithTheme(<ThemesScreen />);
     await waitFor(() => expect(mockListCustomThemes).toHaveBeenCalledTimes(1));
-    await fireEvent.press(screen.getByText('＋'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Create custom theme' }));
     const save = await screen.findByRole('button', { name: 'Save mock theme' });
     await fireEvent.press(save);
     await waitFor(() => expect(mockCreateCustomTheme).toHaveBeenCalledTimes(1));

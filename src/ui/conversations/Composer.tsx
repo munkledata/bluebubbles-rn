@@ -59,6 +59,7 @@ import {
   type ComposerTextAttachmentAdmission,
   type ComposerTextAdmission,
 } from './useComposerAuthoringSession';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 /** One schedule sheet's immutable snapshot of the composer it was opened from. */
 interface PendingSchedule {
@@ -1149,6 +1150,7 @@ export const Composer = React.memo(function Composer({
           </Pressable>
         ) : null}
         <TextInput
+          {...textInputAccentProps(theme)}
           ref={inputRef}
           // Stays editable while a send is admitted: a read-only box makes many Android keyboards
           // close after every send. A second send is still blocked by the submission guard.

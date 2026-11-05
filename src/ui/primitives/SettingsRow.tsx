@@ -1,6 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useTheme } from '../theme';
+import { switchAccentProps } from '../theme/controlColors';
 
 /**
  * The iOS grouped-settings row family. Every row reads its own theme colors and shares
@@ -52,6 +53,7 @@ export function SwitchRow({
         {label}
       </Text>
       <Switch
+        {...switchAccentProps(theme)}
         value={value}
         disabled={disabled}
         onValueChange={onValueChange}

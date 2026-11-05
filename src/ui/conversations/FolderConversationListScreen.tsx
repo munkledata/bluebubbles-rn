@@ -27,6 +27,7 @@ import { ConversationTile } from './ConversationTile';
 import { InboxSeparator } from './FilteredChatListScreen';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 import { GLOBAL_SEARCH_MAX_CODE_POINTS, normalizeGlobalSearchQuery } from '@features/search/query';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 interface FolderConversationListScreenProps {
   folderId: number | null;
@@ -155,6 +156,7 @@ function FolderConversationListAttempt({
         <View style={[styles.searchShell, { backgroundColor: theme.color.secondaryBackground }]}>
           <Icon name="search" size={18} color={theme.color.secondaryLabel} />
           <TextInput
+            {...textInputAccentProps(theme)}
             value={searchText}
             onChangeText={onSearchTextChange}
             // Android counts UTF-16 units here; reserve two for each JavaScript code point.

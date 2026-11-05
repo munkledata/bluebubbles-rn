@@ -226,9 +226,12 @@ async function renderViewer(): Promise<RenderResult> {
   return view;
 }
 
-/** The two action pills, in bar order: share (⤴) then save (⤓). */
-function pills(): ReturnType<typeof screen.getByText>[] {
-  return [screen.getByText('⤴'), screen.getByText('⤓')];
+/** The two action pills, in bar order: share then save. */
+function pills(): ReturnType<typeof screen.getByRole>[] {
+  return [
+    screen.getByRole('button', { name: 'Share media' }),
+    screen.getByRole('button', { name: 'Save media' }),
+  ];
 }
 
 function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {

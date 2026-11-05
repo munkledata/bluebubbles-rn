@@ -2,6 +2,7 @@ import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Icon } from '../primitives';
 import { useTheme, withAlpha } from '../theme';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 interface ChatSearchBarProps {
   value: string;
@@ -43,6 +44,7 @@ export function ChatSearchBar({
       <View style={[styles.inputShell, { backgroundColor: theme.color.secondaryBackground }]}>
         <Icon name="search" size={18} color={theme.color.secondaryLabel} />
         <TextInput
+          {...textInputAccentProps(theme)}
           autoFocus
           value={value}
           onChangeText={onChangeText}

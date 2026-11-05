@@ -33,6 +33,7 @@ import { ChatAvatar, chatPeopleCount } from '@ui/conversations/ChatAvatar';
 import { InboxSeparator } from '@ui/conversations/FilteredChatListScreen';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 function parseFolderId(value: string | string[] | undefined): number | null {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -478,6 +479,7 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
             >
               <Icon name="search" size={18} color={theme.color.secondaryLabel} />
               <TextInput
+                {...textInputAccentProps(theme)}
                 value={searchText}
                 // Bounded by code points but not normalized, so the field shows exactly what was
                 // typed (as folder search does); the lookup normalizes its own copy.

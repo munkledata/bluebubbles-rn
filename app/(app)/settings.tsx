@@ -72,6 +72,7 @@ import {
 } from '@ui/permissions/contactsPermission';
 import { PRESET_ORDER, PRESETS } from '@ui/theme/tokens';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { textInputAccentProps } from '@ui/theme/controlColors';
 
 /** Where auto-downloaded images are additionally saved (the picker in the DOWNLOADS section). */
 const AUTO_DOWNLOAD_DEST_OPTIONS: { value: AutoDownloadDestination; label: string }[] = [
@@ -556,6 +557,7 @@ export default function SettingsScreen(): React.JSX.Element {
         keyboardShouldPersistTaps="handled"
       >
         <TextInput
+          {...textInputAccentProps(theme)}
           value={query}
           onChangeText={setQuery}
           placeholder="Search settings"

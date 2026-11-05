@@ -6,7 +6,7 @@ import type { CustomFolderSummaryRow } from '@db/repositories';
 import { useCustomFolderSummaries } from '@features/conversations/useCustomFolderSummaries';
 import { reorderCustomFolders } from '@/services/customFolderCommands';
 import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
-import { readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
+import { Icon, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** Manage the small, explicitly bounded ordered set of device-local conversation folders. */
@@ -135,7 +135,7 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
             accessibilityLabel="Create conversation folder"
             accessibilityState={{ disabled: controlsBlocked }}
           >
-            <Text style={[styles.add, { color: theme.color.tint }]}>＋</Text>
+            <Icon name="add" size={28} color={theme.color.tint} />
           </Pressable>
         }
       />
@@ -188,7 +188,7 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
           </View>
         ) : rows.length === 0 ? (
           <Text style={[styles.message, { color: theme.color.secondaryLabel }]}>
-            No folders yet. Tap ＋ to create one.
+            No folders yet. Tap + to create one.
           </Text>
         ) : (
           <View style={[styles.group, { backgroundColor: theme.color.secondaryBackground }]}>
@@ -308,7 +308,6 @@ export default function ConversationFoldersScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  add: { fontSize: 26, fontWeight: '400', textAlign: 'right' },
   content: { paddingHorizontal: 16, paddingVertical: 16, paddingBottom: 32 },
   note: { fontSize: 14, lineHeight: 20, paddingHorizontal: 4, paddingBottom: 14 },
   loading: { paddingTop: 56 },

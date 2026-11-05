@@ -22,6 +22,7 @@ import { Button, Screen, TextField, useTheme } from '@ui';
 import { ForgetPreviousServerAction } from '@ui/connection';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { createI18n } from '@utils/i18n';
+import { switchAccentProps } from '@ui/theme/controlColors';
 
 export default function Manual(): React.JSX.Element {
   const theme = useTheme();
@@ -97,6 +98,7 @@ export default function Manual(): React.JSX.Element {
                 </Text>
               </View>
               <Switch
+                {...switchAccentProps(theme)}
                 aria-label={label}
                 accessibilityLabel={label}
                 value={allowInsecure}
