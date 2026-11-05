@@ -134,7 +134,8 @@ export function publishShareShortcuts(rows: readonly InboxRow[], appLockEnabled:
     ids = native.setShareShortcuts(revision, records, appLockEnabled);
   });
   lastPublished = published ? payload : null;
-  publishedShortcutIds = published ? shortcutIdsByGuid(records, ids) : new Map();
+  // App Lock publishes nothing; don't rely on native returning an empty list to forget the ids.
+  publishedShortcutIds = published && !appLockEnabled ? shortcutIdsByGuid(records, ids) : new Map();
   return published;
 }
 
@@ -147,7 +148,8 @@ function shortcutIdsByGuid(
   if (!Array.isArray(ids)) return out;
   records.forEach((record, index) => {
     const id: unknown = ids[index];
-    if (typeof id === 'string' && TARGET_TOKEN.test(id)) out.set(record.guid, id);
+    // Native trims the guid before signing it; key the same way.
+    if (typeof id === 'string' && TARGET_TOKEN.test(id)) out.set(record.guid.trim(), id);
   });
   return out;
 }
@@ -157,7 +159,7 @@ function shortcutIdsByGuid(
  * has no published shortcut (outside the top ten, App Lock on, or an older native build).
  */
 export function conversationShortcutIdFor(chatGuid: string): string | null {
-  return publishedShortcutIds.get(chatGuid) ?? null;
+  return publishedShortcutIds.get(chatGuid.trim()) ?? null;
 }
 
 /** The ordered active-chat list shortcuts are published from and resolved against. */

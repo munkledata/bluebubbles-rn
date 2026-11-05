@@ -40,6 +40,23 @@ private const val CONTACTS_AUTHORITY = "com.android.contacts"
 private val HEX_COLOR = Regex("^#[0-9A-Fa-f]{6}$")
 private const val AVATAR_PX = 192
 private const val MAX_DECODE_PX = AVATAR_PX * 2
+/** Hard cap on decoded pixels (~4 MB at ARGB_8888); anything that still exceeds it is refused. */
+private const val MAX_DECODE_PIXELS = 1_000_000L
+
+/**
+ * The power-of-two sample size that brings BOTH sides to at most [MAX_DECODE_PX], or null when the
+ * image is unusable or would still exceed [MAX_DECODE_PIXELS] (a panorama, or a tiny file that
+ * claims enormous dimensions). Pure, JVM-testable.
+ */
+internal fun avatarSampleSize(width: Int, height: Int): Int? {
+  if (width <= 0 || height <= 0) return null
+  var sample = 1
+  while ((width / sample > MAX_DECODE_PX || height / sample > MAX_DECODE_PX) && sample < (1 shl 20)) {
+    sample *= 2
+  }
+  val pixels = (width / sample).toLong() * (height / sample).toLong()
+  return if (pixels in 1..MAX_DECODE_PIXELS) sample else null
+}
 
 /** Parse `#RRGGBB` to an opaque ARGB int, or null for anything else. Pure, JVM-testable. */
 internal fun parseAvatarColor(value: String?): Int? {
@@ -82,7 +99,7 @@ internal fun resolveAvatarSource(
   val parsed = runCatching { java.net.URI(uri) }.getOrNull() ?: return null
   return when (parsed.scheme?.lowercase()) {
     "content" ->
-      if (parsed.rawAuthority == CONTACTS_AUTHORITY && parsed.rawUserInfo == null) {
+      if (parsed.rawAuthority == CONTACTS_AUTHORITY) {
         AvatarSource.ContactPhoto(uri)
       } else {
         null
@@ -101,18 +118,24 @@ internal fun resolveAvatarSource(
   }
 }
 
-/** Validate one bridge record into a spec. Pure; invalid pieces fall back rather than throw. */
+/**
+ * Validate one bridge record into a spec. Pure. A photo is kept even when the letter-circle fields
+ * are bad (they only matter if the photo can't be read); with no photo, a bad letter circle returns
+ * null and the caller uses its neutral fallback.
+ */
 internal fun normalizeAvatarSpec(
   photoUri: String?,
   initials: String?,
   background: String?,
   foreground: String?,
+  fallback: ShareShortcutAvatarSpec,
 ): ShareShortcutAvatarSpec? {
-  val bg = parseAvatarColor(background) ?: return null
-  val fg = parseAvatarColor(foreground) ?: return null
-  val text = normalizeAvatarInitials(initials) ?: return null
   val photo = photoUri?.takeIf { it.isNotBlank() }
-  return ShareShortcutAvatarSpec(photo, text, bg, fg)
+  val bg = parseAvatarColor(background)
+  val fg = parseAvatarColor(foreground)
+  val text = normalizeAvatarInitials(initials)
+  if (bg != null && fg != null && text != null) return ShareShortcutAvatarSpec(photo, text, bg, fg)
+  return if (photo != null) fallback.copy(photoUri = photo) else null
 }
 
 /** Draws avatar icons. Not JVM-testable (android.graphics); covered by device proof. */
@@ -137,17 +160,11 @@ internal class ShareShortcutAvatarRenderer(private val context: Context) {
       is AvatarSource.OwnFile -> { -> FileInputStream(File(source.canonicalPath)) }
     }
     return runCatching {
-      // Read the size first, then decode at most ~2x the icon size so a huge photo can't exhaust memory.
+      // Read the size first, then shrink until both sides are at most MAX_DECODE_PX (and refuse
+      // anything still over the pixel budget), so a huge or oddly shaped image can't exhaust memory.
       val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
       open()?.use { BitmapFactory.decodeStream(it, null, bounds) }
-      if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-      var sample = 1
-      while (
-        bounds.outWidth / (sample * 2) >= MAX_DECODE_PX &&
-        bounds.outHeight / (sample * 2) >= MAX_DECODE_PX
-      ) {
-        sample *= 2
-      }
+      val sample = avatarSampleSize(bounds.outWidth, bounds.outHeight) ?: return null
       val options = BitmapFactory.Options().apply { inSampleSize = sample }
       open()?.use { BitmapFactory.decodeStream(it, null, options) }
     }.getOrNull()

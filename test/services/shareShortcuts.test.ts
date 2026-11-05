@@ -315,6 +315,8 @@ describe('conversation shortcut ids (Phase 2)', () => {
       expect(conversationShortcutIdFor(rows[0]!.guid)).toBe(id(1));
     };
     remember();
+    // Even if native wrongly returned ids under App Lock, JS must not keep them.
+    native.setShareShortcuts.mockReturnValueOnce([id(1)]);
     publishShareShortcuts(rows, true);
     expect(conversationShortcutIdFor(rows[0]!.guid)).toBeNull();
 
@@ -331,6 +333,18 @@ describe('conversation shortcut ids (Phase 2)', () => {
     remember();
     clearAllShareShortcuts();
     expect(conversationShortcutIdFor(rows[0]!.guid)).toBeNull();
+  });
+});
+
+describe('conversation shortcut ids when Android publishes fewer chats', () => {
+  it('maps only the published prefix when native returns fewer ids than records', () => {
+    const rows = manyRows(4);
+    const tok = (n: number) => `gator-share-v2-${String(n).repeat(43).slice(0, 43)}`;
+    native.setShareShortcuts.mockReturnValueOnce([tok(1), tok(2)]);
+    publishShareShortcuts(rows, false);
+    expect(conversationShortcutIdFor(rows[1]!.guid)).toBe(tok(2));
+    expect(conversationShortcutIdFor(rows[2]!.guid)).toBeNull();
+    expect(conversationShortcutIdFor(rows[3]!.guid)).toBeNull();
   });
 });
 

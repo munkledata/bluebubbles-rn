@@ -162,6 +162,7 @@ internal fun normalizeShareShortcutSpecs(records: List<ShareShortcutRecord>): Li
       record.initials,
       record.background,
       record.foreground,
+      FALLBACK_AVATAR,
     ) ?: FALLBACK_AVATAR
     ShareShortcutSpec(guid, label, avatar)
   }

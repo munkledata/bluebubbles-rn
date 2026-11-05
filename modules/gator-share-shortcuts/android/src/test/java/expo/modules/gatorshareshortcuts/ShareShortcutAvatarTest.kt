@@ -1,7 +1,9 @@
 package expo.modules.gatorshareshortcuts
 
 import java.io.File
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -42,7 +44,7 @@ class ShareShortcutAvatarTest {
   fun refusesOtherProvidersSchemesAndMalformedInput() {
     for (uri in listOf(
       "content://media/external/images/1",
-      "content://com.android.contacts@evil/contacts/1/photo",
+      "content://com.android.contacts@evil/contacts/1/photo", // authority is not exactly contacts
       "content://com.android.contacts.evil/contacts/1/photo",
       "https://example.com/a.jpg",
       "file://host/data/user/0/com.gator/files/a.jpg",
@@ -75,13 +77,66 @@ class ShareShortcutAvatarTest {
   }
 
   @Test
-  fun aBadColorOrInitialsRejectsTheWholeSpec() {
-    assertNull(normalizeAvatarSpec(null, "AB", "nope", "#FFFFFF"))
-    assertNull(normalizeAvatarSpec(null, "TOOLONG", "#000000", "#FFFFFF"))
+  fun aBadLetterCircleFallsBackButNeverDropsAGoodPhoto() {
+    assertNull(normalizeAvatarSpec(null, "AB", "nope", "#FFFFFF", FALLBACK_AVATAR))
+    assertNull(normalizeAvatarSpec(null, "TOOLONG", "#000000", "#FFFFFF", FALLBACK_AVATAR))
+    assertEquals(
+      FALLBACK_AVATAR.copy(photoUri = "content://com.android.contacts/contacts/1/photo"),
+      normalizeAvatarSpec(
+        "content://com.android.contacts/contacts/1/photo",
+        "AB",
+        "nope",
+        "#FFFFFF",
+        FALLBACK_AVATAR,
+      ),
+    )
     assertEquals(
       ShareShortcutAvatarSpec(null, "AB", 0xFF000000.toInt(), 0xFFFFFFFF.toInt()),
-      normalizeAvatarSpec("  ", "AB", "#000000", "#FFFFFF"),
+      normalizeAvatarSpec("  ", "AB", "#000000", "#FFFFFF", FALLBACK_AVATAR),
     )
+  }
+
+  @Test
+  fun samplesUntilBothSidesFitAndRefusesHugeImages() {
+    assertEquals(1, avatarSampleSize(300, 300))
+    assertEquals(8, avatarSampleSize(1200, 1600)) // 1600 / 4 = 400 is still over 384
+    // A long panorama: halved until its LONG side fits, not left at full size.
+    val panorama = avatarSampleSize(30_000, 300)
+    assertTrue(panorama != null && 30_000 / panorama <= 384)
+    // A small file claiming an enormous height can't sneak a huge allocation through.
+    val tall = avatarSampleSize(400, 1_000_000)
+    assertTrue(tall == null || (400L / tall) * (1_000_000L / tall) <= 1_000_000L)
+    assertNull(avatarSampleSize(0, 10))
+    assertNull(avatarSampleSize(10, -1))
+  }
+
+  @Test
+  fun ignoresTheQueryAndFragmentOfAFileUri() {
+    assertEquals(
+      AvatarSource.OwnFile("/data/user/0/com.gator/files/a.jpg"),
+      resolve("file:///data/user/0/com.gator/files/a.jpg?x=1#y"),
+    )
+  }
+
+  @Test
+  fun followsSymlinksWhenCheckingOwnStorage() {
+    val root = Files.createTempDirectory("gator-avatar").toFile()
+    try {
+      val ownDir = File(root, "files").apply { mkdirs() }
+      val outside = File(root, "other").apply { mkdirs() }
+      File(outside, "secret.jpg").writeText("x")
+      Files.createSymbolicLink(File(ownDir, "link").toPath(), outside.toPath())
+      val real: (String) -> String? = { runCatching { File(it).canonicalPath }.getOrNull() }
+      val dirs = listOf(ownDir.canonicalPath)
+      assertNull(resolveAvatarSource("file://${ownDir.canonicalPath}/link/secret.jpg", dirs, real))
+      File(ownDir, "mine.jpg").writeText("x")
+      assertEquals(
+        AvatarSource.OwnFile(File(ownDir, "mine.jpg").canonicalPath),
+        resolveAvatarSource("file://${ownDir.canonicalPath}/mine.jpg", dirs, real),
+      )
+    } finally {
+      root.deleteRecursively()
+    }
   }
 
   @Test
