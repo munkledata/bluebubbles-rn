@@ -524,7 +524,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda",
       "path": "app/(setup)/manual.tsx",
-      "line": 32,
+      "line": 41,
       "symbol": "Manual.submit",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#connect",
@@ -537,7 +537,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510",
       "path": "app/(setup)/manual.tsx",
-      "line": 73,
+      "line": 86,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",
@@ -550,7 +550,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:9d60163bfff7",
       "path": "app/(setup)/manual.tsx",
-      "line": 100,
+      "line": 113,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "src/services/bootstrap.ts#forgetOnThisPhoneOnly",
@@ -563,7 +563,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2",
       "path": "app/(setup)/manual.tsx",
-      "line": 108,
+      "line": 121,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",
@@ -576,7 +576,7 @@
     {
       "id": "app/(setup)/scan.tsx#Scan.onBarcodeScanned:mutator-call:a94b6122a495",
       "path": "app/(setup)/scan.tsx",
-      "line": 65,
+      "line": 81,
       "symbol": "Scan.onBarcodeScanned",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#connect",
@@ -589,7 +589,7 @@
     {
       "id": "app/(setup)/scan.tsx#Scan:mutator-reference:1cff632b86f3",
       "path": "app/(setup)/scan.tsx",
-      "line": 114,
+      "line": 141,
       "symbol": "Scan",
       "operation": "mutator-reference",
       "target": "app/(setup)/scan.tsx#Scan.onBarcodeScanned",
@@ -602,7 +602,7 @@
     {
       "id": "app/(setup)/scan.tsx#Scan:mutator-reference:2e00f574c549",
       "path": "app/(setup)/scan.tsx",
-      "line": 137,
+      "line": 171,
       "symbol": "Scan",
       "operation": "mutator-reference",
       "target": "src/services/bootstrap.ts#forgetOnThisPhoneOnly",
