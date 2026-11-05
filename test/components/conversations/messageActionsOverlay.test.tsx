@@ -139,7 +139,7 @@ function makeSelected(
 
 async function renderOverlay(
   selected: SelectedMessage,
-  h: ReturnType<typeof handlers> = handlers(),
+  h: ReturnType<typeof handlers> & { onMessageSender?: jest.Mock } = handlers(),
 ) {
   await renderWithTheme(<MessageActionsOverlay selected={selected} {...h} />);
   return h;
@@ -361,6 +361,43 @@ describe('MessageActionsOverlay — narrow edit + read-only history', () => {
     await renderOverlay(makeSelected({ isFromMe: true, sendState: 'sending' }));
     expect(screen.queryByText('Delete')).toBeNull();
     expect(screen.getByText('Cancel Sending')).toBeTruthy();
+  });
+});
+
+describe('MessageActionsOverlay — Message <name> (group messages)', () => {
+  it('offers to message a group message’s sender by name, then closes', async () => {
+    const onMessageSender = jest.fn();
+    const h = await renderOverlay(makeSelected({ senderAddress: '+15551112222' }), {
+      ...handlers(),
+      onMessageSender,
+    });
+    await pressAndFlush(screen.getByText('Message Alice'), () =>
+      expect(onMessageSender).toHaveBeenCalledTimes(1),
+    );
+    expect(h.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('names the sender by address when there is no name', async () => {
+    await renderOverlay(makeSelected({ senderName: null, senderAddress: 'laura@example.com' }), {
+      ...handlers(),
+      onMessageSender: jest.fn(),
+    });
+    expect(screen.getByText('Message laura@example.com')).toBeTruthy();
+  });
+
+  it.each([
+    ['your own message', { isFromMe: true, senderAddress: '+15551112222' }],
+    ['a message still sending', { isTemp: true, senderAddress: '+15551112222' }],
+    ['no sender address', { senderAddress: null }],
+    ['a blank sender address', { senderAddress: '   ' }],
+  ])('hides it for %s', async (_case, overrides) => {
+    await renderOverlay(makeSelected(overrides), { ...handlers(), onMessageSender: jest.fn() });
+    expect(screen.queryByText(/^Message /)).toBeNull();
+  });
+
+  it('hides it outside group chats (no handler)', async () => {
+    await renderOverlay(makeSelected({ senderAddress: '+15551112222' }));
+    expect(screen.queryByText('Message Alice')).toBeNull();
   });
 });
 

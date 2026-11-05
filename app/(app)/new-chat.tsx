@@ -132,14 +132,17 @@ export default function NewChatScreen(): React.JSX.Element {
   // A forwarded message pre-fills the composer. File paths stay out of this public route: the
   // only attachment parameter is an opaque, one-time key into a process-local handoff.
   // `to`/`body` come from an `imessage:` link another app opened (see app/+native-intent.tsx). They
-  // only pre-fill the screen; nothing is sent until the person taps Start.
-  const { forwardText, forwardAttachmentHandoff, shareBatch, to, body } = useLocalSearchParams<{
-    to?: string;
-    body?: string;
-    forwardText?: string;
-    forwardAttachmentHandoff?: string;
-    shareBatch?: string;
-  }>();
+  // only pre-fill the screen; nothing is sent until the person taps Start. "Message <name>" on a
+  // group message also passes `to`, plus `service` to pre-pick the group's own service.
+  const { forwardText, forwardAttachmentHandoff, shareBatch, to, body, service } =
+    useLocalSearchParams<{
+      to?: string;
+      body?: string;
+      forwardText?: string;
+      forwardAttachmentHandoff?: string;
+      shareBatch?: string;
+      service?: string;
+    }>();
   const [initialForwardHandoff] = useState(forwardAttachmentHandoff);
   const [recipients, setRecipients] = useState<Recipient[]>(() => {
     const linked = typeof to === 'string' ? to.trim() : '';
@@ -196,7 +199,11 @@ export default function NewChatScreen(): React.JSX.Element {
   const rcsFindOrCreateSupported = useSessionStore(
     (s) => s.serverInfo?.supports_rcs_find_or_create_chat === true,
   );
-  const [requestedService, setRequestedService] = useState<NewChatService | null>(null);
+  // A pre-picked service is the draft's starting choice: it shows like any other choice (and is
+  // kept even if its capability disappears), and the person can still switch it.
+  const [requestedService, setRequestedService] = useState<NewChatService | null>(() =>
+    service === 'iMessage' || service === 'RCS' ? service : null,
+  );
   const selectedService: NewChatService | null =
     requestedService ?? (rcsEnabled ? 'RCS' : imessageEnabled ? 'iMessage' : null);
   // Once a default becomes available, pin it for this draft. A later capability refresh must not

@@ -17,7 +17,9 @@ import { parseReactionType, type ReactionBaseType } from '@core/reactions/reacti
 import { parseRcsChatGuid, parseRcsMessageGuid } from '@core/rcs/providerIdentity';
 import { bodyTextFromRuns, parseAttributedRuns } from '@core/richtext';
 import { logger } from '@core/secure';
-import type { MessagePreview } from '@db/repositories';
+import { getDatabase } from '@db/database';
+import { findChatsByParticipantAddresses, type MessagePreview } from '@db/repositories';
+import type { NewChatService } from '@/services/chatActions';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
 import { ReminderUnavailableError } from '@/services/notifications/reminderErrors';
@@ -43,6 +45,7 @@ import { isDevServer } from '@utils/isDev';
 import { isLocalFileUri, isRcsChatGuid, isUserFileAttachment, type BubbleRect } from '@utils';
 import { devSendFakeReaction } from './devSeed';
 import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
+import { planDirectMessage } from './directMessagePlan';
 import { buildForwardParams } from './forwardParams';
 import {
   currentPartCount,
@@ -213,6 +216,12 @@ export interface MessageActionsArgs {
   setEditing?: (editing: { guid: string; text: string; partIndex: 0 } | null) => void;
   /** Re-read the loaded message window (e.g. after an unsend's result became unknown). */
   refreshMessages?: () => void;
+  /** The screen's chat navigator, for "Message <name>" (never stacks one thread on another). */
+  openChat?: (path: string) => void;
+  /** "Message <name>": the group's service, pre-picked for a new one-to-one chat. */
+  directMessageService?: NewChatService | null;
+  /** The server can start a new chat (iMessage or RCS). */
+  newChatAvailable?: boolean;
 }
 
 /**
@@ -238,6 +247,9 @@ export function useMessageActions({
   setReplyTo,
   setEditing,
   refreshMessages,
+  openChat,
+  directMessageService = null,
+  newChatAvailable = false,
 }: MessageActionsArgs) {
   const router = useRouter();
   const isDev = isDevServer;
@@ -325,6 +337,7 @@ export function useMessageActions({
         attachmentDescription: msg.attachmentDescription,
         isFromMe: msg.isFromMe === 1,
         senderName: msg.senderName,
+        senderAddress: msg.senderAddress,
         mine,
         myEmojis,
         canReact,
@@ -923,6 +936,42 @@ export function useMessageActions({
     else if (plan.kind === 'navigate') router.push({ pathname: '/new-chat', params: plan.params });
   };
 
+  // "Message <name>" on a group message. The sender's existing one-to-one iMessage chat opens
+  // directly. Otherwise the new-message screen opens with the sender filled in and the group's
+  // service pre-picked, and nothing is sent until the person taps Start. An RCS one-to-one is found
+  // by the server when that first message starts the chat.
+  const onMessageSenderSelected = (): void => {
+    const current = currentSelectedMessage();
+    const address = current && current.isFromMe !== 1 ? (current.senderAddress?.trim() ?? '') : '';
+    if (!address || !screenLease.isCurrent()) return;
+    void (async () => {
+      let existingChatGuid: string | null = null;
+      if (directMessageService === 'iMessage') {
+        try {
+          const matches = await findChatsByParticipantAddresses(
+            getDatabase(),
+            [address],
+            'iMessage',
+          );
+          existingChatGuid = matches[0]?.guid ?? null;
+        } catch {
+          // Only a shortcut: the new-message screen finds the same chat itself. No address logged.
+          logger.warn('message sender: looking up the one-to-one chat failed');
+        }
+      }
+      if (!screenLease.isCurrent()) return;
+      const plan = planDirectMessage({
+        address,
+        service: directMessageService,
+        existingChatGuid,
+        newChatAvailable,
+      });
+      if (plan.kind === 'open') openChat?.(plan.path);
+      else if (plan.kind === 'compose') router.push({ pathname: '/new-chat', params: plan.params });
+      else showDialog('Message', plan.message);
+    })();
+  };
+
   // Save the message's attachment(s) to the device gallery. Saves any already-downloaded local
   // file; if none is downloaded yet, tells the user to open it first (which triggers the download).
   const onSaveSelected = (): void => {
@@ -1012,6 +1061,7 @@ export function useMessageActions({
     onShareSelected,
     onDeleteSelected,
     onForwardSelected,
+    onMessageSenderSelected,
     onSaveSelected,
     onRemindLater,
   };

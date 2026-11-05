@@ -36,6 +36,8 @@ export interface SelectedMessage {
   attachmentDescription?: string | null;
   isFromMe: boolean;
   senderName: string | null;
+  /** The sender's address, for "Message <name>" on a group message from someone else. */
+  senderAddress?: string | null;
   /** Classic reaction types the current user has already applied to this message. */
   mine: ReactionBaseType[];
   /** Arbitrary-emoji tapback glyphs the current user has already applied. */
@@ -110,6 +112,8 @@ interface MessageActionsOverlayProps {
   onRemoteDeleteFromMac?: () => void;
   /** Forward the message text and/or downloaded attachments (opens the new-message composer). */
   onForward?: () => void;
+  /** Group chats only: open (or start) a one-to-one chat with this message's sender. */
+  onMessageSender?: () => void;
   /** Save the message's attachment(s) to the device gallery. */
   onSave: () => void;
   /** Share the message's attachment file or text via the OS share sheet. */
@@ -157,6 +161,7 @@ export function MessageActionsOverlay({
   onUnsend,
   onRemoteDeleteFromMac,
   onForward,
+  onMessageSender,
   onSave,
   onShare,
   onDelete,
@@ -340,6 +345,14 @@ export function MessageActionsOverlay({
   if (hasText) actions.push({ key: 'copy', label: 'Copy', onPress: onCopy });
   if (onForward && (hasText || hasAttachments))
     actions.push({ key: 'forward', label: 'Forward', onPress: onForward });
+  const senderAddress = selected?.senderAddress?.trim();
+  if (onMessageSender && senderAddress && !selected?.isFromMe && !selected?.isTemp) {
+    actions.push({
+      key: 'message-sender',
+      label: `Message ${selected?.senderName?.trim() || senderAddress}`,
+      onPress: onMessageSender,
+    });
+  }
   if (hasAttachments) actions.push({ key: 'save', label: 'Save to Photos', onPress: onSave });
   if (hasText || hasAttachments) actions.push({ key: 'share', label: 'Share…', onPress: onShare });
   if (onViewThread && selected?.inThread) {

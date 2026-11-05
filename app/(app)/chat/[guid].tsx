@@ -40,6 +40,8 @@ import { useChatHeader } from '@features/conversations/useChatHeader';
 import { useChatSearchSession } from '@features/conversations/useChatSearchSession';
 import { useChatShareIntake } from '@features/conversations/useChatShareIntake';
 import { useMessageActions } from '@features/conversations/useMessageActions';
+import { directMessageServiceFor } from '@features/conversations/directMessagePlan';
+import { useChatNavigator } from '@ui/useChatNavigator';
 import { useMessages } from '@features/conversations/useMessages';
 import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
 import {
@@ -123,6 +125,7 @@ function ChatScreenInner({
   // account that rendered them; passing the mount lease prevents such an A callback from capturing
   // B merely because it is invoked after reconnect.
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const openChat = useChatNavigator();
   const header = useChatHeader(guid);
   const backgroundUri = useChatBackgroundUri(guid);
   const visibleBackgroundUri = accountLease.isCurrent() ? backgroundUri : null;
@@ -364,6 +367,7 @@ function ChatScreenInner({
     onShareSelected,
     onDeleteSelected,
     onForwardSelected,
+    onMessageSenderSelected,
     onSaveSelected,
     onRemindLater,
   } = useMessageActions({
@@ -381,6 +385,9 @@ function ChatScreenInner({
     setReplyTo,
     setEditing,
     refreshMessages: refreshWindow,
+    openChat,
+    directMessageService: directMessageServiceFor(chatService),
+    newChatAvailable,
   });
   const actionSelected = useMemo(() => {
     if (!selected) return null;
@@ -1063,6 +1070,7 @@ function ChatScreenInner({
           ? { onRemoteDeleteFromMac: onRemoteDeleteSelected }
           : {})}
         onForward={newChatAvailable ? onForwardSelected : undefined}
+        onMessageSender={isGroup ? onMessageSenderSelected : undefined}
         onSave={onSaveSelected}
         onShare={onShareSelected}
         onDelete={onDeleteSelected}

@@ -40,6 +40,8 @@ jest.mock('expo-router', () => {
   return {
     useFocusEffect: (callback: () => void | (() => void)) =>
       R.useEffect(() => (mockRouteFocused ? callback() : undefined), [callback, mockRouteFocused]),
+    // The chat screen opens other chats through useChatNavigator, which reads the path.
+    usePathname: () => '/chat/test',
     useLocalSearchParams: () => ({ guid: mockGuid }),
     useNavigation: () => ({ dispatch: jest.fn() }),
     useRoute: () => ({ key: 'chat-read-marker-route' }),

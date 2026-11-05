@@ -28,6 +28,8 @@ jest.mock('expo-router', () => {
   const R = require('react');
   return {
     useFocusEffect: (callback: () => void | (() => void)) => R.useEffect(callback, [callback]),
+    // The chat screen opens other chats through useChatNavigator, which reads the path.
+    usePathname: () => '/chat/test',
     useLocalSearchParams: () => ({ guid: GUID }),
     useNavigation: () => ({ dispatch: jest.fn() }),
     useRoute: () => ({ key: 'chat-deleted-backfill-route' }),

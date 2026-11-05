@@ -112,6 +112,8 @@ jest.mock('expo-router', () => {
           cleanup();
         };
       }, [callback]),
+    // The chat screen opens other chats through useChatNavigator, which reads the path.
+    usePathname: () => '/chat/test',
     useLocalSearchParams: () => ({
       guid: mockGuid,
       focus: mockFocus,

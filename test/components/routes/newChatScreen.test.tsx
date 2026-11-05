@@ -36,6 +36,7 @@ const mockRouter = { push: mockPush, back: mockBack, replace: mockReplace };
 let mockSearchParams: {
   to?: string;
   body?: string;
+  service?: string;
   forwardText?: string;
   forwardAttachmentHandoff?: string;
   shareBatch?: string;
@@ -2458,6 +2459,45 @@ describe('NewChatScreen — RCS find-or-create', () => {
 
     await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
     expect(mockFindOrCreateRcsChat).not.toHaveBeenCalled();
+  });
+});
+
+describe('NewChatScreen — opened from "Message <name>" on a group message', () => {
+  const bothServices = (): void => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: 'test',
+        rcs: true,
+        ...RCS_SERVER_IDENTITY,
+        supports_imessage_new_chat: true,
+        private_api: false,
+      }),
+    });
+  };
+
+  it('pre-picks the group’s iMessage service over the RCS default, and the choice stays open', async () => {
+    bothServices();
+    mockSearchParams = { to: '+15551230000', service: 'iMessage' };
+    await renderWithTheme(<NewChatScreen />);
+
+    expect(screen.getByLabelText('Remove +15551230000')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'iMessage' }).props.accessibilityState.selected).toBe(
+      true,
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByRole('radio', { name: 'RCS' }));
+    });
+    expect(screen.getByRole('radio', { name: 'RCS' }).props.accessibilityState.selected).toBe(true);
+    expect(mockSend).not.toHaveBeenCalled();
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
+  it('ignores a service it cannot start, keeping the usual default', async () => {
+    bothServices();
+    mockSearchParams = { to: '+15551230000', service: 'SMS' };
+    await renderWithTheme(<NewChatScreen />);
+
+    expect(screen.getByRole('radio', { name: 'RCS' }).props.accessibilityState.selected).toBe(true);
   });
 });
 
