@@ -54,10 +54,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/foregroundBoot.test.ts; test/components/routes/rootLayout.test.tsx; test/services/lockService.test.ts; test/db/dbKeyRotation.test.ts"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:4a3eed343439",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>:mutator-call:56b293007aa4",
       "path": "app/(app)/_layout.tsx",
-      "line": 157,
-      "symbol": "ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>",
+      "line": 158,
+      "symbol": "ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
       "detectedContext": "error-report-lifecycle-delegation",
@@ -67,10 +67,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:47ff0ef8b6dc",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>:mutator-call:a59eccae0714",
       "path": "app/(app)/_layout.tsx",
-      "line": 174,
-      "symbol": "ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>",
+      "line": 175,
+      "symbol": "ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRealtime",
       "detectedContext": "coordinated-delegation",
@@ -80,10 +80,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:4a3eed343439:2",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>:mutator-call:56b293007aa4:2",
       "path": "app/(app)/_layout.tsx",
-      "line": 177,
-      "symbol": "ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>",
+      "line": 178,
+      "symbol": "ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
       "detectedContext": "error-report-lifecycle-delegation",
@@ -93,10 +93,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:5864493d436d",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>:mutator-call:315f81f76bc5",
       "path": "app/(app)/_layout.tsx",
-      "line": 182,
-      "symbol": "ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>",
+      "line": 183,
+      "symbol": "ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>",
       "operation": "mutator-call",
       "target": "src/services/send/index.ts#recoverOutgoing",
       "detectedContext": "coordinated-delegation",
@@ -108,7 +108,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5bd646a3ed>:mutator-call:4ffa3931c74a",
       "path": "app/(app)/_layout.tsx",
-      "line": 201,
+      "line": 202,
       "symbol": "ConnectedAppLayout.<callback:5bd646a3ed>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
@@ -145,10 +145,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatScreen.test.tsx; test/db/messageRetractionRepo.test.ts; test/db/messagesBranches.test.ts"
     },
     {
-      "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:4369ee0c83>.<callback:70c7fd292e>:mutator-call:5a63826cf1db",
+      "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:4a034745f4>.<callback:70c7fd292e>:mutator-call:3d55321081d2",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 514,
-      "symbol": "ChatScreenInner.<callback:4369ee0c83>.<callback:70c7fd292e>",
+      "line": 513,
+      "symbol": "ChatScreenInner.<callback:4a034745f4>.<callback:70c7fd292e>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
       "detectedContext": "coordinated-delegation",
@@ -433,7 +433,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:1e716ab98ac5",
       "path": "app/(app)/server-management.tsx",
-      "line": 321,
+      "line": 322,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialReplacement",
@@ -446,7 +446,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:f08dd1db40ef",
       "path": "app/(app)/server-management.tsx",
-      "line": 322,
+      "line": 323,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade",
@@ -459,7 +459,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.confirmDiscardCredential.onConfirm:mutator-call:ffe1420d9aaf",
       "path": "app/(app)/server-management.tsx",
-      "line": 508,
+      "line": 509,
       "symbol": "ServerManagementScreen.confirmDiscardCredential.onConfirm",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential",
@@ -472,7 +472,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796",
       "path": "app/(app)/server-management.tsx",
-      "line": 516,
+      "line": 517,
       "symbol": "ServerManagementScreen.onDiscardCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate",
@@ -485,7 +485,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.<callback:7bf4151522>:mutator-call:6b73b09a1510",
       "path": "app/(app)/server-management.tsx",
-      "line": 890,
+      "line": 900,
       "symbol": "ServerManagementScreen.<callback:7bf4151522>",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential",
@@ -574,35 +574,35 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
-      "id": "app/(setup)/scan.tsx#Scan.onBarcodeScanned:mutator-call:a94b6122a495",
+      "id": "app/(setup)/scan.tsx#Scan.connectPending:mutator-call:a9b34a9464e4",
       "path": "app/(setup)/scan.tsx",
-      "line": 81,
-      "symbol": "Scan.onBarcodeScanned",
+      "line": 75,
+      "symbol": "Scan.connectPending",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#connect",
       "detectedContext": "coordinated-delegation",
       "owner": "Scan connect",
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts; test/components/routes/scanScreen.test.tsx"
     },
     {
-      "id": "app/(setup)/scan.tsx#Scan:mutator-reference:1cff632b86f3",
+      "id": "app/(setup)/scan.tsx#Scan:mutator-reference:7175127311c7",
       "path": "app/(setup)/scan.tsx",
-      "line": 141,
+      "line": 175,
       "symbol": "Scan",
       "operation": "mutator-reference",
-      "target": "app/(setup)/scan.tsx#Scan.onBarcodeScanned",
+      "target": "app/(setup)/scan.tsx#Scan.connectPending",
       "detectedContext": "coordinated-delegation",
       "owner": "Scan connect",
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts; test/components/routes/scanScreen.test.tsx"
     },
     {
       "id": "app/(setup)/scan.tsx#Scan:mutator-reference:2e00f574c549",
       "path": "app/(setup)/scan.tsx",
-      "line": 171,
+      "line": 203,
       "symbol": "Scan",
       "operation": "mutator-reference",
       "target": "src/services/bootstrap.ts#forgetOnThisPhoneOnly",
@@ -5551,6 +5551,32 @@
       "transactionContext": "startup-migration",
       "disposition": "proven-temporal-exclusion",
       "evidence": "test/db/migrations/0060_chat_auto_unarchive.test.ts; test/db/migrationHead.test.ts; scripts/check-migrations.test.mjs"
+    },
+    {
+      "id": "src/db/migrations.ts#migration:0061_messages_fts_update_only_on_text:sql-schema:31fc61b1d7ee",
+      "path": "src/db/migrations.ts",
+      "line": 1445,
+      "symbol": "migration:0061_messages_fts_update_only_on_text",
+      "operation": "sql-schema",
+      "target": "messages_au",
+      "detectedContext": "startup-migration",
+      "owner": "0061 messages_fts update trigger fires only when the text changes",
+      "transactionContext": "startup-migration",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "test/db/migrations/0061_messages_fts_update_only_on_text.test.ts; test/db/migrationHead.test.ts; scripts/check-migrations.test.mjs"
+    },
+    {
+      "id": "src/db/migrations.ts#migration:0061_messages_fts_update_only_on_text:sql-schema:5c2ac88b99da",
+      "path": "src/db/migrations.ts",
+      "line": 1446,
+      "symbol": "migration:0061_messages_fts_update_only_on_text",
+      "operation": "sql-schema",
+      "target": "messages_au",
+      "detectedContext": "startup-migration",
+      "owner": "0061 messages_fts update trigger fires only when the text changes",
+      "transactionContext": "startup-migration",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "test/db/migrations/0061_messages_fts_update_only_on_text.test.ts; test/db/migrationHead.test.ts; scripts/check-migrations.test.mjs"
     },
     {
       "id": "src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:1678bfc56fc9",
@@ -20661,7 +20687,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:e737f4b3c52e",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 431,
+      "line": 447,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event",
@@ -20674,7 +20700,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:bed88bf25470",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 448,
+      "line": 464,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -20687,7 +20713,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:fbf723b9add6",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 494,
+      "line": 514,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -20700,7 +20726,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock:mutator-call:6ad0e1b99aa0",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 573,
+      "line": 593,
       "symbol": "deliverRespectingLock",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliver",
@@ -20713,7 +20739,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock:mutator-call:23ef353517cd",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 575,
+      "line": 595,
       "symbol": "deliverRespectingLock",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliver",
@@ -20726,7 +20752,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>:mutator-call:328a2817af6d",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 615,
+      "line": 635,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
@@ -20739,7 +20765,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>:mutator-call:cb1a4da13a12",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 619,
+      "line": 639,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock",
@@ -20752,7 +20778,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>:mutator-call:cb1a4da13a12:2",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 627,
+      "line": 647,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock",
@@ -20765,7 +20791,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleBackgroundFcm:mutator-call:bbd38b366234",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 676,
+      "line": 696,
       "symbol": "handleBackgroundFcm",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm",
@@ -20778,7 +20804,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#startFcm.<callback:a43a320bdb>:mutator-call:b2b3d2f6880a",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 697,
+      "line": 717,
       "symbol": "startFcm.<callback:a43a320bdb>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm",
@@ -21038,7 +21064,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:mutator-call:44918d382fdf",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 553,
+      "line": 541,
       "symbol": "migrateReminderNotificationId",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId.<callback:e98741237f>",
@@ -21051,7 +21077,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:mutator-call:7ac9ad737605",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 553,
+      "line": 541,
       "symbol": "migrateReminderNotificationId",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -21064,7 +21090,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:sql-update:d6c50c44f83d",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 557,
+      "line": 545,
       "symbol": "migrateReminderNotificationId",
       "operation": "sql-update",
       "target": "reminders",
@@ -21077,7 +21103,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:mutator-call:8f5d1e4c3bf5",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 578,
+      "line": 566,
       "symbol": "deleteFaceTimeRoute",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute.<callback:9a6e587f1c>",
@@ -21090,7 +21116,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:mutator-call:a02fbb26ec7f",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 578,
+      "line": 566,
       "symbol": "deleteFaceTimeRoute",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -21103,7 +21129,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:sql-delete:cb58d0dd06c4",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 581,
+      "line": 569,
       "symbol": "deleteFaceTimeRoute",
       "operation": "sql-delete",
       "target": "kv",
@@ -21116,7 +21142,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:mutator-call:701b9879b8ce",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 591,
+      "line": 579,
       "symbol": "clearNotificationRoutes",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes.<callback:bffe50ba8a>",
@@ -21129,7 +21155,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:mutator-call:afd841a9a6e0",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 591,
+      "line": 579,
       "symbol": "clearNotificationRoutes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -21142,7 +21168,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:sql-delete:f27d9c134c56",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 594,
+      "line": 582,
       "symbol": "clearNotificationRoutes",
       "operation": "sql-delete",
       "target": "kv",

@@ -9653,7 +9653,7 @@ function incomingIngressCertifiedNodes({
       .update(normalizedSnippet(authenticateFcmV3Delivery, fcmFile))
       .digest('hex') !== '50312d5c35899dddd6151792863b57ad01ef9fed858785cba036b225e8838ba9' ||
     createHash('sha256').update(normalizedSnippet(fcmFile, fcmFile)).digest('hex') !==
-      'b81ca905d912343ca4e2145e2122b456613eeecf7fa6fddcbd0f46de3dc40bac' ||
+      '5105b313585b3498f8840f95b8545cd1e3157465f9f076aff44f24d36c91e2c0' ||
     createHash('sha256')
       .update(normalizedSnippet(createFcmHeadlessCallbackLifetime, fcmFile))
       .digest('hex') !== '1b4681d00f4778d7a2d57d83bc39f66059553d54e92f12481862814bfb47eeb5' ||
@@ -9665,7 +9665,7 @@ function incomingIngressCertifiedNodes({
     createHash('sha256').update(normalizedSnippet(handleBackgroundFcm, fcmFile)).digest('hex') !==
       '304e5e2fd8077dbad603490bebe251fc79c763bbb867444dc7dcf5dbb0e5c1a9' ||
     createHash('sha256').update(normalizedSnippet(deliver, fcmFile)).digest('hex') !==
-      '17a2fb63c06dec6741c53c87687ce194d35a5d2b8eb5033492dab0326d969394' ||
+      '4cea18747df7349bed78db5d7190b8f9ee2ddae7fed3ff7323df7c1908ecf9aa' ||
     createHash('sha256').update(normalizedSnippet(deliverRespectingLock, fcmFile)).digest('hex') !==
       '1c6d931477a6289b7fb0b8296c74d4ddaf32ad214af2920fc04aa89018540960' ||
     createHash('sha256')
@@ -10110,9 +10110,12 @@ function incomingIngressCertifiedNodes({
     !lockExpiredBinding ||
     lockExpiredCalls.length !== 1 ||
     !nodeIsInside(lockExpiredCalls[0], effectivelyLocked.body.statements[3]) ||
-    isLockExpired.body.statements.length !== 2 ||
+    isLockExpired.body.statements.length !== 3 ||
     statementText(isLockExpired, 0) !== 'if (lastBackgrounded == null) return false;' ||
-    statementText(isLockExpired, 1) !== 'return now - lastBackgrounded >= timeoutMs;' ||
+    // A clock that moved backwards (or two different clocks) fails closed: the grace period cannot
+    // be measured, so the gate locks.
+    statementText(isLockExpired, 1) !== 'if (now < lastBackgrounded) return true;' ||
+    statementText(isLockExpired, 2) !== 'return now - lastBackgrounded >= timeoutMs;' ||
     !maxServerOriginInputLength ||
     !(maxServerOriginInputLength.declarationList.flags & ts.NodeFlags.Const) ||
     !maxServerOriginInputLength.declaration.initializer ||
@@ -15259,7 +15262,7 @@ function foregroundBootLifecycleDelegationNodes({
  * as unresolved for review.
  */
 function errorReportLifecycleDelegationNodes({ root, edges }) {
-  const appStateOwner = 'ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>';
+  const appStateOwner = 'ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>';
   const appStateTarget = 'src/services/errors/index.ts#flushErrorReports';
   const appStateKey = `app/(app)/_layout.tsx|${appStateOwner}|${appStateTarget}`;
   const expectations = new Map([

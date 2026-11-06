@@ -4065,14 +4065,14 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:47ff0ef8b6dc',
-      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:501418c77f>.<callback:268f56bac0>:mutator-call:5864493d436d',
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>:mutator-call:a59eccae0714',
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:9c7da0bc33>.<callback:5e516ea64d>:mutator-call:315f81f76bc5',
       'app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda',
       'app/(setup)/manual.tsx#Manual:mutator-reference:9d60163bfff7',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2',
-      'app/(setup)/scan.tsx#Scan.onBarcodeScanned:mutator-call:a94b6122a495',
-      'app/(setup)/scan.tsx#Scan:mutator-reference:1cff632b86f3',
+      'app/(setup)/scan.tsx#Scan.connectPending:mutator-call:a9b34a9464e4',
+      'app/(setup)/scan.tsx#Scan:mutator-reference:7175127311c7',
       'app/(setup)/scan.tsx#Scan:mutator-reference:2e00f574c549',
       'app/(setup)/welcome.tsx#Welcome.<callback:b1fa990a01>:mutator-call:7469e4d131fc',
       'app/(setup)/welcome.tsx#Welcome.devSeedAndOpen:mutator-call:da967f4afb4d',
@@ -7469,7 +7469,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     selected.map((finding) => finding.id).sort(),
     [
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:8ad712352d>.<callback:60008a07b1>:mutator-call:61c25c93f19c',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:4369ee0c83>.<callback:70c7fd292e>:mutator-call:5a63826cf1db',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:4a034745f4>.<callback:70c7fd292e>:mutator-call:3d55321081d2',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>:mutator-call:3e3d348f4c24',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
