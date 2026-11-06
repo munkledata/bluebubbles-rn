@@ -4,7 +4,7 @@
 > The other items remain deferred until explicitly selected.
 >
 > **Authority:** This document owns product work deliberately moved outside or explicitly deferred
-> [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md). Its items are not included in the 107-task
+> [`STATUS.md`](./STATUS.md). Its items are not included in the 107-task
 > remediation count or the four-task release count and do not become release requirements merely by
 > being recorded here.
 

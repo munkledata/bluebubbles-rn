@@ -1,7 +1,7 @@
 # Release checklist
 
 This is the short, operational checklist for one Android release candidate. Remediation status lives
-in [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md), while release-task status and
+in [`docs/STATUS.md`](./docs/STATUS.md), while release-task status and
 dispositions live in [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md). The superseded v63 Internal
 Testing snapshot lives in
 [`docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md) and must
@@ -211,7 +211,7 @@ Open, or Production promotion, or earlier if Play flags the internal app.
 ## 1. Release blockers and decisions
 
 - [ ] Every `BLOCKER` in §3.1 of the
-      [remediation plan](./docs/WORK_PLAN_2026-08-03.md#31-release-disposition-register) is `DONE` for
+      [remediation plan](./docs/STATUS.md#31-release-disposition-register) is `DONE` for
       this exact commit.
 - [ ] Every open `CONDITIONAL` item has its affected feature disabled, with evidence that the path
       is unreachable in this candidate.

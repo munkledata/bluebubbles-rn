@@ -12,7 +12,7 @@ or turn a partial device result into broad release approval.
 
 Use the related documents for their narrower purposes:
 
-- [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) owns remediation status, including
+- [`STATUS.md`](./STATUS.md) owns remediation status, including
   `DEVICE-01` and every task-specific Android acceptance result.
 - [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the operational checklist for one exact
   candidate.

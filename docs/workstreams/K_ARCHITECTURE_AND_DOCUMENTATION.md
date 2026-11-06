@@ -2,7 +2,7 @@
 
 > **Document role:** This file owns stable implementation design and sequencing for Workstream K.
 > It never owns task status, dates, owners, blockers, or completion evidence. Those remain only in
-> [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md) for remediation and
+> [`STATUS.md`](../STATUS.md) for remediation and
 > [`RELEASE_PLAN.md`](../RELEASE_PLAN.md) for the four release-operation tasks.
 
 <a id="rel-011"></a>

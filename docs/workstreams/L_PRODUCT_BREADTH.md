@@ -2,7 +2,7 @@
 
 > **Document role:** This file owns stable implementation design and sequencing for Workstream L.
 > It never owns task status, dates, owners, blockers, or completion evidence. Those remain only in
-> [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md), the authoritative tracker. These are
+> [`STATUS.md`](../STATUS.md), the authoritative tracker. These are
 > independently selected backlog items, not permission to start one broad feature wave.
 
 <a id="feat-01"></a>

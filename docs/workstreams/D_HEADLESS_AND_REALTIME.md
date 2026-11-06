@@ -3,7 +3,7 @@
 > **Document role:** This file owns stable implementation design, rationale, child-slice structure,
 > and sequencing for Workstream D. It never owns task status, dates, assignees, blockers, or
 > completion evidence. Status remains only in
-> [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md), the authoritative tracker.
+> [`STATUS.md`](../STATUS.md), the authoritative tracker.
 
 ## Reliability sequence
 
