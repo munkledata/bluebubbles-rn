@@ -204,7 +204,17 @@ function InlineVideo({ uri }: { uri: string }): React.JSX.Element {
     ),
   );
 
-  return <VideoView player={player} nativeControls contentFit="contain" style={styles.fill} />;
+  return (
+    <VideoView
+      player={player}
+      nativeControls
+      contentFit="contain"
+      // expo-video's fullscreen button opens its own Activity, which Secure Screen's FLAG_SECURE on
+      // the React Activity does not cover. The viewer is already full screen.
+      fullscreenOptions={{ enable: false }}
+      style={styles.fill}
+    />
+  );
 }
 
 const styles = StyleSheet.create({

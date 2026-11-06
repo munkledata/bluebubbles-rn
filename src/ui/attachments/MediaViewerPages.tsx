@@ -77,6 +77,9 @@ function FullscreenVideo({
       player={player}
       nativeControls
       contentFit="contain"
+      // The viewer page is already full screen; expo-video's own fullscreen Activity would escape
+      // Secure Screen (FLAG_SECURE is applied to the React Activity only).
+      fullscreenOptions={{ enable: false }}
       style={{ width: win.width, height: win.height }}
     />
   );
