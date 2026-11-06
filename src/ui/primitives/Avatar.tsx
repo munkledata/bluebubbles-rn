@@ -1,7 +1,6 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { normalizeHandleColor } from '@core/models';
-import { readableTextOn } from '../theme/adaptiveFromImage';
+import { avatarLetterSpec } from '@core/avatar';
 import { Icon } from './Icon';
 
 interface AvatarProps {
@@ -12,40 +11,6 @@ interface AvatarProps {
   color?: string;
   /** Contact photo (file:// or data: uri). When set, renders the image instead of initials. */
   uri?: string | null;
-}
-
-// iOS-ish avatar palette (used when colorfulAvatars is on; falls back here otherwise).
-const PALETTE = [
-  '#FF6B6B',
-  '#FFA94D',
-  '#FFD43B',
-  '#69DB7C',
-  '#4DABF7',
-  '#9775FA',
-  '#F783AC',
-  '#3BC9DB',
-];
-
-function colorFor(name: string): string {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return PALETTE[Math.abs(hash) % PALETTE.length]!;
-}
-
-/**
- * The first LETTER (any script) of the first and last words. Punctuation, digits and emoji never
- * count, so "(555) 123-4567" or "+1 555…" no longer show "(5" or "+". Empty when the name has no
- * letters at all; the avatar then shows a person glyph instead.
- */
-function initials(name: string): string {
-  const letters = name
-    .trim()
-    .split(/\s+/)
-    .map((word) => word.match(/\p{L}/u)?.[0] ?? '')
-    .filter(Boolean);
-  if (letters.length === 0) return '';
-  if (letters.length === 1) return letters[0]!.toUpperCase();
-  return (letters[0]! + letters[letters.length - 1]!).toUpperCase();
 }
 
 /**
@@ -68,9 +33,11 @@ export const Avatar = React.memo(function Avatar({
       />
     );
   }
-  const backgroundColor = normalizeHandleColor(color) ?? colorFor(name);
-  const foreground = readableTextOn(backgroundColor);
-  const letters = initials(name);
+  const {
+    initials: letters,
+    background: backgroundColor,
+    foreground,
+  } = avatarLetterSpec(name, color);
   return (
     <View
       accessible={false}

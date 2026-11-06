@@ -35,3 +35,36 @@ export function relativeLuminance(hex: string): number {
   const { r, g, b } = parseHexColor(hex);
   return 0.2126 * linearChannel(r) + 0.7152 * linearChannel(g) + 0.0722 * linearChannel(b);
 }
+
+/**
+ * WCAG contrast ratio between two colours (1–21). Order-independent. Runs at render time on theme
+ * colours, so an unparseable colour scores 1 (no contrast) instead of throwing: callers then pick
+ * their readable fallback, and readableTextOn returns near-white.
+ */
+export function contrastRatio(a: string, b: string): number {
+  let la: number;
+  let lb: number;
+  try {
+    la = relativeLuminance(a);
+    lb = relativeLuminance(b);
+  } catch {
+    return 1;
+  }
+  const lighter = Math.max(la, lb);
+  const darker = Math.min(la, lb);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+const NEAR_WHITE = '#FFFFFF';
+const NEAR_BLACK = '#111111';
+
+/**
+ * The more-readable foreground for `bg`: near-white or near-black, whichever has the
+ * higher contrast ratio. With a pure-grey background the two are within a hair, so we
+ * tie-break toward the choice that clears WCAG AA (4.5) where one of them can.
+ */
+export function readableTextOn(bg: string): string {
+  const whiteContrast = contrastRatio(NEAR_WHITE, bg);
+  const blackContrast = contrastRatio(NEAR_BLACK, bg);
+  return whiteContrast >= blackContrast ? NEAR_WHITE : NEAR_BLACK;
+}
