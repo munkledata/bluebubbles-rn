@@ -2,9 +2,9 @@
  * Scheduled-message recurrence (React-free; runs in Node tests + the headless worker).
  *
  * Deliberately boring: three fixed cadences, no rrule library.
- * - daily/weekly advance by FIXED milliseconds (24h / 7×24h). This is DST-agnostic by
- *   design: across a DST boundary the local wall-clock time shifts by an hour, which we
- *   accept for simplicity (documented trade-off).
+ * - daily/weekly advance by whole LOCAL calendar days (1 or 7), so the anchor's wall-clock
+ *   time survives a DST change: a 9:00 message stays at 9:00 instead of drifting to 8:00 or
+ *   10:00 for the rest of the year (fixed 24 h steps did exactly that).
  * - monthly uses CALENDAR math anchored to the ORIGINAL day-of-month, clamping to each
  *   target month's last day. Jan 31 → Feb 28 (29 in a leap year) → Mar 31 — the clamp is
  *   per-occurrence, so the day does NOT permanently drift down to the 28th.
@@ -25,6 +25,13 @@ export function recurrenceLabel(recurrence: Recurrence): string {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** `anchorMs` shifted by whole local days, keeping the anchor's wall-clock time across DST. */
+function addDaysLocal(anchorMs: number, days: number): number {
+  const d = new Date(anchorMs);
+  d.setDate(d.getDate() + days);
+  return d.getTime();
+}
 
 /**
  * `anchorMs` shifted forward by `months` calendar months, keeping the anchor's local
@@ -60,10 +67,19 @@ export function nextOccurrence(
     }
     return next;
   }
-  const step = recurrence === 'daily' ? DAY_MS : 7 * DAY_MS;
-  // Jump straight past `now` (no per-step loop needed for a fixed-ms cadence).
-  const missed = Math.max(0, Math.floor((nowMs - scheduledAtMs) / step));
-  let next = scheduledAtMs + (missed + 1) * step;
-  if (next <= nowMs) next += step; // exact-boundary guard: result must be STRICTLY > now
+  const stepDays = recurrence === 'daily' ? 1 : 7;
+  // Estimate the missed steps from fixed milliseconds (one jump, so a device that was off for
+  // weeks does no per-day loop), then correct by calendar steps: a DST hour can put the estimate
+  // one step high or low, never more. The result must be STRICTLY after `now`.
+  let steps = Math.max(0, Math.floor((nowMs - scheduledAtMs) / (stepDays * DAY_MS)));
+  let next = addDaysLocal(scheduledAtMs, (steps + 1) * stepDays);
+  while (next <= nowMs) {
+    steps += 1;
+    next = addDaysLocal(scheduledAtMs, (steps + 1) * stepDays);
+  }
+  while (steps > 0 && addDaysLocal(scheduledAtMs, steps * stepDays) > nowMs) {
+    steps -= 1;
+    next = addDaysLocal(scheduledAtMs, (steps + 1) * stepDays);
+  }
   return next;
 }

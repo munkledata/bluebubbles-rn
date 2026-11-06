@@ -25,7 +25,7 @@ describe('recurrenceLabel', () => {
   });
 });
 
-describe('nextOccurrence — daily/weekly (fixed-ms arithmetic, DST-agnostic by design)', () => {
+describe('nextOccurrence — daily/weekly (whole local days)', () => {
   it('advances one day when fired on time', () => {
     const at = local(2026, 7, 17);
     expect(nextOccurrence(at, 'daily', at)).toBe(at + DAY);
@@ -57,6 +57,42 @@ describe('nextOccurrence — daily/weekly (fixed-ms arithmetic, DST-agnostic by 
     const at = local(2026, 7, 17);
     const now = at + 3 * DAY; // exactly the 3rd daily slot
     expect(nextOccurrence(at, 'daily', now)).toBe(at + 4 * DAY);
+  });
+});
+
+// jest.config.js pins TZ=America/Denver: clocks jump forward on 2026-03-08 and back on 2026-11-01.
+describe('nextOccurrence — daily/weekly across a DST change (keeps the wall-clock time)', () => {
+  it('daily: the slot after the spring-forward night is still 09:00 (a 23-hour day)', () => {
+    const at = local(2026, 3, 7, 9, 0);
+    const next = nextOccurrence(at, 'daily', at + 60 * 60_000);
+    expect(next).toBe(local(2026, 3, 8, 9, 0));
+    expect(new Date(next).getHours()).toBe(9);
+    expect(next - at).toBe(23 * 60 * 60_000);
+  });
+
+  it('daily: the slot after the fall-back night is still 09:00 (a 25-hour day)', () => {
+    const at = local(2026, 10, 31, 9, 0);
+    const next = nextOccurrence(at, 'daily', at + 60 * 60_000);
+    expect(next).toBe(local(2026, 11, 1, 9, 0));
+    expect(new Date(next).getHours()).toBe(9);
+    expect(next - at).toBe(25 * 60 * 60_000);
+  });
+
+  it('weekly: a week that contains the DST change keeps 09:00', () => {
+    const at = local(2026, 3, 1, 9, 0);
+    const next = nextOccurrence(at, 'weekly', at + DAY);
+    expect(next).toBe(local(2026, 3, 8, 9, 0));
+    expect(new Date(next).getHours()).toBe(9);
+  });
+
+  it('catch-up across the DST change lands on the next 09:00 slot after now, strictly later', () => {
+    const at = local(2026, 3, 1, 9, 0);
+    const now = local(2026, 3, 20, 10, 0); // 19 days later, after the clocks moved
+    const next = nextOccurrence(at, 'daily', now);
+    expect(next).toBe(local(2026, 3, 21, 9, 0));
+    expect(next).toBeGreaterThan(now);
+    // now exactly on a slot: still strictly later
+    expect(nextOccurrence(at, 'daily', local(2026, 3, 21, 9, 0))).toBe(local(2026, 3, 22, 9, 0));
   });
 });
 
