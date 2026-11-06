@@ -8,6 +8,7 @@ import {
   type IncomingEventConflictRecovery,
   type NormalizedEvent,
 } from '@core/realtime';
+import { waitForCondition } from '../support/async';
 import { DurableRealtimeDispatcher } from '@/services/realtime/incomingEventDispatcher';
 import { IncomingEventDrain } from '@/services/realtime/incomingEventDrain';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
@@ -889,18 +890,12 @@ describe('durable realtime dispatcher', () => {
       'socket',
       currentLease(),
     );
-    for (let index = 0; index < 20; index += 1) {
-      const count = (
-        raw.prepare(`SELECT COUNT(*) AS count FROM incoming_event_queue`).get() as { count: number }
-      ).count;
-      if (count === 2) break;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-
-    expect(
+    const queuedRows = (): number =>
       (raw.prepare(`SELECT COUNT(*) AS count FROM incoming_event_queue`).get() as { count: number })
-        .count,
-    ).toBe(2);
+        .count;
+    await waitForCondition(() => queuedRows() === 2, 'both events to be queued');
+
+    expect(queuedRows()).toBe(2);
     expect(effects).toHaveLength(1);
 
     releaseFirst();

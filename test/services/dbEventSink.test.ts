@@ -1,5 +1,6 @@
 import { Chat, Message } from '@core/models';
 import { EventRouter, type EventDeliveryContext } from '@core/realtime';
+import { waitForCondition } from '../support/async';
 import { deliverRaw } from '../support/realtimeRouter';
 import { logger } from '@core/secure';
 import {
@@ -75,9 +76,7 @@ describe('DbEventSink (live path)', () => {
       chats: [{ guid: 'cDownload', participants: [{ address: 'a@b.com' }] }],
     });
     const handled = sink.onEvent({ type: 'new-message', message }, 'fcm');
-    for (let i = 0; i < 20 && onMessageStored.mock.calls.length === 0; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    await waitForCondition(() => onMessageStored.mock.calls.length > 0, 'the stored-message hook');
 
     expect(onMessageStored).toHaveBeenCalledWith(expect.any(Number), 'fcm', undefined);
     await expect(handled).resolves.toBeUndefined();

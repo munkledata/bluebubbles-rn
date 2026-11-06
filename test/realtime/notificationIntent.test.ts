@@ -4,6 +4,7 @@ import {
   type EventSink,
   type NotificationIntent,
 } from '@core/realtime';
+import { waitForCondition } from '../support/async';
 import { deliverRaw } from '../support/realtimeRouter';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
@@ -75,9 +76,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     ).then(() => {
       finished = true;
     });
-    for (let i = 0; i < 20 && notify.mock.calls.length === 0; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    await waitForCondition(() => notify.mock.calls.length > 0, 'the notification intent');
 
     expect(notify).toHaveBeenCalledTimes(1);
     expect(notify).toHaveBeenCalledWith(expect.any(Object), context);
