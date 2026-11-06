@@ -7,8 +7,6 @@ import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
 
-import { scanDbWrites } from './check-db-writes.mjs';
-
 const SCHEDULE_SERVICE_PATH = 'src/services/send/scheduleService.ts';
 const SEND_SERVICE_PATH = 'src/services/send/sendService.ts';
 const RESET_TARGET = 'src/db/repositories/scheduled.ts#resetStuckScheduled';
@@ -2395,7 +2393,7 @@ function ordinaryTextOwnerErrors(findings) {
   return errors;
 }
 
-/** Validate the closed-world production call graph reported by the DB scanner. */
+/** Validate the closed-world production call graph of the scheduled/outgoing helpers. */
 export function scheduledRecoveryCallGraphErrors(findings) {
   return [
     ...exactCallErrors(findings, {
@@ -3044,6 +3042,154 @@ export function scheduledRunnerUsageErrors(sources) {
   return [...errors, ...reviewedScheduledOwnerErrors(sourceFiles)];
 }
 
+// ---------------------------------------------------------------------------------------------
+// Production call graph of the scheduled/outgoing repository helpers, read directly from the
+// import bindings of src/ and app/ (scanner triage F1, 2026-11-06). This replaces the DB-write
+// scanner's findings, which carried the same four fields for these six targets. A use is a
+// 'mutator-call' when the imported binding is the callee, otherwise a 'mutator-reference'
+// (alias, re-export, value use). The symbol is the enclosing top-level owner followed by one
+// `.<callback:…>` segment per anonymous function around the use, as the scanner reported it.
+// Known approximation: a local declaration shadowing an imported name is not distinguished.
+// ---------------------------------------------------------------------------------------------
+const SCHEDULED_CALL_TARGETS = new Map([
+  ['resetStuckScheduled', RESET_TARGET],
+  ['claimDueScheduled', CLAIM_TARGET],
+  ['claimScheduled', BROAD_CLAIM_TARGET],
+  ['handoverScheduledTextToOutgoing', HANDOFF_TARGET],
+  ['insertOutgoingText', PUBLIC_TEXT_INSERT_TARGET],
+  ['insertOutgoingTextWithinTransaction', TRANSACTION_TEXT_INSERT_TARGET],
+]);
+
+function isRepositoriesSpecifier(specifier, importerPath) {
+  if (/^@db\/repositories(?:\/|$)/.test(specifier)) return true;
+  if (!specifier.startsWith('.')) return false;
+  const importerDirectory = importerPath.split('/').slice(0, -1);
+  const segments = [...importerDirectory];
+  for (const part of specifier.split('/')) {
+    if (part === '.' || part === '') continue;
+    if (part === '..') segments.pop();
+    else segments.push(part);
+  }
+  return segments.join('/').startsWith('src/db/repositories');
+}
+
+function callbackFingerprint(node, sourceFile) {
+  const text = node.getText(sourceFile).replace(/\s+/g, ' ');
+  return `<callback:${createHash('sha256').update(text).digest('hex').slice(0, 10)}>`;
+}
+
+function ownerSymbol(node, sourceFile) {
+  const segments = [];
+  let current = node.parent;
+  while (current && current !== sourceFile) {
+    if (ts.isFunctionDeclaration(current)) {
+      segments.unshift(current.name?.text ?? '<anonymous>');
+    } else if (ts.isMethodDeclaration(current)) {
+      const owner = current.parent;
+      const className =
+        (ts.isClassDeclaration(owner) || ts.isClassExpression(owner)) && owner.name
+          ? owner.name.text
+          : '<class>';
+      segments.unshift(`${className}.${current.name.getText(sourceFile)}`);
+    } else if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+      const parent = current.parent;
+      if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
+        segments.unshift(parent.name.text);
+      } else {
+        segments.unshift(callbackFingerprint(current, sourceFile));
+      }
+    }
+    current = current.parent;
+  }
+  return segments.length === 0 ? '<module>' : segments.join('.');
+}
+
+export function scheduledCallFindingsFromSources(sources) {
+  const findings = [];
+  for (const { path, source } of sources) {
+    if (
+      !/\b(?:resetStuckScheduled|claimDueScheduled|claimScheduled|handoverScheduledTextToOutgoing|insertOutgoingText)\b/.test(
+        source,
+      )
+    ) {
+      continue;
+    }
+    const sourceFile = ts.createSourceFile(
+      path,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      path.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const bindings = new Map(); // local name → target
+    const namespaces = new Set(); // `import * as ns` of the repositories
+    for (const statement of sourceFile.statements) {
+      if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+        if (!isRepositoriesSpecifier(statement.moduleSpecifier.text, path)) continue;
+        const named = statement.importClause?.namedBindings;
+        if (!named) continue;
+        if (ts.isNamespaceImport(named)) namespaces.add(named.name.text);
+        else {
+          for (const element of named.elements) {
+            const imported = (element.propertyName ?? element.name).text;
+            const target = SCHEDULED_CALL_TARGETS.get(imported);
+            if (target) bindings.set(element.name.text, target);
+          }
+        }
+      } else if (
+        ts.isExportDeclaration(statement) &&
+        statement.moduleSpecifier &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.exportClause &&
+        ts.isNamedExports(statement.exportClause) &&
+        isRepositoriesSpecifier(statement.moduleSpecifier.text, path)
+      ) {
+        for (const element of statement.exportClause.elements) {
+          const target = SCHEDULED_CALL_TARGETS.get((element.propertyName ?? element.name).text);
+          if (target)
+            findings.push({ path, symbol: '<module>', operation: 'mutator-reference', target });
+        }
+      }
+    }
+    if (bindings.size === 0 && namespaces.size === 0) continue;
+    const record = (node, target) => {
+      const parent = node.parent;
+      const operation =
+        ts.isCallExpression(parent) && parent.expression === node
+          ? 'mutator-call'
+          : 'mutator-reference';
+      findings.push({ path, symbol: ownerSymbol(node, sourceFile), operation, target });
+    };
+    const visit = (node) => {
+      if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
+      if (ts.isIdentifier(node)) {
+        const parent = node.parent;
+        const isPropertyName =
+          (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+          (ts.isPropertyAssignment(parent) && parent.name === node) ||
+          ts.isImportSpecifier(parent) ||
+          ts.isExportSpecifier(parent);
+        const target = bindings.get(node.text);
+        if (target && !isPropertyName) record(node, target);
+      } else if (
+        ts.isPropertyAccessExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        namespaces.has(node.expression.text)
+      ) {
+        const target = SCHEDULED_CALL_TARGETS.get(node.name.text);
+        if (target) record(node, target);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  return findings;
+}
+
+export function scheduledCallFindings(root) {
+  return scheduledCallFindingsFromSources(productionSources(root));
+}
+
 function productionSources(root) {
   const sources = [];
   function visit(directory) {
@@ -3072,7 +3218,7 @@ export function runScheduledRecoveryCheck({ root = process.cwd() } = {}) {
   const sendService = resolve(root, SEND_SERVICE_PATH);
   if (!existsSync(scheduleService)) throw new Error(`missing ${SCHEDULE_SERVICE_PATH}`);
   if (!existsSync(sendService)) throw new Error(`missing ${SEND_SERVICE_PATH}`);
-  const findings = scanDbWrites({ root });
+  const findings = scheduledCallFindings(root);
   const errors = [
     ...scheduledRecoverySourceErrors(readFileSync(scheduleService, 'utf8'), {
       expectedBodyHash: REVIEWED_RUN_DUE_BODY_HASH,

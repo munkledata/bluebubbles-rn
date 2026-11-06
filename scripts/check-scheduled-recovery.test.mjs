@@ -12,6 +12,7 @@ import {
   scheduledReserveRunBodyHash,
   scheduledRunDueBodyHash,
   scheduledSendTextBodyHash,
+  scheduledCallFindingsFromSources,
 } from './check-scheduled-recovery.mjs';
 
 const schedulePath = 'src/services/send/scheduleService.ts';
@@ -1132,4 +1133,66 @@ test('the live repository satisfies the scheduled recovery contract', () => {
     claimCalls: 1,
     handoffCalls: 1,
   });
+});
+
+test('reads the scheduled/outgoing call graph from import bindings: calls, callbacks, aliases, namespaces', () => {
+  const findings = scheduledCallFindingsFromSources([
+    {
+      path: 'src/services/send/scheduleService.ts',
+      source: `
+        import { claimDueScheduled, resetStuckScheduled } from '@db/repositories';
+        export async function recoverInterruptedScheduledRows(db) { await resetStuckScheduled(db); }
+        export async function runDueScheduled(db) { return claimDueScheduled(db, 1, 2, guard); }
+      `,
+    },
+    {
+      path: 'src/services/send/sendService.ts',
+      source: `
+        import { handoverScheduledTextToOutgoing, insertOutgoingTextWithinTransaction } from '@db/repositories/scheduled';
+        export async function sendTextMessage(db) {
+          await handoverScheduledTextToOutgoing(db);
+          await withDbTransaction(db, async (tx, context) => {
+            await insertOutgoingTextWithinTransaction(context, tx);
+          });
+        }
+      `,
+    },
+    {
+      path: 'src/services/legacy/other.ts',
+      source: `
+        import { claimScheduled as broadClaim } from '../../db/repositories/scheduled';
+        import * as repos from '@db/repositories';
+        import { claimDueScheduled } from 'some-other-package';
+        export { handoverScheduledTextToOutgoing } from '@db/repositories';
+        const fn = broadClaim;
+        export const useRepos = () => repos.insertOutgoingText(1);
+        export const unrelated = () => claimDueScheduled();
+        const config = { claimScheduled: 1 };
+        const prop = config.claimScheduled;
+      `,
+    },
+  ]);
+  const summary = findings.map(
+    (f) =>
+      `${f.path}|${f.symbol.replace(/<callback:[a-f0-9]{10}>/g, '<callback>')}|${f.operation}|${f.target.split('#')[1]}`,
+  );
+  assert.deepEqual(summary, [
+    'src/services/send/scheduleService.ts|recoverInterruptedScheduledRows|mutator-call|resetStuckScheduled',
+    'src/services/send/scheduleService.ts|runDueScheduled|mutator-call|claimDueScheduled',
+    'src/services/send/sendService.ts|sendTextMessage|mutator-call|handoverScheduledTextToOutgoing',
+    'src/services/send/sendService.ts|sendTextMessage.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+    'src/services/legacy/other.ts|<module>|mutator-reference|handoverScheduledTextToOutgoing',
+    'src/services/legacy/other.ts|<module>|mutator-reference|claimScheduled',
+    'src/services/legacy/other.ts|useRepos|mutator-call|insertOutgoingText',
+  ]);
+  // The same findings drive the existing rules: the alias and the broad helper are rejected.
+  const errors = scheduledRecoveryCallGraphErrors(findings);
+  assert.ok(
+    errors.some((e) => /handoverScheduledTextToOutgoing must have exactly one/.test(e)),
+    errors.join('\n'),
+  );
+  assert.ok(
+    errors.some((e) => /broad claimScheduled helper.*found 1/.test(e)),
+    errors.join('\n'),
+  );
 });
