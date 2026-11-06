@@ -16,4 +16,8 @@ describe('isLockExpired', () => {
   it('treats the exact boundary as expired', () => {
     expect(isLockExpired(0, 30_000, 30_000)).toBe(true);
   });
+
+  it('fails closed when now is before the background stamp (clock moved backwards)', () => {
+    expect(isLockExpired(1_000, 500, 30_000)).toBe(true);
+  });
 });

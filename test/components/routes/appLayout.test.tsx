@@ -337,7 +337,9 @@ describe('AppLayout — active AppState lock gate', () => {
       noteBackgrounded: (now: number) => useLockStore.setState({ lastBackgrounded: now }),
     });
     await mountLayout();
-    const clock = jest.spyOn(Date, 'now');
+    // The grace period is measured on the monotonic clock (monotonicNow → performance.now), which
+    // React Native's Jest setup provides as a mockable function.
+    const clock = jest.spyOn(performance, 'now');
     try {
       clock.mockReturnValue(1_000_000);
       await emitAppState('background');

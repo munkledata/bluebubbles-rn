@@ -1,4 +1,5 @@
 import { isLockExpired } from '@core/security/lockTimeout';
+import { monotonicNow } from '@utils/monotonicNow';
 
 /**
  * Decide whether a background/headless push must be treated as LOCKED — i.e. post a
@@ -18,7 +19,7 @@ export function effectivelyLocked(
     timeoutMs: number;
   },
   appLockEnabled: boolean,
-  now: number = Date.now(),
+  now: number = monotonicNow(), // the same clock noteBackgrounded() stamps with
 ): boolean {
   // Treat a store/vault disagreement as enabled. The setting write updates those two stores in
   // sequence, and failing closed for that tiny hand-off is safer than exposing a push.
