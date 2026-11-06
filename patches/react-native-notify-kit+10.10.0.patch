@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationReceiverHandler.java b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationReceiverHandler.java
-index 7020fca..eec26ee 100644
+index f29eb45..1481d5e 100644
 --- a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationReceiverHandler.java
 +++ b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/NotificationReceiverHandler.java
-@@ -32,12 +32,21 @@ import app.notifee.core.event.MainComponentEvent;
+@@ -33,12 +33,21 @@ import app.notifee.core.event.MainComponentEvent;
  import app.notifee.core.event.NotificationEvent;
  import app.notifee.core.model.NotificationAndroidPressActionModel;
  import app.notifee.core.model.NotificationModel;
@@ -24,7 +24,7 @@ index 7020fca..eec26ee 100644
  
    static void handleNotification(Context context, Intent intent) {
      if (!intent.hasExtra("notification")) {
-@@ -118,6 +127,7 @@ public class NotificationReceiverHandler {
+@@ -123,6 +132,7 @@ public class NotificationReceiverHandler {
      NotificationAndroidPressActionModel pressActionBundle = null;
  
      Bundle extras = new Bundle();
@@ -33,10 +33,10 @@ index 7020fca..eec26ee 100644
      if (pressAction != null) {
        pressActionBundle = NotificationAndroidPressActionModel.fromBundle(pressAction);
 diff --git a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ReceiverService.java b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ReceiverService.java
-index 736e3eb..0e048f8 100644
+index 277d7c3..d5a0097 100644
 --- a/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ReceiverService.java
 +++ b/node_modules/react-native-notify-kit/android/src/main/java/app/notifee/core/ReceiverService.java
-@@ -144,6 +144,7 @@ public class ReceiverService extends Service {
+@@ -181,6 +181,7 @@ public class ReceiverService extends Service {
      NotificationAndroidPressActionModel pressActionBundle = null;
  
      Bundle extras = new Bundle();
@@ -45,7 +45,7 @@ index 736e3eb..0e048f8 100644
      if (pressAction != null) {
        pressActionBundle = NotificationAndroidPressActionModel.fromBundle(pressAction);
 diff --git a/node_modules/react-native-notify-kit/android/src/main/kotlin/io/invertase/notifee/NotifeeEventSubscriber.kt b/node_modules/react-native-notify-kit/android/src/main/kotlin/io/invertase/notifee/NotifeeEventSubscriber.kt
-index f262b43..998a871 100644
+index 90823f0..e220c9c 100644
 --- a/node_modules/react-native-notify-kit/android/src/main/kotlin/io/invertase/notifee/NotifeeEventSubscriber.kt
 +++ b/node_modules/react-native-notify-kit/android/src/main/kotlin/io/invertase/notifee/NotifeeEventSubscriber.kt
 @@ -25,6 +25,7 @@ class NotifeeEventSubscriber : EventListener {
@@ -67,10 +67,10 @@ index f262b43..998a871 100644
                  eventDetailMap.putMap(KEY_DETAIL_PRESS_ACTION, Arguments.fromBundle(pressAction))
              }
 diff --git a/node_modules/react-native-notify-kit/dist/types/NotificationAndroid.d.ts b/node_modules/react-native-notify-kit/dist/types/NotificationAndroid.d.ts
-index 372d6b3..d5d73a3 100644
+index 29d89e8..40e3e46 100644
 --- a/node_modules/react-native-notify-kit/dist/types/NotificationAndroid.d.ts
 +++ b/node_modules/react-native-notify-kit/dist/types/NotificationAndroid.d.ts
-@@ -38,6 +38,10 @@ export interface NotificationAndroid {
+@@ -47,6 +47,10 @@ export interface NotificationAndroid {
       * Defaults to `false`.
       */
      lightUpScreen?: boolean;
@@ -82,10 +82,10 @@ index 372d6b3..d5d73a3 100644
       * Setting this flag will make it so the notification is automatically canceled when the user
       * presses it in the panel.
 diff --git a/node_modules/react-native-notify-kit/dist/validators/validateAndroidNotification.js b/node_modules/react-native-notify-kit/dist/validators/validateAndroidNotification.js
-index 890b0e6..de4248a 100644
+index 97d76c0..94230df 100644
 --- a/node_modules/react-native-notify-kit/dist/validators/validateAndroidNotification.js
 +++ b/node_modules/react-native-notify-kit/dist/validators/validateAndroidNotification.js
-@@ -90,6 +90,15 @@ export default function validateAndroidNotification(android) {
+@@ -116,6 +116,15 @@ export default function validateAndroidNotification(android) {
          }
          out.lightUpScreen = android.lightUpScreen;
      }
@@ -102,10 +102,10 @@ index 890b0e6..de4248a 100644
       * autoCancel
       */
 diff --git a/node_modules/react-native-notify-kit/src/types/NotificationAndroid.ts b/node_modules/react-native-notify-kit/src/types/NotificationAndroid.ts
-index ced6c8f..230cfba 100644
+index 60306be..9c3c5c5 100644
 --- a/node_modules/react-native-notify-kit/src/types/NotificationAndroid.ts
 +++ b/node_modules/react-native-notify-kit/src/types/NotificationAndroid.ts
-@@ -45,6 +45,10 @@ export interface NotificationAndroid {
+@@ -55,6 +55,10 @@ export interface NotificationAndroid {
     * Defaults to `false`.
     */
    lightUpScreen?: boolean;
@@ -117,10 +117,10 @@ index ced6c8f..230cfba 100644
    /**
     * Setting this flag will make it so the notification is automatically canceled when the user
 diff --git a/node_modules/react-native-notify-kit/src/validators/validateAndroidNotification.ts b/node_modules/react-native-notify-kit/src/validators/validateAndroidNotification.ts
-index 8741112..684d665 100644
+index 2d50d00..a643098 100644
 --- a/node_modules/react-native-notify-kit/src/validators/validateAndroidNotification.ts
 +++ b/node_modules/react-native-notify-kit/src/validators/validateAndroidNotification.ts
-@@ -146,6 +146,22 @@ export default function validateAndroidNotification(
+@@ -178,6 +178,22 @@ export default function validateAndroidNotification(
      out.lightUpScreen = android.lightUpScreen;
    }
  

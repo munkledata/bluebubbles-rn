@@ -32,7 +32,7 @@ const EXPECTED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@shopify/flash-list': '2.3.2',
   'drizzle-orm': '0.45.2',
   'react-native-maps': '1.27.2',
-  'react-native-notify-kit': '10.4.8',
+  'react-native-notify-kit': '10.10.0',
 });
 // EAS's own default task for each profile (pinned eas-cli 21.5.0 build tools), plus the ABIs that
 // React Native's from-source included build compiles: it reads only -P, never gradle.properties.
