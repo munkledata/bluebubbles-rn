@@ -199,6 +199,7 @@ At a milestone freeze, run the relevant lint/format checks, then:
 ```sh
 npm run check:architecture
 npm run check:migrations
+npm run typecheck:tests
 npm test -- --runInBand
 ```
 
@@ -213,7 +214,12 @@ evidence. Do not claim host tests prove native behavior.
 
 ### Component tests
 
-- `npm test` runs separate Node and component projects. Use `--selectProjects` when focusing.
+- `npm test` runs separate Node and component projects. Use `--selectProjects` when focusing, and
+  put test paths BEFORE `--selectProjects`; the other order silently runs the whole project.
+- Jest only transpiles tests (`isolatedModules`). Type errors in any test are caught by
+  `npm run typecheck:tests`, not by a test run.
+- Component tests get a 4 s `waitFor` and a 15 s per-test ceiling from the shared setup. Wait for
+  conditions (`test/support/async.ts`) instead of adding real sleeps.
 - React Native Testing Library under React 19 is async: await render and user interactions.
 - Mounted-store mutations that rerender must be wrapped in awaited `act`.
 - Do not assert the global timer count is zero; Expo animation mocks retain timers.
