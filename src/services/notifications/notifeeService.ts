@@ -22,6 +22,7 @@ import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
 } from '../realtime/deliveryCoordinator';
+import { conversationShortcutIdFor, refreshShareShortcuts } from '../shortcuts/shareShortcuts';
 import { isActiveChat } from './activeChat';
 import {
   MESSAGE_HISTORY_IDS_KEY,
@@ -324,6 +325,8 @@ function messageNotificationFromHistory(
     chatGuid?: string;
     messageGuid?: string;
     imessageReactable?: boolean;
+    /** The chat's long-lived shortcut id: Android then shows the notice as a conversation. */
+    shortcutId?: string;
   } = {},
 ): Notification {
   const entries = normalizeMessageNotificationHistory(history.entries);
@@ -347,6 +350,7 @@ function messageNotificationFromHistory(
       smallIcon: 'ic_stat_gator',
       ...(options.onlyAlertOnce ? { onlyAlertOnce: true } : {}),
       ...messageGroupingAndroid(),
+      ...(options.shortcutId ? { shortcutId: options.shortcutId } : {}),
       pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
       style: {
         type: AndroidStyle.MESSAGING,
@@ -938,6 +942,12 @@ async function reconcileDisplayedMessageHistoriesNow(
         mutated = true;
         continue;
       }
+      const chatGuid = reconciled.entries
+        .map((entry) => truthByMessageId.get(entry.messageId)?.chatGuid)
+        .find((guid): guid is string => typeof guid === 'string' && guid.length > 0);
+      // Keep a rebuilt notice a conversation. canReplaceHistory() above proved App Lock off; this
+      // only reads the ids already published, it never publishes from a reconciliation.
+      const shortcutId = chatGuid ? conversationShortcutIdFor(chatGuid) : null;
       await notifee.displayNotification(
         messageNotificationFromHistory(
           { ...current, entries: reconciled.entries },
@@ -945,9 +955,8 @@ async function reconcileDisplayedMessageHistoriesNow(
             onlyAlertOnce: true,
             // Reconciliation intentionally has no current server message GUID. Omitting it keeps
             // a rebuilt/stale history's Love action hidden instead of guessing from its chat.
-            chatGuid: reconciled.entries
-              .map((entry) => truthByMessageId.get(entry.messageId)?.chatGuid)
-              .find((guid): guid is string => typeof guid === 'string' && guid.length > 0),
+            chatGuid,
+            ...(shortcutId ? { shortcutId } : {}),
           },
         ),
       );
@@ -1888,6 +1897,30 @@ function ensureChannel(): Promise<string> {
   return channelReady;
 }
 
+/**
+ * The shortcut id that makes a message notice an Android conversation, or undefined. Only while App
+ * Lock is PROVEN off (a hydrated OFF, or a headless persisted OFF read): shortcuts carry the chat's
+ * name and picture outside the app. A killed-app push has no inbox to have published shortcuts, so
+ * publish the top chats first; the chat that just got this message is already among them.
+ */
+async function conversationShortcutIdForPost(
+  chatGuid: string,
+  context?: EventDeliveryContext,
+): Promise<string | undefined> {
+  const lockProvenOff = await resolveMessageNotificationMutationGuard(context);
+  if (!lockProvenOff()) return undefined;
+  const known = conversationShortcutIdFor(chatGuid);
+  if (known) return known;
+  const lease = capturePresentationContext(context);
+  await refreshShareShortcuts(false, lease);
+  if (!lockProvenOff()) {
+    // App Lock turned on while we published: scrub again rather than leave names behind.
+    await refreshShareShortcuts(true, lease);
+    return undefined;
+  }
+  return conversationShortcutIdFor(chatGuid) ?? undefined;
+}
+
 function deliveryIsCurrent(context?: EventDeliveryContext): boolean {
   return context?.isCurrent() ?? true;
 }
@@ -2270,6 +2303,10 @@ async function postNotificationNow(
   const channelId = customChannel ? perChatId : CHANNEL_NEW_MESSAGE;
   if (!deliveryIsCurrent(context)) return;
   if (isActiveChat(intent.chatGuid)) return;
+  const shortcutId = await conversationShortcutIdForPost(intent.chatGuid, context);
+  if (!deliveryIsCurrent(context)) return;
+  if (await containPrivateNotificationIfLocked(context)) return;
+  if (isActiveChat(intent.chatGuid)) return;
   const notification = messageNotificationFromHistory(
     {
       chatId: route.chatId,
@@ -2289,6 +2326,7 @@ async function postNotificationNow(
           ? intent.messageGuid
           : undefined,
       imessageReactable: intent.imessageReactable === true,
+      ...(shortcutId ? { shortcutId } : {}),
     },
   );
   if (

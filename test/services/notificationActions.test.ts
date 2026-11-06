@@ -54,6 +54,11 @@ import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 
 // notifee: the shared stub isn't a jest.fn, so mock it here to spy on cancelNotification.
+// Conversation shortcut ids come from the native shortcut module; tests choose what it returns.
+jest.mock('@/services/shortcuts/shareShortcuts', () => ({
+  conversationShortcutIdFor: jest.fn(() => null),
+  refreshShareShortcuts: jest.fn(async () => false),
+}));
 jest.mock('react-native-notify-kit', () => ({
   __esModule: true,
   AndroidGroupAlertBehavior: { ALL: 0, SUMMARY: 1, CHILDREN: 2 },

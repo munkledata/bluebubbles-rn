@@ -294,10 +294,18 @@ Plus two correctness items:
   a reason to skip clearing — chips from a pre-redacted session would otherwise stay live on the
   share sheet after a restart.
 - **`reportShortcutUsed`** (called from `useChatNavigator`, the single chat-open funnel) feeds the
-  People Service ranking. This is the _only_ affinity signal available: notifications cannot carry
-  a matching `shortcutId`, because `react-native-notify-kit` builds its Android notification object
-  from scratch and strips unknown keys (`grep -ri shortcut node_modules/react-native-notify-kit/dist`
-  → zero hits).
+  People Service ranking.
+- **Conversation notifications (2026-11, Phase 2 of the upstream-gaps plan).** Message notices now
+  carry their chat's shortcut id as `android.shortcutId`, so Android files them under Conversations
+  and lets the user mark a chat Priority. notify-kit's JS validator used to drop the field; it passes
+  a bounded string through via `patches/react-native-notify-kit+10.4.8.patch` (native already
+  supported it). The id is the same opaque per-account token Direct Share uses, and is added only
+  while App Lock is proven off (a hydrated OFF, or a headless persisted OFF read). A killed-app push
+  publishes the top chats first (`conversationShortcutIdForPost` in `notifeeService.ts`); the chat
+  that just got the message is already among them. Each shortcut's picture is the chat's photo or
+  its `@core/avatar` letter circle, never the Gator logo. Known edge: a chat pushed out of the top
+  10 while its notice is still showing loses its shortcut, and that notice stops being a
+  conversation.
 
 ## Historical regression tests
 
