@@ -75,6 +75,80 @@ const CONNECT_CANDIDATE_DRAIN_FAILURE_MESSAGE =
 const ACCOUNT_CLEANUP_QUARANTINE_FAILURE_MESSAGE =
   'A previous account cleanup operation did not stop in time.';
 const CREDENTIAL_CLEANUP_TIMEOUT_MESSAGE = 'Secure credential retirement did not finish in time.';
+
+/**
+ * The cleanup steps `runForget` accounts for, in the order its rejection reports them: the first
+ * failed step in this list is the error `forget()` rejects with. A step that is not listed here
+ * cannot be marked failed, so the sweep's accounting and its rejection order live in one place.
+ */
+const FORGET_CLEANUP_STEPS = [
+  'durableCredential',
+  'credentialUpgradeRetirement',
+  'candidateDrain',
+  'inMemoryCleanup',
+  'fcmTokenRetirement',
+  'realtimeDrain',
+  'fcmKeyRetirement',
+  'uploadDrain',
+  'syncDrain',
+  'downloadDrain',
+  'notificationCleanup',
+  'databaseCleanup',
+  'mediaCleanup',
+  'shortcutCleanup',
+  'logCleanup',
+] as const;
+type ForgetCleanupStep = (typeof FORGET_CLEANUP_STEPS)[number];
+/** The message a step reports when it has no error of its own (see {@link ForgetCleanupLedger.fail}). */
+const FORGET_CLEANUP_FAILURE_MESSAGES: Readonly<Record<ForgetCleanupStep, string>> = {
+  durableCredential: CREDENTIAL_CLEANUP_TIMEOUT_MESSAGE,
+  credentialUpgradeRetirement: CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE,
+  candidateDrain: CONNECT_CANDIDATE_DRAIN_FAILURE_MESSAGE,
+  inMemoryCleanup: IN_MEMORY_CLEANUP_FAILURE_MESSAGE,
+  fcmTokenRetirement: FCM_TOKEN_RETIREMENT_FAILURE_MESSAGE,
+  realtimeDrain: REALTIME_DRAIN_FAILURE_MESSAGE,
+  fcmKeyRetirement: FCM_KEY_RETIREMENT_FAILURE_MESSAGE,
+  uploadDrain: UPLOAD_DRAIN_FAILURE_MESSAGE,
+  syncDrain: SYNC_DRAIN_FAILURE_MESSAGE,
+  downloadDrain: DOWNLOAD_DRAIN_FAILURE_MESSAGE,
+  notificationCleanup: NOTIFICATION_CLEANUP_FAILURE_MESSAGE,
+  databaseCleanup: DATABASE_CLEANUP_FAILURE_MESSAGE,
+  mediaCleanup: MEDIA_CLEANUP_FAILURE_MESSAGE,
+  shortcutCleanup: SHORTCUT_CLEANUP_FAILURE_MESSAGE,
+  logCleanup: LOG_CLEANUP_FAILURE_MESSAGE,
+};
+
+/** Which cleanup steps of one `runForget` sweep failed, and which failure the sweep reports. */
+class ForgetCleanupLedger {
+  private readonly failures = new Map<ForgetCleanupStep, Error>();
+
+  /**
+   * Marks `step` failed: with `error` when the step produced one, otherwise with the step's
+   * message from {@link FORGET_CLEANUP_FAILURE_MESSAGES}. A later call for the same step replaces
+   * the earlier record.
+   */
+  fail(step: ForgetCleanupStep, error?: Error): void {
+    this.failures.set(step, error ?? new Error(FORGET_CLEANUP_FAILURE_MESSAGES[step]));
+  }
+
+  failed(step: ForgetCleanupStep): boolean {
+    return this.failures.has(step);
+  }
+
+  /** The failure of the earliest failed step in {@link FORGET_CLEANUP_STEPS} order, or null. */
+  firstFailure(): Error | null {
+    for (const step of FORGET_CLEANUP_STEPS) {
+      const failure = this.failures.get(step);
+      if (failure) return failure;
+    }
+    return null;
+  }
+
+  /** True when `step` failed and no other step did. */
+  isOnlyFailure(step: ForgetCleanupStep): boolean {
+    return this.failures.size === 1 && this.failures.has(step);
+  }
+}
 /** The server step of a scoped-credential retirement failed; none of its local steps ran yet. */
 class ScopedCredentialServerRevocationError extends Error {
   constructor(readonly serverError: unknown) {
@@ -383,6 +457,9 @@ async function runForget(
   // bootstrap checks it again before publishing Connected/starting account work.
   lifecycle.connectionAttemptEpoch += 1;
   const forgetEpoch = lifecycle.connectionAttemptEpoch;
+  // Every cleanup step below records its outcome here and the sweep never stops early; the first
+  // failed step in FORGET_CLEANUP_STEPS order is what this run rejects with.
+  const ledger = new ForgetCleanupLedger();
   // Capture this synchronously with revocation. A candidate that has not reached its 45-second
   // timeout can still have an already-issued SecureStore write in native code; clearing only its
   // JS authorization flag does not cancel that write.
@@ -465,9 +542,8 @@ async function runForget(
   } catch {
     failedInMemorySurfaces.push('realtime-runtime');
   }
-  const inMemoryCleanupFailure =
-    failedInMemorySurfaces.length > 0 ? new Error(IN_MEMORY_CLEANUP_FAILURE_MESSAGE) : null;
-  if (inMemoryCleanupFailure) {
+  if (failedInMemorySurfaces.length > 0) {
+    ledger.fail('inMemoryCleanup');
     try {
       logger.warn('[forget] in-memory account cleanup steps failed', {
         surfaces: failedInMemorySurfaces,
@@ -504,14 +580,10 @@ async function runForget(
   const candidateDrained =
     !candidateQuarantine ||
     (await withDeadline(candidateQuarantine, FOREGROUND_DELIVERY_CLEANUP_DEADLINE_MS));
-  const candidateDrainFailure = candidateDrained
-    ? null
-    : new Error(CONNECT_CANDIDATE_DRAIN_FAILURE_MESSAGE);
   if (!candidateDrained) {
+    ledger.fail('candidateDrain');
     logger.warn('[forget] timed-out connection candidate is still settling');
   }
-
-  let credentialUpgradeRetirementFailure: Error | null = null;
 
   // SecureStore has no multi-key transaction. When the independent marker succeeded, this entire
   // monotonic retirement chain may be bounded: a late delete cannot reactivate A, and quarantine
@@ -520,7 +592,6 @@ async function runForget(
   // Preserve the tuple until the post-drain snapshot proves whether it is server-revocation
   // custody. The `forgotten`/independent marker makes it inactive immediately.
   const credentialRetirement = retireDurableCredentials(independentlyRevoked, true);
-  let durableCredentialFailure: Error | null;
   if (independentlyRevoked) {
     const retirement = await settleWithinDeadline(
       credentialRetirement,
@@ -528,9 +599,9 @@ async function runForget(
       () => quarantineAccountCleanup(credentialRetirement),
     );
     if (retirement.kind === 'value') {
-      durableCredentialFailure = retirement.value;
+      if (retirement.value) ledger.fail('durableCredential', retirement.value);
     } else {
-      durableCredentialFailure = new Error(CREDENTIAL_CLEANUP_TIMEOUT_MESSAGE);
+      ledger.fail('durableCredential');
       if (retirement.kind === 'timeout') {
         logger.warn('[forget] secure credential retirement timed out');
       } else {
@@ -538,7 +609,8 @@ async function runForget(
       }
     }
   } else {
-    durableCredentialFailure = await credentialRetirement;
+    const failure = await credentialRetirement;
+    if (failure) ledger.fail('durableCredential', failure);
   }
 
   // Firebase registration belongs to the OLD server even though the token itself lives in the
@@ -547,7 +619,6 @@ async function runForget(
   // after tracked registration work drains. Do this after both durable revocation gates are closed,
   // and treat native/import failure as incomplete account cleanup: the local wipe continues, but
   // connect B cannot validate until a retry succeeds.
-  let fcmTokenRetirementFailure: Error | null = null;
   if (FCM_ENABLED) {
     const retirement = (async (): Promise<void> => {
       const { deleteToken, getMessaging } = await import('@react-native-firebase/messaging');
@@ -557,7 +628,7 @@ async function runForget(
       quarantineAccountCleanup(retirement),
     );
     if (result.kind !== 'value') {
-      fcmTokenRetirementFailure = new Error(FCM_TOKEN_RETIREMENT_FAILURE_MESSAGE);
+      ledger.fail('fcmTokenRetirement');
       if (result.kind === 'timeout') {
         logger.warn('[forget] previous FCM token retirement timed out');
       } else {
@@ -566,8 +637,8 @@ async function runForget(
     }
   }
   const realtimeDrained = await withDeadline(realtimeIdle, REALTIME_DRAIN_DEADLINE_MS);
-  const realtimeDrainFailure = realtimeDrained ? null : new Error(REALTIME_DRAIN_FAILURE_MESSAGE);
   if (!realtimeDrained) {
+    ledger.fail('realtimeDrain');
     // Admission/generation was invalidated synchronously, but the tracked set now includes whole
     // account actions and scheduled sends that can carry network/DB work. Still perform the sweep;
     // do not authorize B until a later retry proves every old slot idle and wipes once more.
@@ -599,7 +670,7 @@ async function runForget(
         () => quarantineAccountCleanup(retirement),
       );
     } else {
-      credentialUpgradeRetirementFailure = new Error(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
+      ledger.fail('credentialUpgradeRetirement');
       logger.warn('[forget] scoped credential snapshot was unavailable', {
         reason: snapshotResult.kind,
         ...(snapshotResult.kind === 'error'
@@ -648,21 +719,20 @@ async function runForget(
         ),
       );
     quarantineAccountCleanup(lateRetirement);
-    credentialUpgradeRetirementFailure = new Error(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
+    ledger.fail('credentialUpgradeRetirement');
   }
 
   // Registration owns SecureStore writes and is part of the realtime drain. Retire its key only
   // AFTER that drain succeeds, so a suspended pending/active write cannot resurrect account A's
   // key behind the keyless revoked tombstone. On timeout, skip the mutation; the failed drain
   // blocks B and a later full cleanup retries after all old registration slots have settled.
-  let fcmKeyRetirementFailure: Error | null = null;
   if (realtimeDrained) {
     const retirement = retireFcmDeviceEncryptionState(vault);
     const result = await settleWithinDeadline(retirement, FCM_KEY_RETIREMENT_DEADLINE_MS, () =>
       quarantineAccountCleanup(retirement),
     );
     if (result.kind !== 'value') {
-      fcmKeyRetirementFailure = new Error(FCM_KEY_RETIREMENT_FAILURE_MESSAGE);
+      ledger.fail('fcmKeyRetirement');
       if (result.kind === 'timeout') {
         logger.warn('[forget] push encryption-key retirement timed out');
       } else {
@@ -681,15 +751,15 @@ async function runForget(
   } catch (error) {
     logger.warn('[forget] upload cancellation failed', error);
   }
-  const uploadDrainFailure = uploadsDrained ? null : new Error(UPLOAD_DRAIN_FAILURE_MESSAGE);
   if (!uploadsDrained) {
+    ledger.fail('uploadDrain');
     logger.warn('[forget] upload drain timed out — next connection remains blocked');
   }
   // …then let that dying run actually finish before we delete anything. Bounded: if a request is
   // wedged we still owe the user the wipe, and by now it can't fetch anything new anyway.
   const syncDrained = await withDeadline(awaitSyncIdle(), SYNC_DRAIN_DEADLINE_MS);
-  const syncDrainFailure = syncDrained ? null : new Error(SYNC_DRAIN_FAILURE_MESSAGE);
   if (!syncDrained) {
+    ledger.fail('syncDrain');
     // HttpClient snapshots A's transport for an in-flight request. Until every sync page commit is
     // generation-guarded, a late response may repopulate A rows after this sweep; keep B blocked so
     // a later cleanup can drain that run and wipe again.
@@ -702,8 +772,8 @@ async function runForget(
   } catch (error) {
     logger.warn('[forget] bounded-download cancellation failed', error);
   }
-  const downloadDrainFailure = downloadsDrained ? null : new Error(DOWNLOAD_DRAIN_FAILURE_MESSAGE);
   if (!downloadsDrained) {
+    ledger.fail('downloadDrain');
     logger.warn('[forget] bounded-download drain timed out — next connection remains blocked');
   }
   if (!(await withDeadline(errorReportsIdle, ERROR_REPORT_DRAIN_DEADLINE_MS))) {
@@ -726,7 +796,6 @@ async function runForget(
   // unavailable. Ahead of the DB block for the same reason, with its own lazy import (notify-kit's
   // native bridge is deliberately kept out of this module's load graph) and its own try/catch. A
   // failure cannot skip the remaining cleanup, but it does keep the next account blocked.
-  let notificationCleanupFailure: Error | null = null;
   try {
     const { cancelAllNotifications } = await import('./notifications/notifeeService');
     // Keep the queue ordering: if an older notification mutation is still finishing, this cleanup
@@ -748,10 +817,10 @@ async function runForget(
       );
     }
     if (!notificationCleanupCompleted || notificationCleanupRejected) {
-      notificationCleanupFailure = new Error(NOTIFICATION_CLEANUP_FAILURE_MESSAGE);
+      ledger.fail('notificationCleanup');
     }
   } catch (e) {
-    notificationCleanupFailure = new Error(NOTIFICATION_CLEANUP_FAILURE_MESSAGE);
+    ledger.fail('notificationCleanup');
     logger.warn('[forget] could not clear displayed notifications', e);
   }
 
@@ -768,12 +837,16 @@ async function runForget(
     DATABASE_CLEANUP_DEADLINE_MS,
     () => quarantineAccountCleanup(databaseCleanup),
   );
-  let databaseCleanupFailure: Error | null;
   if (databaseResult.kind === 'value') {
-    databaseCleanupFailure = databaseResult.value.databaseFailure;
-    notificationCleanupFailure ??= databaseResult.value.notificationFailure;
+    const { databaseFailure, notificationFailure } = databaseResult.value;
+    if (databaseFailure) ledger.fail('databaseCleanup', databaseFailure);
+    // The tray sweep above keeps its own failure; only an otherwise clean notification step adopts
+    // the one the DB cleanup reports.
+    if (notificationFailure && !ledger.failed('notificationCleanup')) {
+      ledger.fail('notificationCleanup', notificationFailure);
+    }
   } else {
-    databaseCleanupFailure = new Error(DATABASE_CLEANUP_FAILURE_MESSAGE);
+    ledger.fail('databaseCleanup');
     if (databaseResult.kind === 'timeout') {
       logger.warn('[forget] local cache wipe timed out; late work remains quarantined');
     } else {
@@ -781,19 +854,18 @@ async function runForget(
     }
   }
   const mediaCleared = await deleteCachedMedia();
-  const mediaCleanupFailure = mediaCleared ? null : new Error(MEDIA_CLEANUP_FAILURE_MESSAGE);
+  if (!mediaCleared) ledger.fail('mediaCleanup');
   // Confirm both legacy and current Direct Share cleanup before allowing account B. The native
   // operation also rotates the opaque-id namespace so a retained account-A target cannot resolve
   // under B. Lazy import keeps the native bridge off the bootstrap graph until teardown.
-  let shortcutCleanupFailure: Error | null = null;
   try {
     const { clearAllShareShortcuts } = await import('./shortcuts/shareShortcuts');
     if (!clearAllShareShortcuts()) {
-      shortcutCleanupFailure = new Error(SHORTCUT_CLEANUP_FAILURE_MESSAGE);
+      ledger.fail('shortcutCleanup');
       logger.warn('[forget] could not confirm Direct Share shortcut cleanup');
     }
   } catch (e) {
-    shortcutCleanupFailure = new Error(SHORTCUT_CLEANUP_FAILURE_MESSAGE);
+    ledger.fail('shortcutCleanup');
     logger.warn('[forget] could not clear Direct Share shortcuts', e);
   }
 
@@ -804,7 +876,7 @@ async function runForget(
   if (scopedCredentialRetirement) {
     const result = await scopedCredentialRetirement;
     if (result.kind !== 'value') {
-      credentialUpgradeRetirementFailure = new Error(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
+      ledger.fail('credentialUpgradeRetirement');
       // Its own error type means the server step failed before any local custody step ran.
       onlyServerStepUnconfirmed =
         result.kind === 'error' && result.error instanceof ScopedCredentialServerRevocationError;
@@ -841,30 +913,12 @@ async function runForget(
     });
   const logClearCompleted = await withDeadline(persistentLogClear, LOG_CLEAR_DEADLINE_MS);
   memoryLogSink.clear();
-  const logCleanupFailure =
-    logClearCompleted && persistedLogsCleared ? null : new Error(LOG_CLEANUP_FAILURE_MESSAGE);
+  if (!(logClearCompleted && persistedLogsCleared)) ledger.fail('logCleanup');
 
   // The caller must not mistake a completed local wipe for a fully retired account. Marker and
   // tombstone stay closed; connect() sees this rejection, reports it, and retries the whole
   // idempotent cleanup before validating B. Any development log happens only AFTER A's buffers reset.
-  const cleanupFailures = [
-    durableCredentialFailure,
-    credentialUpgradeRetirementFailure,
-    candidateDrainFailure,
-    inMemoryCleanupFailure,
-    fcmTokenRetirementFailure,
-    realtimeDrainFailure,
-    fcmKeyRetirementFailure,
-    uploadDrainFailure,
-    syncDrainFailure,
-    downloadDrainFailure,
-    notificationCleanupFailure,
-    databaseCleanupFailure,
-    mediaCleanupFailure,
-    shortcutCleanupFailure,
-    logCleanupFailure,
-  ];
-  const cleanupFailure = cleanupFailures.find((failure) => failure instanceof Error);
+  const cleanupFailure = ledger.firstFailure();
   if (cleanupFailure) {
     logger.warn('[forget] account cleanup remains incomplete; next connection will retry', {
       reason: cleanupFailure.message,
@@ -876,9 +930,7 @@ async function runForget(
     // vault itself reads `forgotten` (a failed tombstone write leaves only the marker file).
     const onlyServerRevocationPending =
       onlyServerStepUnconfirmed &&
-      cleanupFailures.every(
-        (failure) => !(failure instanceof Error) || failure === credentialUpgradeRetirementFailure,
-      ) &&
+      ledger.isOnlyFailure('credentialUpgradeRetirement') &&
       (await sessionTombstoneConfirmed());
     throw onlyServerRevocationPending ? new ServerRevocationPendingError() : cleanupFailure;
   }
