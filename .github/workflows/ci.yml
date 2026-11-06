@@ -87,6 +87,10 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Jest only transpiles tests (isolatedModules), so this is what fails a test's type error.
+      - name: Typecheck tests
+        run: npm run typecheck:tests
+
       - name: Migration allocation guard
         run: npm run check:migrations
 
