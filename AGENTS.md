@@ -11,23 +11,16 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 
 ## Lean working mode
 
-- Work in verified milestones. A homogeneous proof-only batch may cover roughly 40–60 audit records;
-  keep concurrency, native-effect, crypto, migration, or lifecycle changes closer to 20–30. Split
-  implementation into focused steps, but update inventory/docs and run the full Jest gate once at
-  the milestone end.
-- Use focused tests, typecheck, and the relevant scanner/guard while iterating. Run broad architecture,
+- Work in verified milestones; keep concurrency, native-effect, crypto, migration, or lifecycle
+  changes to 20–30 records per batch. Split implementation into focused steps, but update docs and
+  run the full Jest gate once at the milestone end.
+- Use focused tests, typecheck, and the relevant guard while iterating. Run broad architecture,
   migration, and full functional gates once after the candidate is frozen.
-- Format every touched source/test file before the final scanner pass or inventory edit. Never freeze
-  callback-fingerprint ids and then run a formatter that can rekey them.
-- Run `npm run check:db-writes:fast` for ordinary DB-write milestones. Run
-  `npm run check:db-writes:full` whenever scanner algorithms or certificate implementations change,
-  when the incoming-ingress proof changes, and when closing parent `DB-02A`; the full command includes
-  the intentionally slow adversarial ingress matrix. A reviewed path/ID data-only addition uses the
-  fast scanner plus an exact-set test and does not require the unrelated ingress mutation sweep.
-- Use one implementer by default. Add one independent reviewer only for concurrency, scanner,
-  migration, crypto, native, or other high-risk changes.
+- Format every touched source/test file before the final gate run.
+- Use one implementer by default. Add one independent reviewer only for concurrency, migration,
+  crypto, native, or other high-risk changes.
 - Do not produce per-file hash manifests, repeated historical narratives, or full raw command output
-  unless reconciliation or a failure investigation requires them.
+  unless a failure investigation requires them.
 - Preserve the dirty worktree and unrelated user changes.
 - On a real failure, show the exact error and explain it before correcting it. After two failed
   correction attempts, stop and rethink the diagnosis.
@@ -89,8 +82,10 @@ in the relevant document under `docs/`, then link to it here if future agents mu
   waits forever and blocks every later write.
 - Many public repository helpers open their own transaction. Inspect the implementation before
   composing writers; do not infer safety from a harmless-looking call name.
-- Run `node scripts/check-db-writes.mjs --report`. Every `nested-coordinator` finding is a defect,
-  never an allowlist candidate. The report exits non-zero whenever `--check` would fail.
+- Ownership is enforced at compile time: `getDatabase()` returns a `ReadDb`, only a transaction
+  callback holds the `WriteDb`, and nesting is a type error. `npm run lint` and
+  `npm run check:architecture` catch the shapes types cannot (a detached `void withDbTransaction`,
+  a handle fetched inside a write holder, a `$client` escape, raw SQL outside an owner).
 - A write issued outside an owner while any transaction is open can silently join the other
   transaction. Put every dependent DB write inside the same short owner callback.
 - Transaction callbacks must be DB-only and bounded. Do not hold the mutex across network, native
@@ -123,8 +118,8 @@ in the relevant document under `docs/`, then link to it here if future agents mu
   callback's raw `db` for later use.
 - Join registration is synchronous. The owner closes joins when its callback settles, waits for all
   registered tasks, and rolls back on task failure or a late-join attempt.
-- The scanner recognizes only the exact imported, inline, awaited/returned join. Named callbacks,
-  dynamic dispatch, lookalikes, and unadopted promises fail closed.
+- Keep the join exactly as an imported, inline, awaited or returned `runInTransactionContext`
+  call; named callbacks, dynamic dispatch and unadopted promises defeat the type and lint checks.
 
 ### op-sqlite/Drizzle behavior
 
@@ -209,7 +204,6 @@ During a focused step, run the smallest relevant test suite plus:
 
 ```sh
 npm run typecheck
-node scripts/check-db-writes.mjs --report
 ```
 
 At a milestone freeze, run the relevant lint/format checks, then:
@@ -219,12 +213,6 @@ npm run check:architecture
 npm run check:migrations
 npm run typecheck:tests
 npm test -- --runInBand
-```
-
-For inventory work, also require:
-
-```sh
-node scripts/check-db-writes.mjs --reconcile
 ```
 
 The final report must state the actual suite/test results and any remaining device-only or unresolved

@@ -18,7 +18,6 @@ import {
   scheduledCallSiteKey,
   EXPECTED_SCHEDULED_CALL_SITES,
 } from './check-scheduled-recovery.mjs';
-import { scanDbWrites } from './check-db-writes.mjs';
 
 const schedulePath = 'src/services/send/scheduleService.ts';
 const sendPath = 'src/services/send/sendService.ts';
@@ -1233,25 +1232,4 @@ test('the reviewed call-site set fails on a missing owner and on an unreviewed c
     scheduledCallSiteErrors(extra),
     /unreviewed scheduled\/outgoing helper use: src\/services\/send\/newService\.ts\|sendNew\.<callback>/,
   );
-});
-
-// Parity with the DB-write scanner while it still exists: the import-binding reader must report the
-// same production uses of the six helpers (callback fingerprints differ by construction and are
-// wildcarded). Delete this test together with the scanner.
-test('the import-binding reader matches the DB-write scanner for the six scheduled/outgoing helpers', () => {
-  const helpers = new Set(EXPECTED_SCHEDULED_CALL_SITES.map((key) => key.split('|')[3]));
-  const fromScanner = new Set(
-    scanDbWrites({ root: process.cwd() })
-      .filter(
-        (finding) =>
-          typeof finding.target === 'string' &&
-          helpers.has(finding.target.split('#')[1]) &&
-          /^mutator-(?:call|reference)$/.test(finding.operation) &&
-          !finding.path.startsWith('test/'),
-      )
-      .map(scheduledCallSiteKey),
-  );
-  const fromReader = new Set(scheduledCallFindings(process.cwd()).map(scheduledCallSiteKey));
-  assert.deepEqual([...fromReader].sort(), [...fromScanner].sort());
-  assert.ok(fromReader.size >= 11);
 });

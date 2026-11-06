@@ -234,7 +234,6 @@ node scripts/check-workflow-security.mjs
 npm run check:toolchain
 npm ci
 npm run check:architecture
-npm run check:db-writes:full
 npm run check:secret-hygiene
 npm run typecheck
 npm run lint -- --max-warnings=0

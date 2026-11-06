@@ -8,6 +8,11 @@ simple version would drop real production-safety guarantees, so the owner paused
 its own planned project. These notes record what the survey found so the next attempt starts from
 facts. Line numbers refer to `scripts/check-db-writes.mjs` at commit `1a6a3c6` and will drift.
 
+**2026-11-06:** the DB-write scanner was retired, and with it the call-by-call harness proofs it carried.
+The harness move now rests on the doorway's unit-tested refusals, the relaunch and runtime-concurrency
+suites' `gator.db` open-name assertions, and the file-name confinement in `check-core-boundaries.mjs`.
+The scanner line numbers below are historical.
+
 ## Stage 1 (2026-10-18): PERF fixtures behind a doorway
 
 The PERF-01 cold fixture and the PERF-02 query benchmark moved unchanged from `database.ts` to

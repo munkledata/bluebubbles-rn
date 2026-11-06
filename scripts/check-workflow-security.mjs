@@ -16,9 +16,6 @@ const TOOLCHAIN_GUARD_NAME = 'Verify toolchain pins';
 const TOOLCHAIN_GUARD_COMMAND = 'node scripts/check-toolchain.mjs';
 const INSTALL_NAME = 'Install dependencies';
 const INSTALL_COMMAND = 'npm ci';
-const DATABASE_WRITE_APPROVAL_NAME = 'Database write approval guard';
-const FAST_DATABASE_WRITE_TEST_NAME = 'Fast database-write scanner suite';
-const FAST_DATABASE_WRITE_TEST_COMMAND = 'npm run check:db-writes:fast';
 const DEPENDENCY_AUDIT_NAME = 'Dependency audit (reviewed exceptions only)';
 const DEPENDENCY_AUDIT_LINES = [
   'run: |',
@@ -477,54 +474,6 @@ function requireDependencyAuditGate(checkJob, errors) {
   }
 }
 
-function requireDatabaseWriteApprovalGuard(checkJob, installIndex, errors) {
-  const name = DATABASE_WRITE_APPROVAL_NAME;
-  const command = 'node scripts/check-db-writes.mjs --check';
-  const step = extractNamedStep(checkJob, name);
-  if (!step) {
-    errors.push(`CI check job is missing the "${name}" step.`);
-    return;
-  }
-  const reviewedLines = new Set([`      - name: ${name}`, `        run: ${command}`]);
-  const liveLines = linesOf(step).filter(
-    (line) => line.trim() && !line.trimStart().startsWith('#'),
-  );
-  if (liveLines.some((line) => !reviewedLines.has(line))) {
-    errors.push(`"${name}" may contain only its reviewed name and exact run command.`);
-  }
-  if (liveLines.filter((line) => line === `        run: ${command}`).length !== 1) {
-    errors.push(`"${name}" must run exactly: ${command}`);
-  }
-  if (checkJob.indexOf(`      - name: ${name}`) < installIndex) {
-    errors.push(`"${name}" must run after npm ci installs the scanner dependencies.`);
-  }
-  if (/^\s*if\s*:/m.test(step)) {
-    errors.push(`"${name}" must run unconditionally.`);
-  }
-  if (/^\s*continue-on-error\s*:/m.test(step) || /\|\|\s*true/.test(step)) {
-    errors.push(`"${name}" must fail the CI job when an unapproved write is found.`);
-  }
-}
-
-function requireFastDatabaseWriteTests(checkJob, errors) {
-  requireExactBlockingStep(
-    checkJob,
-    'CI check job',
-    FAST_DATABASE_WRITE_TEST_NAME,
-    FAST_DATABASE_WRITE_TEST_COMMAND,
-    errors,
-  );
-
-  const stepHeaders = topLevelStepHeaders(checkJob);
-  const approvalIndex = stepHeaders.indexOf(`- name: ${DATABASE_WRITE_APPROVAL_NAME}`);
-  const fastTestIndex = stepHeaders.indexOf(`- name: ${FAST_DATABASE_WRITE_TEST_NAME}`);
-  if (approvalIndex < 0 || fastTestIndex !== approvalIndex + 1) {
-    errors.push(
-      `"${FAST_DATABASE_WRITE_TEST_NAME}" must immediately follow the exact database write approval guard.`,
-    );
-  }
-}
-
 function requireUiCoverageGate(checkJob, installIndex, errors) {
   const name = 'Unit tests and UI coverage gate';
   const command = 'npm run coverage:ui -- --ci --runInBand';
@@ -598,8 +547,6 @@ function validateCheckJob(workflow, errors) {
   });
 
   const installIndex = check.source.indexOf('run: npm ci');
-  requireDatabaseWriteApprovalGuard(check.source, installIndex, errors);
-  requireFastDatabaseWriteTests(check.source, errors);
   requireUiCoverageGate(check.source, installIndex, errors);
   requireDependencyAuditGate(check.source, errors);
 }
@@ -1090,7 +1037,7 @@ if (invokedDirectly) {
   try {
     const result = runWorkflowSecurityCheck();
     console.log(
-      `Workflow security guard passed: ${result.actionCount} action uses are immutable; database-write approval and scanner tests, UI coverage, audits, dependency review, local native compilation/tests, Android release verification, and scheduled Android DB lane configuration are enforced.`,
+      `Workflow security guard passed: ${result.actionCount} action uses are immutable; UI coverage, audits, dependency review, local native compilation/tests, Android release verification, and scheduled Android DB lane configuration are enforced.`,
     );
   } catch (error) {
     console.error(
