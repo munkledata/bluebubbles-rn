@@ -5,18 +5,18 @@
     "exactAab": false
   },
   "inputs": {
-    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
+    "dependencyLockSha256": "692093678ae2ee0a237d80ca66eee208192c3e69cb2029f105c2ba94cc238fd3",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "8b71ef2c2c8b2cd4b120753c70a8db5312bd9ef63c010fd3d87f2b37adc9b630"
   },
   "summary": {
-    "productionPackageRecords": 1020,
-    "uniquePackageVersions": 926,
+    "productionPackageRecords": 1019,
+    "uniquePackageVersions": 925,
     "assetFiles": 13,
     "pendingAssetProvenance": 13,
     "localComponents": 15,
-    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
+    "dependencyLockSha256": "692093678ae2ee0a237d80ca66eee208192c3e69cb2029f105c2ba94cc238fd3",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },
@@ -9747,23 +9747,6 @@
       "issues": []
     },
     {
-      "installPath": "node_modules/jail-monkey",
-      "name": "jail-monkey",
-      "version": "3.0.0",
-      "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/jail-monkey/-/jail-monkey-3.0.0.tgz",
-      "integrity": "sha512-EB382zJRHzElFPEucuafU3cxPJn5U8QgaQHzY09J8ly1eElG4EvNBEWu+0okS7Ro5Jvc8B/7lB+6mNCKjWjDGg==",
-      "optional": false,
-      "legalDocuments": [
-        {
-          "path": "LICENSE",
-          "bytes": 1069,
-          "sha256": "7429a2d7f123d7fbd893b40065c757f669b5b5117eacd90beb6a145a5cb4dccd"
-        }
-      ],
-      "issues": []
-    },
-    {
       "installPath": "node_modules/jest",
       "name": "jest",
       "version": "29.7.0",
@@ -18597,14 +18580,6 @@
       "text": "The MIT License (MIT)\n\nCopyright (c) 2014-present Guillermo Rauch and Socket.IO contributors\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in\nall copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\nTHE SOFTWARE.",
       "sources": [
         "node_modules/socket.io-client/LICENSE"
-      ]
-    },
-    {
-      "sha256": "7429a2d7f123d7fbd893b40065c757f669b5b5117eacd90beb6a145a5cb4dccd",
-      "bytes": 1069,
-      "text": "MIT License\n\nCopyright (c) 2017 Gant Laborde\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
-      "sources": [
-        "node_modules/jail-monkey/LICENSE"
       ]
     },
     {

@@ -2,9 +2,9 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Dependency lock SHA-256 (package-lock.json without the app's own version): `979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd`
-- Production package records: 1020
-- Unique package versions: 926
+- Dependency lock SHA-256 (package-lock.json without the app's own version): `692093678ae2ee0a237d80ca66eee208192c3e69cb2029f105c2ba94cc238fd3`
+- Production package records: 1019
+- Unique package versions: 925
 - Source assets: 13
 - Pending asset provenance: 13
 - Local components: 15
@@ -641,7 +641,6 @@
 | `istanbul-lib-report` | `3.0.1` | BSD-3-Clause | no | `e09f9b52c6ce5c17ba8103cd0cbf446c33b5448b0c1d01d711b36a1f15a501ba` | none |
 | `istanbul-lib-source-maps` | `4.0.1` | BSD-3-Clause | no | `b661867c1d66a1b71ee3a6109159874334cd5c182a80d1bcc7353b5a4c6823c6` | none |
 | `istanbul-reports` | `3.2.0` | BSD-3-Clause | no | `e09f9b52c6ce5c17ba8103cd0cbf446c33b5448b0c1d01d711b36a1f15a501ba` | none |
-| `jail-monkey` | `3.0.0` | MIT | no | `7429a2d7f123d7fbd893b40065c757f669b5b5117eacd90beb6a145a5cb4dccd` | none |
 | `jest` | `29.7.0` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
 | `jest-changed-files` | `29.7.0` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
 | `jest-circus` | `29.7.0` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
@@ -1237,7 +1236,6 @@
 | `7252e9bc5eba33ff2b205f12c581fde208fa92c94ae8dac36d8167b648ad622c` | 1083 | 1 |
 | `736835b6c374cbfb66ccfbfc4f8819bcbeae3cfd5f5e5507f25f4caeabf9540e` | 1082 | 1 |
 | `73cb68c437d59e066f9386ef97be57298df4db119fdbd7d7150817c6dbd9f189` | 1116 | 1 |
-| `7429a2d7f123d7fbd893b40065c757f669b5b5117eacd90beb6a145a5cb4dccd` | 1069 | 1 |
 | `74773cfa34cf18a6652f84f4f1912ceb88f35e90f15d27a2f8d0cde278c46ce9` | 2249 | 1 |
 | `74d8054d56d522bdaa340d3d71130cb204997d523a5292c85ac1264dd77c8d06` | 1089 | 1 |
 | `75070206e4ee2a749be52444cecc05101ca8d314c9d6d335ff914046cbf086a0` | 1083 | 1 |

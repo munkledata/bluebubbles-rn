@@ -110,7 +110,7 @@ describe('boot state machine', () => {
   it.each(CORE_BOOT_STAGES)('retries a retryable %s failure as a fresh run', (stage) => {
     let state: BootState = loadingAt(stage);
     const issue: BootIssue = {
-      stage: 'device-integrity',
+      stage: 'shortcut-cleanup',
       level: 'diagnostic',
       code: 'check-failed',
     };
@@ -197,7 +197,7 @@ describe('boot state machine', () => {
 
   it('retains same-run issues through ready, deduplicates them, and accepts optional ready issues', () => {
     const degraded: BootIssue = {
-      stage: 'device-integrity',
+      stage: 'shortcut-cleanup',
       level: 'diagnostic',
       code: 'native-module-unavailable',
     };
@@ -325,7 +325,8 @@ describe('boot state machine', () => {
       issue: { stage: 'realtime', level: 'diagnostic', code: 'socket-delayed' },
     });
     expect(anotherStage.issues).toHaveLength(2);
-    expect(CORE_BOOT_STAGES.length + OPTIONAL_BOOT_STAGES.length).toBe(16);
+    // 5 core + 10 optional stages ('device-integrity' left with jail-monkey on 2026-11-06).
+    expect(CORE_BOOT_STAGES.length + OPTIONAL_BOOT_STAGES.length).toBe(15);
   });
 
   it('invalidates an active run before reset so its run id cannot be reused', () => {

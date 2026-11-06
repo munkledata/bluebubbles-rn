@@ -247,7 +247,6 @@ jest.mock('@/services/logging/fileLogSink', () => ({
 }));
 jest.mock('@/services/connection', () => ({ connectToServer }));
 jest.mock('@/services/lock', () => ({ hydrateLock: jest.fn() }));
-jest.mock('@native/deviceIntegrity', () => ({ checkDeviceIntegrity: jest.fn() }));
 jest.mock('@state/hydrateStores', () => ({ areCriticalSettingsHydrated, hydrateAllStores }));
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
   clearShareShortcuts,
