@@ -5501,14 +5501,14 @@ fullOnlyTest(
       {
         label: 'runtime Drizzle client receives the production singleton',
         path: 'src/db/database.ts',
-        before: 'const database = drizzle(drizzleAdapter(activeHandle)) as unknown as AppDatabase;',
-        after: 'const database = drizzle(drizzleAdapter(rawDb!)) as unknown as AppDatabase;',
+        before: 'const database = drizzle(drizzleAdapter(activeHandle)) as unknown as TestDb;',
+        after: 'const database = drizzle(drizzleAdapter(rawDb!)) as unknown as TestDb;',
       },
       {
         label: 'runtime Drizzle client bypasses the reviewed adapter',
         path: 'src/db/database.ts',
-        before: 'const database = drizzle(drizzleAdapter(activeHandle)) as unknown as AppDatabase;',
-        after: 'const database = drizzle(activeHandle as never) as unknown as AppDatabase;',
+        before: 'const database = drizzle(drizzleAdapter(activeHandle)) as unknown as TestDb;',
+        after: 'const database = drizzle(activeHandle as never) as unknown as TestDb;',
       },
       {
         label: 'runtime migration call is detached from its awaited owner',
@@ -6510,8 +6510,8 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          'const database = drizzle(drizzleAdapter(reopened)) as unknown as AppDatabase;',
-          'const database = drizzle(drizzleAdapter(rawDb!)) as unknown as AppDatabase;',
+          'const database = drizzle(drizzleAdapter(reopened)) as unknown as TestDb;',
+          'const database = drizzle(drizzleAdapter(rawDb!)) as unknown as TestDb;',
         );
       },
     },
@@ -6521,8 +6521,8 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          'const database = drizzle(drizzleAdapter(reopened)) as unknown as AppDatabase;',
-          'const database = drizzle(reopened) as unknown as AppDatabase;',
+          'const database = drizzle(drizzleAdapter(reopened)) as unknown as TestDb;',
+          'const database = drizzle(reopened) as unknown as TestDb;',
         );
       },
     },
@@ -7042,8 +7042,8 @@ fullOnlyTest(
       },
       {
         path: 'src/db/database.ts',
-        before: 'const database = drizzle(drizzleAdapter(reopened)) as unknown as AppDatabase;',
-        after: 'const database = drizzle(drizzleAdapter(rawDb!)) as unknown as AppDatabase;',
+        before: 'const database = drizzle(drizzleAdapter(reopened)) as unknown as TestDb;',
+        after: 'const database = drizzle(drizzleAdapter(rawDb!)) as unknown as TestDb;',
       },
       {
         path: 'src/services/boot/foregroundBoot.ts',

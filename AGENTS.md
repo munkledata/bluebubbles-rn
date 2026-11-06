@@ -109,7 +109,9 @@ in the relevant document under `docs/`, then link to it here if future agents mu
   `src/db/transaction.ts`, `src/db/database.ts` and tests may assert a `WriteDb`/`TestDb`;
   `check:architecture` enforces that and the raw-driver, `getRawDatabase()`, `'gator.db'` and raw
   write-statement boundaries. In Node tests a nested claim rejects with `DbTransactionNestedError`
-  within 1.5 s instead of hanging.
+  within 1.5 s instead of hanging. Development builds throw the same error into any waiter whose
+  queue has not moved for 10 s, so a single dev transaction longer than 10 s also fails the caller
+  queued behind it; release builds only report.
 
 ### Transaction-only helpers
 
