@@ -1148,9 +1148,9 @@ describe('handleNotificationAction — retired FaceTime cleanup', () => {
 });
 
 describe('notification actions — account-switch containment', () => {
-  it('keeps legacy raw payloads navigation-compatible but action-inert', async () => {
-    // `notificationOpen.ts` still resolves this old format for a best-effort body-tap deep link.
-    // It has no account owner, though, so this action boundary must never trust it for mutations.
+  it('ignores legacy raw payloads for every action and press', async () => {
+    // The pre-schema-2 shape has no account owner. It resolves to nothing everywhere now (routing
+    // fails closed), so neither an action nor a body tap may act on it.
     await handleNotificationAction(
       chatDetail(ACTION_REPLY, { chatGuid: 'legacy-chat' }, { input: 'do not send' }),
     );

@@ -452,8 +452,10 @@ async function resolveFaceTimeToken(token: string): Promise<string | null> {
 }
 
 /**
- * Decode a native payload. Schema 2 is fail-closed; legacy raw payloads remain read-compatible so
- * actions/deep links on notifications posted by an older app build keep working during migration.
+ * Decode a native payload. Schema 2 is fail-closed: a payload without this app's owner and schema
+ * markers resolves to nothing, so a raw `chatGuid` from any other source can never route a tap or
+ * an action. (Pre-schema payloads were read-compatible during the schema-2 rollout; every
+ * notification an installed build can still hold was posted with schema 2.)
  */
 export async function resolveNotificationData(
   data: Record<string, unknown> | undefined,
@@ -461,20 +463,6 @@ export async function resolveNotificationData(
   if (!data) return null;
   const owner = stringValue(data.gatorOwner);
   const schema = stringValue(data.gatorSchema);
-  if (owner == null && schema == null) {
-    const chatGuid = stringValue(data.chatGuid);
-    const faceTimeUuid = stringValue(data.faceTimeUuid);
-    if (faceTimeUuid) return { faceTimeUuid };
-    if (!chatGuid) return null;
-    const messageGuid = stringValue(data.messageGuid);
-    const messageDate = stringValue(data.messageDate);
-    return {
-      chatGuid,
-      ...(messageGuid == null ? {} : { messageGuid }),
-      ...(messageDate == null ? {} : { messageDate }),
-      ...(data.reminder === '1' ? { reminder: '1' as const } : {}),
-    };
-  }
   if (owner !== NOTIFICATION_DATA_OWNER || schema !== NOTIFICATION_DATA_SCHEMA) return null;
 
   const kind = stringValue(data.gatorKind) as NotificationRouteKind | undefined;

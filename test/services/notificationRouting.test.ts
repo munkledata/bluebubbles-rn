@@ -912,7 +912,7 @@ describe('notificationRouting — native privacy boundary', () => {
     );
   });
 
-  it('fails closed on foreign/new schemas while preserving legacy press compatibility', async () => {
+  it('fails closed on foreign/new schemas and on ownerless raw payloads', async () => {
     await expect(
       resolveNotificationData({
         gatorOwner: 'other-app',
@@ -929,9 +929,12 @@ describe('notificationRouting — native privacy boundary', () => {
         chatId: '1',
       }),
     ).resolves.toBeNull();
+    // A raw guid with no owner/schema marker (the pre-schema-2 shape, or any other app's payload)
+    // routes nowhere: not even a body tap may open a chat from it.
     await expect(
       resolveNotificationData({ chatGuid: 'legacy-chat', messageGuid: 'legacy-message' }),
-    ).resolves.toEqual({ chatGuid: 'legacy-chat', messageGuid: 'legacy-message' });
+    ).resolves.toBeNull();
+    await expect(resolveNotificationData({ faceTimeUuid: 'legacy-call' })).resolves.toBeNull();
   });
 
   it('routes the fixed message summary to the inbox without native identifiers or a DB lookup', async () => {
