@@ -22,10 +22,6 @@ import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
 } from '../realtime/deliveryCoordinator';
-import {
-  conversationShortcutIdFor,
-  existingConversationShortcutId,
-} from '../shortcuts/shareShortcuts';
 import { isActiveChat } from './activeChat';
 import {
   MESSAGE_HISTORY_IDS_KEY,
@@ -950,7 +946,16 @@ async function reconcileDisplayedMessageHistoriesNow(
         .find((guid): guid is string => typeof guid === 'string' && guid.length > 0);
       // Keep a rebuilt notice a conversation. canReplaceHistory() above proved App Lock off; this
       // only reads the ids already published, it never publishes from a reconciliation.
-      const shortcutId = chatGuid ? conversationShortcutIdFor(chatGuid) : null;
+      const shortcutId = chatGuid
+        ? (await import('../shortcuts/shareShortcuts')).conversationShortcutIdFor(chatGuid)
+        : null;
+      if (!deliveryIsCurrent(context)) return;
+      if (!canReplaceHistory()) {
+        // The lock policy changed during the load: same as above, withdraw instead of rebuilding.
+        await notifee.cancelNotification(id);
+        mutated = true;
+        continue;
+      }
       await notifee.displayNotification(
         messageNotificationFromHistory(
           { ...current, entries: reconciled.entries },
@@ -1911,6 +1916,10 @@ async function conversationShortcutIdForPost(
   context?: EventDeliveryContext,
 ): Promise<string | undefined> {
   const lockProvenOff = await resolveMessageNotificationMutationGuard(context);
+  if (!lockProvenOff()) return undefined;
+  // Loaded on use, like ../clients: the shortcut module pulls in Expo and the DB, which the many
+  // services that merely import this file must not load at startup (or in plain Node tests).
+  const { existingConversationShortcutId } = await import('../shortcuts/shareShortcuts');
   if (!lockProvenOff()) return undefined;
   return existingConversationShortcutId(chatGuid) ?? undefined;
 }
