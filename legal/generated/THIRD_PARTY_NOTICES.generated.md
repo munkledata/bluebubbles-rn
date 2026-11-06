@@ -2,7 +2,7 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Dependency lock SHA-256 (package-lock.json without the app's own version): `979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd`
+- Dependency lock SHA-256 (package-lock.json without the app's own version): `134da976166da2b24bd9c9978f63eaf50458834954d1ef06b70adde6c86ab65a`
 - Production package records: 1020
 - Unique package versions: 926
 - Source assets: 13
@@ -285,7 +285,7 @@
 | `@jridgewell/trace-mapping` | `0.3.31` | MIT | no | `769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c` | none |
 | `@js-sdsl/ordered-map` | `4.4.2` | MIT | no | `787684b2059945f845f404340e20c4c8e3f325f4ab7aaeaf8e985f38c8d84658` | none |
 | `@noble/hashes` | `1.8.0` | MIT | no | `4f221aee6e072336700c408c68ab3b96a3fc09f6aebe6f48f1bd99e5ef13faec` | none |
-| `@op-engineering/op-sqlite` | `17.1.2` | MIT | no | `d0fe599bdf4816b342dc25eccf22f800978f81ee2c8657fe5886099dd999d6fa`<br>`e635d3647b73c208837e7263a777f670556d002abe6c7c66fb457b302c6fb06f`<br>`941f27f449085e1564d8da5c1b8162039701110fcf8a7326c0cfbabcba30b460` | none |
+| `@op-engineering/op-sqlite` | `19.0.5` | MIT | no | `d0fe599bdf4816b342dc25eccf22f800978f81ee2c8657fe5886099dd999d6fa`<br>`e635d3647b73c208837e7263a777f670556d002abe6c7c66fb457b302c6fb06f`<br>`941f27f449085e1564d8da5c1b8162039701110fcf8a7326c0cfbabcba30b460` | none |
 | `@protobufjs/aspromise` | `1.1.2` | BSD-3-Clause | no | `a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794` | none |
 | `@protobufjs/base64` | `1.1.2` | BSD-3-Clause | no | `a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794` | none |
 | `@protobufjs/codegen` | `2.0.5` | BSD-3-Clause | no | `a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794` | none |

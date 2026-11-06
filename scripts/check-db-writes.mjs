@@ -7763,7 +7763,7 @@ function driverAdapterCertifiedCallables({
     return empty();
   }
   if (
-    packageJson?.dependencies?.['@op-engineering/op-sqlite'] !== '17.1.2' ||
+    packageJson?.dependencies?.['@op-engineering/op-sqlite'] !== '19.0.5' ||
     packageJson?.dependencies?.['drizzle-orm'] !== '0.45.2'
   ) {
     return empty();

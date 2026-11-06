@@ -6955,7 +6955,7 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
     {
       label: 'op-sqlite dependency drift',
       mutate(root) {
-        replaceFixtureSource(root, 'package.json', '"17.1.2"', '"17.1.3"');
+        replaceFixtureSource(root, 'package.json', '"19.0.5"', '"19.0.6"');
       },
     },
     {

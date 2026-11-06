@@ -26,7 +26,7 @@ export const REQUIRED_EAS_GRADLE_COMMANDS = Object.freeze({
   production: `:app:bundleRelease -PreactNativeArchitectures=${REQUIRED_ANDROID_ARCHITECTURES.production}`,
 });
 export const REQUIRED_NATIVE_BOUNDARY_PINS = Object.freeze({
-  '@op-engineering/op-sqlite': '17.1.2',
+  '@op-engineering/op-sqlite': '19.0.5',
   '@react-native-firebase/app': '25.1.0',
   '@react-native-firebase/messaging': '25.1.0',
   '@shopify/flash-list': '2.0.2',

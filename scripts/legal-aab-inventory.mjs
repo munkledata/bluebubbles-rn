@@ -41,8 +41,9 @@ const UTF8 = new TextDecoder('utf-8', { fatal: true });
 const ABSOLUTE_USER_DIRECTORY_PATTERN =
   /\/+Users\/+[^/\x00-\x1f]{1,128}(?:\/+|$)|\/+home\/+[^/\x00-\x1f]{1,128}(?:\/+|$)/i;
 
-// op-sqlite 17.1.2 packages these two reviewed outputs from the pinned
-// io.github.ronickg:openssl:3.3.2-1 AAR. That upstream binary contains a generic build-machine
+// op-sqlite 17.1.2 packaged these two reviewed outputs from the pinned
+// io.github.ronickg:openssl:3.3.2-1 AAR; 19.0.5 bundles OpenSSL 3.6.2, so its libcrypto.so must be
+// re-reviewed from the first release build and these digests moved if the path remains. That upstream binary contains a generic build-machine
 // path. The exception is deliberately bound to both the archive path and the complete file digest;
 // any rebuilt, renamed, or additional file remains blocked by the ordinary metadata scan.
 export const REVIEWED_ANDROID_ABSOLUTE_PATH_EXCEPTIONS = Object.freeze([

@@ -5,7 +5,7 @@
     "exactAab": false
   },
   "inputs": {
-    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
+    "dependencyLockSha256": "134da976166da2b24bd9c9978f63eaf50458834954d1ef06b70adde6c86ab65a",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "8b71ef2c2c8b2cd4b120753c70a8db5312bd9ef63c010fd3d87f2b37adc9b630"
@@ -16,7 +16,7 @@
     "assetFiles": 13,
     "pendingAssetProvenance": 13,
     "localComponents": 15,
-    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
+    "dependencyLockSha256": "134da976166da2b24bd9c9978f63eaf50458834954d1ef06b70adde6c86ab65a",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },
@@ -3814,10 +3814,10 @@
     {
       "installPath": "node_modules/@op-engineering/op-sqlite",
       "name": "@op-engineering/op-sqlite",
-      "version": "17.1.2",
+      "version": "19.0.5",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@op-engineering/op-sqlite/-/op-sqlite-17.1.2.tgz",
-      "integrity": "sha512-R1E0MO9dGuOSr5K+Wrwi2k2HrEDbG6iJGwboYl+2hJXpuo01k556GcAj1l7nu4RDPH0wdpM7NL7pieIL5+k3Mw==",
+      "resolved": "https://registry.npmjs.org/@op-engineering/op-sqlite/-/op-sqlite-19.0.5.tgz",
+      "integrity": "sha512-sG0TP2K+x5Ti4wpjMBjSCyIMpKtbHYwYLT+jySMFef4VdPjId+FMIDsxHrWpIfpYOr9BjrMK1+pdAefeSSTjcw==",
       "optional": false,
       "legalDocuments": [
         {
