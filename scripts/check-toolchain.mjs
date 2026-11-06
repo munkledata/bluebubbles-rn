@@ -533,11 +533,14 @@ export function validateResolvedEnvironmentConfig(config, lane) {
 
 export function validateEnvironmentSmokeWorkflowSource(source) {
   if (typeof source !== 'string') return ['CI workflow source is unavailable'];
-  const checkStart = source.indexOf('\n  check:\n');
-  const checkEnd = source.indexOf('\n  android:\n', checkStart + 1);
-  if (checkStart < 0 || checkEnd < 0) {
-    return ['CI workflow must retain the check job before the Android job'];
-  }
+  const checkHeader = '\n  check:\n';
+  const checkStart = source.indexOf(checkHeader);
+  if (checkStart < 0) return ['CI workflow must retain the check job'];
+  // The check job ends at the next job header (two-space indent) or at the end of the workflow;
+  // since 2026-11-06 the Android build lives in its own workflow.
+  const afterHeader = source.slice(checkStart + checkHeader.length);
+  const nextJob = afterHeader.match(/\n  [A-Za-z0-9_-]+:\s*\n/);
+  const checkEnd = nextJob ? checkStart + checkHeader.length + nextJob.index : source.length;
 
   const checkJob = source.slice(checkStart, checkEnd);
   const checkoutPattern =
