@@ -458,7 +458,21 @@ export function MessageList({
         key={focusReady ? `focus-${focusKey}` : `list-${chatGuid}`}
         ref={listRef}
         data={rows}
-        keyExtractor={(m: EnrichedMessage) => m.guid}
+        // The row id, not the guid: a sent message is promoted from its temp guid to the server's
+        // in place (UPDATE … WHERE guid = tempGuid), and a guid key remounted that row mid send
+        // effect. The id survives promotion; the dup-drop path deletes the temp row, where a
+        // remount is right.
+        keyExtractor={(m: EnrichedMessage) => String(m.id)}
+        // Recycle pools per shape so a text row never has to be re-measured as a media row.
+        getItemType={(m: EnrichedMessage) =>
+          isGroupEvent(m)
+            ? 'event'
+            : m.dateRetracted != null
+              ? 'tombstone'
+              : m.hasAttachments === 1
+                ? 'media'
+                : 'text'
+        }
         initialScrollIndex={focusReady ? focusIndex : undefined}
         // Land at the newest message after first-render measurement (normal open). See onListLoad.
         onLoad={onListLoad}
