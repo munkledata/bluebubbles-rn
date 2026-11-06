@@ -3,9 +3,10 @@
  * `timeoutMs` and should re-lock on resume. Null `lastBackgrounded` (never backgrounded this
  * session) never expires.
  *
- * Both stamps must come from the same clock (see `monotonicNow`). A `now` before
- * `lastBackgrounded` means that clock went backwards, or the stamps came from different clocks;
- * either way the grace period cannot be measured, so the check fails closed and locks.
+ * Both stamps are wall-clock (`Date.now()`): Android's monotonic clock stops while the device
+ * sleeps, so it would under-count an hour in a pocket. Setting the clock FORWARD only locks sooner;
+ * a `now` before `lastBackgrounded` means it was set BACK, so the grace period cannot be measured
+ * and the check fails closed and locks.
  */
 export function isLockExpired(
   lastBackgrounded: number | null,

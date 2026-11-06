@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState as NativeAppState, StyleSheet, View, type AppStateStatus } from 'react-native';
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isLockExpired } from '@core/security/lockTimeout';
-import { monotonicNow } from '@utils/monotonicNow';
 import { logger as secureLogger } from '@core/secure';
 import {
   handleNotificationAction,
@@ -153,7 +152,7 @@ function ConnectedAppLayout(): React.JSX.Element {
     const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
       const lock = useLockStore.getState();
       if (state === 'background' || state === 'inactive') {
-        if (lock.enabled) lock.noteBackgrounded(monotonicNow());
+        if (lock.enabled) lock.noteBackgrounded(Date.now());
         pauseRealtime();
         void flushErrorReports();
         return;
@@ -161,7 +160,7 @@ function ConnectedAppLayout(): React.JSX.Element {
       if (state === 'active') {
         if (
           lock.enabled &&
-          (lock.locked || isLockExpired(lock.lastBackgrounded, monotonicNow(), lock.timeoutMs))
+          (lock.locked || isLockExpired(lock.lastBackgrounded, Date.now(), lock.timeoutMs))
         ) {
           lock.lock();
           pauseRealtime();
