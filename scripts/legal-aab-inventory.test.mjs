@@ -277,14 +277,14 @@ test('reviewed Android path exceptions remain pinned to the two audited OpenSSL 
     {
       path: 'base/lib/arm64-v8a/libcrypto.so',
       rule: 'absolute-user-directory',
-      sha256: 'da06ab9b38e9e28d2f9ab0040d398ec076d981f3a309325971a978e6135b80b1',
-      review: 'io.github.ronickg:openssl:3.3.2-1',
+      sha256: 'b9ded0da1944aa338e16b801632782b4b64003b8b573ed93852d637864e0f429',
+      review: 'io.github.ronickg:openssl:3.6.2-3',
     },
     {
       path: 'BUNDLE-METADATA/com.android.tools.build.debugsymbols/arm64-v8a/libcrypto.so.sym',
       rule: 'absolute-user-directory',
-      sha256: '168e5685408ac41ccc9338a7e202b03de1bf2575f8100678d54626a7bdc45a6b',
-      review: 'io.github.ronickg:openssl:3.3.2-1',
+      sha256: '3c3cb56e739c0962e67bdf733161107a361b82d6f5ff679acb71ae70a7115a41',
+      review: 'io.github.ronickg:openssl:3.6.2-3',
     },
   ]);
   assert.equal(Object.isFrozen(REVIEWED_ANDROID_ABSOLUTE_PATH_EXCEPTIONS), true);

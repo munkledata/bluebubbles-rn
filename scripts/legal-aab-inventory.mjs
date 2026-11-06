@@ -41,23 +41,26 @@ const UTF8 = new TextDecoder('utf-8', { fatal: true });
 const ABSOLUTE_USER_DIRECTORY_PATTERN =
   /\/+Users\/+[^/\x00-\x1f]{1,128}(?:\/+|$)|\/+home\/+[^/\x00-\x1f]{1,128}(?:\/+|$)/i;
 
-// op-sqlite 17.1.2 packaged these two reviewed outputs from the pinned
-// io.github.ronickg:openssl:3.3.2-1 AAR; 19.0.5 bundles OpenSSL 3.6.2, so its libcrypto.so must be
-// re-reviewed from the first release build and these digests moved if the path remains. That upstream binary contains a generic build-machine
-// path. The exception is deliberately bound to both the archive path and the complete file digest;
-// any rebuilt, renamed, or additional file remains blocked by the ordinary metadata scan.
+// op-sqlite 19.0.5 packages these two reviewed outputs from the pinned io.github.ronickg:openssl:3.6.2-3
+// AAR (reviewed 2026-11-06 from Android run 42304012710 on ci/openssl-3-6-2-review; the 3.3.2-1
+// digests they replace came from op-sqlite 17.1.2). The upstream binary carries only its compiled-in
+// OPENSSLDIR/ENGINESDIR/MODULESDIR under the generic GitHub-runner build root
+// /home/runner/work/ndkports/ndkports/openssl/build/port/install/Arm64; libssl.so carries no path.
+// The exception is deliberately bound to both the archive path and the complete file digest; any
+// rebuilt, renamed, or additional file remains blocked by the ordinary metadata scan, and the
+// packaged .so is Gradle's stripped output, so its digest is taken from a real release build.
 export const REVIEWED_ANDROID_ABSOLUTE_PATH_EXCEPTIONS = Object.freeze([
   Object.freeze({
     path: 'base/lib/arm64-v8a/libcrypto.so',
     rule: 'absolute-user-directory',
-    sha256: 'da06ab9b38e9e28d2f9ab0040d398ec076d981f3a309325971a978e6135b80b1',
-    review: 'io.github.ronickg:openssl:3.3.2-1',
+    sha256: 'b9ded0da1944aa338e16b801632782b4b64003b8b573ed93852d637864e0f429',
+    review: 'io.github.ronickg:openssl:3.6.2-3',
   }),
   Object.freeze({
     path: 'BUNDLE-METADATA/com.android.tools.build.debugsymbols/arm64-v8a/libcrypto.so.sym',
     rule: 'absolute-user-directory',
-    sha256: '168e5685408ac41ccc9338a7e202b03de1bf2575f8100678d54626a7bdc45a6b',
-    review: 'io.github.ronickg:openssl:3.3.2-1',
+    sha256: '3c3cb56e739c0962e67bdf733161107a361b82d6f5ff679acb71ae70a7115a41',
+    review: 'io.github.ronickg:openssl:3.6.2-3',
   }),
 ]);
 
