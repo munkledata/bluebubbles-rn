@@ -21,6 +21,8 @@ interface ActiveReachabilityWatch {
   timer: ReturnType<typeof setTimeout> | null;
   running: boolean;
   rerunRequested: boolean;
+  /** Publish the next result even when it equals the remembered state (a user-driven Retry). */
+  republishNext: boolean;
 }
 
 let watchGeneration = 0;
@@ -55,7 +57,9 @@ function publish(
   watch: ActiveReachabilityWatch,
   next: Exclude<TransportServerState, 'unknown'>,
 ): void {
-  if (!ownsWatch(watch) || watch.state === next) return;
+  if (!ownsWatch(watch)) return;
+  if (watch.state === next && !watch.republishNext) return;
+  watch.republishNext = false;
   const previous = watch.state;
   watch.state = next;
   callObserver(watch, () => watch.callbacks.onStateChange(next), 'state');
@@ -133,14 +137,27 @@ export function startReachabilityWatch(
     timer: null,
     running: false,
     rerunRequested: false,
+    republishNext: false,
   };
   activeWatch = watch;
   runProbe(watch);
 }
 
-/** Coalesce a native network-recovery signal into the current foreground server probe. */
-export function probeReachabilityNow(): void {
-  if (activeWatch) runProbe(activeWatch);
+export interface ProbeReachabilityOptions {
+  /**
+   * Publish the probe's result even if it matches the last published state. The transport store
+   * resets the server state to `unknown` when the user taps Retry, so an unchanged answer must reach
+   * it again or the status stays on "Reconnecting". A recovery edge is still judged against the real
+   * previous state, so a forced re-publish of `reachable` never fakes a recovery.
+   */
+  readonly republish?: boolean;
+}
+
+/** Coalesce a native network-recovery signal, or a user Retry, into the current foreground probe. */
+export function probeReachabilityNow(options: ProbeReachabilityOptions = {}): void {
+  if (!activeWatch) return;
+  if (options.republish) activeWatch.republishNext = true;
+  runProbe(activeWatch);
 }
 
 /** Stop timers, abort the active HTTP request, and reject every late continuation. */

@@ -18,6 +18,8 @@ const notifee = {
   deleteChannel: async () => undefined,
   openNotificationSettings: async () => undefined,
   requestPermission: async () => ({ authorizationStatus: 1 }),
+  // The read-only permission check realtime startup and message posting make (AUTHORIZED).
+  getNotificationSettings: async () => ({ authorizationStatus: 1 }),
   displayNotification: async () => undefined,
   createTriggerNotification: async () => undefined,
   getDisplayedNotifications: async () => [],
