@@ -60,6 +60,54 @@ async function seed(db: AppDatabase) {
   );
 }
 
+describe('symbol-only queries (no letters or digits for FTS to index)', () => {
+  async function seedSymbols(db: AppDatabase) {
+    await seed(db);
+    const chatId = (await getChatIdByGuid(db, 'c-craig'))!;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({ guid: 's1', text: '👍', dateCreated: 400 }),
+        Message.parse({ guid: 's2', text: 'c++ rocks', dateCreated: 500 }),
+        Message.parse({ guid: 's3', text: 'score 100% today', dateCreated: 600 }),
+        Message.parse({ guid: 's4', text: 'snake_case', dateCreated: 700 }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+  }
+
+  it('finds an emoji-only message by literal substring in every search', async () => {
+    const { db } = await createTestDb();
+    await seedSymbols(db);
+    expect((await searchMessagesEnriched(db, '👍')).map((r) => r.guid)).toEqual(['s1']);
+    const page = await searchMessagesInChat(db, 'c-craig', '👍');
+    expect(page.results.map((r) => r.guid)).toEqual(['s1']);
+    expect(page.totalCount).toBe(1);
+    expect(await searchChatGuidsByMessage(db, '👍')).toEqual(['c-craig']);
+    expect(await searchChatGuidsByMessage(db, '😀')).toEqual([]);
+  });
+
+  it('matches punctuation literally, with LIKE wildcards escaped', async () => {
+    const { db } = await createTestDb();
+    await seedSymbols(db);
+    expect((await searchMessagesEnriched(db, '++')).map((r) => r.guid)).toEqual(['s2']);
+    // `%` and `_` are LIKE wildcards: unescaped, '%' would match every message.
+    expect((await searchMessagesEnriched(db, '%')).map((r) => r.guid)).toEqual(['s3']);
+    expect((await searchMessagesEnriched(db, '_')).map((r) => r.guid)).toEqual(['s4']);
+    expect((await searchMessagesEnriched(db, '%')).at(0)?.snippet).toBe('score 100% today');
+  });
+
+  it('keeps the full-text path for a query with letters (prefix match, not a substring)', async () => {
+    const { db } = await createTestDb();
+    await seedSymbols(db);
+    // FTS prefix: 'c' matches 'c++' and 'catch'; a LIKE substring would also hit 'score', 'case'.
+    const guids = (await searchMessagesEnriched(db, 'c')).map((r) => r.guid).sort();
+    expect(guids).toEqual(['m1', 's2', 's4'].sort());
+    expect(await searchMessagesEnriched(db, '   ')).toEqual([]);
+  });
+});
+
 describe('searchMessagesEnriched', () => {
   it('returns matching messages enriched with chat context', async () => {
     const { db } = await createTestDb();

@@ -6,7 +6,7 @@ import {
 import { parseMessagePartTopology } from '@core/models';
 import { REACTION_BASE_TYPES, STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import type { AppDatabase } from '../types';
-import { toFtsQuery } from './_shared';
+import { escapeLike, toFtsQuery } from './_shared';
 // The ONE definition of "this chat is not under a local deletion tombstone" — search is a reader
 // of it like the inbox is. Import the owning rule rather than restating it; chats.ts does not import
 // message queries, so this dependency stays acyclic.
@@ -66,13 +66,13 @@ export async function searchMessagesInChat(
   queryText: string,
   cursor: ChatSearchCursor | null = null,
 ): Promise<ChatSearchPage> {
-  const match = toFtsQuery(queryText);
-  if (!match || !chatGuid) {
+  const textMatch = textMatchFor(queryText);
+  if (!textMatch || !chatGuid) {
     return { results: [], nextCursor: null, hasMore: false, totalCount: cursor ? null : 0 };
   }
 
   const eligible = sql`
-    messages_fts MATCH ${match}
+    ${textMatch.matches}
     AND c.guid = ${chatGuid}
     AND ${notAnOverlayMessage()}
     AND ${messageHasVisibleContentSql('m')}
@@ -95,8 +95,7 @@ export async function searchMessagesInChat(
     ? sql`SELECT ${cursor.maxMessageId} AS maxMessageId, NULL AS totalCount`
     : sql`
         SELECT MAX(m.id) AS maxMessageId, COUNT(*) AS totalCount
-        FROM messages_fts
-        JOIN messages m ON m.id = messages_fts.rowid
+        FROM ${textMatch.source}
         JOIN chats c ON c.id = m.chat_id
         WHERE ${eligible}
       `;
@@ -104,13 +103,12 @@ export async function searchMessagesInChat(
   const rows = await db.all<ChatSearchQueryRow>(sql`
     WITH search_metadata AS (${metadata})
     SELECT m.id, m.guid, m.date_created AS dateCreated,
-           m.text, snippet(messages_fts, 0, '', '', '…', 12) AS snippet,
+           m.text, ${textMatch.snippet} AS snippet,
            m.is_from_me AS isFromMe,
            COALESCE(h.display_name, h.address) AS senderName,
            h.address AS senderAddress,
            search_metadata.maxMessageId, search_metadata.totalCount
-    FROM messages_fts
-    JOIN messages m ON m.id = messages_fts.rowid
+    FROM ${textMatch.source}
     JOIN chats c ON c.id = m.chat_id
     LEFT JOIN handles h ON h.id = m.handle_id
     CROSS JOIN search_metadata
@@ -170,6 +168,37 @@ interface SearchResultQueryRow extends SearchResultRow {
 
 export const SEARCH_LITERAL_SCAN_CHUNK_CODE_UNITS = 64 * 1024;
 const SEARCH_LITERAL_MAX_QUERY_CODE_UNITS = 256;
+
+/**
+ * How a query is matched against message text. FTS5 when it has letters or digits. Otherwise
+ * (emoji or symbols only: the tokenizer has nothing to index, so the FTS query would be empty and
+ * the search silently found nothing) a literal substring LIKE over the text column, bounded by the
+ * caller's LIMIT. `source` is the FROM clause that binds `m`; `matches` the WHERE predicate;
+ * `snippet` the excerpt expression (`boundSearchResultSnippet` centers a plain text on the literal).
+ */
+interface TextMatch {
+  source: SQL;
+  matches: SQL;
+  snippet: SQL;
+}
+
+function textMatchFor(queryText: string): TextMatch | null {
+  const match = toFtsQuery(queryText);
+  if (match) {
+    return {
+      source: sql`messages_fts JOIN messages m ON m.id = messages_fts.rowid`,
+      matches: sql`messages_fts MATCH ${match}`,
+      snippet: sql`snippet(messages_fts, 0, '', '', '…', 12)`,
+    };
+  }
+  const needle = queryText.trim();
+  if (!needle || needle.length > SEARCH_LITERAL_MAX_QUERY_CODE_UNITS) return null;
+  return {
+    source: sql`messages m`,
+    matches: sql`m.text LIKE ${`%${escapeLike(needle)}%`} ESCAPE '\\'`,
+    snippet: sql`m.text`,
+  };
+}
 
 function foldAsciiLower(value: string): string {
   return value.replace(/[A-Z]/g, (character) => character.toLowerCase());
@@ -313,25 +342,24 @@ export async function searchMessagesEnriched(
   queryText: string,
   limit = 50,
 ): Promise<SearchResultRow[]> {
-  const match = toFtsQuery(queryText);
-  if (!match) return [];
+  const textMatch = textMatchFor(queryText);
+  if (!textMatch) return [];
   // `snippet()` needs the FTS table referenced by name (not an alias), so this query joins on
   // `messages_fts` directly. No mark args — it just centers the text on the match; the UI bolds the
   // query terms in JS (control-char marks don't reliably survive the native bridge).
   const rows = await db.all<SearchResultQueryRow>(sql`
     SELECT m.id, m.guid, m.text, m.date_created AS dateCreated, m.is_from_me AS isFromMe,
-           snippet(messages_fts, 0, '', '', '…', 12) AS snippet,
+           ${textMatch.snippet} AS snippet,
            c.guid AS chatGuid, c.display_name AS chatDisplayName, c.custom_name AS chatCustomName,
            c.chat_identifier AS chatIdentifier, c.style AS chatStyle,
            (SELECT group_concat(COALESCE(h2.display_name, h2.address), ', ' ORDER BY h2.id)
               FROM chat_handles ch JOIN handles h2 ON h2.id = ch.handle_id
              WHERE ch.chat_id = c.id) AS chatParticipantNames,
            COALESCE(h.display_name, h.address) AS senderName
-    FROM messages_fts
-    JOIN messages m ON m.id = messages_fts.rowid
+    FROM ${textMatch.source}
     JOIN chats c ON c.id = m.chat_id
     LEFT JOIN handles h ON h.id = m.handle_id
-    WHERE messages_fts MATCH ${match}
+    WHERE ${textMatch.matches}
       AND ${notAnOverlayMessage()}
       AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
@@ -816,14 +844,13 @@ export async function searchChatGuidsByMessage(
   queryText: string,
   limit = 300,
 ): Promise<string[]> {
-  const match = toFtsQuery(queryText);
-  if (!match) return [];
+  const textMatch = textMatchFor(queryText);
+  if (!textMatch) return [];
   const rows = await db.all<{ guid: string }>(sql`
     SELECT DISTINCT c.guid AS guid
-    FROM messages_fts f
-    JOIN messages m ON m.id = f.rowid
+    FROM ${textMatch.source}
     JOIN chats c ON c.id = m.chat_id
-    WHERE messages_fts MATCH ${match}
+    WHERE ${textMatch.matches}
       AND ${visibleMessageMatchSql()}
     LIMIT ${limit}
   `);

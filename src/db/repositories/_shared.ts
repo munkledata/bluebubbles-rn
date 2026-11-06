@@ -25,3 +25,8 @@ export function toFtsQuery(input: string): string {
   if (tokens.length === 0) return '';
   return tokens.map((t) => `"${t}"*`).join(' ');
 }
+
+/** Escape SQLite LIKE wildcards so a query matches literally. Pair with `ESCAPE '\\'`. */
+export function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
