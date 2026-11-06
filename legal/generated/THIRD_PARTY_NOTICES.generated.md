@@ -37,7 +37,7 @@
 | `modules/gator-bounded-download` | 14 | `36c96541a6828ad38ec1d51e0595a5a4e961c3123aa6300a89abd74367024e94` | unresolved |
 | `modules/gator-paste-input` | 5 | `607728202efe4aa6baa296d08e4613bbdc2126d57d9ba8ade055f3ab4becea58` | unresolved |
 | `modules/gator-power` | 3 | `0619f15dc9e511160439b3cd8f183f4fcbfd4c329c880fafa4cdf98627ec8316` | unresolved |
-| `modules/gator-screen-security` | 5 | `7f3ae521373ef58de227b1c0402917ff54044f136334c550bedec79096aae384` | unresolved |
+| `modules/gator-screen-security` | 5 | `37ca7de48f60b3561d796552b7eb2b88e3d6a2705748b0aeba334bf5f0c8423d` | unresolved |
 | `modules/gator-share-intake` | 10 | `573ff6a31e63d35144254fdfdb6ff1723ce1f31b4df55c57a347b955ecbd8201` | unresolved |
 | `modules/gator-share-shortcuts` | 8 | `812db4fb4b7a389d42606dbd34b20d0147d931bf2dbb62db0d81c11ff8eafafc` | unresolved |
 | `plugins/withArm64Only.js` | 1 | `7365aa0dc24051a64451abacbe4cbbd7d0dc00f80cad10bee60d84ef6aaa24c5` | unresolved |

@@ -93,7 +93,7 @@ const OWNED_NATIVE_LOG_SOURCE_CONTRACT =
 const OWNED_NATIVE_RUNTIME_PRIVACY_FILE =
   'modules/gator-screen-security/android/src/main/java/expo/modules/gatorscreensecurity/GatorRuntimePrivacyPackage.kt';
 const OWNED_NATIVE_RUNTIME_PRIVACY_SOURCE_CONTRACT =
-  '0561e42f1d093204165a6bcbc1040333041797ca8c97625d53488eee39ffb32b';
+  '95f7994cb31ca78c36dc80db684cb8f5abb641026fcf63c690e797f61a8e101c';
 const OWNED_STARTUP_PRIVACY_PLUGIN = 'plugins/withStartupPrivacy.js';
 const OWNED_STARTUP_PRIVACY_PLUGIN_CONTRACT =
   '11e51d99e71f1864c507164c00458baba2153812c96ffa8c9a1645005957293e';

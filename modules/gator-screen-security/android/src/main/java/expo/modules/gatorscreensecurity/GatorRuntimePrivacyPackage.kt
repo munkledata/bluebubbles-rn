@@ -25,7 +25,7 @@ object GatorStartupPrivacy {
       return
     }
     try {
-      FLog.setMinimumLoggingLevel(Int.MAX_VALUE)
+      FLog.minimumLoggingLevel = Int.MAX_VALUE
       startup()
     } catch (_: Exception) {
       throw ReleaseReactStartupException()
@@ -48,7 +48,7 @@ class GatorRuntimePrivacyPackage : BasePackage() {
     object : ApplicationLifecycleListener {
       override fun onCreate(application: Application) {
         if (!isDebuggable(application)) {
-          FLog.setMinimumLoggingLevel(Int.MAX_VALUE)
+          FLog.minimumLoggingLevel = Int.MAX_VALUE
         }
       }
     },
@@ -62,7 +62,7 @@ class GatorRuntimePrivacyPackage : BasePackage() {
       object : ReactNativeHostHandler {
         override fun onWillCreateReactInstance(useDeveloperSupport: Boolean) {
           if (!useDeveloperSupport || !debuggable) {
-            FLog.setMinimumLoggingLevel(Int.MAX_VALUE)
+            FLog.minimumLoggingLevel = Int.MAX_VALUE
           }
         }
 

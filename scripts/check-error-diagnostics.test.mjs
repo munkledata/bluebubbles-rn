@@ -1254,7 +1254,7 @@ test('pins release native runtime logging and host-exception containment', () =>
       [
         '        override fun onWillCreateReactInstance(useDeveloperSupport: Boolean) {',
         '          if (!useDeveloperSupport || !debuggable) {',
-        '            FLog.setMinimumLoggingLevel(Int.MAX_VALUE)',
+        '            FLog.minimumLoggingLevel = Int.MAX_VALUE',
         '          }',
         '        }',
         '',
@@ -1268,8 +1268,8 @@ test('pins release native runtime logging and host-exception containment', () =>
     runtimePrivacyNativeSource.replace('catch (_: LinkageError)', 'catch (_: VirtualMachineError)'),
     runtimePrivacyNativeSource.replace('throw ReleaseReactStartupException()', 'return'),
     runtimePrivacyNativeSource.replace(
-      'FLog.setMinimumLoggingLevel(Int.MAX_VALUE)\n      startup()',
-      'startup()\n      FLog.setMinimumLoggingLevel(Int.MAX_VALUE)',
+      'FLog.minimumLoggingLevel = Int.MAX_VALUE\n      startup()',
+      'startup()\n      FLog.minimumLoggingLevel = Int.MAX_VALUE',
     ),
   ];
   for (const mutated of mutations) {
