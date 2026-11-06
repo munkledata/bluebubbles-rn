@@ -278,7 +278,10 @@ test('requires one blocking environment smoke after dependency installation in C
   for (const [label, mutated] of [
     [
       'persisted checkout credentials',
-      workflow.replace('          persist-credentials: false\n', ''),
+      workflow.replace(
+        '          fetch-depth: 0\n          persist-credentials: false\n',
+        '          fetch-depth: 0\n',
+      ),
     ],
     [
       'missing flag',
