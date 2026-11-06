@@ -18,7 +18,15 @@ import {
   type ShareIntakeManifestIdentity,
   type ShareIntakeNewChatPlan,
 } from '@db/repositories';
-import { addTextToChatDraft, createNewChat, findOrCreateRcsChat, http } from '@/services';
+import {
+  addTextToChatDraft,
+  createAppleGroup,
+  createNewChat,
+  findOrCreateRcsChat,
+  http,
+  startChatRepair,
+} from '@/services';
+import { canonicalIMessageGroupMembers } from '@core/api/endpoints/chats';
 import type { NewChatService } from '@/services/chatActions';
 import {
   consumeShareIntakeBatchIfComplete,
@@ -187,6 +195,9 @@ export default function NewChatScreen(): React.JSX.Element {
   const imessageEnabled = useSessionStore((s) => s.serverInfo?.supports_imessage_new_chat === true);
   const exactIMessageTextSupported = useSessionStore(
     (s) => s.serverInfo?.supports_imessage_plain_text === true,
+  );
+  const groupCreateSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_group_create === true,
   );
   // Advisory only: the server's read-only lookup colours an iMessage recipient blue (reachable) or
   // green (not on iMessage). It never blocks Start or switches the service.
@@ -652,8 +663,18 @@ export default function NewChatScreen(): React.JSX.Element {
     exactIMessageTextSupported;
   const groupUsesOpenIt = choosesExisting && selectedMatch.isGroup;
 
-  // This slice creates only 1:1 chats. Group creation is a later helper capability.
-  const tooManyRecipients = effectiveRecipients.length > 1 && !groupUsesOpenIt;
+  // FP-006: with the server's group-create switch on, two or more iMessage recipients start a new
+  // group. A share or staged file never takes this path (the first message is text only).
+  const createsGroup =
+    groupCreateSupported &&
+    selectedService === 'iMessage' &&
+    !choosesExisting &&
+    initialContent.identity === null &&
+    effectiveRecipients.length >= 2;
+  const groupMembers = createsGroup
+    ? canonicalIMessageGroupMembers(effectiveRecipients.map((r) => r.address))
+    : null;
+  const tooManyRecipients = effectiveRecipients.length > 1 && !groupUsesOpenIt && !createsGroup;
 
   // The server refuses RCS media over this limit, and Start creates the thread with its text before
   // it sends files, so a send-time refusal would leave the new chat without its file. Name the
@@ -676,11 +697,14 @@ export default function NewChatScreen(): React.JSX.Element {
     (initialContent.identity === null ||
       selectedService !== 'RCS' ||
       rcsAttemptOwnershipSupported) &&
-    (sendsToExisting || effectiveRecipients.length === 1) &&
+    (sendsToExisting || effectiveRecipients.length === 1 || groupMembers !== null) &&
     message.trim().length > 0 &&
     rcsFileTooLarge === null &&
+    !(createsGroup && anyNotOnIMessage) &&
     (selectedService !== 'iMessage' ||
-      (staged.length === 0 && (sendsToExisting || imessageAddressValid) && !imessageTextTooLong));
+      (staged.length === 0 &&
+        (sendsToExisting || imessageAddressValid || groupMembers !== null) &&
+        !imessageTextTooLong));
 
   /**
    * "Open it": go to the selected existing chat. A share travels with the route, so it must never
@@ -804,6 +828,63 @@ export default function NewChatScreen(): React.JSX.Element {
 
   const sendWithReturn = useFeatureSettingsStore((s) => s.sendWithReturn);
 
+  /**
+   * Create a new iMessage group with this draft's text as its first message. One request id per
+   * draft, so a retry after an unconfirmed attempt replays it instead of sending a second copy.
+   * The new chat arrives through the ordinary single-chat sync before the route opens it.
+   */
+  const startNewGroup = async (members: string[]): Promise<void> => {
+    if (!accountLease.isCurrent() || submissionInFlightRef.current) return;
+    submissionInFlightRef.current = true;
+    setBusy(true);
+    try {
+      const body = message.trim();
+      const attemptKey = JSON.stringify(['iMessage-group', members, body]);
+      let tempGuid = createAttemptsRef.current.get(attemptKey);
+      if (!tempGuid) {
+        tempGuid = `temp-${Crypto.randomUUID()}`;
+        createAttemptsRef.current.set(attemptKey, tempGuid);
+      }
+      const result = await createAppleGroup(
+        { addresses: members, message: body, tempGuid },
+        accountLease,
+      );
+      if (!accountLease.isCurrent() || abandonedRef.current) return;
+      if (result?.status === 'accepted') {
+        // Best effort: when the fetch fails the chat still arrives with the next sync.
+        await startChatRepair(result.guid).catch(() => null);
+        if (!accountLease.isCurrent() || abandonedRef.current) return;
+        navigateWithoutPrompt(() => router.replace(`/chat/${encodeURIComponent(result.guid)}`));
+        return;
+      }
+      if (result?.status === 'outcome-unknown') {
+        showDialog(
+          'Group Not Confirmed',
+          'The group and its first message may have been sent. Check Messages on your Mac before trying again. Your draft is still here.',
+        );
+        return;
+      }
+      // Definitely not sent: a later Start is a new attempt, never a replay of this refusal.
+      createAttemptsRef.current.delete(attemptKey);
+      showDialog(
+        'Group Not Started',
+        result?.status === 'rejected' && result.notOnIMessage
+          ? 'Someone in this group isn’t on iMessage, so Messages didn’t create it. Your draft is still here.'
+          : 'Messages didn’t create the group. Your draft is still here.',
+      );
+    } catch (e) {
+      if (!accountLease.isCurrent() || abandonedRef.current) return;
+      logger.warn('[new-chat] group creation failed', e);
+      showDialog(
+        'Group Not Confirmed',
+        'Gator couldn’t confirm whether the group was created. Check Messages on your Mac before trying again. Your draft is still here.',
+      );
+    } finally {
+      submissionInFlightRef.current = false;
+      if (accountLease.isCurrent() && !abandonedRef.current) setBusy(false);
+    }
+  };
+
   const onStart = async (): Promise<void> => {
     const recipient = effectiveRecipients[0];
     if (
@@ -816,6 +897,10 @@ export default function NewChatScreen(): React.JSX.Element {
       return;
     if (sendsToExisting && existingGuid) {
       await startInExistingChat(existingGuid);
+      return;
+    }
+    if (createsGroup) {
+      if (groupMembers) await startNewGroup(groupMembers);
       return;
     }
     // A plain RCS message (no share, no files): find or create the Google thread without sending,

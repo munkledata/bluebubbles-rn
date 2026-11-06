@@ -2,6 +2,11 @@ import { getDatabase } from '@db/database';
 import { runCapabilityGatedAccountAction } from './capabilityGatedAction';
 import { accountHttp } from './clients';
 import {
+  createExactIMessageGroup,
+  type CreateAppleGroupArgs,
+  type CreateAppleGroupResult,
+} from './groupCreateService';
+import {
   clearExactIMessageGroupName,
   renameExactIMessageGroup,
   type ClearAppleGroupNameArgs,
@@ -51,5 +56,19 @@ export async function clearAppleGroupName(
         () => lease.isCurrent(),
         capability,
       ),
+  );
+}
+
+/** Account-scoped UI entry point for creating a group from New Message. */
+export async function createAppleGroup(
+  args: CreateAppleGroupArgs,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<CreateAppleGroupResult | null> {
+  const snapshot = { ...args, addresses: [...args.addresses] };
+  return runCapabilityGatedAccountAction(
+    accountLease,
+    'supports_imessage_group_create',
+    (lease, capability) =>
+      createExactIMessageGroup(accountHttp(lease), snapshot, () => lease.isCurrent(), capability),
   );
 }

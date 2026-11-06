@@ -105,9 +105,11 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('@/services', () => ({
   addTextToChatDraft: jest.fn(),
+  createAppleGroup: jest.fn(),
   createNewChat: jest.fn(),
   findOrCreateRcsChat: jest.fn(),
   http: {},
+  startChatRepair: jest.fn(),
 }));
 jest.mock('@/services/send', () => ({ send: jest.fn(), sendImages: jest.fn() }));
 jest.mock('@/services/share/shareIntake', () => ({
@@ -146,7 +148,13 @@ import NewChatScreen from '../../../app/(app)/new-chat';
 // eslint-disable-next-line import/first
 import * as Crypto from 'expo-crypto';
 // eslint-disable-next-line import/first
-import { addTextToChatDraft, createNewChat, findOrCreateRcsChat } from '@/services';
+import {
+  addTextToChatDraft,
+  createAppleGroup,
+  createNewChat,
+  findOrCreateRcsChat,
+  startChatRepair,
+} from '@/services';
 // eslint-disable-next-line import/first
 import { send, sendImages } from '@/services/send';
 // eslint-disable-next-line import/first
@@ -184,6 +192,8 @@ import {
 } from '@features/conversations/forwardAttachmentHandoff';
 
 const mockCreateNewChat = createNewChat as jest.Mock;
+const mockCreateAppleGroup = createAppleGroup as jest.Mock;
+const mockStartChatRepair = startChatRepair as jest.Mock;
 const mockCheckAvailability = checkIMessageAvailability as jest.Mock;
 const mockFindOrCreateRcsChat = findOrCreateRcsChat as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
@@ -399,6 +409,17 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(async (_identity: unknown, plan: unknown) => plan);
   mockCreateNewChat.mockReset().mockResolvedValue('RCS;-;+15551234567');
+  mockCreateAppleGroup.mockReset().mockResolvedValue({
+    status: 'accepted',
+    guid: 'iMessage;+;chat-new-group',
+    messageGuid: 'msg-1',
+    existing: false,
+  });
+  mockStartChatRepair.mockReset().mockResolvedValue({
+    messages: 1,
+    historyExhausted: true,
+    restored: false,
+  });
   mockRandomUUID.mockReset().mockReturnValue('00000000-0000-4000-8000-000000000001');
   useDialogStore.setState({ current: null, queue: [] });
   useShareIntentStore.setState({
@@ -2518,5 +2539,155 @@ describe('NewChatScreen — opened from an imessage: link', () => {
 
     expect(screen.queryByLabelText('Remove not an address')).toBeNull();
     expect(screen.getByPlaceholderText('Phone or email')).toBeTruthy();
+  });
+});
+
+describe('NewChatScreen — new iMessage group (FP-006 group create)', () => {
+  const GROUP_GUID = 'iMessage;+;chat-new-group';
+  const useGroupCreate = (enabled: boolean): void => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: 'test',
+        supports_imessage_new_chat: true,
+        supports_imessage_group_create: enabled,
+      }),
+    });
+  };
+  async function draftGroup(text = 'hi all'): Promise<void> {
+    await addRecipient('+15557770002');
+    await addRecipient('+15557770001');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), text);
+    });
+  }
+  const start = async (): Promise<void> => {
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+  };
+
+  it('keeps two recipients one-to-one only without the create switch', async () => {
+    useGroupCreate(false);
+    await renderWithTheme(<NewChatScreen />);
+    await draftGroup();
+
+    expect(screen.getByText(/New conversations are one-to-one/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
+    expect(mockCreateAppleGroup).not.toHaveBeenCalled();
+  });
+
+  it('creates the group once with sorted members, fetches it, then opens it', async () => {
+    useGroupCreate(true);
+    await renderWithTheme(<NewChatScreen />);
+    await draftGroup();
+
+    expect(screen.queryByText(/New conversations are one-to-one/)).toBeNull();
+    await start();
+
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith('/chat/iMessage%3B%2B%3Bchat-new-group'),
+    );
+    expect(mockCreateAppleGroup).toHaveBeenCalledTimes(1);
+    expect(mockCreateAppleGroup).toHaveBeenCalledWith(
+      {
+        addresses: ['+15557770001', '+15557770002'],
+        message: 'hi all',
+        tempGuid: 'temp-00000000-0000-4000-8000-000000000001',
+      },
+      expect.anything(),
+    );
+    expect(mockStartChatRepair).toHaveBeenCalledWith(GROUP_GUID);
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
+  it('still opens the new group when fetching it fails', async () => {
+    useGroupCreate(true);
+    mockStartChatRepair.mockRejectedValueOnce(new Error('offline'));
+    await renderWithTheme(<NewChatScreen />);
+    await draftGroup();
+    await start();
+
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith('/chat/iMessage%3B%2B%3Bchat-new-group'),
+    );
+  });
+
+  it('says someone is not on iMessage without naming anyone, and keeps the draft', async () => {
+    useGroupCreate(true);
+    mockCreateAppleGroup.mockResolvedValueOnce({ status: 'rejected', notOnIMessage: true });
+    await renderWithTheme(<NewChatScreen />);
+    await draftGroup();
+    await start();
+
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Group Not Started'));
+    const message = useDialogStore.getState().current?.message ?? '';
+    expect(message).toContain('isn’t on iMessage');
+    expect(message).not.toMatch(/\+1555/);
+    expect(screen.getByDisplayValue('hi all')).toBeTruthy();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('keeps the same request id when Start is tapped again after an unconfirmed attempt', async () => {
+    useGroupCreate(true);
+    mockCreateAppleGroup.mockResolvedValueOnce({ status: 'outcome-unknown' });
+    await renderWithTheme(<NewChatScreen />);
+    await draftGroup();
+    await start();
+
+    await waitFor(() =>
+      expect(useDialogStore.getState().current?.title).toBe('Group Not Confirmed'),
+    );
+    expect(screen.getByDisplayValue('hi all')).toBeTruthy();
+    useDialogStore.setState({ current: null, queue: [] });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+        false,
+      ),
+    );
+    await start();
+
+    await waitFor(() => expect(mockCreateAppleGroup).toHaveBeenCalledTimes(2));
+    expect(mockCreateAppleGroup.mock.calls[0]?.[0].tempGuid).toBe(
+      mockCreateAppleGroup.mock.calls[1]?.[0].tempGuid,
+    );
+    expect(mockRandomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a fresh request id after a definite refusal', async () => {
+    useGroupCreate(true);
+    mockRandomUUID
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000001')
+      .mockReturnValueOnce('00000000-0000-4000-8000-000000000002');
+    mockCreateAppleGroup.mockResolvedValueOnce({ status: 'rejected' });
+    await renderWithTheme(<NewChatScreen />);
+    await draftGroup();
+    await start();
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Group Not Started'));
+    useDialogStore.setState({ current: null, queue: [] });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+        false,
+      ),
+    );
+    await start();
+
+    await waitFor(() => expect(mockCreateAppleGroup).toHaveBeenCalledTimes(2));
+    expect(mockCreateAppleGroup.mock.calls[0]?.[0].tempGuid).not.toBe(
+      mockCreateAppleGroup.mock.calls[1]?.[0].tempGuid,
+    );
+  });
+
+  it('admits a forwarded text as the new group’s first message', async () => {
+    useGroupCreate(true);
+    mockSearchParams = { forwardText: 'Hi' };
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15557770002');
+    await addRecipient('+15557770001');
+    // A forwarded text alone is fine; the start is admitted as a group.
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      false,
+    );
   });
 });

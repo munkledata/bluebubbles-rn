@@ -58,7 +58,7 @@ export { syncGroupPhotos } from './backgrounds/groupPhotos';
 export { computeBackgroundIsLight } from './backgrounds/luminance';
 export { startAppleFaceTimeCall } from './facetimeCallUiService';
 export { createAppleFaceTimeLink } from './facetimeLinkUiService';
-export { clearAppleGroupName, renameAppleGroup } from './groupRenameUiService';
+export { clearAppleGroupName, createAppleGroup, renameAppleGroup } from './groupRenameUiService';
 export {
   prepareAppleGroupPhotoSet,
   removeAppleGroupPhoto,

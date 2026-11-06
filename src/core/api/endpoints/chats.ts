@@ -259,6 +259,47 @@ export interface ClearIMessageGroupNameAck {
   guid: string;
 }
 
+/** The helper's create command takes 2 to 32 distinct members besides the owner. */
+export const IMESSAGE_GROUP_CREATE_MIN_ADDRESSES = 2;
+export const IMESSAGE_GROUP_CREATE_MAX_ADDRESSES = 32;
+const IMESSAGE_GROUP_CREATE_MESSAGE_MAX_BYTES = 64 * 1024;
+
+const IMessageGroupCreateAck = z
+  .object({
+    guid: z.string(),
+    messageGuid: z.string().min(1).max(256),
+    existing: z.boolean(),
+  })
+  .strict();
+
+export interface CreateIMessageGroupParams {
+  /** Canonical E.164 numbers or email addresses, sorted and distinct. */
+  addresses: readonly string[];
+  message: string;
+  /** Stable idempotency identity for this one draft. */
+  tempGuid: string;
+}
+
+export interface CreateIMessageGroupAck {
+  guid: string;
+  messageGuid: string;
+  /** True when Messages already had a group with exactly these members. */
+  existing: boolean;
+}
+
+/** The members as the create command needs them: canonical, distinct and sorted, else null. */
+export function canonicalIMessageGroupMembers(addresses: readonly string[]): string[] | null {
+  if (
+    addresses.length < IMESSAGE_GROUP_CREATE_MIN_ADDRESSES ||
+    addresses.length > IMESSAGE_GROUP_CREATE_MAX_ADDRESSES ||
+    !addresses.every((address) => isCanonicalIMessageParticipantAddress(address))
+  ) {
+    return null;
+  }
+  const sorted = [...new Set(addresses)].sort();
+  return sorted.length === addresses.length ? sorted : null;
+}
+
 export interface RenameIMessageGroupParams {
   chatGuid: string;
   displayName: string;
@@ -814,3 +855,65 @@ export function chatGroupPhotoUrl(http: HttpUrlBuilder, guid: string): string {
 }
 
 export { SYNC_WITH_QUERY };
+
+function groupCreateOutcomeUnknown(cause: unknown): ApiError {
+  return new ApiError(
+    'parse_error',
+    'Server returned an invalid iMessage group creation acknowledgement',
+    undefined,
+    cause,
+    undefined,
+    'imessage_group_create_outcome_unknown',
+  );
+}
+
+/**
+ * POST one new iMessage group with its first message, with no automatic HTTP retry. The server
+ * checks every member is on iMessage first and never echoes an address in a refusal.
+ */
+export async function createIMessageGroup(
+  http: HttpClient,
+  params: CreateIMessageGroupParams,
+): Promise<CreateIMessageGroupAck> {
+  const addresses = canonicalIMessageGroupMembers(params.addresses);
+  if (!addresses || addresses.some((address, index) => address !== params.addresses[index])) {
+    throw new Error('A new Apple group needs 2 to 32 distinct, sorted iMessage addresses.');
+  }
+  if (params.message.trim().length === 0) {
+    throw new Error('A new Apple group needs a first message.');
+  }
+  requireRoundTripUtf8(params.message, IMESSAGE_GROUP_CREATE_MESSAGE_MAX_BYTES, 'group message');
+  if (
+    !params.tempGuid.startsWith('temp-') ||
+    params.tempGuid.trim() !== params.tempGuid ||
+    UNICODE_CONTROL_CHARACTER.test(params.tempGuid)
+  ) {
+    throw new Error('A new Apple group needs a client-generated temporary GUID.');
+  }
+  requireRoundTripUtf8(
+    params.tempGuid,
+    IMESSAGE_GROUP_RENAME_TEMP_GUID_MAX_BYTES,
+    'group tempGuid',
+  );
+
+  let ack: CreateIMessageGroupAck;
+  try {
+    const raw = await http.post('/chat/new-group', IMessageGroupCreateAck, {
+      captureErrorDetail: true,
+      retry: false,
+      json: { addresses, message: params.message, tempGuid: params.tempGuid },
+    });
+    ack = IMessageGroupCreateAck.parse(raw);
+  } catch (error) {
+    if (error instanceof ApiError && error.kind !== 'parse_error') throw error;
+    if (error instanceof ApiError || error instanceof z.ZodError) {
+      throw groupCreateOutcomeUnknown(error);
+    }
+    throw error;
+  }
+
+  if (!isValidIMessageGroupGuid(ack.guid)) {
+    throw groupCreateOutcomeUnknown(new Error('Group creation returned a non-group conversation.'));
+  }
+  return ack;
+}
