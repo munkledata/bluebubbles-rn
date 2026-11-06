@@ -245,6 +245,30 @@ describe('useMessageActions — narrow iMessage actions and RCS reactions', () =
     });
   });
 
+  it('does not offer Edit on a message sent with an effect', async () => {
+    const setEditing = jest.fn();
+    const target = {
+      ...msg('message-with-effect', 'sent'),
+      dateCreated: Date.now(),
+      senderService: 'iMessage',
+      expressiveSendStyleId: 'com.apple.MobileSMS.expressivesend.impact',
+      messagePartTopology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    } as EnrichedMessage;
+    const { result } = await mount([target], 'iMessage;-;+15550001111', {
+      enabled: true,
+      setEditing,
+    });
+
+    await act(async () => result.current.onLongPressMessage(target, rect));
+    expect(result.current.selected?.editPartIndex).toBeUndefined();
+    expect(setEditing).not.toHaveBeenCalled();
+  });
+
   // A request that can't leave the phone can't unsend anything, but the app could not tell that
   // apart from a lost answer afterwards and left the message hidden as "unsent" for good.
   it('refuses to unsend while the phone is offline, before hiding anything', async () => {

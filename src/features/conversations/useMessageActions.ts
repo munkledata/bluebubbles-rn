@@ -96,6 +96,9 @@ function canEditExactPlainTextPartZero(msg: EnrichedMessage, now: number): boole
     bodyRuns.every((run) => !run.attachment && !run.mention) &&
     !msg.subject?.trim() &&
     !msg.balloonBundleId &&
+    // The Mac refuses to edit a message sent with an effect (device check, 0.1.75), as it does
+    // for Unsend below; never offer an edit that can only come back "Edit Not Sent".
+    !msg.expressiveSendStyleId &&
     visibleAttachmentCount === 0 &&
     msg.attachments.length === 0 &&
     !msg.hasAttachments &&
