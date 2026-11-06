@@ -1436,4 +1436,19 @@ export const MIGRATIONS: Migration[] = [
        END`,
     ],
   },
+  {
+    // 0001 created `messages_au AFTER UPDATE ON messages` with no column list, so every read
+    // receipt, delivery-tier or flag update deleted and re-inserted the search posting for an
+    // unchanged text. Fire only when the text itself changes (an edit or an unsend).
+    name: '0061_messages_fts_update_only_on_text',
+    statements: [
+      `DROP TRIGGER IF EXISTS messages_au`,
+      `CREATE TRIGGER messages_au AFTER UPDATE OF text ON messages
+         WHEN old.text IS NOT new.text
+       BEGIN
+         INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
+         INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+       END`,
+    ],
+  },
 ];

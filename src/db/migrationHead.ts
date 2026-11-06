@@ -6,5 +6,5 @@
  * It lives apart from migrations.ts because the DB-write guard requires database.ts to import
  * exactly one name, MIGRATIONS, from that module.
  */
-export const MIGRATION_HEAD = '0060_chat_auto_unarchive' as const;
-export const MIGRATION_COUNT = 60 as const;
+export const MIGRATION_HEAD = '0061_messages_fts_update_only_on_text' as const;
+export const MIGRATION_COUNT = 61 as const;
