@@ -129,9 +129,8 @@ the EAS profiles intentionally have no update-channel fields.
 
 ## Security and privacy boundaries
 
-- **Credentials:** server credentials use Android-backed SecureStore and normally travel in an
-  authorization header/socket auth payload. The explicitly selected legacy compatibility mode can
-  put credentials in a TLS-protected URL and is not the default.
+- **Credentials:** server credentials use Android-backed SecureStore and travel only in the
+  authorization header or the socket auth payload, never in a URL.
 - **Database:** messages, contacts, drafts, reminders, and most non-secret preferences live in a
   SQLCipher-encrypted SQLite database. Server credentials, its random key, the authoritative App Lock
   setting, and a few boot-time secrets live separately in Android SecureStore/Keystore. A native
@@ -177,9 +176,10 @@ the EAS profiles intentionally have no update-channel fields.
   screen uses the native Google Maps Android SDK for server-provided coordinates; Find My does not
   read the phone's own location. Google can receive those precise coordinates, the phone IP,
   displayed map region, device/request metadata, a Maps-specific identifier, Maps SDK crash
-  diagnostics, and map interactions. FaceTime entry points and embedded FaceTime web surfaces are
-  retired; explicit Find My system-map actions can contact external mapping services. Do not claim
-  that no third party is involved.
+  diagnostics, and map interactions. The embedded FaceTime web surface is retired; Settings still
+  offers one-shot FaceTime link creation and call starting when the connected server advertises
+  support, and explicit Find My system-map actions can contact external mapping services. Do not
+  claim that no third party is involved.
 - **Current Location sharing:** In a supported one-to-one conversation, an explicit confirmed action
   can request one approximate or precise foreground fix and send it through the connected server.
   Gator does not collect location in the background. Denial, cancellation/account retirement,
