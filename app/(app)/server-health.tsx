@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
+import { projectServerDisplayText } from '@core/api/serverErrorDetail';
 import type { ServerAlert } from '@core/api/endpoints/server';
 import { deriveRcsHealth, RCS_ALERT_TYPES, type RcsSeverity } from '@core/realtime';
 import { isScopedDeviceCredential } from '@core/secure';
@@ -330,15 +331,25 @@ export default function ServerHealthScreen(): React.JSX.Element {
           <SettingsSection label="ENVIRONMENT" style={styles.gap}>
             <InfoRow
               label="Server version"
-              value={env?.version ?? visibleServerInfo?.server_version ?? 'Unknown'}
+              value={
+                env?.version ??
+                projectServerDisplayText(visibleServerInfo?.server_version) ??
+                'Unknown'
+              }
             />
-            <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? 'Unknown'} />
+            <InfoRow
+              label="macOS"
+              value={projectServerDisplayText(visibleServerInfo?.os_version) ?? 'Unknown'}
+            />
             <InfoRow label="Node" value={env?.node ?? 'Unknown'} />
             <InfoRow label="Uptime" value={formatUptime(admin?.uptimeMs)} />
           </SettingsSection>
 
           <SettingsSection label="CONNECTION" style={styles.gap}>
-            <InfoRow label="Proxy" value={visibleServerInfo?.proxy_service ?? 'Direct'} />
+            <InfoRow
+              label="Proxy"
+              value={projectServerDisplayText(visibleServerInfo?.proxy_service) ?? 'Direct'}
+            />
             <InfoRow label="Public IP" value={ip ?? '—'} />
             <InfoRow
               label="Connection"

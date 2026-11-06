@@ -15,6 +15,7 @@ import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
+import { projectServerDisplayText } from '@core/api/serverErrorDetail';
 import { isScopedDeviceCredential } from '@core/secure';
 import { buildSetupQr } from '@features/setup/qr';
 import {
@@ -581,8 +582,14 @@ export default function ServerManagementScreen(): React.JSX.Element {
               latency != null ? ` · ${latency} ms` : ''
             }`}
           />
-          <InfoRow label="Server version" value={visibleServerInfo?.server_version ?? 'Unknown'} />
-          <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? 'Unknown'} />
+          <InfoRow
+            label="Server version"
+            value={projectServerDisplayText(visibleServerInfo?.server_version) ?? 'Unknown'}
+          />
+          <InfoRow
+            label="macOS"
+            value={projectServerDisplayText(visibleServerInfo?.os_version) ?? 'Unknown'}
+          />
           <InfoRow
             label="Restored iMessage features"
             value={restoredIMessageFeaturesLabel(visibleServerInfo)}
@@ -591,7 +598,10 @@ export default function ServerManagementScreen(): React.JSX.Element {
             label="iMessage availability"
             value={iMessageAvailabilityCopy(visibleServerInfo?.supports_imessage_availability)}
           />
-          <InfoRow label="Proxy" value={visibleServerInfo?.proxy_service ?? 'Direct'} />
+          <InfoRow
+            label="Proxy"
+            value={projectServerDisplayText(visibleServerInfo?.proxy_service) ?? 'Direct'}
+          />
           <Pressable
             onPress={onShareUrl}
             disabled={!visibleOrigin}

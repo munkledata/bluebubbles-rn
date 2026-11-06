@@ -88,6 +88,12 @@ export function projectServerErrorDetail(value: unknown): string | undefined {
   return bounded || undefined;
 }
 
+/**
+ * Any other server-authored string shown as UI prose (its version, OS or proxy name) goes through
+ * the same projector: bounded, control characters and URLs removed, never trusted for decisions.
+ */
+export const projectServerDisplayText = projectServerErrorDetail;
+
 /** Parse only bounded fields from the reviewed v1 `{ error: { message, type } }` envelope. */
 export function parseServerErrorBody(bodyText: string): ParsedServerErrorBody | undefined {
   if (bodyText.length > MAX_SERVER_ERROR_BODY_BYTES) return undefined;
