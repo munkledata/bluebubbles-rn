@@ -28,7 +28,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
   migration, crypto, native, or other high-risk changes.
 - Do not produce per-file hash manifests, repeated historical narratives, or full raw command output
   unless reconciliation or a failure investigation requires them.
-- Preserve the dirty worktree and unrelated user changes. Use `apply_patch` for edits.
+- Preserve the dirty worktree and unrelated user changes.
 - On a real failure, show the exact error and explain it before correcting it. After two failed
   correction attempts, stop and rethink the diagnosis.
 - Before claiming completion, reread the diff skeptically and show concrete verification output.
@@ -185,7 +185,8 @@ but its affected-row count is not portable. Use`RETURNING` or a builder when own
 - FlashList v2 has no `inverted` or `estimatedItemSize` prop. Render chat chronologically and use
   `maintainVisibleContentPosition={{ startRenderingFromBottom: true }}`.
 - Guard calls on an auto-released `expo-video` player during focus/unmount cleanup.
-- A plain `View` with an accessibility role/label also needs `accessible`. Test accessibility
+- A plain `View` with an accessibility role/label also needs `accessible`, except a
+  `radiogroup`, which must stay non-`accessible` or TalkBack hides its radios. Test accessibility
   contracts by role, not only by test ID.
 - Never give text containers fixed heights; support Android font scaling.
 - Use themed colors explicitly. Bare React Native `Text` defaults can be unreadable on dark
