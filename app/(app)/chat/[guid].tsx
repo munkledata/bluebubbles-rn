@@ -507,7 +507,6 @@ function ChatScreenInner({
   const [replyRestoredFor, setReplyRestoredFor] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
-    setReplyRestoredFor(null);
     void runTrackedRealtimeWork(accountLease, async () => {
       const raw = (await kvGet(getDatabase(), `${DRAFT_REPLY_KV_PREFIX}${guid}`)) ?? '';
       const target = parseDraftReplyTarget(raw);
