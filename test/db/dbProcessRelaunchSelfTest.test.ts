@@ -469,6 +469,12 @@ beforeEach(() => {
 });
 
 describe('DB-03B1 fixed process-relaunch database contract', () => {
+  // Every disposable fixture in this suite must open only its own *-selftest.db names. A redirect
+  // to the production file would crash, rekey or corrupt real data (scanner triage B1, 2026-11-06).
+  afterEach(() => {
+    expect(JSON.stringify(mockOpen.mock.calls)).not.toContain('gator.db');
+  });
+
   it('pins the exact production migration boundary used across process death', () => {
     expect(migrationNames).toHaveLength(MIGRATION_COUNT);
     expect(migrationNames[28]).toBe('0029_chats_deleted_at');

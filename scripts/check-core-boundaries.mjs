@@ -1062,6 +1062,219 @@ export function runDbHandleEscapeBoundaryCheck({ root = process.cwd() } = {}) {
   return { files: files.length };
 }
 
+// ---------------------------------------------------------------------------------------------
+// Owned native modules must not touch SQLite (scanner triage E2, 2026-11-06). A Kotlin/Swift module
+// opening the database behind the JS owner would bypass SQLCipher key custody and the write lock.
+// This used to be the DB-write scanner's `<native>` finding, which could never be approved.
+// ---------------------------------------------------------------------------------------------
+const NATIVE_SOURCE_PATTERN = /\.(kt|java|swift|m|mm)$/;
+export const NATIVE_SQLITE_MARKERS = [
+  { pattern: /android\.database\.sqlite/, label: 'android.database.sqlite' },
+  { pattern: /\bSQLiteDatabase\b/, label: 'SQLiteDatabase' },
+  { pattern: /\bSQLiteOpenHelper\b/, label: 'SQLiteOpenHelper' },
+  { pattern: /\bexecSQL\s*\(/, label: 'execSQL(' },
+  { pattern: /\bsqlite3_[a-z_]+\s*\(/, label: 'sqlite3_*(' },
+  { pattern: /\bFMDatabase\b/, label: 'FMDatabase' },
+];
+
+function nativeSourceFiles(directory) {
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = resolve(directory, entry.name);
+    if (entry.isDirectory()) return entry.name === 'build' ? [] : nativeSourceFiles(path);
+    return NATIVE_SOURCE_PATTERN.test(entry.name) ? [path] : [];
+  });
+}
+
+export function validateNativeSqliteMarkers({ root, files }) {
+  const errors = [];
+  for (const file of files) {
+    readFileSync(file, 'utf8')
+      .split('\n')
+      .forEach((line, index) => {
+        for (const { pattern, label } of NATIVE_SQLITE_MARKERS) {
+          if (pattern.test(line)) {
+            errors.push(
+              `${relative(root, file)}:${index + 1} uses ${label}; an owned native module must not open the database (SQLCipher key custody and the write lock live in the JS owner)`,
+            );
+          }
+        }
+      });
+  }
+  return errors;
+}
+
+export function runNativeSqliteBoundaryCheck({ root = process.cwd() } = {}) {
+  const files = nativeSourceFiles(resolve(root, 'modules'));
+  const errors = validateNativeSqliteMarkers({ root, files });
+  if (errors.length > 0) {
+    throw new Error(
+      `Native SQLite access in owned modules:\n${errors.map((e) => `- ${e}`).join('\n')}`,
+    );
+  }
+  return { files: files.length };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Headless wake budgets must nest (scanner triage A5, 2026-11-06). Android gives a killed-app push
+// or background wake roughly a minute; the windows below are the only statement of how the effect
+// tail, the delivery/work window, finalization, the admission budget and the key-rotation overlap
+// relate. The constants are read from source so the modules' native imports need no mocks.
+// ---------------------------------------------------------------------------------------------
+export const HEADLESS_BUDGET_SOURCES = [
+  'src/services/background/realtimeHeadlessEffects.ts',
+  'src/services/background/backgroundSync.ts',
+  'src/services/background/realtimePrerequisiteRecovery.ts',
+  'src/services/notifications/fcmMessaging.ts',
+  'src/core/realtime/fcmEncryption.ts',
+];
+const RNFB_HEADLESS_TASK_MS = 60_000;
+const SAMSUNG_WORKER_TIMEOUT_MS = 75_000;
+const SERVER_PREVIOUS_KEY_OVERLAP_MS = 24 * 60 * 60 * 1_000 + 5 * 60 * 1_000;
+const ROTATION_OVERLAP_SLACK_MS = 5 * 60 * 1_000;
+export const HEADLESS_BUDGET_RULES = [
+  {
+    rule: 'REALTIME_HEADLESS_EFFECT_WINDOW_MS + REALTIME_HEADLESS_EFFECT_CANCEL_GRACE_MS <= FCM_HEADLESS_DELIVERY_WINDOW_MS',
+    why: 'an effect must run and be cancelled inside the push delivery window',
+    holds: (c) =>
+      c.REALTIME_HEADLESS_EFFECT_WINDOW_MS + c.REALTIME_HEADLESS_EFFECT_CANCEL_GRACE_MS <=
+      c.FCM_HEADLESS_DELIVERY_WINDOW_MS,
+  },
+  {
+    rule: 'REALTIME_HEADLESS_EFFECT_WINDOW_MS + REALTIME_HEADLESS_EFFECT_CANCEL_GRACE_MS <= BACKGROUND_CALLBACK_WORK_WINDOW_MS',
+    why: 'the same effect tail runs inside a background callback',
+    holds: (c) =>
+      c.REALTIME_HEADLESS_EFFECT_WINDOW_MS + c.REALTIME_HEADLESS_EFFECT_CANCEL_GRACE_MS <=
+      c.BACKGROUND_CALLBACK_WORK_WINDOW_MS,
+  },
+  {
+    rule: 'FCM_HEADLESS_DELIVERY_WINDOW_MS < FCM_HEADLESS_FINALIZATION_WINDOW_MS < 60_000',
+    why: "delivery stops before final logging, and both before RNFB's 60-second Android task ends",
+    holds: (c) =>
+      c.FCM_HEADLESS_DELIVERY_WINDOW_MS < c.FCM_HEADLESS_FINALIZATION_WINDOW_MS &&
+      c.FCM_HEADLESS_FINALIZATION_WINDOW_MS < RNFB_HEADLESS_TASK_MS,
+  },
+  {
+    rule: 'BACKGROUND_WAKE_ADMISSION_BUDGET_MS < BACKGROUND_CALLBACK_WORK_WINDOW_MS',
+    why: "the orchestrator's own budget must fire while the callback is alive (review M187)",
+    holds: (c) => c.BACKGROUND_WAKE_ADMISSION_BUDGET_MS < c.BACKGROUND_CALLBACK_WORK_WINDOW_MS,
+  },
+  {
+    rule: 'BACKGROUND_CALLBACK_WORK_WINDOW_MS < BACKGROUND_CALLBACK_FINALIZATION_WINDOW_MS < 75_000',
+    why: "work stops before cleanup, and both before Samsung's observed 75-second worker timeout",
+    holds: (c) =>
+      c.BACKGROUND_CALLBACK_WORK_WINDOW_MS < c.BACKGROUND_CALLBACK_FINALIZATION_WINDOW_MS &&
+      c.BACKGROUND_CALLBACK_FINALIZATION_WINDOW_MS < SAMSUNG_WORKER_TIMEOUT_MS,
+  },
+  {
+    rule: 'REALTIME_PREREQUISITE_CHAT_RECOVERY_BUDGET_MS <= REALTIME_PREREQUISITE_RECOVERY_BUDGET_MS',
+    why: 'a single chat recovery is a slice of the whole prerequisite recovery budget',
+    holds: (c) =>
+      c.REALTIME_PREREQUISITE_CHAT_RECOVERY_BUDGET_MS <= c.REALTIME_PREREQUISITE_RECOVERY_BUDGET_MS,
+  },
+  {
+    rule: 'FCM_ROTATION_TIMER_MAX_DELAY_MS <= FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS',
+    why: 'the rotation check must fire before the previous key is retired locally',
+    holds: (c) => c.FCM_ROTATION_TIMER_MAX_DELAY_MS <= c.FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS,
+  },
+  {
+    rule: '24h05m <= FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS <= 24h10m < FCM_PUSH_KEY_ROTATION_INTERVAL_MS',
+    why: "the local cap covers the server's 24h05 previous-key overlap plus five minutes of slack",
+    holds: (c) =>
+      c.FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS >= SERVER_PREVIOUS_KEY_OVERLAP_MS &&
+      c.FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS <=
+        SERVER_PREVIOUS_KEY_OVERLAP_MS + ROTATION_OVERLAP_SLACK_MS &&
+      c.FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS < c.FCM_PUSH_KEY_ROTATION_INTERVAL_MS,
+  },
+];
+
+/** Top-level `const NAME = <number expression>` values of one module, exported or not. */
+export function readNumericConstants(source, fileName = 'source.ts') {
+  const sourceFile = parseSource(source, fileName);
+  const values = new Map();
+  const evaluate = (node) => {
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node))
+      return evaluate(node.expression);
+    if (ts.isNumericLiteral(node)) return Number(node.text.replace(/_/g, ''));
+    if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
+      const operand = evaluate(node.operand);
+      return operand === undefined ? undefined : -operand;
+    }
+    if (ts.isIdentifier(node)) return values.get(node.text);
+    if (ts.isBinaryExpression(node)) {
+      const left = evaluate(node.left);
+      const right = evaluate(node.right);
+      if (left === undefined || right === undefined) return undefined;
+      switch (node.operatorToken.kind) {
+        case ts.SyntaxKind.PlusToken:
+          return left + right;
+        case ts.SyntaxKind.MinusToken:
+          return left - right;
+        case ts.SyntaxKind.AsteriskToken:
+          return left * right;
+        case ts.SyntaxKind.SlashToken:
+          return left / right;
+        default:
+          return undefined;
+      }
+    }
+    return undefined;
+  };
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+      const value = evaluate(declaration.initializer);
+      if (typeof value === 'number' && Number.isFinite(value))
+        values.set(declaration.name.text, value);
+    }
+  }
+  return values;
+}
+
+export function validateHeadlessBudgets({ root }) {
+  const constants = {};
+  const errors = [];
+  for (const relativePath of HEADLESS_BUDGET_SOURCES) {
+    const path = resolve(root, relativePath);
+    if (!existsSync(path)) {
+      errors.push(
+        `${relativePath} is missing; update HEADLESS_BUDGET_SOURCES if the constants moved`,
+      );
+      continue;
+    }
+    for (const [name, value] of readNumericConstants(readFileSync(path, 'utf8'), path)) {
+      if (name in constants && constants[name] !== value) {
+        errors.push(`${name} is defined with different values in two budget sources`);
+      }
+      constants[name] = value;
+    }
+  }
+  for (const { rule, why, holds } of HEADLESS_BUDGET_RULES) {
+    const names = rule.match(/\b[A-Z][A-Z0-9_]+_MS\b/g) ?? [];
+    const missing = names.filter((name) => !(name in constants));
+    if (missing.length > 0) {
+      errors.push(
+        `${missing.join(', ')} not found as a numeric constant in the budget sources; if renamed, update HEADLESS_BUDGET_RULES`,
+      );
+      continue;
+    }
+    if (!holds(constants)) {
+      const actual = names.map((name) => `${name}=${constants[name]}`).join(', ');
+      errors.push(`headless budget rule broken: ${rule} (${why}); ${actual}`);
+    }
+  }
+  return { errors, constants: Object.keys(constants).length };
+}
+
+export function runHeadlessBudgetCheck({ root = process.cwd() } = {}) {
+  const { errors, constants } = validateHeadlessBudgets({ root });
+  if (errors.length > 0) {
+    throw new Error(`Headless budget violations:\n${errors.map((e) => `- ${e}`).join('\n')}`);
+  }
+  return { rules: HEADLESS_BUDGET_RULES.length, constants };
+}
+
 export function runArchitectureBoundaryCheck({ root = process.cwd() } = {}) {
   return {
     core: runCoreBoundaryCheck({ root }),
@@ -1070,6 +1283,8 @@ export function runArchitectureBoundaryCheck({ root = process.cwd() } = {}) {
     cycles: runSynchronousRuntimeCycleCheck({ root }),
     embeddedWebView: runEmbeddedWebViewBoundaryCheck({ root }),
     dbHandleEscape: runDbHandleEscapeBoundaryCheck({ root }),
+    nativeSqlite: runNativeSqliteBoundaryCheck({ root }),
+    headlessBudgets: runHeadlessBudgetCheck({ root }),
     headlessEntry: runHeadlessEntryCheck({ root }),
   };
 }

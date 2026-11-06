@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,11 @@ import {
   hasUseDomDirective,
   importSpecifiers,
   runArchitectureBoundaryCheck,
+  runNativeSqliteBoundaryCheck,
+  readNumericConstants,
+  runHeadlessBudgetCheck,
+  HEADLESS_BUDGET_SOURCES,
+  validateNativeSqliteMarkers,
   runCoreBoundaryCheck,
   runEmbeddedWebViewBoundaryCheck,
   runServiceBoundaryCheck,
@@ -563,6 +568,9 @@ test('the repository satisfies UI DB, cycle, and static headless entry architect
   assert.ok(result.cycles.edges > 0);
   assert.ok(result.embeddedWebView.files > 0);
   assert.ok(result.headlessEntry.imports > 0);
+  assert.ok(result.nativeSqlite.files > 0);
+  assert.ok(result.headlessBudgets.rules >= 8);
+  assert.ok(result.headlessBudgets.constants > 10);
 });
 
 test('database handle escape: raw driver, raw handle, file name and write-handle assertions stay in src/db', () => {
@@ -641,4 +649,105 @@ test('database handle escape: a raw write statement needs an owner callback or a
     'src/db/repositories/example.ts:17 issues a raw write statement outside a transaction or write-lock owner and outside a WriteDb-typed function',
   ]);
   rmSync(root, { recursive: true, force: true });
+});
+
+test('native SQLite markers: an owned module that opens the database is rejected, a clean one passes', () => {
+  const root = fixture({
+    'modules/gator-example/android/src/main/java/expo/modules/example/Opens.kt': `
+      import android.database.sqlite.SQLiteDatabase
+      class Opens { fun run(db: SQLiteDatabase) { db.execSQL("DELETE FROM messages") } }
+    `,
+    'modules/gator-example/ios/Opens.swift': 'let rc = sqlite3_open(path, &handle)\n',
+    'modules/gator-example/android/src/main/java/expo/modules/example/Clean.kt': `
+      class Clean { fun run(): Int = 1 }
+    `,
+    'modules/gator-example/android/build/generated/Ignored.kt':
+      'val x = SQLiteDatabase.create(null)\n',
+  });
+  try {
+    assert.throws(
+      () => runNativeSqliteBoundaryCheck({ root }),
+      (error) => {
+        assert.match(error.message, /Opens\.kt:2 uses android\.database\.sqlite/);
+        assert.match(error.message, /Opens\.kt:3 uses SQLiteDatabase/);
+        assert.match(error.message, /Opens\.kt:3 uses execSQL\(/);
+        assert.match(error.message, /Opens\.swift:1 uses sqlite3_\*\(/);
+        assert.doesNotMatch(error.message, /Clean\.kt|Ignored\.kt/);
+        return true;
+      },
+    );
+    const clean = validateNativeSqliteMarkers({
+      root,
+      files: [
+        resolve(root, 'modules/gator-example/android/src/main/java/expo/modules/example/Clean.kt'),
+      ],
+    });
+    assert.deepEqual(clean, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('headless budgets: numeric constants are evaluated from source, including arithmetic and references', () => {
+  const values = readNumericConstants(`
+    export const A_MS = 40_000;
+    const B_MS = 24 * 60 * 60 * 1_000 + 10 * 60 * 1_000;
+    export const C_MS = (A_MS + 2_000) as const;
+    const label = 'not a number';
+    const D_MS = Math.max(A_MS, B_MS);
+  `);
+  assert.deepEqual(
+    [...values.entries()],
+    [
+      ['A_MS', 40_000],
+      ['B_MS', 87_000_000],
+      ['C_MS', 42_000],
+    ],
+  );
+});
+
+test('headless budgets: a shrunk delivery window, an equal admission window, and a renamed constant fail', () => {
+  const current = Object.fromEntries(
+    HEADLESS_BUDGET_SOURCES.map((path) => [
+      path,
+      readFileSync(resolve(process.cwd(), path), 'utf8'),
+    ]),
+  );
+  const root = fixture({
+    ...current,
+    'src/services/notifications/fcmMessaging.ts': current[
+      'src/services/notifications/fcmMessaging.ts'
+    ]
+      .replace(
+        'FCM_HEADLESS_DELIVERY_WINDOW_MS = 50_000',
+        'FCM_HEADLESS_DELIVERY_WINDOW_MS = 41_000',
+      )
+      .replace('FCM_ROTATION_TIMER_MAX_DELAY_MS =', 'FCM_ROTATION_TIMER_MAX_WAIT_MS ='),
+    'src/services/background/backgroundSync.ts': current[
+      'src/services/background/backgroundSync.ts'
+    ].replace(
+      'BACKGROUND_WAKE_ADMISSION_BUDGET_MS = 40_000',
+      'BACKGROUND_WAKE_ADMISSION_BUDGET_MS = 50_000',
+    ),
+  });
+  try {
+    assert.throws(
+      () => runHeadlessBudgetCheck({ root }),
+      (error) => {
+        assert.match(
+          error.message,
+          /REALTIME_HEADLESS_EFFECT_WINDOW_MS \+ REALTIME_HEADLESS_EFFECT_CANCEL_GRACE_MS <= FCM_HEADLESS_DELIVERY_WINDOW_MS/,
+        );
+        assert.match(error.message, /FCM_HEADLESS_DELIVERY_WINDOW_MS=41000/);
+        assert.match(
+          error.message,
+          /BACKGROUND_WAKE_ADMISSION_BUDGET_MS < BACKGROUND_CALLBACK_WORK_WINDOW_MS/,
+        );
+        assert.match(error.message, /FCM_ROTATION_TIMER_MAX_DELAY_MS not found/);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

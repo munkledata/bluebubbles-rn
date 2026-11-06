@@ -104,6 +104,12 @@ function installNativeHarness(
 }
 
 describe('runDbRuntimeConcurrencySelfTest', () => {
+  // Every disposable fixture in this suite must open only its own *-selftest.db names. A redirect
+  // to the production file would crash, rekey or corrupt real data (scanner triage B1, 2026-11-06).
+  afterEach(() => {
+    expect(JSON.stringify(mockOpen.mock.calls)).not.toContain('gator.db');
+  });
+
   beforeEach(() => {
     jest.resetModules();
     mockOpen.mockReset();
