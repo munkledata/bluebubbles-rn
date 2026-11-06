@@ -59,7 +59,9 @@ module.exports = {
       displayName: 'components',
       preset: 'jest-expo',
       testMatch: ['<rootDir>/test/components/**/*.test.tsx'],
-      setupFilesAfterEnv: ['<rootDir>/test/components/support/setup.ts'],
+      // The nesting detector too (test/support/transactionNesting.ts): a component test that drives a
+      // repository through a mocked screen must fail fast on a nested transaction like a node test.
+      setupFilesAfterEnv: ['<rootDir>/test/components/support/setup.ts', '<rootDir>/test/support/setupNode.ts'],
       moduleNameMapper,
       clearMocks: true,
     },
