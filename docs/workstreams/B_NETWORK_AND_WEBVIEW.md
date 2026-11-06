@@ -2,7 +2,7 @@
 
 > **Document role:** This file owns stable implementation design and sequencing for Workstream B.
 > It never owns task status, dates, owners, blockers, or completion evidence. Active remediation
-> status remains in [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md); explicitly deferred
+> status remains in [`STATUS.md`](../STATUS.md); explicitly deferred
 > future product status remains in [`POST_REMEDIATION_PLAN.md`](../POST_REMEDIATION_PLAN.md).
 
 Workstream B treats URLs, DNS answers, redirects, embedded documents, server-rotation instructions,

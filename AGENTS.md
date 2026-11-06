@@ -1,7 +1,7 @@
 # Gator RN — concise agent instructions
 
 Gator RN is an Android-only React Native/Expo rebuild of the Flutter iMessage client. Start with
-`README.md`. Remediation status lives in `docs/WORK_PLAN_2026-08-03.md`; `docs/RELEASE_PLAN.md` owns
+`README.md`. Remediation status lives in `docs/STATUS.md`; `docs/RELEASE_PLAN.md` owns
 the four release-operation tasks. Older plans and `docs/DB_WRITE_SAFETY_AUDIT_2026-07-25.md` are
 historical context, not current status.
 
@@ -33,7 +33,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 | Frozen DB-02A handoff             | `docs/DB_02A_CURRENT.md`                                                                                |
 | Session late-result ownership     | `docs/REL_004_LATE_RESULT_INVENTORY.md`                                                                 |
 | Session teardown barrier          | `docs/REL_005A_TEARDOWN_INVENTORY.md`                                                                   |
-| Authoritative remediation status  | `docs/WORK_PLAN_2026-08-03.md`                                                                          |
+| Authoritative remediation status  | `docs/STATUS.md`                                                                                        |
 | Authoritative release-task status | `docs/RELEASE_PLAN.md`                                                                                  |
 | Audit history                     | `docs/history/AUDIT_REPORT.md`                                                                          |
 | Exact-candidate release gate      | `RELEASE_CHECKLIST.md`                                                                                  |

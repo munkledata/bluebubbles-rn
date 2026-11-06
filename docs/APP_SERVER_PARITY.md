@@ -123,7 +123,7 @@ _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconcil
 > evidence unless they explicitly say they describe the current client.
 
 > **Status authority (2026-08-08):** This document records protocol evidence and parity decisions; it is not the
-> implementation tracker. [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) is authoritative. Under
+> implementation tracker. [`STATUS.md`](./STATUS.md) is authoritative. Under
 > `PARITY-01`, every open `PARTIAL`/`CONFIRMED` capability must link to a primary work-plan task or an explicit
 > `DEFER`/`DROP` product decision. Per-address contact lookup and RCS send-contact are complete paths; the bulk
 > contacts/handles bootstrap listed below is a different, still-unused capability.
@@ -246,7 +246,7 @@ unknown outcomes cannot fall back or replay. The matching Android build and phon
 owner-deferred. Existing stranded copies are not guessed away by body/time matching.
 
 `FEAT-03` remains **IN_PROGRESS**. The authoritative
-[prepared handoff](./WORK_PLAN_2026-08-03.md#feat-03--multipart-and-unsupported-message-correctness)
+[prepared handoff](./STATUS.md#feat-03--multipart-and-unsupported-message-correctness)
 binds the active server checkout, app/server/helper versions, existing freeze failures, and the
 small next batch: plain send/reopen with a timely **unedited** target Unsend, one formatted send,
 and one RCS combined-send retry/live/sync check. No historical pass is silently rebound to the
@@ -310,7 +310,7 @@ explicitly excludes RCS from only the Mac scope because locally stored RCS match
 This closes source-level app/server parity, not release evidence. A fresh local staging package contains
 the route, capability, and both bounded scalars, but it has not replaced the installed Mac server. The new
 server and app builds must still be deployed together and exercised on Android against a realistic Mac
-Messages database. `WORK_PLAN_2026-08-03.md` remains authoritative for that device and release tail.
+Messages database. `STATUS.md` remains authoritative for that device and release tail.
 
 ## ✅ Closed (2026-07-01)
 
@@ -587,7 +587,7 @@ artifact/server identities, outcomes, and measurement limits are recorded in
 
 ## ✅ Complete (updated 2026-09-15) — missed-deletion catch-up sync (R1)
 
-**Authoritative task:** [`DELETE-SYNC-01`](./WORK_PLAN_2026-08-03.md). Frozen legacy/v1
+**Authoritative task:** [`DELETE-SYNC-01`](./STATUS.md). Frozen legacy/v1
 continuation, additive v2 durable-ledger continuation, atomic app adoption, stable initial-repair
 boundary, and two digest-locked cross-repository response fixtures are implemented. Both exact-device
 branches passed; owner-approved residuals are recorded below.

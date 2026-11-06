@@ -1,6 +1,6 @@
 # Work plan 2026-08-03 — status log
 
-Moved on 2026-11-06 from section 18 of [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md), which keeps
+Moved on 2026-11-06 from section 18 of [`STATUS.md`](../STATUS.md), which keeps
 the task register and specifications. Dated entries only; the register's status lines remain the authority.
 New entries go at the end of this file.
 - **2026-08-03:** Plan created from the Codex architecture/security/feature/package/design audit. No app code
