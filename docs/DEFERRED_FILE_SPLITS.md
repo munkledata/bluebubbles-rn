@@ -7,6 +7,10 @@ lines) and the media viewer (1,400 → 966) and retired the legacy `hydrateSessi
 DB-write-guard bookkeeping rather than clearer code, so they wait for their own planned change.
 Counts and line numbers are as of commit `ba0400c` and will drift.
 
+**2026-11-06:** the DB-write scanner and its inventory were retired (replaced by the `ReadDb`/`WriteDb`
+type split, ESLint rules and the boundary guard), so the guard footprint described below no longer
+exists and no longer blocks these splits; what remains is the design question in each section.
+
 ## `bootstrap.ts`: connect and account cleanup
 
 Shape today (2,026 lines):

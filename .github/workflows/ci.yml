@@ -67,12 +67,6 @@ jobs:
       - name: Smoke controlled environment config resolution
         run: node scripts/check-toolchain.mjs --environment-smoke
 
-      - name: Database write approval guard
-        run: node scripts/check-db-writes.mjs --check
-
-      - name: Fast database-write scanner suite
-        run: npm run check:db-writes:fast
-
       - name: Architecture and secret hygiene guards
         run: |
           npm run check:architecture

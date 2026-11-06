@@ -8,17 +8,12 @@ import {
   scheduledRecoverySourceErrors,
   scheduledHandoffSourceErrors,
   scheduledRunnerUsageErrors,
-  scheduledEnsureRecoveryBodyHash,
-  scheduledReserveRunBodyHash,
-  scheduledRunDueBodyHash,
-  scheduledSendTextBodyHash,
   scheduledCallFindings,
   scheduledCallFindingsFromSources,
   scheduledCallSiteErrors,
   scheduledCallSiteKey,
   EXPECTED_SCHEDULED_CALL_SITES,
 } from './check-scheduled-recovery.mjs';
-import { scanDbWrites } from './check-db-writes.mjs';
 
 const schedulePath = 'src/services/send/scheduleService.ts';
 const sendPath = 'src/services/send/sendService.ts';
@@ -795,70 +790,7 @@ test('keeps the plain-text route proof, exclusive dispatch, and certified retry 
   }
 });
 
-test('reviewed function fingerprints fail closed on otherwise unchecked edits', () => {
-  const runDueHash = scheduledRunDueBodyHash(validSource);
-  const reserveRunHash = scheduledReserveRunBodyHash(validSource);
-  const ensureRecoveryHash = scheduledEnsureRecoveryBodyHash(validSource);
-  const expectedRecoveryHashes = {
-    expectedBodyHash: runDueHash,
-    expectedReserveBodyHash: reserveRunHash,
-    expectedEnsureBodyHash: ensureRecoveryHash,
-  };
-  assert.deepEqual(scheduledRecoverySourceErrors(validSource, expectedRecoveryHashes), []);
-  assertErrors(
-    scheduledRecoverySourceErrors(
-      replaceOnce(validSource, '    return fired;', '    void fired;\n    return fired;'),
-      expectedRecoveryHashes,
-    ),
-    /reviewed AST body fingerprint/,
-  );
-  assertErrors(
-    scheduledRecoverySourceErrors(
-      replaceOnce(
-        validSource,
-        '  const waitForTurn = tails.get(key) ?? Promise.resolve();',
-        '  const waitForTurn = Promise.resolve();',
-      ),
-      expectedRecoveryHashes,
-    ),
-    /reserveScheduledRun no longer matches its reviewed AST body fingerprint/,
-  );
-  assertErrors(
-    scheduledRecoverySourceErrors(
-      replaceOnce(
-        validSource,
-        '  if (existing) return existing.promise;',
-        '  if (existing && accountScope?.isCurrent()) return existing.promise;',
-      ),
-      expectedRecoveryHashes,
-    ),
-    /ensureScheduledRecovery no longer matches its reviewed AST body fingerprint/,
-  );
-
-  const sendHash = scheduledSendTextBodyHash(validSendServiceSource);
-  assert.deepEqual(
-    scheduledHandoffSourceErrors(validSendServiceSource, { expectedBodyHash: sendHash }),
-    [],
-  );
-  assertErrors(
-    scheduledHandoffSourceErrors(
-      replaceOnce(
-        validSendServiceSource,
-        '  return { tempGuid };\n}',
-        '  void tempGuid;\n  return { tempGuid };\n}',
-      ),
-      { expectedBodyHash: sendHash },
-    ),
-    /reviewed AST body fingerprint/,
-  );
-});
-
 test('rejects bypass or early release of the scheduled-run FIFO', () => {
-  const expectedRecoveryHashes = {
-    expectedBodyHash: scheduledRunDueBodyHash(validSource),
-    expectedReserveBodyHash: scheduledReserveRunBodyHash(validSource),
-    expectedEnsureBodyHash: scheduledEnsureRecoveryBodyHash(validSource),
-  };
   assertErrors(
     scheduledRecoverySourceErrors(
       replaceOnce(
@@ -866,9 +798,8 @@ test('rejects bypass or early release of the scheduled-run FIFO', () => {
         '    await reservation.waitForTurn;',
         '    void reservation.waitForTurn;',
       ),
-      expectedRecoveryHashes,
     ),
-    /reviewed AST body fingerprint|reserved FIFO turn/,
+    /reserved FIFO turn/,
   );
 
   const guardedRelease =
@@ -885,11 +816,8 @@ test('rejects bypass or early release of the scheduled-run FIFO', () => {
     '      recoveryStatesForDatabase(db as object).delete(recoveryKey);\n' +
     '    }';
   assertErrors(
-    scheduledRecoverySourceErrors(
-      replaceOnce(validSource, guardedRelease, earlyRelease),
-      expectedRecoveryHashes,
-    ),
-    /reviewed AST body fingerprint/,
+    scheduledRecoverySourceErrors(replaceOnce(validSource, guardedRelease, earlyRelease)),
+    /reservation\.finish\(\) must be the only statement of the finally block/,
   );
 });
 
@@ -951,126 +879,6 @@ test('requires the background callback to wire its reviewed schedule owner direc
     ),
   );
   assertErrors(scheduledRunnerUsageErrors(detachedRace), /reviewed scheduled-owner fingerprint/);
-});
-
-test('pins the complete background callback lifetime and work graph', () => {
-  const widenedDeadline = mutateRunnerSource(
-    'src/services/background/backgroundSync.ts',
-    (source) =>
-      replaceOnce(
-        source,
-        'BACKGROUND_CALLBACK_WORK_WINDOW_MS = 50_000',
-        'BACKGROUND_CALLBACK_WORK_WINDOW_MS = 300_000',
-      ),
-  );
-  assertErrors(
-    scheduledRunnerUsageErrors(widenedDeadline),
-    /reviewed REL-001 callback dependency fingerprint/,
-  );
-
-  const disabledAbort = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
-    replaceOnce(
-      source,
-      "controller.abort(new Error('Background callback work deadline expired'));",
-      'void controller;',
-    ),
-  );
-  assertErrors(
-    scheduledRunnerUsageErrors(disabledAbort),
-    /reviewed REL-001 callback dependency fingerprint/,
-  );
-});
-
-test('pins the complete background callback dependency chain', () => {
-  for (const [path, before, after] of [
-    [
-      'src/native/backgroundTaskExecution.ts',
-      'if (event?.executionId === executionId) cancel();',
-      'if (true) cancel();',
-    ],
-    [
-      'src/services/background/registerBackgroundSyncHeadlessTask.ts',
-      'retainBackgroundTaskExecution(body.executionInfo.eventId, body.data?.gatorExecutionId)',
-      'null',
-    ],
-  ]) {
-    assertErrors(
-      scheduledRunnerUsageErrors(
-        mutateRunnerSource(path, (source) => replaceOnce(source, before, after)),
-      ),
-      /reviewed REL-001 callback dependency fingerprint/,
-    );
-    assertErrors(
-      scheduledRunnerUsageErrors(validRunnerSources.filter((entry) => entry.path !== path)),
-      /reviewed REL-001 callback dependency fingerprint/,
-    );
-  }
-  const detachedOutgoingDrain = mutateRunnerSource(
-    'src/services/background/backgroundSyncOrchestrator.ts',
-    (source) =>
-      replaceOnce(
-        source,
-        '    await deps.drainOutgoing(context.db, context.client, budgetScope, context.serverInfo);',
-        '    void deps.drainOutgoing(context.db, context.client, budgetScope, context.serverInfo);',
-      ),
-  );
-  assertErrors(
-    scheduledRunnerUsageErrors(detachedOutgoingDrain),
-    /reviewed REL-001 callback dependency fingerprint/,
-  );
-
-  const droppedHttpLifetimeSignal = mutateRunnerSource('src/core/api/http.ts', (source) =>
-    replaceOnce(
-      source,
-      '      opts.signal,\n      this.cfg.lifetimeSignal,\n      ...(this.cfg.cancellationSignals ?? []),',
-      '      opts.signal,\n      undefined,\n      ...(this.cfg.cancellationSignals ?? []),',
-    ),
-  );
-  assertErrors(
-    scheduledRunnerUsageErrors(droppedHttpLifetimeSignal),
-    /reviewed REL-001 callback dependency fingerprint/,
-  );
-
-  const droppedOutgoingSignal = mutateRunnerSource(
-    'src/services/send/outgoingQueueService.ts',
-    (source) =>
-      replaceOnce(
-        source,
-        '            signal: attachmentSignal,',
-        '            signal: undefined,',
-      ),
-  );
-  assertErrors(
-    scheduledRunnerUsageErrors(droppedOutgoingSignal),
-    /reviewed REL-001 callback dependency fingerprint/,
-  );
-
-  const disabledUploadAbort = mutateRunnerSource(
-    'src/services/send/attachmentUpload.ts',
-    (source) =>
-      replaceOnce(
-        source,
-        "  const abortFromOwner = (): void => stopAttempt('cancelled');",
-        '  const abortFromOwner = (): void => undefined;',
-      ),
-  );
-  assertErrors(
-    scheduledRunnerUsageErrors(disabledUploadAbort),
-    /reviewed REL-001 callback dependency fingerprint/,
-  );
-  const unboundedFilename = mutateRunnerSource('src/utils/uploadFilename.ts', (source) =>
-    replaceOnce(source, 'name.length > 255', 'name.length > Number.MAX_SAFE_INTEGER'),
-  );
-  assertErrors(
-    scheduledRunnerUsageErrors(unboundedFilename),
-    /reviewed REL-001 callback dependency fingerprint/,
-  );
-  assertErrors(
-    scheduledRunnerUsageErrors(
-      validRunnerSources.filter((entry) => entry.path !== 'src/utils/uploadFilename.ts'),
-    ),
-    /uploadFilename/,
-  );
 });
 
 test('requires explicit foreground and background ownership sources', () => {
@@ -1233,25 +1041,4 @@ test('the reviewed call-site set fails on a missing owner and on an unreviewed c
     scheduledCallSiteErrors(extra),
     /unreviewed scheduled\/outgoing helper use: src\/services\/send\/newService\.ts\|sendNew\.<callback>/,
   );
-});
-
-// Parity with the DB-write scanner while it still exists: the import-binding reader must report the
-// same production uses of the six helpers (callback fingerprints differ by construction and are
-// wildcarded). Delete this test together with the scanner.
-test('the import-binding reader matches the DB-write scanner for the six scheduled/outgoing helpers', () => {
-  const helpers = new Set(EXPECTED_SCHEDULED_CALL_SITES.map((key) => key.split('|')[3]));
-  const fromScanner = new Set(
-    scanDbWrites({ root: process.cwd() })
-      .filter(
-        (finding) =>
-          typeof finding.target === 'string' &&
-          helpers.has(finding.target.split('#')[1]) &&
-          /^mutator-(?:call|reference)$/.test(finding.operation) &&
-          !finding.path.startsWith('test/'),
-      )
-      .map(scheduledCallSiteKey),
-  );
-  const fromReader = new Set(scheduledCallFindings(process.cwd()).map(scheduledCallSiteKey));
-  assert.deepEqual([...fromReader].sort(), [...fromScanner].sort());
-  assert.ok(fromReader.size >= 11);
 });

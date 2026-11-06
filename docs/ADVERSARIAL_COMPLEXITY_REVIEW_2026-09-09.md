@@ -111,7 +111,7 @@ This comparison started from the same copied source on both sides; existing live
 does not explain the difference.
 
 The cause is visible in `callableOwnName`, `normalizedSnippet`, and the hardcoded startup identities
-in [`check-db-writes.mjs`](../scripts/check-db-writes.mjs). The callback hash retains comments, and a
+in `scripts/check-db-writes.mjs` (deleted 2026-11-06). The callback hash retains comments, and a
 certificate depends on its exact value. Reconciliation can handle some uncomplicated callback
 renames, but cannot repair this classification cascade.
 

@@ -3,6 +3,10 @@
 `DB-02A` is complete. This short file records the frozen result; the Work Plan remains the task-status
 authority, while the Audit Report is dated supporting evidence.
 
+**Retired 2026-11-06:** the scanner, its inventory and their tests were deleted (architecture review
+2026-11-05, fix plan A-7). DB-write ownership is now enforced by the `ReadDb`/`WriteDb` type split,
+ESLint rules and `check-core-boundaries.mjs`. This file is historical evidence of the frozen result.
+
 ## Frozen result — 2026-08-21
 
 - Inventory: 1,300 exact findings
