@@ -342,6 +342,13 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
       chat content; returning inside the grace period showed the chat at once, and a screenshot
       worked. With Secure Screen on, captures of Settings and the chat list were black. The
       open-dialog and screen-recording variants were not tried.
+- [ ] **`EXACT PACKAGED CANDIDATE` — Secure Screen and Recents on every Activity (F-3 step 2, added
+      2026-11-06):** the policy now reaches Activities other than the React host. With Secure Screen
+      on, open a received video and tap fullscreen: a screenshot is blocked ("Can't take
+      screenshot"). Open the image cropper (set a group photo) and the QR scanner (Add Server):
+      both are black in a capture. With App Lock on and Secure Screen off, go Home from the
+      fullscreen video and open Recents: Gator's card shows no video frame. Record pass/fail per
+      Activity without screenshots of chat content.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Separate the push axes: App Lock disabled permits
       detailed background and killed-process presentation; App Lock enabled keeps notices generic
       in a still-live process, including after unlock and within its unexpired UI grace period.
