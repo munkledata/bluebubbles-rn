@@ -17,6 +17,7 @@ import {
 import { download, redownload } from '@/services/download';
 import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { useDownloadStore } from '@state/downloadStore';
+import { useSessionStore } from '@state/sessionStore';
 import {
   activePageAttachment,
   PAGE_CHECK_INDICATOR_DELAY_MS,
@@ -33,6 +34,7 @@ import {
   MediaPageCheckOverlay,
   MediaViewerTopBar,
 } from '@ui/attachments/MediaViewerControls';
+import { LivePhotoControl } from '@ui/attachments/LivePhotoControl';
 import { ProtectedFullscreenVideo, ProtectedZoomableImage } from '@ui/attachments/MediaViewerPages';
 import { useAttachmentCachePathProtection } from '@ui/attachments/useAttachmentCachePathProtection';
 import { useMediaShareSave } from '@ui/attachments/useMediaShareSave';
@@ -357,6 +359,18 @@ export default function MediaViewer(): React.JSX.Element {
   const downloadStatus = useDownloadStore((state) =>
     current ? state.status[current.guid] : undefined,
   );
+  // Live Photo: only an iMessage/SMS still the server marked (RCS attachments never carry the
+  // flag), once its own picture is on screen, while the server can stream the clip.
+  const livePhotosSupported = useSessionStore((s) => s.serverInfo?.supports_live_photo === true);
+  const livePhotoGuid =
+    livePhotosSupported &&
+    !isVideo &&
+    local &&
+    pageReady &&
+    !mediaLoadFailureIsCurrent &&
+    current?.hasLivePhoto === 1
+      ? current.guid
+      : null;
   const downloadProgress = useDownloadStore((state) =>
     current ? state.progress[current.guid] : undefined,
   );
@@ -990,6 +1004,16 @@ export default function MediaViewer(): React.JSX.Element {
           failed={downloadStatus === 'error' || pendingForCurrent?.phase === 'adopted'}
           fileMissing={retryingExistingPath}
           onDownload={() => requestDownload(downloadIntent, pendingForCurrent?.token)}
+        />
+      ) : null}
+
+      {livePhotoGuid ? (
+        <LivePhotoControl
+          key={livePhotoGuid}
+          guid={livePhotoGuid}
+          width={win.width}
+          height={win.height}
+          isCurrent={() => accountLease.isCurrent()}
         />
       ) : null}
 

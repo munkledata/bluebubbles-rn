@@ -167,6 +167,11 @@ jest.mock('@/services/download', () => ({
   redownload: jest.fn(),
 }));
 
+const mockLoadLivePhotoClip = jest.fn<Promise<string | null>, [string, boolean?]>();
+jest.mock('@/services/download/livePhotoClips', () => ({
+  loadLivePhotoClip: (guid: string, replace?: boolean) => mockLoadLivePhotoClip(guid, replace),
+}));
+
 // eslint-disable-next-line import/first
 import {
   getVisibleAttachmentByGuid,
@@ -185,6 +190,8 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 // eslint-disable-next-line import/first
 import { useDownloadStore } from '@state/downloadStore';
+// eslint-disable-next-line import/first
+import { useSessionStore } from '@state/sessionStore';
 
 const getAtt = getVisibleAttachmentByGuid as jest.Mock;
 const listGallery = listChatImageAttachmentsByAttachmentGuid as jest.Mock;
@@ -1770,5 +1777,47 @@ describe('MediaViewer cache-reader protection', () => {
     await renderWithTheme(<MediaViewer />);
     await waitFor(() => expect(mockProtectPath).toHaveBeenCalledWith(PRIVATE_VIDEO_URI));
     expect(screen.queryByTestId('video-view')).toBeNull();
+  });
+});
+
+describe('MediaViewer Live Photo', () => {
+  const LIVE_ATT = { ...ATT, hasLivePhoto: 1 };
+  const supportLivePhotos = (supported: boolean): void => {
+    useSessionStore.setState({
+      serverInfo: { supports_live_photo: supported } as never,
+    });
+  };
+
+  beforeEach(() => {
+    mockLoadLivePhotoClip.mockReset().mockResolvedValue(null);
+  });
+  afterEach(() => {
+    useSessionStore.setState({ serverInfo: null });
+  });
+
+  it('offers the LIVE control on a marked still once its picture is on screen', async () => {
+    supportLivePhotos(true);
+    getAtt.mockResolvedValue(LIVE_ATT);
+    listGallery.mockResolvedValue({ items: [LIVE_ATT], index: 0 });
+    await renderViewer();
+    const live = await screen.findByRole('button', { name: 'Play Live Photo' });
+    await act(async () => {
+      fireEvent(live, 'pressIn');
+    });
+    expect(mockLoadLivePhotoClip).toHaveBeenCalledWith(LIVE_ATT.guid, false);
+  });
+
+  it('offers nothing for an ordinary still', async () => {
+    supportLivePhotos(true);
+    await renderViewer();
+    expect(screen.queryByRole('button', { name: 'Play Live Photo' })).toBeNull();
+  });
+
+  it('offers nothing while the server cannot stream the clip', async () => {
+    supportLivePhotos(false);
+    getAtt.mockResolvedValue(LIVE_ATT);
+    listGallery.mockResolvedValue({ items: [LIVE_ATT], index: 0 });
+    await renderViewer();
+    expect(screen.queryByRole('button', { name: 'Play Live Photo' })).toBeNull();
   });
 });
