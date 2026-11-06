@@ -9,6 +9,7 @@ import {
   importSpecifiers,
   runArchitectureBoundaryCheck,
   runNativeSqliteBoundaryCheck,
+  validateDevHarnessImports,
   readNumericConstants,
   runHeadlessBudgetCheck,
   HEADLESS_BUDGET_SOURCES,
@@ -571,6 +572,7 @@ test('the repository satisfies UI DB, cycle, and static headless entry architect
   assert.ok(result.nativeSqlite.files > 0);
   assert.ok(result.headlessBudgets.rules >= 8);
   assert.ok(result.headlessBudgets.constants > 10);
+  assert.ok(result.devHarness.files > 0);
 });
 
 test('database handle escape: raw driver, raw handle, file name and write-handle assertions stay in src/db', () => {
@@ -746,6 +748,40 @@ test('headless budgets: a shrunk delivery window, an equal admission window, and
         assert.match(error.message, /FCM_ROTATION_TIMER_MAX_DELAY_MS not found/);
         return true;
       },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('dev harness imports: only the reviewed importers reach src/db/devHarness, and the harness never reaches the vault', () => {
+  const root = fixture({
+    'src/db/devHarness/dbSelfTests.ts':
+      "import { logger } from '@core/secure/logger';\nexport const x = 1;\n",
+    'src/db/devHarness/leaky.ts': "import { vault } from '@core/secure';\nexport const y = 1;\n",
+    'src/services/boot/devHarnessBoot.ts':
+      "import { x } from '@db/devHarness/dbSelfTests';\nexport { x };\n",
+    'src/services/boot/foregroundBoot.ts':
+      "import { x } from '@db/devHarness/dbSelfTests';\nexport { x };\n",
+    'src/features/sneaky.ts': "import { x } from '../db/devHarness/dbSelfTests';\nexport { x };\n",
+    'test/db/harness.test.ts': "import { x } from '@db/devHarness/dbSelfTests';\n",
+  });
+  try {
+    const files = [
+      'src/db/devHarness/dbSelfTests.ts',
+      'src/db/devHarness/leaky.ts',
+      'src/services/boot/devHarnessBoot.ts',
+      'src/services/boot/foregroundBoot.ts',
+      'src/features/sneaky.ts',
+      'test/db/harness.test.ts',
+    ].map((p) => resolve(root, p));
+    const errors = validateDevHarnessImports({ root, files });
+    assert.equal(errors.length, 3, errors.join('\n'));
+    assert.match(errors.join('\n'), /foregroundBoot\.ts imports the dev DB harness/);
+    assert.match(errors.join('\n'), /sneaky\.ts imports the dev DB harness/);
+    assert.match(
+      errors.join('\n'),
+      /leaky\.ts imports @core\/secure; the dev DB harness may use @core\/secure\/logger only/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

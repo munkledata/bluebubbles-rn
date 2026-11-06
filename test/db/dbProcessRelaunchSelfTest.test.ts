@@ -5,15 +5,15 @@ const mockRunMigrations = jest.fn();
 jest.mock('@op-engineering/op-sqlite', () => ({ open: mockOpen }));
 jest.mock('@db/migrate', () => ({ runMigrations: mockRunMigrations }));
 
-let cleanupDbProcessRelaunchSelfTestDatabase: typeof import('@db/database').cleanupDbProcessRelaunchSelfTestDatabase;
-let prepareDbProcessRelaunchSelfTest: typeof import('@db/database').prepareDbProcessRelaunchSelfTest;
-let resumeDbProcessRelaunchSelfTest: typeof import('@db/database').resumeDbProcessRelaunchSelfTest;
-let cleanupDbActiveWalWriteDeathSelfTestDatabase: typeof import('@db/database').cleanupDbActiveWalWriteDeathSelfTestDatabase;
-let prepareDbActiveWalWriteDeathSelfTest: typeof import('@db/database').prepareDbActiveWalWriteDeathSelfTest;
-let resumeDbActiveWalWriteDeathSelfTest: typeof import('@db/database').resumeDbActiveWalWriteDeathSelfTest;
-let cleanupDbActiveMigrationDeathSelfTestDatabase: typeof import('@db/database').cleanupDbActiveMigrationDeathSelfTestDatabase;
-let prepareDbActiveMigrationDeathSelfTest: typeof import('@db/database').prepareDbActiveMigrationDeathSelfTest;
-let resumeDbActiveMigrationDeathSelfTest: typeof import('@db/database').resumeDbActiveMigrationDeathSelfTest;
+let cleanupDbProcessRelaunchSelfTestDatabase: typeof import('@db/devHarness/dbSelfTests').cleanupDbProcessRelaunchSelfTestDatabase;
+let prepareDbProcessRelaunchSelfTest: typeof import('@db/devHarness/dbSelfTests').prepareDbProcessRelaunchSelfTest;
+let resumeDbProcessRelaunchSelfTest: typeof import('@db/devHarness/dbSelfTests').resumeDbProcessRelaunchSelfTest;
+let cleanupDbActiveWalWriteDeathSelfTestDatabase: typeof import('@db/devHarness/dbSelfTests').cleanupDbActiveWalWriteDeathSelfTestDatabase;
+let prepareDbActiveWalWriteDeathSelfTest: typeof import('@db/devHarness/dbSelfTests').prepareDbActiveWalWriteDeathSelfTest;
+let resumeDbActiveWalWriteDeathSelfTest: typeof import('@db/devHarness/dbSelfTests').resumeDbActiveWalWriteDeathSelfTest;
+let cleanupDbActiveMigrationDeathSelfTestDatabase: typeof import('@db/devHarness/dbSelfTests').cleanupDbActiveMigrationDeathSelfTestDatabase;
+let prepareDbActiveMigrationDeathSelfTest: typeof import('@db/devHarness/dbSelfTests').prepareDbActiveMigrationDeathSelfTest;
+let resumeDbActiveMigrationDeathSelfTest: typeof import('@db/devHarness/dbSelfTests').resumeDbActiveMigrationDeathSelfTest;
 
 const migrationNames = (
   jest.requireActual('@db/migrations') as typeof import('@db/migrations')
@@ -461,7 +461,7 @@ beforeAll(async () => {
     resumeDbActiveMigrationDeathSelfTest,
     resumeDbActiveWalWriteDeathSelfTest,
     resumeDbProcessRelaunchSelfTest,
-  } = await import('@db/database'));
+  } = await import('@db/devHarness/dbSelfTests'));
 });
 
 beforeEach(() => {

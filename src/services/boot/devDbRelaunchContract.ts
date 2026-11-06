@@ -32,7 +32,7 @@ import {
   type DbRuntimeConcurrencyDatabaseChecks,
   type DbRuntimeConcurrencyDatabaseFailureCode,
   type DbRuntimeConcurrencyDatabaseResult,
-} from '@db/database';
+} from '@db/devHarness/dbSelfTests';
 import { runDbBackupRestoreWave } from '@/services/boot/dbBackupRestoreWave';
 import { runDbRuntimeConcurrencyWave } from '@/services/boot/dbRuntimeConcurrencyWave';
 import { MIGRATION_COUNT, MIGRATION_HEAD } from '@db/migrationHead';

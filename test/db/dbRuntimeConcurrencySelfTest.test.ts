@@ -122,7 +122,7 @@ describe('runDbRuntimeConcurrencySelfTest', () => {
     const harness = installNativeHarness();
     const appDatabase = { kind: 'adapted-disposable-database' };
     mockDrizzle.mockReturnValue(appDatabase);
-    const { runDbRuntimeConcurrencySelfTest } = await import('@db/database');
+    const { runDbRuntimeConcurrencySelfTest } = await import('@db/devHarness/dbSelfTests');
     const runWave = jest.fn(async (db, options) => {
       expect(db).toBe(appDatabase);
       await options.rawRekey();
@@ -176,7 +176,7 @@ describe('runDbRuntimeConcurrencySelfTest', () => {
   it('returns a finite internal failure and still deletes the disposable file', async () => {
     const harness = installNativeHarness({ waveFailsBeforeReopen: true });
     mockDrizzle.mockReturnValue({});
-    const { runDbRuntimeConcurrencySelfTest } = await import('@db/database');
+    const { runDbRuntimeConcurrencySelfTest } = await import('@db/devHarness/dbSelfTests');
 
     const result = await runDbRuntimeConcurrencySelfTest(async () => {
       throw new Error('private native path and key');
@@ -192,7 +192,7 @@ describe('runDbRuntimeConcurrencySelfTest', () => {
   it('makes final disposable-file cleanup failure authoritative', async () => {
     installNativeHarness({ finalDeleteFails: true });
     mockDrizzle.mockReturnValue({});
-    const { runDbRuntimeConcurrencySelfTest } = await import('@db/database');
+    const { runDbRuntimeConcurrencySelfTest } = await import('@db/devHarness/dbSelfTests');
 
     const result = await runDbRuntimeConcurrencySelfTest(async (_db, options) => {
       await options.rawRekey();
@@ -253,7 +253,7 @@ describe('runDbBackupRestoreSelfTest', () => {
     const harness = installBackupHarness();
     const appDatabase = { kind: 'adapted-backup-restore-database' };
     mockDrizzle.mockReturnValue(appDatabase);
-    const { runDbBackupRestoreSelfTest } = await import('@db/database');
+    const { runDbBackupRestoreSelfTest } = await import('@db/devHarness/dbSelfTests');
     const runWave = jest.fn(async (db) => {
       expect(db).toBe(appDatabase);
       return backupRestoreWaveChecks;
@@ -295,7 +295,7 @@ describe('runDbBackupRestoreSelfTest', () => {
   it('keeps a close failure finite and prevents an all-true failure marker', async () => {
     installBackupHarness(true);
     mockDrizzle.mockReturnValue({});
-    const { runDbBackupRestoreSelfTest } = await import('@db/database');
+    const { runDbBackupRestoreSelfTest } = await import('@db/devHarness/dbSelfTests');
 
     const result = await runDbBackupRestoreSelfTest(async () => backupRestoreWaveChecks);
 

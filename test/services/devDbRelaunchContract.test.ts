@@ -66,7 +66,7 @@ jest.mock('@/services/boot/dbRuntimeConcurrencyWave', () => ({
 jest.mock('@/services/boot/dbBackupRestoreWave', () => ({
   runDbBackupRestoreWave: mockRunBackupRestoreWave,
 }));
-jest.mock('@db/database', () => ({
+jest.mock('@db/devHarness/dbSelfTests', () => ({
   cleanupDbBackupRestoreSelfTestDatabase: mockCleanupBackupRestoreDatabase,
   cleanupDbActiveMigrationDeathSelfTestDatabase: mockCleanupActiveMigrationDeathDatabase,
   cleanupDbActiveWalWriteDeathSelfTestDatabase: mockCleanupWalWriteDeathDatabase,

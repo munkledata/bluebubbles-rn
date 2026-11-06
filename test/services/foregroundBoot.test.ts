@@ -104,7 +104,7 @@ const mockDbDriverInternalFailure = {
 
 jest.mock('@core/realtime', () => ({ FCM_ENABLED: false }));
 jest.mock('@core/secure', () => ({ logger: mockLogger }));
-jest.mock('@db/database', () => ({
+jest.mock('@db/devHarness/dbSelfTests', () => ({
   DB_DRIVER_CONTRACT_INTERNAL_FAILURE: mockDbDriverInternalFailure,
   runDbDriverSelfTest: mockRunDbDriverSelfTest,
 }));

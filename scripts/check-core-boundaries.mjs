@@ -893,7 +893,12 @@ const DB_HANDLE_ESCAPE_RULES = {
       'drizzle-orm/op-sqlite',
       'drizzle-orm/better-sqlite3',
     ]),
-    allowed: new Set(['src/db/database.ts', 'src/db/key.ts']),
+    allowed: new Set([
+      'src/db/database.ts',
+      'src/db/key.ts',
+      'src/db/opSqliteAdapter.ts',
+      'src/db/devHarness/dbSelfTests.ts',
+    ]),
   },
   rawHandleCall: {
     allowed: new Set([
@@ -906,7 +911,13 @@ const DB_HANDLE_ESCAPE_RULES = {
     literal: 'gator.db',
     allowed: new Set(['src/db/database.ts', 'src/db/key.ts']),
   },
-  writeHandleAssertion: { allowed: new Set(['src/db/transaction.ts', 'src/db/database.ts']) },
+  writeHandleAssertion: {
+    allowed: new Set([
+      'src/db/transaction.ts',
+      'src/db/database.ts',
+      'src/db/devHarness/dbSelfTests.ts',
+    ]),
+  },
   rawWriteSql: {
     // transaction.ts is the owner implementation itself (BEGIN/COMMIT/ROLLBACK).
     allowed: new Set([
@@ -1275,6 +1286,67 @@ export function runHeadlessBudgetCheck({ root = process.cwd() } = {}) {
   return { rules: HEADLESS_BUDGET_RULES.length, constants };
 }
 
+// ---------------------------------------------------------------------------------------------
+// The dev DB harness (src/db/devHarness) is reached only through the dev-only require in the boot
+// sequence, the relaunch contract and the services barrel's PERF entry points, so release bundles
+// never carry it; and it must not reach the secure barrel (the vault), only the logger (fix plan B4).
+// ---------------------------------------------------------------------------------------------
+const DEV_HARNESS_PREFIX = 'src/db/devHarness/';
+export const DEV_HARNESS_IMPORTERS = new Set([
+  'src/services/boot/devHarnessBoot.ts',
+  'src/services/boot/devDbRelaunchContract.ts',
+  'src/services/index.ts',
+]);
+const DEV_HARNESS_FORBIDDEN_IMPORT = /^@core\/secure(?:\/(?!logger$).*)?$/;
+
+function resolvesIntoDevHarness(specifier, importerPath) {
+  if (specifier.startsWith('@db/devHarness/') || specifier === '@db/devHarness') return true;
+  if (!specifier.startsWith('.')) return false;
+  const segments = importerPath.split('/').slice(0, -1);
+  for (const part of specifier.split('/')) {
+    if (part === '.' || part === '') continue;
+    if (part === '..') segments.pop();
+    else segments.push(part);
+  }
+  return `${segments.join('/')}/`.startsWith(DEV_HARNESS_PREFIX);
+}
+
+export function validateDevHarnessImports({ root, files }) {
+  const errors = [];
+  for (const file of files) {
+    const path = relative(root, file).split(sep).join('/');
+    if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)) continue;
+    const specifiers = importSpecifiers(readFileSync(file, 'utf8'), path);
+    const insideHarness = path.startsWith(DEV_HARNESS_PREFIX);
+    for (const specifier of specifiers) {
+      if (
+        !insideHarness &&
+        resolvesIntoDevHarness(specifier, path) &&
+        !DEV_HARNESS_IMPORTERS.has(path)
+      ) {
+        errors.push(
+          `${path} imports the dev DB harness (${specifier}); only the dev-only boot module, the relaunch contract and the services barrel may, so release bundles never carry it`,
+        );
+      }
+      if (insideHarness && DEV_HARNESS_FORBIDDEN_IMPORT.test(specifier)) {
+        errors.push(
+          `${path} imports ${specifier}; the dev DB harness may use @core/secure/logger only, never the vault`,
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+export function runDevHarnessBoundaryCheck({ root = process.cwd() } = {}) {
+  const files = [...sourceFiles(resolve(root, 'src')), ...sourceFiles(resolve(root, 'app'))];
+  const errors = validateDevHarnessImports({ root, files });
+  if (errors.length > 0) {
+    throw new Error(`Dev harness import violations:\n${errors.map((e) => `- ${e}`).join('\n')}`);
+  }
+  return { files: files.length, importers: DEV_HARNESS_IMPORTERS.size };
+}
+
 export function runArchitectureBoundaryCheck({ root = process.cwd() } = {}) {
   return {
     core: runCoreBoundaryCheck({ root }),
@@ -1285,6 +1357,7 @@ export function runArchitectureBoundaryCheck({ root = process.cwd() } = {}) {
     dbHandleEscape: runDbHandleEscapeBoundaryCheck({ root }),
     nativeSqlite: runNativeSqliteBoundaryCheck({ root }),
     headlessBudgets: runHeadlessBudgetCheck({ root }),
+    devHarness: runDevHarnessBoundaryCheck({ root }),
     headlessEntry: runHeadlessEntryCheck({ root }),
   };
 }

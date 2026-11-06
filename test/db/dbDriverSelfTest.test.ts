@@ -14,7 +14,7 @@ jest.mock('expo-crypto', () => ({
 }));
 jest.mock('@db/migrate', () => ({ runMigrations: mockRunMigrations }));
 
-let runDbDriverSelfTest: typeof import('@db/database').runDbDriverSelfTest;
+let runDbDriverSelfTest: typeof import('@db/devHarness/dbSelfTests').runDbDriverSelfTest;
 
 const migrationNames = (
   jest.requireActual('@db/migrations') as typeof import('@db/migrations')
@@ -653,7 +653,7 @@ const passingChecks = {
 
 describe('runDbDriverSelfTest', () => {
   beforeAll(async () => {
-    ({ runDbDriverSelfTest } = await import('@db/database'));
+    ({ runDbDriverSelfTest } = await import('@db/devHarness/dbSelfTests'));
   });
 
   beforeEach(() => {
