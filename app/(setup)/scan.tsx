@@ -40,6 +40,10 @@ export default function Scan(): React.JSX.Element {
   const [scanError, setScanError] = useState<string | null>(null);
   const [insecureCode, setInsecureCode] = useState(false);
   const [awaitingRescan, setAwaitingRescan] = useState(false);
+  // A scanned code waits for the user to confirm the server it names. A QR code is just a picture:
+  // one on a poster or in a chat would otherwise hand this phone's password to whatever address it
+  // chose the moment the camera saw it.
+  const [pending, setPending] = useState<{ origin: string; password: string } | null>(null);
   const status = useSessionStore((s) => s.status);
   const connectError = useSessionStore((s) => s.error);
 
@@ -62,6 +66,13 @@ export default function Scan(): React.JSX.Element {
     scanned.current = false;
     setAwaitingRescan(false);
     setScanError(null);
+    setPending(null);
+  };
+
+  const connectPending = (): void => {
+    if (!pending) return;
+    setPending(null);
+    void connect(pending.origin, pending.password);
   };
 
   const onBarcodeScanned = ({ data }: BarcodeScanningResult): void => {
@@ -78,7 +89,7 @@ export default function Scan(): React.JSX.Element {
       scanned.current = true;
       setInsecureCode(false);
       setScanError(null);
-      void connect(origin, password);
+      setPending({ origin, password });
     } catch (error) {
       setInsecureCode(false);
       setScanError(scanErrorText(i18n, error));
@@ -149,6 +160,27 @@ export default function Scan(): React.JSX.Element {
           )}
         </Text>
         <View style={styles.reticle} />
+        {pending ? (
+          <View
+            style={[styles.confirm, { backgroundColor: theme.color.secondaryBackground }]}
+            accessibilityRole="alert"
+          >
+            <Text style={[styles.confirmTitle, { color: theme.color.label }]}>
+              {i18n.text('scan.confirm.title')}
+            </Text>
+            {/* The host only: never the password, and never the raw QR text. */}
+            <Text style={[styles.confirmHost, { color: theme.color.secondaryLabel }]}>
+              {hostOf(pending.origin)}
+            </Text>
+            <Button title={i18n.text('scan.confirm.action.connect')} onPress={connectPending} />
+            <Button
+              title={i18n.text('scan.action.scanAgain')}
+              variant="plain"
+              onPress={scanAgain}
+              style={styles.spaced}
+            />
+          </View>
+        ) : null}
         {message ? <Text style={styles.error}>{message}</Text> : <View />}
         {awaitingRescan && status === 'error' ? (
           <Button
@@ -177,8 +209,20 @@ export default function Scan(): React.JSX.Element {
   );
 }
 
+/** The address the user is about to trust, shown without scheme, path or credentials. */
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+}
+
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  confirm: { borderRadius: 16, padding: 16, marginVertical: 12, gap: 8 },
+  confirmTitle: { fontSize: 18, fontWeight: '700' },
+  confirmHost: { fontSize: 16, marginBottom: 8 },
   permission: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
   permTitle: { fontSize: 26, fontWeight: '700', marginBottom: 12 },
   permText: { fontSize: 16, lineHeight: 22, marginBottom: 24 },

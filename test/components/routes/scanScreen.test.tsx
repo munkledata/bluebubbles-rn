@@ -114,9 +114,12 @@ describe('ScanScreen', () => {
     await fireEvent.press(screen.getByText('Enter Manually'));
     expect(mockReplace).toHaveBeenCalledWith('/manual');
 
-    // Scanning is not locked: a secure code still connects.
+    // Scanning is not locked: a secure code still goes on to the confirm step and connects.
     await act(async () => {
       scan?.({ data: JSON.stringify(['secret', 'https://gator.example']) });
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Connect' }));
     });
     expect(mockConnect).toHaveBeenCalledTimes(1);
     expect(mockConnect).toHaveBeenCalledWith('https://gator.example', 'secret');
@@ -172,6 +175,9 @@ describe('ScanScreen', () => {
     await act(async () => {
       mockCameraViewProps.onBarcodeScanned?.(code);
     });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Connect' }));
+    });
     expect(mockConnect).toHaveBeenCalledTimes(1);
 
     mockSessionState = { status: 'error', error: 'SERVER_CANARY_42' };
@@ -193,6 +199,49 @@ describe('ScanScreen', () => {
     await act(async () => {
       mockCameraViewProps.onBarcodeScanned?.(code);
     });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Connect' }));
+    });
     expect(mockConnect).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows the scanned server host and connects only after the user confirms', async () => {
+    mockPermission = { granted: true };
+    await renderWithTheme(<ScanScreen />);
+    const scan = mockCameraViewProps.onBarcodeScanned;
+
+    await act(async () => {
+      scan?.({ data: JSON.stringify(['hunter2', 'https://gator.example:1234/some/path']) });
+    });
+    expect(mockConnect).not.toHaveBeenCalled();
+    expect(screen.getByText('Connect to this server?')).toBeTruthy();
+    // The host only: no scheme, path, or password.
+    expect(screen.getByText('gator.example:1234')).toBeTruthy();
+    expect(screen.queryByText(/hunter2/)).toBeNull();
+    expect(screen.queryByText(/some\/path/)).toBeNull();
+
+    // The camera keeps reporting the code while the card is up: still nothing connects.
+    await act(async () => {
+      scan?.({ data: JSON.stringify(['hunter2', 'https://gator.example:1234/some/path']) });
+    });
+    expect(mockConnect).not.toHaveBeenCalled();
+
+    // Scan Again discards the code and re-arms the camera without connecting.
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Scan Again' }));
+    });
+    expect(screen.queryByText('Connect to this server?')).toBeNull();
+    expect(mockConnect).not.toHaveBeenCalled();
+
+    await act(async () => {
+      scan?.({ data: JSON.stringify(['hunter2', 'https://other.example']) });
+    });
+    expect(screen.getByText('other.example')).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Connect' }));
+    });
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(mockConnect).toHaveBeenCalledWith('https://other.example', 'hunter2');
+    expect(screen.queryByText('Connect to this server?')).toBeNull();
   });
 });

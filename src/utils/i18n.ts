@@ -82,6 +82,8 @@ const ENGLISH_MESSAGES = {
   'product.serverName': 'Gator Server',
   'scan.action.manual': 'Enter Manually',
   'scan.action.scanAgain': 'Scan Again',
+  'scan.confirm.action.connect': 'Connect',
+  'scan.confirm.title': 'Connect to this server?',
   'scan.error.empty': 'No data was scanned. Please try again.',
   'scan.error.invalid': 'Invalid QR code.',
   'scan.error.invalidJson': 'That code is not a valid {appName} setup QR code.',
