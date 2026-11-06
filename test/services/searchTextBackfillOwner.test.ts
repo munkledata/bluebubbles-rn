@@ -13,7 +13,11 @@ jest.mock('@db/database', () => ({
   getRawDatabase: (...args: unknown[]) => mockGetRawDatabase(...args) as unknown,
   initDatabase: jest.fn(),
 }));
-jest.mock('@db/key', () => ({ resolveDbKey: jest.fn(), rotateDbKey: jest.fn() }));
+jest.mock('@db/key', () => ({
+  isLegacyPassphraseKey: () => false,
+  resolveDbKey: jest.fn(),
+  rotateDbKey: jest.fn(),
+}));
 jest.mock('@/services/clients', () => ({ vault: { __vault: true } }));
 
 import type Database from 'better-sqlite3';

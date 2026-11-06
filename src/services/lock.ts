@@ -2,7 +2,7 @@ import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { logger } from '@core/secure';
 import { isDevServer } from '@utils/isDev';
-import { setNativeAppLockEnabled } from '@native/screenSecurity';
+import { getNativeAppLockEnabled, setNativeAppLockEnabled } from '@native/screenSecurity';
 import { vault } from './clients';
 import { flushErrorReports } from './errors';
 import { pauseRealtime, resumeRealtime } from './realtimeControl';
@@ -74,7 +74,12 @@ export async function hydrateLock(
     const v = await vault.get('appLockEnabled');
     if (v !== null && v !== 'true' && v !== 'false') throw new InvalidAppLockSettingError();
     if (options.shouldCommit && !options.shouldCommit()) return { notificationCleanupFailed };
-    const enabled = v === 'true';
+    // A missing vault entry after Android cleared the Keystore must not silently turn App Lock off:
+    // the native SharedPreferences mirror written by every setAppLockEnabled survives that (F-12).
+    const enabled = v === 'true' || (v === null && getNativeAppLockEnabled() === true);
+    if (v === null && enabled) {
+      logger.warn('[lock] App Lock vault entry missing; restored from the native mirror');
+    }
     if (enabled) {
       try {
         await beginAppLockNotificationPrivacy();

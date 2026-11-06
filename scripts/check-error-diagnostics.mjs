@@ -102,10 +102,10 @@ const RN_ERROR_PATCH = 'patches/react-native+0.86.3.patch';
 const OPSQLITE_ERROR_SOURCE =
   'node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt';
 const OPSQLITE_ERROR_SOURCE_CONTRACT =
-  'e1cae849eb4c91bf5e9d2b6fa86d4b66cc4e7ccad84f0fa16349336add3b777a';
-const OPSQLITE_ERROR_PATCH = 'patches/@op-engineering+op-sqlite+17.1.2.patch';
+  '19fd6c5d556265486d54ff0cec879be737887492e8edbb41a9961d487542075a';
+const OPSQLITE_ERROR_PATCH = 'patches/@op-engineering+op-sqlite+19.0.5.patch';
 const OPSQLITE_ERROR_PATCH_CONTRACT =
-  'fc2c546553dddbfd34ad987e2da1b5f244d691e6dc509fa8fa2834b8bb1957ae';
+  'f049572160392502d57ab295527bab79a09bd1be781f135989a5a0a2c1acd633';
 // Exact SDK 57 generated settings: marker strings inside disabled blocks or
 // quoted decoys are not proof that Gradle compiles the patched RN sources.
 const RN_SOURCE_BUILD_SETTINGS_CONTRACT =
@@ -2051,10 +2051,10 @@ export function findNativeErrorPrivacyFindings({ root = process.cwd() } = {}) {
     read('node_modules/@op-engineering/op-sqlite/package.json') || '{}',
   );
   if (
-    packageJson.dependencies?.['@op-engineering/op-sqlite'] !== '17.1.2' ||
-    installedSqlitePackage.version !== '17.1.2'
+    packageJson.dependencies?.['@op-engineering/op-sqlite'] !== '19.0.5' ||
+    installedSqlitePackage.version !== '19.0.5'
   ) {
-    errors.push('native error privacy requires pinned op-sqlite 17.1.2');
+    errors.push('native error privacy requires pinned op-sqlite 19.0.5');
   }
   if (normalizedSourceHash(read(OPSQLITE_ERROR_SOURCE)) !== OPSQLITE_ERROR_SOURCE_CONTRACT) {
     errors.push(`native error privacy source contract changed: ${OPSQLITE_ERROR_SOURCE}`);

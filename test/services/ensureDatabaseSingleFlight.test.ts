@@ -26,6 +26,7 @@ jest.mock('@db/database', () => ({
   initDatabase: (...a: unknown[]) => mockInitDatabase(...a) as unknown,
 }));
 jest.mock('@db/key', () => ({
+  isLegacyPassphraseKey: (key: string) => /^[0-9a-f]{64}$/.test(key),
   resolveDbKey: (...a: unknown[]) => mockResolveDbKey(...a) as unknown,
   rotateDbKey: (...a: unknown[]) => mockRotateDbKey(...a) as unknown,
 }));
@@ -148,6 +149,64 @@ describe('ensureDatabase single-flight', () => {
     await expect(ensureDatabase()).resolves.toBe(HANDLE);
     expect(mockResolveDbKey).toHaveBeenCalledTimes(2);
     expect(mockInitDatabase).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('legacy passphrase key upgrade on first open (F-4)', () => {
+  beforeEach(() => {
+    mockGetDatabase.mockReset();
+    mockGetRawDatabase.mockReset();
+    mockInitDatabase.mockReset();
+    mockResolveDbKey.mockReset();
+    mockRotateDbKey.mockReset();
+    mockGetRawDatabase.mockReturnValue(RAW_HANDLE);
+  });
+
+  it('schedules exactly one rotation after a legacy-key open, and none for a raw key', async () => {
+    for (const [key, rotations] of [
+      ['ab'.repeat(32), 1],
+      [`x'${'ab'.repeat(32)}'`, 0],
+    ] as const) {
+      const ensureDatabase = await loadEnsureDatabase();
+      const gate = closedThenOpen();
+      mockResolveDbKey.mockResolvedValue(key);
+      mockInitDatabase.mockImplementation(async () => {
+        gate.markOpen();
+        return HANDLE;
+      });
+      mockRotateDbKey.mockResolvedValue(undefined);
+
+      await expect(ensureDatabase()).resolves.toBe(HANDLE);
+      await ensureDatabase();
+      for (let turn = 0; turn < 3; turn += 1) await Promise.resolve();
+
+      expect(mockRotateDbKey).toHaveBeenCalledTimes(rotations);
+      if (rotations === 1)
+        expect(mockRotateDbKey).toHaveBeenCalledWith({ __vault: true }, RAW_HANDLE);
+      mockRotateDbKey.mockReset();
+    }
+  });
+
+  it('keeps the open usable and only logs when the legacy upgrade fails', async () => {
+    const ensureDatabase = await loadEnsureDatabase();
+    const gate = closedThenOpen();
+    mockResolveDbKey.mockResolvedValue('cd'.repeat(32));
+    mockInitDatabase.mockImplementation(async () => {
+      gate.markOpen();
+      return HANDLE;
+    });
+    mockRotateDbKey.mockRejectedValue(new Error('rekey failed'));
+    const { logger } = await import('@core/secure');
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await expect(ensureDatabase()).resolves.toBe(HANDLE);
+    for (let turn = 0; turn < 3; turn += 1) await Promise.resolve();
+
+    expect(mockRotateDbKey).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[db] legacy key upgrade did not complete', {
+      errorName: 'Error',
+    });
+    warn.mockRestore();
   });
 });
 

@@ -2,6 +2,8 @@ import { requireOptionalNativeModule } from 'expo';
 
 interface GatorScreenSecurityNative {
   setAppLockEnabled: (enabled: boolean) => void;
+  /** Present from the F-12 native build on; older binaries lack it. */
+  getAppLockEnabled?: () => boolean;
   getSecureScreenEnabled: () => boolean;
   setSecureScreenEnabled: (enabled: boolean) => void;
 }
@@ -25,6 +27,20 @@ export function setNativeAppLockEnabled(enabled: boolean): boolean {
   if (!native) return false;
   native.setAppLockEnabled(enabled);
   return true;
+}
+
+/**
+ * The native mirror of the App Lock choice, or null when no build carries it. The vault entry is
+ * the source of truth; this mirror only breaks the tie when the vault entry is missing (F-12).
+ */
+export function getNativeAppLockEnabled(): boolean | null {
+  const native = getNative();
+  if (!native?.getAppLockEnabled) return null;
+  try {
+    return native.getAppLockEnabled() === true;
+  } catch {
+    return null;
+  }
 }
 
 /** Read the independent native-persisted screenshot/recording preference. */

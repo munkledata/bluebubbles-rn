@@ -32,7 +32,7 @@ internal object ScreenSecurityController {
   private fun preferences(activity: Activity) =
     activity.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
 
-  private fun appLockEnabled(activity: Activity): Boolean =
+  fun appLockEnabled(activity: Activity): Boolean =
     preferences(activity).getBoolean(APP_LOCK_ENABLED, false)
 
   fun secureScreenEnabled(activity: Activity): Boolean =
@@ -134,6 +134,13 @@ class GatorScreenSecurityModule : Module() {
     Function("setAppLockEnabled") { enabled: Boolean ->
       runOnMainThread {
         ScreenSecurityController.setAppLockEnabled(currentActivity(), enabled)
+      }
+    }
+    // F-12: the vault entry can be lost with the Keystore while this SharedPreferences mirror
+    // survives, so JavaScript can fall back to it when the vault says nothing.
+    Function("getAppLockEnabled") {
+      runOnMainThread {
+        ScreenSecurityController.appLockEnabled(currentActivity())
       }
     }
     Function("getSecureScreenEnabled") {

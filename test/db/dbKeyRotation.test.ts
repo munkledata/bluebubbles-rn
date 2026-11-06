@@ -1,5 +1,12 @@
 import { InMemoryVault } from '@core/secure';
-import { resolveDbKey, rotateDbKey } from '@db/key';
+import {
+  DatabaseKeyLostError,
+  getOrCreateDbKey,
+  isLegacyPassphraseKey,
+  isRawKey,
+  resolveDbKey,
+  rotateDbKey,
+} from '@db/key';
 import { withDbWriteLock } from '@db/transaction';
 
 const mockOpen = jest.fn();
@@ -19,10 +26,12 @@ describe('rotateDbKey (crash-safe staging)', () => {
     const sql: string[] = [];
     await rotateDbKey(vault, { execute: async (s) => void sql.push(s) });
 
-    expect(sql.some((s) => /pragma rekey/i.test(s))).toBe(true);
     const primary = await vault.get('dbEncryptionKey');
     expect(primary).toBeTruthy();
     expect(primary).not.toBe('deadbeef');
+    // SQLCipher's raw-key form, in the documented double-quoted PRAGMA spelling: no key stretching.
+    expect(isRawKey(primary ?? '')).toBe(true);
+    expect(sql).toEqual([`PRAGMA rekey = "${primary}"`]);
     expect(await vault.get('dbEncryptionKeyPending')).toBeNull();
   });
 
@@ -109,7 +118,7 @@ describe('rotateDbKey (crash-safe staging)', () => {
         rotateDbKey(vault, {
           execute: async (statement) => {
             sql.push(statement);
-            if (!/^PRAGMA rekey = '[0-9a-f]{64}'$/i.test(statement)) return;
+            if (!/^PRAGMA rekey = "x'[0-9a-f]{64}'"$/i.test(statement)) return;
             executeDidStart = true;
             try {
               await executeGate.promise;
@@ -133,7 +142,7 @@ describe('rotateDbKey (crash-safe staging)', () => {
 
       // Staging is vault-only and recoverable, but the shared native connection remains untouched
       // until the predecessor releases its write-lock slot.
-      expect(stagedKey).toMatch(/^[0-9a-f]{64}$/);
+      expect(stagedKey).toMatch(/^x'[0-9a-f]{64}'$/);
       expect(executeDidStart).toBe(false);
       expect(sql).toEqual([]);
       expect(await vault.get('dbEncryptionKey')).toBe('OLD');
@@ -154,7 +163,7 @@ describe('rotateDbKey (crash-safe staging)', () => {
 
       // The native rekey promise owns the write-lock lifetime. Neither the vault promotion nor a
       // synchronously queued successor may outrun it.
-      expect(sql).toEqual([`PRAGMA rekey = '${stagedKey}'`]);
+      expect(sql).toEqual([`PRAGMA rekey = "${stagedKey}"`]);
       expect(await vault.get('dbEncryptionKey')).toBe('OLD');
       expect(await vault.get('dbEncryptionKeyPending')).toBe(stagedKey);
       expect(rotationSettled).toBe(false);
@@ -200,6 +209,78 @@ function selfTestHandle(
     }),
   };
 }
+
+describe('key form (F-4: raw key instead of a stretched passphrase)', () => {
+  it('creates a fresh install key in the raw form and stores it', async () => {
+    const vault = new InMemoryVault();
+    const key = await getOrCreateDbKey(vault);
+    expect(key).toMatch(/^x'[0-9a-f]{64}'$/);
+    expect(isRawKey(key)).toBe(true);
+    expect(isLegacyPassphraseKey(key)).toBe(false);
+    expect(await vault.get('dbEncryptionKey')).toBe(key);
+    // A second call returns the stored key unchanged.
+    expect(await getOrCreateDbKey(vault)).toBe(key);
+  });
+
+  it('returns an existing legacy passphrase key unchanged and recognises its form', async () => {
+    const vault = new InMemoryVault();
+    const legacy = 'ab'.repeat(32);
+    await vault.set('dbEncryptionKey', legacy);
+    expect(await getOrCreateDbKey(vault)).toBe(legacy);
+    expect(isLegacyPassphraseKey(legacy)).toBe(true);
+    expect(isRawKey(legacy)).toBe(false);
+  });
+
+  it('classifies only the exact 64-hex passphrase shape as legacy', () => {
+    for (const key of [
+      '',
+      'deadbeef',
+      'AB'.repeat(32),
+      `x'${'ab'.repeat(32)}'`,
+      `${'ab'.repeat(32)} `,
+      'ab'.repeat(33),
+    ]) {
+      expect(isLegacyPassphraseKey(key)).toBe(false);
+    }
+    expect(isRawKey(`x'${'AB'.repeat(32)}'`)).toBe(false);
+    expect(isRawKey(`x'${'ab'.repeat(31)}'`)).toBe(false);
+  });
+});
+
+describe('a lost Keystore key with an existing database (F-12)', () => {
+  it('fails closed instead of minting a key the existing file cannot be read with', async () => {
+    const vault = new InMemoryVault();
+    const fileExists = jest.fn(async () => true);
+    await expect(getOrCreateDbKey(vault, fileExists)).rejects.toBeInstanceOf(DatabaseKeyLostError);
+    await expect(getOrCreateDbKey(vault, fileExists)).rejects.toMatchObject({
+      name: 'DatabaseKeyLostError',
+    });
+    expect(await vault.get('dbEncryptionKey')).toBeNull(); // nothing minted, nothing stored
+  });
+
+  it('mints a key on a true first run, and never consults the file when a key exists', async () => {
+    const vault = new InMemoryVault();
+    const fileExists = jest.fn(async () => false);
+    const key = await getOrCreateDbKey(vault, fileExists);
+    expect(isRawKey(key)).toBe(true);
+    expect(fileExists).toHaveBeenCalledTimes(1);
+    expect(await getOrCreateDbKey(vault, fileExists)).toBe(key);
+    expect(fileExists).toHaveBeenCalledTimes(1);
+  });
+
+  it('reaches the file check through resolveDbKey when no rotation is staged', async () => {
+    const vault = new InMemoryVault();
+    const probe = jest.fn(async () => true);
+    await expect(resolveDbKey(vault, probe, async () => true)).rejects.toBeInstanceOf(
+      DatabaseKeyLostError,
+    );
+    expect(probe).not.toHaveBeenCalled();
+    // A staged rotation means a key existed moments ago: recovery, not a lost key.
+    await vault.set('dbEncryptionKey', 'ab'.repeat(32));
+    await vault.set('dbEncryptionKeyPending', `x'${'cd'.repeat(32)}'`);
+    expect(await resolveDbKey(vault, probe, async () => true)).toBe('ab'.repeat(32));
+  });
+});
 
 describe('resolveDbKey (boot recovery)', () => {
   beforeEach(() => {

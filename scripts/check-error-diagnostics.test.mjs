@@ -43,7 +43,7 @@ const nativeErrorPrivacyFiles = [
   'node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp',
   'node_modules/@op-engineering/op-sqlite/package.json',
   'node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt',
-  'patches/@op-engineering+op-sqlite+17.1.2.patch',
+  'patches/@op-engineering+op-sqlite+19.0.5.patch',
 ];
 const { applyStartupPrivacy } = withStartupPrivacy;
 const { applyWebSocketRedirectPolicy } = withNoWebSocketRedirects;
@@ -1176,7 +1176,7 @@ test('pins op-sqlite release exception containment to the app flag, installed so
   assert.deepEqual(findNativeErrorPrivacyFindings({ root: fixtureRoot }), []);
   const sourcePath =
     'node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt';
-  const patchPath = 'patches/@op-engineering+op-sqlite+17.1.2.patch';
+  const patchPath = 'patches/@op-engineering+op-sqlite+19.0.5.patch';
   const appFlag =
     '(reactApplicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0';
   const cases = [
@@ -1210,13 +1210,13 @@ test('pins op-sqlite release exception containment to the app flag, installed so
       'package.json',
       (source) =>
         source.replace(
-          '"@op-engineering/op-sqlite": "17.1.2"',
-          '"@op-engineering/op-sqlite": "^17.1.2"',
+          '"@op-engineering/op-sqlite": "19.0.5"',
+          '"@op-engineering/op-sqlite": "^19.0.5"',
         ),
     ],
     [
       'node_modules/@op-engineering/op-sqlite/package.json',
-      (source) => source.replace('"version": "17.1.2"', '"version": "17.1.3"'),
+      (source) => source.replace('"version": "19.0.5"', '"version": "19.0.6"'),
     ],
   ];
   for (const [path, mutate] of cases) {

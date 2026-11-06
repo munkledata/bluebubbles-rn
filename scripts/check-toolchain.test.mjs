@@ -26,7 +26,7 @@ import {
 } from './check-toolchain.mjs';
 
 const EXPECTED_NATIVE_BOUNDARY_PINS = Object.freeze({
-  '@op-engineering/op-sqlite': '17.1.2',
+  '@op-engineering/op-sqlite': '19.0.5',
   '@react-native-firebase/app': '25.1.0',
   '@react-native-firebase/messaging': '25.1.0',
   '@shopify/flash-list': '2.3.2',

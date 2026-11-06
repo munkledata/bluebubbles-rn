@@ -2,8 +2,8 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Dependency lock SHA-256 (package-lock.json without the app's own version): `230d54d8e8fc632846fa35ab2e6adb2f648fa4eeaee28ab9f73c7e9ad5bbe67a`
-- Production package records: 1021
+- Dependency lock SHA-256 (package-lock.json without the app's own version): `134da976166da2b24bd9c9978f63eaf50458834954d1ef06b70adde6c86ab65a`
+- Production package records: 1020
 - Unique package versions: 926
 - Source assets: 13
 - Pending asset provenance: 13
@@ -285,7 +285,7 @@
 | `@jridgewell/trace-mapping` | `0.3.31` | MIT | no | `769d154fbde32a915af110b1123650bc79f4cbe675acc66e005265bf069c6c6c` | none |
 | `@js-sdsl/ordered-map` | `4.4.2` | MIT | no | `787684b2059945f845f404340e20c4c8e3f325f4ab7aaeaf8e985f38c8d84658` | none |
 | `@noble/hashes` | `1.8.0` | MIT | no | `4f221aee6e072336700c408c68ab3b96a3fc09f6aebe6f48f1bd99e5ef13faec` | none |
-| `@op-engineering/op-sqlite` | `17.1.2` | MIT | no | `d0fe599bdf4816b342dc25eccf22f800978f81ee2c8657fe5886099dd999d6fa`<br>`e635d3647b73c208837e7263a777f670556d002abe6c7c66fb457b302c6fb06f`<br>`941f27f449085e1564d8da5c1b8162039701110fcf8a7326c0cfbabcba30b460` | none |
+| `@op-engineering/op-sqlite` | `19.0.5` | MIT | no | `d0fe599bdf4816b342dc25eccf22f800978f81ee2c8657fe5886099dd999d6fa`<br>`e635d3647b73c208837e7263a777f670556d002abe6c7c66fb457b302c6fb06f`<br>`941f27f449085e1564d8da5c1b8162039701110fcf8a7326c0cfbabcba30b460` | none |
 | `@protobufjs/aspromise` | `1.1.2` | BSD-3-Clause | no | `a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794` | none |
 | `@protobufjs/base64` | `1.1.2` | BSD-3-Clause | no | `a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794` | none |
 | `@protobufjs/codegen` | `2.0.5` | BSD-3-Clause | no | `a67b34a24a5daddcce46aea68c5004e4442bbfb63690329fa607bf4de4269794` | none |
@@ -895,11 +895,8 @@
 | `libsodium-wrappers` | `0.8.4` | ISC | no | `ce7b8ba14db085aadb72359226ccf7273225db31dad653242a7726a10dabbbd4` | none |
 | `libsodium-wrappers-sumo` | `0.8.4` | ISC | no | `ce7b8ba14db085aadb72359226ccf7273225db31dad653242a7726a10dabbbd4` | none |
 | `react-native-maps` | `1.27.2` | MIT | no | `4099a1a5146930614f6c88cab3d38676d460e0e349f3743693ade20e4407587e` | none |
-| `react-native-notify-kit` | `10.10.0` | Apache-2.0 | no | `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`<br>`0e5b0fe8d11e1627336bc6361de610ba8acf9a035fd73e07b5b4a0909a48371f`<br>`6da058a052e0700887d012271ef92a7fb34fbaddff78fdb321c8a5ae2d01e69e` | none |
-| `@expo/image-utils` | `0.8.17` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `@expo/require-utils` | `55.0.8` | MIT | no | `49c5f9c7097c9a940ff663a54c27a4c60e379df6cc2b3052df0d37a09a85df93` | none |
+| `react-native-notify-kit` | `10.4.8` | Apache-2.0 | no | `6da058a052e0700887d012271ef92a7fb34fbaddff78fdb321c8a5ae2d01e69e` | none |
 | `commander` | `12.1.0` | MIT | yes | `04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b` | none |
-| `semver` | `7.8.6` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
 | `react-native-reanimated` | `4.5.1` | MIT | no | `f1ae22eddd3a96c3b7b8a494ef03749ae6a1e19574bacc9c195d83c916de09e2` | none |
 | `semver` | `7.8.5` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
 | `react-native-safe-area-context` | `5.7.0` | MIT | no | `f5c7a4d527258e11fdfe3d84eb73cd14fe6d64224ef051e59f6ee21fe378800c` | none |
@@ -1037,6 +1034,7 @@
 | `utif2` | `4.1.0` | MIT | no | `c1fb8861eca211bf5aea574358aba7039396c0c1824c2a1477cc126d398efd89` | none |
 | `util-deprecate` | `1.0.2` | MIT | no | `0154425673db15cdfa80ecba2c9b1f1a867f7197a006764712849bfc3a93cbb7` | none |
 | `utils-merge` | `1.0.1` | MIT | no | `6e7d699cdd1e4fa837ba7718ea49841aa67201b449ea8b3f9cf274be15974a64` | none |
+| `uuid` | `11.1.1` | MIT | yes | `beaa6b04fb82e41dd2ad679e19e27953afb5999b1abbb455b6564e78ebfeb332` | none |
 | `v8-to-istanbul` | `9.3.0` | ISC | no | `1a9c55b2961f5e3062e181fa55666c44d011fc3cc03ed6d4fa4321c51f2a5ec5` | none |
 | `validate-npm-package-name` | `5.0.1` | ISC | no | `f3e1645267f7dd77ee6545283cc1766e5883e8fb3b5088fe2cfb995defbb3dde` | none |
 | `vary` | `1.1.2` | MIT | no | `bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400` | none |
@@ -1060,6 +1058,7 @@
 | `wrappy` | `1.0.2` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
 | `write-file-atomic` | `4.0.2` | ISC | no | `ea7f376fe7a1fc28572b83ac8f806d92effb31852b9981bc9ba9d5266caa6b28` | none |
 | `ws` | `8.21.1` | MIT | no | `2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef` | none |
+| `xcode` | `3.0.1` | Apache-2.0 | yes | `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`<br>`0e5b0fe8d11e1627336bc6361de610ba8acf9a035fd73e07b5b4a0909a48371f` | none |
 | `xml2js` | `0.6.0` | MIT | no | `c51452ef1dfd5606c9fe266930fa6bf7e8a534d52973b6475df5bf212cad5b0a` | none |
 | `xmlbuilder` | `11.0.1` | MIT | no | `e368bc4263b466cf98c225af15e300549e00da8859416a4536109e9654d434a8` | none |
 | `xmlbuilder` | `15.1.1` | MIT | no | `e368bc4263b466cf98c225af15e300549e00da8859416a4536109e9654d434a8` | none |
@@ -1171,7 +1170,7 @@
 | `479b48ab7acdf844b2f44d6a3ce806f932ad009d84d2c71651355b372a2ad0ad` | 1114 | 3 |
 | `483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a` | 1077 | 9 |
 | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` | 1109 | 64 |
-| `49c5f9c7097c9a940ff663a54c27a4c60e379df6cc2b3052df0d37a09a85df93` | 1106 | 4 |
+| `49c5f9c7097c9a940ff663a54c27a4c60e379df6cc2b3052df0d37a09a85df93` | 1106 | 3 |
 | `49d6a1c9a623784c61c6cb70f773f3457faceb1914a13c8560a9823b7631950c` | 1937 | 1 |
 | `4ab87e6e3c0c0b78e47c77d49ec10c048f8a519fb8062e6e3217e3e6e9b0c6e9` | 1476 | 1 |
 | `4be9d87b56a306293223b490c0d0b245e9e94f39884147bf051a6c7b825aeb30` | 1189 | 1 |
@@ -1180,7 +1179,7 @@
 | `4db62091452bb75599fe174df10e9cbaa645df1f09fe1e182a3ae8f0a63d379e` | 1079 | 1 |
 | `4df78f3bcde252efdbef67e5a3ef02877be68a4b4ff7ee0c78e4d89a0a7f1f00` | 1508 | 1 |
 | `4eb7543b08d955a6d23fcc224601d43ff566e775be918805e26210d7f6eb4893` | 1100 | 1 |
-| `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | 765 | 27 |
+| `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | 765 | 26 |
 | `4efb635cc4fd67f738ce2af65f8b73514ee338d0d201b836ab3a823cfda771d1` | 1076 | 1 |
 | `4f221aee6e072336700c408c68ab3b96a3fc09f6aebe6f48f1bd99e5ef13faec` | 1109 | 1 |
 | `50627796eb4236cd05674e71d090e594447995225b7d94cd59e57c25fa3a0217` | 1209 | 1 |
@@ -1344,6 +1343,7 @@
 | `bd134b41da59e452fb5a1d366b660886f741c87c2bf9428e93764c419fbc40f5` | 1094 | 1 |
 | `bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400` | 1094 | 1 |
 | `be635b6249bf2e3a9ab088d9be654960253291042824b62dfcf5e955625dc6fe` | 1636 | 1 |
+| `beaa6b04fb82e41dd2ad679e19e27953afb5999b1abbb455b6564e78ebfeb332` | 1109 | 1 |
 | `bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a` | 1083 | 1 |
 | `bfdeded4040e05da31ca9b6239dc83bd23fa26ac8db87342a7ca4363f68916ff` | 11342 | 1 |
 | `c064f7a3e353bc1bc977f3c897941c75ef763f44f41677e0a15370ca0853d6e2` | 1085 | 3 |
@@ -1429,7 +1429,7 @@
 | `f81a99a72ec5e64e3f74fad0db3df27ab69ab0edd4878368f83379d3e4fc9313` | 1061 | 1 |
 | `f855c605d6ba3587ef8ba49a428cec58711964547c5364f1dade33ed23315361` | 1068 | 2 |
 | `f9a72660f8b9b8a9ae3773ecaab64f61d1412a4f1c9eb945e455d22608fdc348` | 1071 | 1 |
-| `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | 1106 | 59 |
+| `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | 1106 | 58 |
 | `fb506e4ade12d7a9efa67c9d76a9a28c8e15d347ca49a69e48e29b40b34ad2ab` | 1068 | 2 |
 | `fd3a263fe19ed8faa9068b43abaebafc02c77897b0c6fc09abc04bb592e5f16e` | 18651 | 1 |
 | `fe99d9a94ec7edc64a9767701f830f66e08239b000d653a359d66e640289ed0c` | 1112 | 1 |
