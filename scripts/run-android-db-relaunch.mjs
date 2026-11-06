@@ -469,6 +469,24 @@ const PROCESS_TIMEOUT_MS = 10_000;
 // window to show the launched process (CI lanes run 42272165906); the second window is still bounded.
 const PROCESS_WAIT_ATTEMPTS = 2;
 const POLL_MS = 250;
+// DB-03: when a lane fails waiting on the app process or its markers, print fixed Android facts to
+// the CI log (never to the retained artifact): how `am start` answered, how many app processes
+// exist, the top resumed activity, and the newest exit reasons. Every printed value is an Android
+// enum label, a component name, a PID, a count or a time of day; device free text such as exit
+// descriptions, traces or intent data is never printed.
+const DIAGNOSED_FAILURE_CODES = Object.freeze([
+  'app-process-exited',
+  'app-process-missing',
+  'app-process-still-running',
+  'invalid-process-identity',
+  'process-a-not-alive',
+  'process-not-changed',
+  'relaunch-result-timeout',
+]);
+const EXIT_INFO_LIMIT = 5;
+const EXIT_LABEL_PATTERN = /^[A-Z0-9 _()]{1,48}$/;
+/** Classified `am start` answers of this harness process, in launch order. */
+const launchOutcomes = [];
 const MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_MARKER_JSON_CHARS = 4_096;
 const LOGCAT_BOUNDARY_PREFIX = 'GATOR_DB_RELAUNCH_BOUNDARY_';
@@ -540,6 +558,7 @@ function runCommand(command, args, options = {}) {
     serial,
     timeoutMs = COMMAND_TIMEOUT_MS,
     allowMissingProcess = false,
+    includeStderr = false,
   } = options;
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -558,6 +577,7 @@ function runCommand(command, args, options = {}) {
       `${label} failed with exit ${String(result.status)}${detail ? `: ${detail}` : ''}`,
     );
   }
+  if (includeStderr) return [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
   return result.stdout.trim();
 }
 
@@ -1534,6 +1554,7 @@ export async function waitForProcess(getProcessIdentity, options = {}) {
     now = Date.now,
     sleep = delay,
     processAttempts = PROCESS_WAIT_ATTEMPTS,
+    phase,
   } = options;
   for (let attempt = 1; attempt <= processAttempts; attempt += 1) {
     const deadline = now() + timeoutMs;
@@ -1545,7 +1566,7 @@ export async function waitForProcess(getProcessIdentity, options = {}) {
   }
   throw new HarnessError(
     'app-process-missing',
-    `Gator did not create an app process within ${String(processAttempts)} windows of ${String(timeoutMs)} ms after launch.`,
+    `Gator did not create ${phase ? `process ${phase}` : 'an app process'} within ${String(processAttempts)} windows of ${String(timeoutMs)} ms after launch.`,
   );
 }
 
@@ -1668,6 +1689,96 @@ async function waitForBackupRestoreMarker({
   );
 }
 
+/** Classifies `am start` output into a fixed label; the intent text itself is never kept. */
+export function classifyActivityStartOutput(output) {
+  const text = String(output ?? '');
+  if (/^Error\b/m.test(text)) return 'error';
+  if (
+    /Activity not started, intent has been delivered to currently running top-most instance/.test(
+      text,
+    )
+  ) {
+    return 'delivered-to-top-instance';
+  }
+  if (/Activity not started, its current task has been brought to the front/.test(text)) {
+    return 'task-brought-to-front';
+  }
+  if (/^Warning\b/m.test(text)) return 'warning';
+  if (/^Starting: Intent \{/m.test(text)) return 'started';
+  return 'unrecognized';
+}
+
+function exitInfoLabel(code, label) {
+  return EXIT_LABEL_PATTERN.test(label ?? '') ? `${code} (${label})` : code;
+}
+
+/** The newest app exits from `dumpsys activity exit-info`, reduced to fixed fields. */
+export function summarizeExitInfo(dump, limit = EXIT_INFO_LIMIT) {
+  return (
+    String(dump ?? '')
+      .split(/ApplicationExitInfo #\d+:/)
+      .slice(1)
+      .map((block) => {
+        const stamp = /\btimestamp=(\d{4}-\d{2}-\d{2} (\d{2}:\d{2}:\d{2}(?:\.\d{3})?))\b/.exec(
+          block,
+        );
+        const pid = /\bpid=(\d{1,10})\b/.exec(block)?.[1] ?? 'unknown';
+        const reason = /\breason=(\d{1,3}) \((.*?)\)(?= subreason=| status=|$)/m.exec(block);
+        const subreason = /\bsubreason=(\d{1,3}) \((.*?)\)(?= status=|$)/m.exec(block);
+        const importance = /\bimportance=(\d{1,4})\b/.exec(block)?.[1] ?? 'unknown';
+        return {
+          sortKey: stamp?.[1] ?? '',
+          line: [
+            `exit at ${stamp?.[2] ?? 'unknown'}`,
+            `pid=${pid}`,
+            `reason=${reason ? exitInfoLabel(reason[1], reason[2]) : 'unknown'}`,
+            `subreason=${subreason ? exitInfoLabel(subreason[1], subreason[2]) : 'unknown'}`,
+            `importance=${importance}`,
+          ].join(' '),
+        };
+      })
+      // Newest first whatever order the dump uses; an entry without a timestamp sorts last.
+      .sort((a, b) => (a.sortKey < b.sortKey ? 1 : a.sortKey > b.sortKey ? -1 : 0))
+      .slice(0, limit)
+      .map((entry) => entry.line)
+  );
+}
+
+/** The package/class of the top resumed activity in `dumpsys activity activities`, or 'none'. */
+export function parseTopResumedActivity(dump) {
+  const match =
+    /\b(?:topResumedActivity|mResumedActivity|ResumedActivity)[=:] ?ActivityRecord\{[0-9a-f]+ u\d+ ([A-Za-z0-9_.]{1,200})\/([A-Za-z0-9_.$]{1,200})/.exec(
+      String(dump ?? ''),
+    );
+  return match ? `${match[1]}/${match[2]}` : 'none';
+}
+
+/** Counts the PIDs `pidof` printed; unlike parseSingleProcessPid it never throws. */
+export function countProcessIds(pidofOutput) {
+  if (pidofOutput === undefined || pidofOutput === null) return 0;
+  return String(pidofOutput)
+    .trim()
+    .split(/\s+/)
+    .filter((value) => /^\d+$/.test(value)).length;
+}
+
+/** Collects host diagnostics for a process or marker failure before the lane's cleanup runs. */
+async function attachFailureDiagnostics(error, collect) {
+  if (
+    typeof collect !== 'function' ||
+    !(error instanceof HarnessError) ||
+    !DIAGNOSED_FAILURE_CODES.includes(error.code)
+  ) {
+    return;
+  }
+  try {
+    const lines = await collect();
+    error.diagnostics = Array.isArray(lines) ? lines.map(String) : [];
+  } catch {
+    error.diagnostics = ['diagnostics unavailable'];
+  }
+}
+
 /** Dependency-injected lifecycle proof; host unit tests never need adb or an Android device. */
 export async function executeRelaunchSequence(operations, timing = {}) {
   const { resetTestState, createRequest, launchApp, stopApp, readLogs, getProcessIdentity } =
@@ -1678,7 +1789,7 @@ export async function executeRelaunchSequence(operations, timing = {}) {
     await resetTestState();
     await createRequest();
     await launchApp();
-    const processA = await waitForProcess(getProcessIdentity, timing);
+    const processA = await waitForProcess(getProcessIdentity, { ...timing, phase: 'A' });
     const prepareMarkers = await waitForMarkerCount({
       readLogs,
       getProcessIdentity,
@@ -1706,7 +1817,7 @@ export async function executeRelaunchSequence(operations, timing = {}) {
     await stopApp();
     await waitForNoProcess(getProcessIdentity, timing);
     await launchApp();
-    const processB = await waitForProcess(getProcessIdentity, timing);
+    const processB = await waitForProcess(getProcessIdentity, { ...timing, phase: 'B' });
     if (processB.pid === processA.pid) {
       throw new HarnessError(
         'process-not-changed',
@@ -1729,6 +1840,7 @@ export async function executeRelaunchSequence(operations, timing = {}) {
     return outcome;
   } catch (error) {
     primaryError = error;
+    await attachFailureDiagnostics(error, operations.collectFailureDiagnostics);
     throw error;
   } finally {
     try {
@@ -1785,7 +1897,7 @@ export async function executeWalWriteDeathSequence(operations, timing = {}) {
     await resetTestState();
     await createRequest();
     await launchApp();
-    const processA = await waitForProcess(getProcessIdentity, timing);
+    const processA = await waitForProcess(getProcessIdentity, { ...timing, phase: 'A' });
     const prepareMarkers = await waitForMarkerCount({
       readLogs,
       getProcessIdentity,
@@ -1833,7 +1945,7 @@ export async function executeWalWriteDeathSequence(operations, timing = {}) {
     await crashApp(processA.pid);
     await waitForNoProcess(getProcessIdentity, timing);
     await launchApp();
-    const processB = await waitForProcess(getProcessIdentity, timing);
+    const processB = await waitForProcess(getProcessIdentity, { ...timing, phase: 'B' });
     if (processB.pid === processA.pid) {
       throw new HarnessError(
         'process-not-changed',
@@ -1864,6 +1976,7 @@ export async function executeWalWriteDeathSequence(operations, timing = {}) {
     return outcome;
   } catch (error) {
     primaryError = error;
+    await attachFailureDiagnostics(error, operations.collectFailureDiagnostics);
     throw error;
   } finally {
     try {
@@ -1893,7 +2006,7 @@ export async function executeActiveMigrationDeathSequence(operations, timing = {
     await resetTestState();
     await createRequest();
     await launchApp();
-    const processA = await waitForProcess(getProcessIdentity, timing);
+    const processA = await waitForProcess(getProcessIdentity, { ...timing, phase: 'A' });
     const prepareMarkers = await waitForMarkerCount({
       readLogs,
       getProcessIdentity,
@@ -1948,7 +2061,7 @@ export async function executeActiveMigrationDeathSequence(operations, timing = {
       );
     }
     await launchApp();
-    const processB = await waitForProcess(getProcessIdentity, timing);
+    const processB = await waitForProcess(getProcessIdentity, { ...timing, phase: 'B' });
     if (processB.pid === processA.pid) {
       throw new HarnessError(
         'process-not-changed',
@@ -1980,6 +2093,7 @@ export async function executeActiveMigrationDeathSequence(operations, timing = {
     return outcome;
   } catch (error) {
     primaryError = error;
+    await attachFailureDiagnostics(error, operations.collectFailureDiagnostics);
     throw error;
   } finally {
     try {
@@ -2007,7 +2121,7 @@ export async function executeRuntimeConcurrencySequence(operations, timing = {})
     await resetTestState();
     await createRequest();
     await launchApp();
-    const processIdentity = await waitForProcess(getProcessIdentity, timing);
+    const processIdentity = await waitForProcess(getProcessIdentity, { ...timing, phase: 'A' });
     const result = await waitForRuntimeConcurrencyMarker({
       readLogs,
       getProcessIdentity,
@@ -2042,6 +2156,7 @@ export async function executeRuntimeConcurrencySequence(operations, timing = {})
     };
   } catch (error) {
     primaryError = error;
+    await attachFailureDiagnostics(error, operations.collectFailureDiagnostics);
     throw error;
   } finally {
     let finalizationError;
@@ -2078,7 +2193,7 @@ export async function executeBackupRestoreSequence(operations, timing = {}) {
     await resetTestState();
     await createRequest();
     await launchApp();
-    const processIdentity = await waitForProcess(getProcessIdentity, timing);
+    const processIdentity = await waitForProcess(getProcessIdentity, { ...timing, phase: 'A' });
     const result = await waitForBackupRestoreMarker({
       readLogs,
       getProcessIdentity,
@@ -2113,6 +2228,7 @@ export async function executeBackupRestoreSequence(operations, timing = {}) {
     };
   } catch (error) {
     primaryError = error;
+    await attachFailureDiagnostics(error, operations.collectFailureDiagnostics);
     throw error;
   } finally {
     let finalizationError;
@@ -2577,11 +2693,55 @@ function currentProcessIdentity(serial) {
 }
 
 function launchApp(serial) {
-  runAdb(serial, LAUNCH_APP_ADB_ARGS, {
+  const output = runAdb(serial, LAUNCH_APP_ADB_ARGS, {
     code: 'app-launch-failed',
     label: 'Gator DEV launch',
     timeoutMs: LAUNCH_TIMEOUT_MS,
+    includeStderr: true,
   });
+  launchOutcomes.push(classifyActivityStartOutput(output));
+}
+
+function collectProcessDiagnostics(serial) {
+  const read = (label, args, summarize, options = {}) => {
+    try {
+      return summarize(
+        runAdb(serial, args, { code: 'diagnostics-unavailable', label, ...options }),
+      );
+    } catch {
+      return undefined;
+    }
+  };
+  const time = read('Device time', ['shell', 'date', '+%H:%M:%S'], (output) =>
+    /^\d{2}:\d{2}:\d{2}$/.test(output) ? output : undefined,
+  );
+  const processes = read(
+    'Gator process count',
+    ['shell', 'pidof', APP_PACKAGE],
+    (output) => String(countProcessIds(output)),
+    { allowMissingProcess: true },
+  );
+  const topActivity = read(
+    'Top resumed activity',
+    ['shell', 'dumpsys', 'activity', 'activities'],
+    parseTopResumedActivity,
+  );
+  const exits = read(
+    'Gator exit history',
+    ['shell', 'dumpsys', 'activity', 'exit-info', APP_PACKAGE],
+    (output) => summarizeExitInfo(output),
+  );
+  return [
+    `device time ${time ?? 'unavailable'}`,
+    `launches: ${launchOutcomes.length > 0 ? launchOutcomes.join(', ') : 'none'}`,
+    `app processes: ${processes ?? 'unavailable'}`,
+    `top resumed activity: ${topActivity ?? 'unavailable'}`,
+    ...(exits === undefined
+      ? ['exit history: unavailable']
+      : exits.length === 0
+        ? ['exit history: none recorded']
+        : exits),
+  ];
 }
 
 function stopApp(serial) {
@@ -2727,6 +2887,7 @@ export async function runAndroidDbRelaunch() {
         logBoundary,
       ),
     getProcessIdentity: () => currentProcessIdentity(serial),
+    collectFailureDiagnostics: () => collectProcessDiagnostics(serial),
   });
 
   const path = writeArtifact(outcome, target);
@@ -2805,6 +2966,7 @@ export async function runAndroidDbWalWriteDeath() {
         logBoundary,
       ),
     getProcessIdentity: () => currentProcessIdentity(serial),
+    collectFailureDiagnostics: () => collectProcessDiagnostics(serial),
   });
 
   const path = writeWalWriteDeathArtifact(outcome, target);
@@ -2890,6 +3052,7 @@ export async function runAndroidDbActiveMigrationDeath() {
         logBoundary,
       ),
     getProcessIdentity: () => currentProcessIdentity(serial),
+    collectFailureDiagnostics: () => collectProcessDiagnostics(serial),
   });
 
   const path = writeActiveMigrationDeathArtifact(outcome, target);
@@ -2967,6 +3130,7 @@ export async function runAndroidDbRuntimeConcurrency() {
         logBoundary,
       ),
     getProcessIdentity: () => currentProcessIdentity(serial),
+    collectFailureDiagnostics: () => collectProcessDiagnostics(serial),
   });
 
   const path = writeRuntimeConcurrencyArtifact(outcome, target);
@@ -3042,6 +3206,7 @@ export async function runAndroidBackupRestore() {
         logBoundary,
       ),
     getProcessIdentity: () => currentProcessIdentity(serial),
+    collectFailureDiagnostics: () => collectProcessDiagnostics(serial),
   });
 
   const path = writeBackupRestoreArtifact(outcome, target);
@@ -3101,6 +3266,9 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     const code = error instanceof HarnessError ? error.code : 'unexpected-harness-error';
     const message = error instanceof Error ? error.message : 'Unknown harness failure.';
     process.stderr.write(`Android DB relaunch harness failed [${code}]: ${message}\n`);
+    for (const line of Array.isArray(error?.diagnostics) ? error.diagnostics : []) {
+      process.stderr.write(`  diagnostic: ${line}\n`);
+    }
     process.exitCode = 1;
   });
 }

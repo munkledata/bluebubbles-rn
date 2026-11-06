@@ -21,7 +21,9 @@ import {
   buildPrivacySafeArtifact,
   buildRuntimeConcurrencyPrivacySafeArtifact,
   buildWalWriteDeathPrivacySafeArtifact,
+  classifyActivityStartOutput,
   CLEANUP_RELAUNCH_STATE_ADB_ARGS,
+  countProcessIds,
   createCrashAppAdbArgs,
   createPrivateFileAbsenceAdbArgs,
   CREATE_ACTIVE_MIGRATION_DEATH_REQUEST_ADB_ARGS,
@@ -46,6 +48,7 @@ import {
   parseRelaunchHarnessMode,
   parseProcessStartTicks,
   parseSingleProcessPid,
+  parseTopResumedActivity,
   PREPARE_CHECKS,
   READ_ACTIVE_MIGRATION_DEATH_WAL_SIZE_ADB_ARGS,
   READ_WAL_WRITE_DEATH_SIZE_ADB_ARGS,
@@ -62,6 +65,7 @@ import {
   RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES,
   RUNTIME_CONCURRENCY_SCHEMA,
   RUNTIME_CONCURRENCY_SUITE,
+  summarizeExitInfo,
   validateActiveMigrationDeathMarker,
   validateBackupRestoreMarker,
   validateRelaunchMarker,
@@ -2369,4 +2373,183 @@ test('the marker wait spends two full windows before failing, and only one when 
     );
     assert.ok(clock >= expectedElapsed, `clock ${clock} < ${expectedElapsed}`);
   }
+});
+
+// DB-03 failure diagnostics: fixed Android facts for the CI log, collected before lane cleanup.
+const EXIT_INFO_DUMP = `ACTIVITY MANAGER PROCESS EXIT INFO (dumpsys activity exit-info)
+Last Timestamp of Persistence Into Persistent Storage: 2026-11-06 23:29:40.000
+  package: com.bluegreengatorapps.messages
+    Historical Process Exit for uid=10190
+        ApplicationExitInfo #0:
+          timestamp=2026-11-06 23:30:01.250 pid=4321 realUid=10190 packageUid=10190 definingUid=10190 user=0
+          process=com.bluegreengatorapps.messages reason=5 (APP CRASH(NATIVE)) subreason=0 (UNKNOWN) status=6
+          importance=100 pss=0.00B rss=0.00B description=private text /data/user/0/secret-file state=empty trace=null
+        ApplicationExitInfo #1:
+          timestamp=2026-11-06 23:29:41.880 pid=4100 realUid=10190 packageUid=10190 definingUid=10190 user=0
+          process=com.bluegreengatorapps.messages reason=10 (USER REQUESTED) subreason=23 (FORCE STOP) status=0
+          importance=100 pss=0.00B rss=0.00B description=stop due to from pid 1234 state=empty trace=null
+        ApplicationExitInfo #2:
+          timestamp=2026-11-06 23:29:30.000 pid=4000 realUid=10190 packageUid=10190 definingUid=10190 user=0
+          process=com.bluegreengatorapps.messages reason=4 (oops: /data/private) subreason=2 (lower) status=1
+          importance=400 pss=0.00B rss=0.00B description=x state=empty trace=null
+`;
+
+test('classifies am start answers without keeping the intent text', () => {
+  const started =
+    'Starting: Intent { act=android.intent.action.VIEW dat=exp+bluegreengatorappsmessages://expo-development-client/... cmp=com.bluegreengatorapps.messages/.MainActivity }';
+  assert.equal(classifyActivityStartOutput(started), 'started');
+  assert.equal(
+    classifyActivityStartOutput(
+      `${started}\nWarning: Activity not started, intent has been delivered to currently running top-most instance.`,
+    ),
+    'delivered-to-top-instance',
+  );
+  assert.equal(
+    classifyActivityStartOutput(
+      `${started}\nWarning: Activity not started, its current task has been brought to the front`,
+    ),
+    'task-brought-to-front',
+  );
+  assert.equal(classifyActivityStartOutput(`${started}\nWarning: another refusal`), 'warning');
+  assert.equal(
+    classifyActivityStartOutput(`${started}\nError: Activity class {a/b} does not exist.`),
+    'error',
+  );
+  assert.equal(classifyActivityStartOutput(''), 'unrecognized');
+  assert.equal(classifyActivityStartOutput(undefined), 'unrecognized');
+});
+
+test('summarizes exit history as fixed fields and never prints device free text', () => {
+  const lines = summarizeExitInfo(EXIT_INFO_DUMP);
+  assert.deepEqual(lines, [
+    'exit at 23:30:01.250 pid=4321 reason=5 (APP CRASH(NATIVE)) subreason=0 (UNKNOWN) importance=100',
+    'exit at 23:29:41.880 pid=4100 reason=10 (USER REQUESTED) subreason=23 (FORCE STOP) importance=100',
+    'exit at 23:29:30.000 pid=4000 reason=4 subreason=2 importance=400',
+  ]);
+  const printed = lines.join('\n');
+  for (const secret of ['secret-file', '/data/', 'description', 'oops', 'lower', 'uid=']) {
+    assert.equal(printed.includes(secret), false, secret);
+  }
+  assert.deepEqual(summarizeExitInfo(EXIT_INFO_DUMP, 1), [lines[0]]);
+  // Newest first even when the dump lists the oldest exit first.
+  const blocks = EXIT_INFO_DUMP.split(/(?=        ApplicationExitInfo #)/);
+  const oldestFirst = [blocks[0], ...blocks.slice(1).reverse()].join('');
+  assert.deepEqual(summarizeExitInfo(oldestFirst), lines);
+  assert.deepEqual(summarizeExitInfo(oldestFirst, 1), [lines[0]]);
+  assert.deepEqual(summarizeExitInfo('no exits here'), []);
+  assert.deepEqual(summarizeExitInfo(undefined), []);
+});
+
+test('reads the top resumed activity and counts app processes without throwing', () => {
+  assert.equal(
+    parseTopResumedActivity(
+      '  topResumedActivity=ActivityRecord{9f3a1b2 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity t2}',
+    ),
+    'com.google.android.apps.nexuslauncher/.NexusLauncherActivity',
+  );
+  assert.equal(
+    parseTopResumedActivity(
+      '    mResumedActivity: ActivityRecord{1a2b3c u0 com.bluegreengatorapps.messages/.MainActivity t7}',
+    ),
+    'com.bluegreengatorapps.messages/.MainActivity',
+  );
+  assert.equal(parseTopResumedActivity('no activity records'), 'none');
+  assert.equal(countProcessIds(undefined), 0);
+  assert.equal(countProcessIds(''), 0);
+  assert.equal(countProcessIds('4321'), 1);
+  assert.equal(countProcessIds('4321 4400\n'), 2);
+  assert.equal(countProcessIds('not a pid'), 0);
+});
+
+test('names the launch whose process never appeared', async () => {
+  await assert.rejects(
+    waitForProcess(async () => undefined, {
+      timeoutMs: 5,
+      pollMs: 1,
+      processAttempts: 1,
+      phase: 'B',
+    }),
+    (error) =>
+      error instanceof HarnessError &&
+      error.code === 'app-process-missing' &&
+      error.message.includes('process B within 1 windows of 5 ms'),
+  );
+});
+
+test('collects failure diagnostics before the lane cleanup and keeps the primary error', async () => {
+  const calls = [];
+  await assert.rejects(
+    executeWalWriteDeathSequence(
+      {
+        resetTestState: async () => calls.push('reset'),
+        createRequest: async () => calls.push('request'),
+        launchApp: async () => calls.push('launch'),
+        crashApp: async () => calls.push('crash'),
+        readLogs: async () => '',
+        getProcessIdentity: async () => undefined,
+        proveWalGrew: async () => true,
+        verifyPrivateStateClean: async () => true,
+        collectFailureDiagnostics: async () => {
+          calls.push('diagnostics');
+          return ['launches: started', 'app processes: 0'];
+        },
+      },
+      { timeoutMs: 5, pollMs: 1, processAttempts: 1 },
+    ),
+    (error) =>
+      error instanceof HarnessError &&
+      error.code === 'app-process-missing' &&
+      error.message.includes('process A') &&
+      JSON.stringify(error.diagnostics) ===
+        JSON.stringify(['launches: started', 'app processes: 0']),
+  );
+  assert.deepEqual(calls, ['reset', 'request', 'launch', 'diagnostics', 'reset']);
+});
+
+test('a failing diagnostics collector never replaces the lane error', async () => {
+  await assert.rejects(
+    executeRelaunchSequence(
+      {
+        resetTestState: async () => {},
+        createRequest: async () => {},
+        launchApp: async () => {},
+        stopApp: async () => {},
+        readLogs: async () => '',
+        getProcessIdentity: async () => undefined,
+        collectFailureDiagnostics: async () => {
+          throw new Error('adb went away');
+        },
+      },
+      { timeoutMs: 5, pollMs: 1, processAttempts: 1 },
+    ),
+    (error) =>
+      error instanceof HarnessError &&
+      error.code === 'app-process-missing' &&
+      JSON.stringify(error.diagnostics) === JSON.stringify(['diagnostics unavailable']),
+  );
+});
+
+test('failures outside the process and marker waits carry no diagnostics', async () => {
+  let collected = false;
+  await assert.rejects(
+    executeRelaunchSequence({
+      resetTestState: async () => {},
+      createRequest: async () => {
+        throw new HarnessError('request-create-failed', 'request write failed');
+      },
+      launchApp: async () => {},
+      stopApp: async () => {},
+      readLogs: async () => '',
+      getProcessIdentity: async () => undefined,
+      collectFailureDiagnostics: async () => {
+        collected = true;
+        return [];
+      },
+    }),
+    (error) =>
+      error instanceof HarnessError &&
+      error.code === 'request-create-failed' &&
+      error.diagnostics === undefined,
+  );
+  assert.equal(collected, false);
 });
