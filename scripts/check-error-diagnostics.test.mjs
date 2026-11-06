@@ -37,10 +37,6 @@ const nativeErrorPrivacyFiles = [
   'plugins/withStartupPrivacy.js',
   'app.config.ts',
   'package.json',
-  'node_modules/react-native/package.json',
-  'patches/react-native+0.86.3.patch',
-  'node_modules/react-native/ReactCommon/jserrorhandler/CMakeLists.txt',
-  'node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp',
   'node_modules/@op-engineering/op-sqlite/package.json',
   'node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt',
   'patches/@op-engineering+op-sqlite+17.1.2.patch',
@@ -1057,49 +1053,15 @@ test('pins the complete owned native source against android shadowing and decoys
   }
 });
 
-test('pins release C++ error containment, committed patch, and source-build wiring', (context) => {
+test('pins the startup privacy wiring and the failing-loudly postinstall', (context) => {
+  // React Native is consumed prebuilt (D-6): no C++ source, patch or source-build wiring is pinned
+  // any more; release JS error containment is the host-tested JS boundary installed by index.js.
   assert.deepEqual(findNativeErrorPrivacyFindings({ root }), []);
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'gator-native-error-privacy-'));
   context.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
   initializeGuardFixture(fixtureRoot);
   assert.deepEqual(findNativeErrorPrivacyFindings({ root: fixtureRoot }), []);
-  const cppPath = 'node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp';
-  const cmakePath = 'node_modules/react-native/ReactCommon/jserrorhandler/CMakeLists.txt';
-  const patchPath = 'patches/react-native+0.86.3.patch';
   const cases = [
-    [cppPath, (source) => source.replace('"runtime.fatal [UnknownError]"', 'error.getMessage()')],
-    [cppPath, (source) => source.replace('processedError.extraData = jsi::Object(runtime);', '')],
-    [
-      cppPath,
-      (source) => source.replace('"runtime.reporting_failed [UnknownError]"', 'error.getMessage()'),
-    ],
-    [cppPath, (source) => source.replace('if (_hasHandledFatalError)', 'if (false)')],
-    [cmakePath, (source) => source.replace(' OR REACT_NATIVE_DEBUG_OPTIMIZED', '')],
-    [
-      cmakePath,
-      (source) => source.replace('GATOR_RELEASE_ERROR_PRIVACY=1', 'GATOR_RELEASE_ERROR_PRIVACY=0'),
-    ],
-    [
-      patchPath,
-      (source) =>
-        source.slice(0, source.indexOf('diff --git a/node_modules/react-native/ReactCommon/')),
-    ],
-    [
-      patchPath,
-      (source) =>
-        source +
-        source.slice(source.indexOf('diff --git a/node_modules/react-native/ReactCommon/')),
-    ],
-    [
-      'app.config.ts',
-      (source) =>
-        source.replace('buildReactNativeFromSource: true', 'buildReactNativeFromSource: false'),
-    ],
-    [
-      'app.config.ts',
-      (source) =>
-        source.replace('buildReactNativeFromSource: true,', '// buildReactNativeFromSource: true,'),
-    ],
     [
       'package.json',
       (source) =>
@@ -1137,10 +1099,6 @@ test('pins release C++ error containment, committed patch, and source-build wiri
       (source) =>
         source.replace('export default config;', 'config.plugins = [];\nexport default config;'),
     ],
-    [
-      'node_modules/react-native/package.json',
-      (source) => source.replace('"version": "0.86.3"', '"version": "0.86.4"'),
-    ],
   ];
   for (const [path, mutate] of cases) {
     const original = readFileSync(join(root, path), 'utf8');
@@ -1150,23 +1108,9 @@ test('pins release C++ error containment, committed patch, and source-build wiri
     assert.ok(findNativeErrorPrivacyFindings({ root: fixtureRoot }).length > 0, path);
     writeFixtureFile(fixtureRoot, path, original);
   }
-  const settings =
-    'includeBuild(expoAutolinking.reactNative) {\n' +
-    '  dependencySubstitution {\n' +
-    '    substitute(module("com.facebook.react:react-android")).using(project(":packages:react-native:ReactAndroid"))\n' +
-    '  }\n}\n';
-  for (const decoy of [
-    `/* ${settings} */`,
-    `if (false) {\n${settings}}`,
-    `def unused = '''${settings}'''`,
-  ]) {
-    writeFixtureFile(fixtureRoot, 'android/settings.gradle', decoy);
-    assert.ok(
-      findNativeErrorPrivacyFindings({ root: fixtureRoot }).some((finding) =>
-        finding.includes('source substitution'),
-      ),
-    );
-  }
+  // A generated Gradle settings file is no longer inspected: prebuilt React Native substitutes nothing.
+  writeFixtureFile(fixtureRoot, 'android/settings.gradle', 'rootProject.name = "fixture"\n');
+  assert.deepEqual(findNativeErrorPrivacyFindings({ root: fixtureRoot }), []);
 });
 
 test('pins op-sqlite release exception containment to the app flag, installed source, and patch', (context) => {

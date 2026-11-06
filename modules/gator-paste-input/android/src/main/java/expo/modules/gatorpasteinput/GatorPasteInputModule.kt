@@ -70,10 +70,12 @@ private const val MAX_RAW_NAME_LENGTH = 512
 private const val MAX_MIME_LENGTH = 120
 private const val MAX_QUEUED_BATCHES = 1
 
-// AndroidX stores the API 25-30 permission token here after requestPermission(). The version-pinned
-// ReactEditText patch supplies the same exact token on API 31+, before delegating to the platform's
-// normal requestPermission()/receive-content path. The lease also retains the original payload so
-// neither platform path can revoke the grant before the bounded worker finishes.
+// AndroidX stores the API 25-30 permission token here after requestPermission(). On API 31+ the
+// platform owns the keyboard commit and hands this module only the IME's opts, so that content
+// carries no token: it is accepted anyway, and the platform releases its read grant when the commit
+// finalizes (the reviewed trade for building against prebuilt React Native instead of a patched
+// ReactEditText; 2026-11-06). The lease also retains the original payload so neither platform path
+// can revoke the grant before the bounded worker finishes.
 private const val EXTRA_INPUT_CONTENT_INFO = "androidx.core.view.extra.INPUT_CONTENT_INFO"
 
 private data class PendingPasteBatch(
@@ -118,21 +120,12 @@ private object InputPermissionApi25 {
   @Suppress("DEPRECATION")
   fun capture(payload: ContentInfoCompat): PermissionLease? {
     val info = payload.extras?.getParcelable(EXTRA_INPUT_CONTENT_INFO) as? InputContentInfo
-    return if (info == null) {
-      // API 31+ IME content must carry the exact token injected by the patched ReactEditText. If
-      // the version-pinned patch is ever absent, reject instead of consuming content whose grant
-      // could only be released later by nondeterministic platform finalization.
-      if (
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-        payload.source == ContentInfoCompat.SOURCE_INPUT_METHOD
-      ) {
-        null
-      } else {
-        PermissionLease(payload, null)
-      }
-    } else {
-      PermissionLease(payload) { info.releasePermission() }
-    }
+    // API 25-30 keyboard commits carry AndroidX's token and are released here, deterministically.
+    // API 31+ keyboard commits carry none (the platform path passes only the IME's opts, and no
+    // public API lets a module intercept it): accept them with a lease that anchors the payload and
+    // leaves the grant's release to platform finalization. One content URI stays readable to this
+    // app slightly longer; the bounded worker's copy and cleanup are unchanged.
+    return if (info == null) PermissionLease(payload, null) else PermissionLease(payload) { info.releasePermission() }
   }
 }
 
@@ -202,10 +195,11 @@ private fun namedThreadFactory(name: String): ThreadFactory = ThreadFactory { ru
  * THE FIX REUSES THE VIEW RN ALREADY CREATED — no subclass or custom ViewManager. `ReactEditText`
  * extends androidx's `AppCompatEditText`, whose receive-content implementation handles
  * `pasteAsPlainText` and API 25-30 keyboard commits once this module registers a listener. On API
- * 31+, Android's framework handles the commit, while the version-pinned ReactEditText source patch
- * forwards the exact public permission token into this module so the bounded worker can release
- * it deterministically. Together these paths enable long-press Paste, keyboard image/GIF/sticker
- * commits, and drag-and-drop for the accepted MIME types.
+ * 31+, Android's framework handles the commit and passes no permission token, so the module accepts
+ * the content and the platform releases the read grant when the commit finalizes (React Native is
+ * consumed prebuilt; no patched ReactEditText forwards the token any more). Together these paths
+ * enable long-press Paste, keyboard image/GIF/sticker commits, and drag-and-drop for the accepted
+ * MIME types.
  *
  * See the JS half in `src/services/paste/pasteInput.ts` + `pastePayload.ts`.
  */
@@ -299,10 +293,11 @@ class GatorPasteInputModule : Module() {
    * default handling; the URI items are consumed here and must not be returned, or the default
    * listener would `coerceToText` them into a `content://…` string in the input.
    *
-   * No provider call happens here. AndroidX (API 25-30) or the version-pinned ReactEditText wrapper
-   * (API 31+) placed the exact `InputContentInfo` token in the payload extras. Retaining that token
-   * keeps the grant alive while one bounded worker performs metadata queries and streaming; the
-   * worker releases it in `finally`. Count is rejected before that worker can touch a provider.
+   * No provider call happens here. On API 25-30 AndroidX placed the exact `InputContentInfo` token
+   * in the payload extras; retaining it keeps the grant alive while one bounded worker performs
+   * metadata queries and streaming, and the worker releases it in `finally`. API 31+ keyboard
+   * commits carry no token and are accepted with a platform-released lease. Count is rejected
+   * before that worker can touch a provider.
    */
   private fun onReceive(context: Context, payload: ContentInfoCompat, tag: Int): ContentInfoCompat? {
     val split = payload.partition { item -> item.uri != null }
@@ -312,7 +307,7 @@ class GatorPasteInputModule : Module() {
 
     val clip = withUris.clip
     val count = clip.itemCount
-    // Anchor the ORIGINAL payload, not the partition copy, and require the explicit API 31+ token.
+    // Anchor the ORIGINAL payload, not the partition copy.
     val permission = capturePermissionLease(payload) ?: run {
       emitRejected(tag, maxOf(count, 1))
       return payload

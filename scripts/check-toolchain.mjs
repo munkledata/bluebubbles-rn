@@ -16,9 +16,9 @@ export const REQUIRED_ANDROID_ARCHITECTURES = Object.freeze({
   production: 'arm64-v8a',
 });
 /**
- * EAS's own default task for each profile, plus the ABIs React Native compiles. With React Native
- * built from source, React Native and Hermes are an included Gradle build that never reads the app's
- * gradle.properties, so without -P it compiles all four ABIs while the app packages only these.
+ * EAS's own default task for each profile, plus the ABIs the app's native code compiles and packages.
+ * The flag is passed explicitly rather than inherited from gradle.properties; React Native and
+ * Hermes themselves are prebuilt Maven artifacts (D-6, 2026-11-06).
  */
 export const REQUIRED_EAS_GRADLE_COMMANDS = Object.freeze({
   development: `:app:assembleDebug -PreactNativeArchitectures=${REQUIRED_ANDROID_ARCHITECTURES.development}`,

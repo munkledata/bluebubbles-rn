@@ -117,6 +117,16 @@ describe('owned rich-paste native boundary', () => {
     expect(moduleSource).toMatch(/batch\.permission\.release\(\)/);
   });
 
+  it('accepts token-less API 31+ keyboard commits with a platform-released lease (prebuilt React Native)', () => {
+    // The ReactEditText source patch that forwarded the API 31+ token is gone with the from-source
+    // build; the module must neither reject that content nor pretend to hold a token for it.
+    expect(moduleSource).not.toMatch(/Build\.VERSION_CODES\.S/);
+    expect(moduleSource).not.toMatch(/SOURCE_INPUT_METHOD/);
+    expect(moduleSource).toMatch(
+      /return if \(info == null\) PermissionLease\(payload, null\) else PermissionLease\(payload\) \{ info\.releasePermission\(\) \}/,
+    );
+  });
+
   it('publishes a complete directory atomically and deletes every failed partial', () => {
     expect(policySource).toMatch(/"\$batchId\.pending"/);
     expect(policySource).toMatch(/items\.size != expectedCount/);

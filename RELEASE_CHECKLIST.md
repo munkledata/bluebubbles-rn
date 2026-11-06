@@ -331,11 +331,13 @@ them to `/gator/source` and `/gator/gradle`. The release runner creates equivale
 run-scoped directories beneath `/private/tmp`; do not inherit a caller-selected Gradle home, C/C++
 flags, or retained EAS local-build workspace.
 
-The two packaging commands pass `-PreactNativeArchitectures` because React Native and Hermes build
-from source in their own included Gradle build, which ignores `android/gradle.properties`; without
-the flag they compile all four ABIs, which pushed the CI Android job past two hours. EAS builds,
-including the local release runner's, get the same flag from each profile's `gradleCommand` in
-`eas.json`, which `npm run check:toolchain` pins to EAS's default task plus the profile's ABIs.
+The two packaging commands pass `-PreactNativeArchitectures` so the app's own native code and the
+packaged ABIs are chosen on the command line rather than inherited from `android/gradle.properties`.
+(Until 2026-11-06 React Native and Hermes were also built from source in an included Gradle build
+that read only that flag; they are consumed as prebuilt Maven artifacts now, see D-6 in the
+2026-11-05 fix plan.) EAS builds, including the local release runner's, get the same flag from each
+profile's `gradleCommand` in `eas.json`, which `npm run check:toolchain` pins to EAS's default task
+plus the profile's ABIs.
 
 ```sh
 GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
