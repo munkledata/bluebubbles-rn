@@ -2,9 +2,9 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Dependency lock SHA-256 (package-lock.json without the app's own version): `979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd`
-- Production package records: 1020
-- Unique package versions: 926
+- Dependency lock SHA-256 (package-lock.json without the app's own version): `b5168c0340d483d991a44fc4704fad87210677656c4a8c7fdbda106b88e3d8ec`
+- Production package records: 1027
+- Unique package versions: 933
 - Source assets: 13
 - Pending asset provenance: 13
 - Local components: 15
@@ -187,7 +187,7 @@
 | `@expo/sdk-runtime-versions` | `1.0.0` | MIT | no | none | no legal text file found |
 | `@expo/spawn-async` | `1.8.0` | MIT | no | `736835b6c374cbfb66ccfbfc4f8819bcbeae3cfd5f5e5507f25f4caeabf9540e` | none |
 | `@expo/sudo-prompt` | `9.3.2` | MIT | no | `1c0d7e365e7c3dcfc1c30b6913d8a61a2741a4702b7ae727093c5610b47dbfa0` | none |
-| `@expo/ui` | `57.0.21` | MIT | no | `22a28f29cff8f5ecf9f463301d9c03b8245a2952ebae0bcab633fd654c0792fb` | none |
+| `@expo/ui` | `57.0.26` | MIT | no | `22a28f29cff8f5ecf9f463301d9c03b8245a2952ebae0bcab633fd654c0792fb` | none |
 | `@expo/vector-icons` | `15.1.1` | MIT | no | `000a66d1bc9e206b5963ba9370cd03350a4b26e205b5880e8e0f882a51951178`<br>`a5416f6b586be51823285bc9a389bfd756eef80cfb7616ea90aaa11bae6189e1` | none |
 | `@expo/ws-tunnel` | `2.0.1` | MIT | no | `49c5f9c7097c9a940ff663a54c27a4c60e379df6cc2b3052df0d37a09a85df93` | none |
 | `@expo/xcpretty` | `4.4.7` | MIT | no | `051e2d2738b442a8a8403194f485deeacd9a7e895c08ffbf9e600a9dae858dcc` | none |
@@ -300,7 +300,7 @@
 | `@radix-ui/react-compose-refs` | `1.1.5` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
 | `@radix-ui/react-context` | `1.2.2` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
 | `@radix-ui/react-direction` | `1.1.4` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
-| `@radix-ui/react-focus-guards` | `1.1.6` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-focus-guards` | `1.2.0` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
 | `@radix-ui/react-id` | `1.1.4` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
 | `@radix-ui/react-presence` | `1.1.10` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
 | `@radix-ui/react-primitive` | `2.1.10` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
@@ -335,13 +335,13 @@
 | `@react-native/metro-config` | `0.86.3` | MIT | no | none | no legal text file found |
 | `@react-native/normalize-colors` | `0.86.3` | MIT | no | none | no legal text file found |
 | `@react-native/virtualized-lists` | `0.86.3` | MIT | no | none | no legal text file found |
-| `@shopify/flash-list` | `2.0.2` | MIT | no | `b471020939ffa8ec28125e4e31c29ef56dee40aa5403640f8311374cc5b413fc` | none |
+| `@shopify/flash-list` | `2.3.2` | MIT | no | `b471020939ffa8ec28125e4e31c29ef56dee40aa5403640f8311374cc5b413fc` | none |
 | `@sinclair/typebox` | `0.27.12` | MIT | no | `32fb6556bc84c192f493cbb1503b99f6ee893227a9473290e88699fde9807fd3` | none |
 | `@sinonjs/commons` | `3.0.1` | BSD-3-Clause | no | `4df78f3bcde252efdbef67e5a3ef02877be68a4b4ff7ee0c78e4d89a0a7f1f00` | none |
 | `@sinonjs/fake-timers` | `10.3.0` | BSD-3-Clause | no | `660eedb52e4c076d2feae829b12b6b983d54f569221402618eb56cd2bb2ddcfb` | none |
 | `@socket.io/component-emitter` | `3.1.2` | MIT | no | `0f0b408b8b871d983e767528c6dc51e0ad7efaa022890c449fe2b2e1ee24dbb7` | none |
-| `@tanstack/query-core` | `5.101.2` | MIT | no | `a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7` | none |
-| `@tanstack/react-query` | `5.101.2` | MIT | no | `a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7` | none |
+| `@tanstack/query-core` | `5.106.1` | MIT | no | `a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7` | none |
+| `@tanstack/react-query` | `5.106.1` | MIT | no | `a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7` | none |
 | `@testing-library/react-native` | `14.1.0` | MIT | no | `7252e9bc5eba33ff2b205f12c581fde208fa92c94ae8dac36d8167b648ad622c` | none |
 | `@tokenizer/inflate` | `0.4.1` | MIT | no | `5bb0e8b566dee0e946cafd9bbed359eb0494580df86457876b4f41bba5c77b25` | none |
 | `@tokenizer/token` | `0.3.0` | MIT | no | none | no legal text file found |
@@ -359,7 +359,7 @@
 | `@types/node` | `26.1.1` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/react` | `19.2.17` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/react-reconciler` | `0.33.0` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
-| `@types/react-test-renderer` | `19.1.0` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
+| `@types/react-test-renderer` | `19.3.1` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/stack-utils` | `2.0.3` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/yargs` | `17.0.35` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/yargs-parser` | `21.0.3` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
@@ -527,7 +527,7 @@
 | `expo-document-picker` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-file-system` | `57.0.7` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-font` | `57.0.4` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `expo-glass-effect` | `57.0.4` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `expo-glass-effect` | `57.0.5` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-image` | `57.0.5` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-image-loader` | `57.0.1` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-image-picker` | `57.0.21` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
@@ -544,7 +544,7 @@
 | `expo-modules-jsi` | `57.1.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-navigation-bar` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-network` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `expo-router` | `57.0.24` | MIT | no | `c358ea82eed53098b2ee0913e1de8243c69d45862e11c48614db47fd5889d947` | none |
+| `expo-router` | `57.0.30` | MIT | no | `c358ea82eed53098b2ee0913e1de8243c69d45862e11c48614db47fd5889d947` | none |
 | `expo-secure-store` | `57.0.4` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-server` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-sharing` | `57.0.25` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
@@ -885,8 +885,8 @@
 | `react-is` | `18.3.1` | MIT | no | `52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85` | none |
 | `react-is` | `19.2.7` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
 | `react-native` | `0.86.3` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
-| `react-native-drawer-layout` | `4.2.10` | MIT | no | `41f321b33afaa5cdaeb7c1aecd6fd5c21467ff910fb677aa47c941d05b5032c0` | none |
-| `react-native-gesture-handler` | `3.2.1` | MIT | no | `f1ae22eddd3a96c3b7b8a494ef03749ae6a1e19574bacc9c195d83c916de09e2` | none |
+| `react-native-drawer-layout` | `4.2.12` | MIT | no | `41f321b33afaa5cdaeb7c1aecd6fd5c21467ff910fb677aa47c941d05b5032c0` | none |
+| `react-native-gesture-handler` | `3.5.0` | MIT | no | `f1ae22eddd3a96c3b7b8a494ef03749ae6a1e19574bacc9c195d83c916de09e2` | none |
 | `react-native-image-colors` | `2.6.0` | MIT | no | `b7730a07b6ff35799ccffc41ed4202e921de4f87d0fead1da95b57183bdcd1be` | none |
 | `react-native-is-edge-to-edge` | `1.3.1` | MIT | no | `4efb635cc4fd67f738ce2af65f8b73514ee338d0d201b836ab3a823cfda771d1` | none |
 | `react-native-libsodium` | `1.7.0` | MIT | no | `d65197e3a40f5d2f0548c2925067ff98543af583e30ef24193ee9e0f54d69b1f` | none |
@@ -964,7 +964,7 @@
 | `sisteransi` | `1.0.5` | MIT | no | `ade66f698fd417addc4d948a85ef33e8abb302daff6453feda18b191d250e54d` | none |
 | `slash` | `3.0.0` | MIT | no | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` | none |
 | `slugify` | `1.6.9` | MIT | no | `8df3c23e3dfffa0d3d41c59fae5741ea3e2c50eb19c52a5d8912a68fdba554c2` | none |
-| `socket.io-client` | `4.8.3` | MIT | no | `73cb68c437d59e066f9386ef97be57298df4db119fdbd7d7150817c6dbd9f189` | none |
+| `socket.io-client` | `4.8.4` | MIT | no | `73cb68c437d59e066f9386ef97be57298df4db119fdbd7d7150817c6dbd9f189` | none |
 | `socket.io-parser` | `4.2.7` | MIT | no | `7fcf6b69636551493328a8cd9a5241843d7b246b3c42ed7b06c777fc5f044b86` | none |
 | `source-map` | `0.6.1` | BSD-3-Clause | no | `6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd` | none |
 | `source-map-js` | `1.2.2` | BSD-3-Clause | no | `6cb0631f71c7749763fd3dd1d5bee52dd1070ec17f2edc1710079ad070bd2fbd` | none |
@@ -1039,10 +1039,17 @@
 | `validate-npm-package-name` | `5.0.1` | ISC | no | `f3e1645267f7dd77ee6545283cc1766e5883e8fb3b5088fe2cfb995defbb3dde` | none |
 | `vary` | `1.1.2` | MIT | no | `bd47ce7b88c7759630d1e2b9fcfa170a0f1fde522be09e13fb1581a79d090400` | none |
 | `vaul` | `1.1.2` | MIT | no | `b09b9ccf866cc09b502d9cf4679e2461beb1469709ea0c6a30009766e10b3acf` | none |
-| `@radix-ui/react-dialog` | `1.1.23` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
-| `@radix-ui/react-dismissable-layer` | `1.1.19` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
-| `@radix-ui/react-focus-scope` | `1.1.16` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
-| `@radix-ui/react-portal` | `1.1.17` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/primitive` | `1.2.0` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-context` | `1.3.0` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-dialog` | `1.3.1` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-dismissable-layer` | `1.2.1` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-focus-scope` | `1.3.1` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-portal` | `1.2.0` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-presence` | `1.1.11` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-primitive` | `2.2.0` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-slot` | `1.5.0` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-use-callback-ref` | `1.1.5` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
+| `@radix-ui/react-use-controllable-state` | `1.3.0` | MIT | no | `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | none |
 | `vlq` | `1.0.1` | MIT | no | `560005aa01c5230147ca813dabd1970628d6c6ef57ad8f1553ad20ef9dce451b` | none |
 | `walker` | `1.0.8` | Apache-2.0 | no | `555e1f70ce6b9b7ce77ad07ba8b2b6b3a543b2c7cc8fe15a2c30ad1b89667e21` | none |
 | `warn-once` | `0.1.1` | MIT | no | `f9a72660f8b9b8a9ae3773ecaab64f61d1412a4f1c9eb945e455d22608fdc348` | none |
@@ -1070,7 +1077,7 @@
 | `yargs-parser` | `21.1.1` | ISC | no | `365496ca1f56da40b23c9815fc40fa9005847b2f8f8fd1c1a4929ef25ec8cd1d` | none |
 | `yocto-queue` | `0.1.0` | MIT | no | `5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` | none |
 | `zod` | `4.6.7` | MIT | no | `3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8` | none |
-| `zustand` | `5.0.14` | MIT | no | `c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417` | none |
+| `zustand` | `5.1.0` | MIT | no | `c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417` | none |
 | `zxing-wasm` | `3.1.1` | MIT | no | `fb506e4ade12d7a9efa67c9d76a9a28c8e15d347ca49a69e48e29b40b34ad2ab` | none |
 | `type-fest` | `5.8.0` | (MIT OR CC0-1.0) | no | `a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499`<br>`5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3` | license choice requires review |
 
@@ -1093,7 +1100,7 @@
 | `0c0fc06d178272faaf09281aff0cb014d52c56fb0d9516b964808d4cccb65c93` | 1147 | 1 |
 | `0cff14eaf2736ff712a34ef8d61f4144082e61387fff1ee3bef9da003d96a4ce` | 1142 | 1 |
 | `0e5b0fe8d11e1627336bc6361de610ba8acf9a035fd73e07b5b4a0909a48371f` | 168 | 2 |
-| `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | 1063 | 21 |
+| `0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138` | 1063 | 28 |
 | `0f0b408b8b871d983e767528c6dc51e0ad7efaa022890c449fe2b2e1ee24dbb7` | 1104 | 1 |
 | `0f0ca96f50793990031ebc488a38f7292ff70bce8ab6a8e5eeda674abc32ccdf` | 1067 | 1 |
 | `0f2c1c521a08ca2e202316a29c57cba39077ebe2618cf10f23df410f4047f60a` | 11357 | 1 |

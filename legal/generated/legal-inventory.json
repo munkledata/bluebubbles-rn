@@ -5,18 +5,18 @@
     "exactAab": false
   },
   "inputs": {
-    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
+    "dependencyLockSha256": "b5168c0340d483d991a44fc4704fad87210677656c4a8c7fdbda106b88e3d8ec",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "8b71ef2c2c8b2cd4b120753c70a8db5312bd9ef63c010fd3d87f2b37adc9b630"
   },
   "summary": {
-    "productionPackageRecords": 1020,
-    "uniquePackageVersions": 926,
+    "productionPackageRecords": 1027,
+    "uniquePackageVersions": 933,
     "assetFiles": 13,
     "pendingAssetProvenance": 13,
     "localComponents": 15,
-    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
+    "dependencyLockSha256": "b5168c0340d483d991a44fc4704fad87210677656c4a8c7fdbda106b88e3d8ec",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },
@@ -2319,10 +2319,10 @@
     {
       "installPath": "node_modules/@expo/ui",
       "name": "@expo/ui",
-      "version": "57.0.21",
+      "version": "57.0.26",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@expo/ui/-/ui-57.0.21.tgz",
-      "integrity": "sha512-4s1ypGNxJhJv2r1fj3wZo4Aubao0zGnCajCuiaTp8pTNrT+1vR8KvyoFEwp+c7gpKm2D58nGCiGBXhEnmKHtDQ==",
+      "resolved": "https://registry.npmjs.org/@expo/ui/-/ui-57.0.26.tgz",
+      "integrity": "sha512-sEvRjKK08nCq4sXo5PjDckA9OBpxFokCXs5MakWlI1wT1gQNvyliWn/Dwic8XC6YPTN/TbnEp2X/SEduD9+I3Q==",
       "optional": false,
       "legalDocuments": [
         {
@@ -4079,10 +4079,10 @@
     {
       "installPath": "node_modules/@radix-ui/react-focus-guards",
       "name": "@radix-ui/react-focus-guards",
-      "version": "1.1.6",
+      "version": "1.2.0",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@radix-ui/react-focus-guards/-/react-focus-guards-1.1.6.tgz",
-      "integrity": "sha512-RNOJjfZMTyBM6xYmV3IVGXkPjIhcBAuv48POevAXwrGJhkWZ9p1rFoIS1JFooPuT193AZmRsCPhpoVJxx6OPoQ==",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-focus-guards/-/react-focus-guards-1.2.0.tgz",
+      "integrity": "sha512-MPm5R0iRGUDrDnPNxmLBkv+X7pN4XKzt+MbWJEuJQsH3NFH4omrbpXpucyYCCKTSt+na/ZxGhEWQrWTZ0285cA==",
       "optional": false,
       "legalDocuments": [
         {
@@ -4628,10 +4628,10 @@
     {
       "installPath": "node_modules/@shopify/flash-list",
       "name": "@shopify/flash-list",
-      "version": "2.0.2",
+      "version": "2.3.2",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@shopify/flash-list/-/flash-list-2.0.2.tgz",
-      "integrity": "sha512-zhlrhA9eiuEzja4wxVvotgXHtqd3qsYbXkQ3rsBfOgbFA9BVeErpDE/yEwtlIviRGEqpuFj/oU5owD6ByaNX+w==",
+      "resolved": "https://registry.npmjs.org/@shopify/flash-list/-/flash-list-2.3.2.tgz",
+      "integrity": "sha512-vQnd0y0Ag11yzS30llaeCrtIU3xYTMe7KEOP3dveLImnVjQEUw6BEg1+Ztja6aODlVNz1BpvxtlQ5eZGxiLwKw==",
       "optional": false,
       "legalDocuments": [
         {
@@ -4713,10 +4713,10 @@
     {
       "installPath": "node_modules/@tanstack/query-core",
       "name": "@tanstack/query-core",
-      "version": "5.101.2",
+      "version": "5.106.1",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.101.2.tgz",
-      "integrity": "sha512-hH5MLoJhF7KaIGd7q3xTXGXvslI+GYlM1Z/35aSHHWaCJWB7XvTSHYuV3eM7tw+aE0mT/xMro4M4Q9rCGHT0lw==",
+      "resolved": "https://registry.npmjs.org/@tanstack/query-core/-/query-core-5.106.1.tgz",
+      "integrity": "sha512-erYv/UACddcdgjOL2ixmFdK6tO/AVBeUcTCOtX2N51yZpDQ2U7KJ+xgB/bCNfsF3uoCDTqGHEEbDiFsIO9YUmQ==",
       "optional": false,
       "legalDocuments": [
         {
@@ -4730,10 +4730,10 @@
     {
       "installPath": "node_modules/@tanstack/react-query",
       "name": "@tanstack/react-query",
-      "version": "5.101.2",
+      "version": "5.106.1",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.101.2.tgz",
-      "integrity": "sha512-seDkr6kzGzX1okaaTtZPtgA688CDPlXUz1C6xSg0ESqn04Vuc8tlrYms1s3de+znBqhPVxFRfpAfUf+6XvfPWg==",
+      "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.106.1.tgz",
+      "integrity": "sha512-ORDvJG/DSfmlFL9lQ8GDkE0VjtQbLeRDY7BL8xjKkQFGLfjFGfNWNuteWgPqA2gPJgLLuWfQ7IX0FlsHCJriyg==",
       "optional": false,
       "legalDocuments": [
         {
@@ -5032,10 +5032,10 @@
     {
       "installPath": "node_modules/@types/react-test-renderer",
       "name": "@types/react-test-renderer",
-      "version": "19.1.0",
+      "version": "19.3.1",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@types/react-test-renderer/-/react-test-renderer-19.1.0.tgz",
-      "integrity": "sha512-XD0WZrHqjNrxA/MaR9O22w/RNidWR9YZmBdRGI7wcnWGrv/3dA8wKCJ8m63Sn+tLJhcjmuhOi629N66W6kgWzQ==",
+      "resolved": "https://registry.npmjs.org/@types/react-test-renderer/-/react-test-renderer-19.3.1.tgz",
+      "integrity": "sha512-9AwMfeBOcXsN5kC4oAauNTOKEwqLHtc69tkJC2CihQ5fCELDwzfQvookvtyaxm6i+vc5LLD0V5OLB8arzY8Smw==",
       "optional": false,
       "legalDocuments": [
         {
@@ -7830,10 +7830,10 @@
     {
       "installPath": "node_modules/expo-glass-effect",
       "name": "expo-glass-effect",
-      "version": "57.0.4",
+      "version": "57.0.5",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/expo-glass-effect/-/expo-glass-effect-57.0.4.tgz",
-      "integrity": "sha512-/AG2Kljbqfgxu+GchI2YFIbxiF9cPsIpCy4iNDzlRiZk9rvR6BwRfB6gfQVu3V2ExaoGf2h5IsEnqVI5MYNBAg==",
+      "resolved": "https://registry.npmjs.org/expo-glass-effect/-/expo-glass-effect-57.0.5.tgz",
+      "integrity": "sha512-eVKCW0l+RmkyVMoeSd46NR1KWIE9FL/h91tO10Qvd4RLIpK1FgLpH65z3AWPrDLjssDt3mJEBNde31HznJnf0A==",
       "optional": false,
       "legalDocuments": [
         {
@@ -8119,10 +8119,10 @@
     {
       "installPath": "node_modules/expo-router",
       "name": "expo-router",
-      "version": "57.0.24",
+      "version": "57.0.30",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/expo-router/-/expo-router-57.0.24.tgz",
-      "integrity": "sha512-XpqE4Oh4yrmc+sVfsDQPLErBlus//85ulLRghVZltYcdvFm9yNzErmaKrXuBVMUL6D3tnpDtkIgxESG9hYBd7w==",
+      "resolved": "https://registry.npmjs.org/expo-router/-/expo-router-57.0.30.tgz",
+      "integrity": "sha512-ia+tNRo6sEKAuaImrunWdcbagY9VJiDi3c76N1keg+sYUWTYmuOnpH9sEnzEsw5qUSDr8wAPxVY43/5o1nCT4w==",
       "optional": false,
       "legalDocuments": [
         {
@@ -13812,10 +13812,10 @@
     {
       "installPath": "node_modules/react-native-drawer-layout",
       "name": "react-native-drawer-layout",
-      "version": "4.2.10",
+      "version": "4.2.12",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/react-native-drawer-layout/-/react-native-drawer-layout-4.2.10.tgz",
-      "integrity": "sha512-O6TQdZ5LSm3dqnuR4rX9KPtE+9dVg7jsezEYz1l01rkQTe4fQvYZIoPu2sZFl5X2N70uhRdjnPULySVR3sBUwA==",
+      "resolved": "https://registry.npmjs.org/react-native-drawer-layout/-/react-native-drawer-layout-4.2.12.tgz",
+      "integrity": "sha512-qYmntEctkMSodN7pnC2llV21nswImLFPHJeT3PJXSJqZdU4jzDATR8iVi66sXkrtoOLJ2+EvXxgd7sMMpV4ViA==",
       "optional": false,
       "legalDocuments": [
         {
@@ -13829,10 +13829,10 @@
     {
       "installPath": "node_modules/react-native-gesture-handler",
       "name": "react-native-gesture-handler",
-      "version": "3.2.1",
+      "version": "3.5.0",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/react-native-gesture-handler/-/react-native-gesture-handler-3.2.1.tgz",
-      "integrity": "sha512-VEWscxUN29aeccbD2McF0LSXrwOhSdisaSRFiEWg0O/3WrVghNJp/tOtLrCgzb9gfcZ3xdA+K2Sp8F5G3iHx/Q==",
+      "resolved": "https://registry.npmjs.org/react-native-gesture-handler/-/react-native-gesture-handler-3.5.0.tgz",
+      "integrity": "sha512-bm8yepwMBUhEOSeU7WQbNNrstD0Hbv6i+XsApARBJSlb+WlRvyaQsobi+tZ5Uyr5kDVgXzg6kPb+CWY9zvyfEw==",
       "optional": false,
       "legalDocuments": [
         {
@@ -15147,10 +15147,10 @@
     {
       "installPath": "node_modules/socket.io-client",
       "name": "socket.io-client",
-      "version": "4.8.3",
+      "version": "4.8.4",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/socket.io-client/-/socket.io-client-4.8.3.tgz",
-      "integrity": "sha512-uP0bpjWrjQmUt5DTHq9RuoCBdFJF10cdX9X+a368j/Ft0wmaVgxlrjvK3kjvgCODOMMOz9lcaRzxmso0bTWZ/g==",
+      "resolved": "https://registry.npmjs.org/socket.io-client/-/socket.io-client-4.8.4.tgz",
+      "integrity": "sha512-7wjKAvVXYOJsbmUgkWbnhPD4bFpkqrUR0++XOjpGFmqDqsqV1CI93VTraeExLxpjxEqrWgFoSRZu1ihjLWfkAA==",
       "optional": false,
       "legalDocuments": [
         {
@@ -16413,12 +16413,46 @@
       "issues": []
     },
     {
+      "installPath": "node_modules/vaul/node_modules/@radix-ui/primitive",
+      "name": "@radix-ui/primitive",
+      "version": "1.2.0",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@radix-ui/primitive/-/primitive-1.2.0.tgz",
+      "integrity": "sha512-KABY+VMIRPJL+Vyzv/335FEhXXD/xDv8BMb1kl48/aXJZMH0LtHCTx5ga5RnxaEP3nZHtmTLf1P9vanmFX46bw==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1063,
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/vaul/node_modules/@radix-ui/react-context",
+      "name": "@radix-ui/react-context",
+      "version": "1.3.0",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-context/-/react-context-1.3.0.tgz",
+      "integrity": "sha512-v5AYEocMISkbJ+1fTXzZpiFv7NRr3D2WiYbLIKf+FkmJ8VkP6d503eV2n34MFussHXY1pcoq3yfJiQH77dc4Mg==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1063,
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "issues": []
+    },
+    {
       "installPath": "node_modules/vaul/node_modules/@radix-ui/react-dialog",
       "name": "@radix-ui/react-dialog",
-      "version": "1.1.23",
+      "version": "1.3.1",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.1.23.tgz",
-      "integrity": "sha512-Ksw4WeROkO4rC9k/onilX/Ao2Cr1ku1unMNH+XSCcP4jSXYu7HDsg9n4ojMjVb22XpYjAQ9qfrFlVbru1vXDUA==",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.3.1.tgz",
+      "integrity": "sha512-+0E4qvVTwjAWra9sEhJ+9BTsvHE00zkUuNw1VGh7S+Gc13dfYk+S1PVQdchWDj+XYHhAai7Z7IpzXVDCGsDplg==",
       "optional": false,
       "legalDocuments": [
         {
@@ -16432,10 +16466,10 @@
     {
       "installPath": "node_modules/vaul/node_modules/@radix-ui/react-dismissable-layer",
       "name": "@radix-ui/react-dismissable-layer",
-      "version": "1.1.19",
+      "version": "1.2.1",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@radix-ui/react-dismissable-layer/-/react-dismissable-layer-1.1.19.tgz",
-      "integrity": "sha512-8g4pfOL9HoKKLWGiypT+dphVqjFfmcXO5GBnhsG6zI+lxAx/8feQpr+1LSN8Re3hiZ+XkLNS4O9ztK11/LzQ6w==",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-dismissable-layer/-/react-dismissable-layer-1.2.1.tgz",
+      "integrity": "sha512-KIfDcAsx+oVylFZ4xryVKusJUrLLhTQmfnJW4kwk4Km5myvhHCrj04hnWWUC166+xD4DHdH8tQGylwYX1h6+Pg==",
       "optional": false,
       "legalDocuments": [
         {
@@ -16449,10 +16483,10 @@
     {
       "installPath": "node_modules/vaul/node_modules/@radix-ui/react-focus-scope",
       "name": "@radix-ui/react-focus-scope",
-      "version": "1.1.16",
+      "version": "1.3.1",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@radix-ui/react-focus-scope/-/react-focus-scope-1.1.16.tgz",
-      "integrity": "sha512-wmRZ2WWLvmt6KHy2rNPOdPUjwq5xOHY02+m+udwJTn0aNIox/rkskAvJTyTLGhPK6KgrUjlJUJpgmx/+wFiFIQ==",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-focus-scope/-/react-focus-scope-1.3.1.tgz",
+      "integrity": "sha512-ugeMhbXt4y5S2T1GnIqbWDKEN962PDwnX1fN0eKOOgf5f63Dh2mn8F1FUySlgW0iF6GiVsRF32DzuDIWTUyQJg==",
       "optional": false,
       "legalDocuments": [
         {
@@ -16466,10 +16500,95 @@
     {
       "installPath": "node_modules/vaul/node_modules/@radix-ui/react-portal",
       "name": "@radix-ui/react-portal",
-      "version": "1.1.17",
+      "version": "1.2.0",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@radix-ui/react-portal/-/react-portal-1.1.17.tgz",
-      "integrity": "sha512-vKQLcWypUnwZVvfV7UkGahH2g6ySe8M8R+zYBwPrv5byZ9QAW6cQVvNKo7GgmD+p8aYb6D9JBuvy8/WhOno2wQ==",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-portal/-/react-portal-1.2.0.tgz",
+      "integrity": "sha512-StX7xXnaRU41VvFtMm9zlhVGz8XF6GmWWTXftkQaY+tqVkbs/R9UmAp5mLzHHapk5hM9RMZQvO/3usyIP/g42g==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1063,
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/vaul/node_modules/@radix-ui/react-presence",
+      "name": "@radix-ui/react-presence",
+      "version": "1.1.11",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-presence/-/react-presence-1.1.11.tgz",
+      "integrity": "sha512-Z7/atlkab36Z8hm+V8zYc79r0W+tiOB1o0tun1By94JyadkekLQmtEAnBSP9XKXBNQsStoStS4+gX10JpS5akA==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1063,
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/vaul/node_modules/@radix-ui/react-primitive",
+      "name": "@radix-ui/react-primitive",
+      "version": "2.2.0",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-primitive/-/react-primitive-2.2.0.tgz",
+      "integrity": "sha512-HCTSPMNqv55Qk0IX4geJbpyXazmqulcimwuyjxTkKi29v+QZbG2Zho9BnbBq4YS2PF+KlNb2CXoLz66uUmblkg==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1063,
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/vaul/node_modules/@radix-ui/react-slot",
+      "name": "@radix-ui/react-slot",
+      "version": "1.5.0",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-slot/-/react-slot-1.5.0.tgz",
+      "integrity": "sha512-tyYd9ddPXAysAbdbD9eYxgwpCSv6f3PncqVSNKQFSR5lcJVLz3cb/pANDoYrLiHBpXv7skortyUgGUWsYuPPFQ==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1063,
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/vaul/node_modules/@radix-ui/react-use-callback-ref",
+      "name": "@radix-ui/react-use-callback-ref",
+      "version": "1.1.5",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-use-callback-ref/-/react-use-callback-ref-1.1.5.tgz",
+      "integrity": "sha512-Y5GBf4NKeADoXI1geiMlMuMoURT3k9MizzzKhGb/m55H94aGigZ01PIpkvsO6lML13BA6XYAXSJ6gza7vTn5nw==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1063,
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/vaul/node_modules/@radix-ui/react-use-controllable-state",
+      "name": "@radix-ui/react-use-controllable-state",
+      "version": "1.3.0",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-use-controllable-state/-/react-use-controllable-state-1.3.0.tgz",
+      "integrity": "sha512-TAcBI7bw2ljYCbv4+zuTSd6zICu8pRt6SDN2vJ/Z06K2MXh6I9WYFe/A9ovlFDtR5HVHGm5iDxDoABm/++dbKg==",
       "optional": false,
       "legalDocuments": [
         {
@@ -16949,10 +17068,10 @@
     {
       "installPath": "node_modules/zustand",
       "name": "zustand",
-      "version": "5.0.14",
+      "version": "5.1.0",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/zustand/-/zustand-5.0.14.tgz",
-      "integrity": "sha512-/8tAspM5LMPr28b3fwLYrtdj77ECpfZviaP75CMTnwO8ISyaE4GDIG/9rDDYq/cH9D2Xw2A2RXglLInmVBQB/g==",
+      "resolved": "https://registry.npmjs.org/zustand/-/zustand-5.1.0.tgz",
+      "integrity": "sha512-ciJZlP48M1PTQbVQq81CGVFxHTLpZNrFjKqwjtCU34AWuXTZT/jrF3p9+fI84Cf1eSCMLapxqBy/SNTfwOBuqA==",
       "optional": false,
       "legalDocuments": [
         {
@@ -17152,10 +17271,17 @@
         "node_modules/@radix-ui/react-use-effect-event/LICENSE",
         "node_modules/@radix-ui/react-use-is-hydrated/LICENSE",
         "node_modules/@radix-ui/react-use-layout-effect/LICENSE",
+        "node_modules/vaul/node_modules/@radix-ui/primitive/LICENSE",
+        "node_modules/vaul/node_modules/@radix-ui/react-context/LICENSE",
         "node_modules/vaul/node_modules/@radix-ui/react-dialog/LICENSE",
         "node_modules/vaul/node_modules/@radix-ui/react-dismissable-layer/LICENSE",
         "node_modules/vaul/node_modules/@radix-ui/react-focus-scope/LICENSE",
-        "node_modules/vaul/node_modules/@radix-ui/react-portal/LICENSE"
+        "node_modules/vaul/node_modules/@radix-ui/react-portal/LICENSE",
+        "node_modules/vaul/node_modules/@radix-ui/react-presence/LICENSE",
+        "node_modules/vaul/node_modules/@radix-ui/react-primitive/LICENSE",
+        "node_modules/vaul/node_modules/@radix-ui/react-slot/LICENSE",
+        "node_modules/vaul/node_modules/@radix-ui/react-use-callback-ref/LICENSE",
+        "node_modules/vaul/node_modules/@radix-ui/react-use-controllable-state/LICENSE"
       ]
     },
     {
