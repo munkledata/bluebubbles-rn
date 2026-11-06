@@ -76,6 +76,7 @@ import {
   walFileGrewBeyondHeader,
   waitForMarkerCount,
   waitForNoProcess,
+  waitForProcess,
 } from './run-android-db-relaunch.mjs';
 import { APP_ACTIVITY, APP_PACKAGE, HarnessError } from './run-android-db-contract.mjs';
 
@@ -2304,6 +2305,39 @@ test('artifact construction rejects nonterminal or internally inconsistent seque
       ),
     /Host checks do not agree/,
   );
+});
+
+test('the process wait spends two full windows before failing, and only one when asked', async () => {
+  for (const [processAttempts, expectedElapsed] of [
+    [undefined, 400],
+    [1, 200],
+  ]) {
+    let clock = 0;
+    await assert.rejects(
+      waitForProcess(async () => null, {
+        timeoutMs: 200,
+        pollMs: 100,
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        ...(processAttempts === undefined ? {} : { processAttempts }),
+      }),
+      (error) =>
+        error instanceof HarnessError &&
+        error.code === 'app-process-missing' &&
+        error.message.includes(`${processAttempts ?? 2} windows of 200 ms`),
+    );
+    assert.ok(clock >= expectedElapsed, `clock ${clock} < ${expectedElapsed}`);
+  }
+  let polls = 0;
+  const identity = await waitForProcess(async () => ((polls += 1) >= 3 ? { pid: '101' } : null), {
+    timeoutMs: 200,
+    pollMs: 100,
+    now: () => 0,
+    sleep: async () => undefined,
+  });
+  assert.deepEqual(identity, { pid: '101' });
 });
 
 test('the marker wait spends two full windows before failing, and only one when asked', async () => {

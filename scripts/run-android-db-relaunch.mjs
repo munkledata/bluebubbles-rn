@@ -465,6 +465,9 @@ const MARKER_TIMEOUT_MS = 120_000;
 /** A second marker window before failing: emulator logcat has been seen to lag a marker past one. */
 const MARKER_WAIT_ATTEMPTS = 2;
 const PROCESS_TIMEOUT_MS = 10_000;
+// A cold x86_64 emulator right after force-stop and private-state cleanup can take longer than one
+// window to show the launched process (CI lanes run 42272165906); the second window is still bounded.
+const PROCESS_WAIT_ATTEMPTS = 2;
 const POLL_MS = 250;
 const MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_MARKER_JSON_CHARS = 4_096;
@@ -1524,22 +1527,25 @@ function delay(ms) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, ms));
 }
 
-async function waitForProcess(getProcessIdentity, options = {}) {
+export async function waitForProcess(getProcessIdentity, options = {}) {
   const {
     timeoutMs = PROCESS_TIMEOUT_MS,
     pollMs = POLL_MS,
     now = Date.now,
     sleep = delay,
+    processAttempts = PROCESS_WAIT_ATTEMPTS,
   } = options;
-  const deadline = now() + timeoutMs;
-  while (now() <= deadline) {
-    const identity = await getProcessIdentity();
-    if (identity) return identity;
-    await sleep(pollMs);
+  for (let attempt = 1; attempt <= processAttempts; attempt += 1) {
+    const deadline = now() + timeoutMs;
+    while (now() <= deadline) {
+      const identity = await getProcessIdentity();
+      if (identity) return identity;
+      await sleep(pollMs);
+    }
   }
   throw new HarnessError(
     'app-process-missing',
-    'Gator did not create an app process after launch.',
+    `Gator did not create an app process within ${String(processAttempts)} windows of ${String(timeoutMs)} ms after launch.`,
   );
 }
 
