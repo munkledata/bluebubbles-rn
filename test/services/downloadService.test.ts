@@ -25,6 +25,7 @@ import {
   type AttachmentFetcher,
 } from '@/services/download/downloadService';
 import { AttachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
+import { nextEventLoopTurn, waitForCondition } from '../support/async';
 import {
   ATTACHMENT_CACHE_MAX_BYTES,
   ATTACHMENT_CACHE_MIN_FREE_BYTES,
@@ -70,6 +71,14 @@ async function seedAttachment(db: AppDatabase, guid: string) {
     () => map.get('c1')!,
     handles,
   );
+}
+
+/**
+ * A few event-loop turns: every queued DB claim settles, so a download that must NOT start has had
+ * its chance. Turns, not milliseconds, so a loaded machine cannot make this pass or fail by luck.
+ */
+async function settle(turns = 5): Promise<void> {
+  for (let turn = 0; turn < turns; turn += 1) await nextEventLoopTurn();
 }
 
 describe('ensureDownloaded', () => {
@@ -287,7 +296,7 @@ describe('ensureDownloaded', () => {
       exists: () => false,
       download: async () => {
         calls += 1;
-        await new Promise((r) => setTimeout(r, 10));
+        await nextEventLoopTurn(); // stay in flight long enough for the second caller to arrive
         return fetched('file:///docs/d2.jpg');
       },
     };
@@ -1624,11 +1633,12 @@ describe('ensureDownloaded', () => {
       const all = ['e1', 'e2', 'e3'].map((g) =>
         ensureDownloaded(db, fetcher, { guid: g, transferName: 'x', localPath: null }),
       );
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForCondition(() => running === 1, 'the first download to start');
+      await settle();
       expect(peak).toBe(1); // cap=1 → only one download runs at a time
 
       setMaxConcurrentDownloads(3); // raising the cap must wake the two queued downloads
-      await new Promise((r) => setTimeout(r, 10));
+      await waitForCondition(() => peak === 3, 'the two queued downloads to wake');
       expect(peak).toBe(3);
 
       while (gates.length) gates.shift()!();
@@ -1659,20 +1669,20 @@ describe('ensureDownloaded', () => {
       const runs = ['lower-1', 'lower-2', 'lower-3', 'lower-4'].map((guid) =>
         ensureDownloaded(db, fetcher, { guid, transferName: 'x.jpg', localPath: null }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForCondition(() => started.length === 3, 'three downloads to start');
       expect(started).toEqual(['lower-1', 'lower-2', 'lower-3']);
 
       setMaxConcurrentDownloads(1);
       finish.get('lower-1')?.();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await settle();
       expect(started).toHaveLength(3);
 
       finish.get('lower-2')?.();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await settle();
       expect(started).toHaveLength(3);
 
       finish.get('lower-3')?.();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await waitForCondition(() => started.length === 4, 'the queued download to wake');
       expect(started).toEqual(['lower-1', 'lower-2', 'lower-3', 'lower-4']);
 
       finish.get('lower-4')?.();
@@ -1708,11 +1718,14 @@ describe('ensureDownloaded', () => {
         const runs = guids.map((guid) =>
           ensureDownloaded(db, fetcher, { guid, transferName: 'x.jpg', localPath: null }),
         );
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await waitForCondition(
+          () => started.length === DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+          'the default-cap downloads to start',
+        );
         expect(started).toHaveLength(DEFAULT_MAX_CONCURRENT_DOWNLOADS);
 
         finish.shift()?.();
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await settle();
         expect(started).toHaveLength(3);
 
         while (finish.length > 0) finish.shift()?.();
