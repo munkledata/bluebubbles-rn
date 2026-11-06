@@ -2,7 +2,7 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Dependency lock SHA-256 (package-lock.json without the app's own version): `f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921`
+- Dependency lock SHA-256 (package-lock.json without the app's own version): `979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd`
 - Production package records: 1020
 - Unique package versions: 926
 - Source assets: 13
@@ -342,7 +342,7 @@
 | `@socket.io/component-emitter` | `3.1.2` | MIT | no | `0f0b408b8b871d983e767528c6dc51e0ad7efaa022890c449fe2b2e1ee24dbb7` | none |
 | `@tanstack/query-core` | `5.101.2` | MIT | no | `a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7` | none |
 | `@tanstack/react-query` | `5.101.2` | MIT | no | `a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7` | none |
-| `@testing-library/react-native` | `14.0.1` | MIT | no | `7252e9bc5eba33ff2b205f12c581fde208fa92c94ae8dac36d8167b648ad622c` | none |
+| `@testing-library/react-native` | `14.1.0` | MIT | no | `7252e9bc5eba33ff2b205f12c581fde208fa92c94ae8dac36d8167b648ad622c` | none |
 | `@tokenizer/inflate` | `0.4.1` | MIT | no | `5bb0e8b566dee0e946cafd9bbed359eb0494580df86457876b4f41bba5c77b25` | none |
 | `@tokenizer/token` | `0.3.0` | MIT | no | none | no legal text file found |
 | `@types/babel__core` | `7.20.5` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |

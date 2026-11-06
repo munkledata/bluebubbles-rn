@@ -5,7 +5,7 @@
     "exactAab": false
   },
   "inputs": {
-    "dependencyLockSha256": "f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921",
+    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "8b71ef2c2c8b2cd4b120753c70a8db5312bd9ef63c010fd3d87f2b37adc9b630"
@@ -16,7 +16,7 @@
     "assetFiles": 13,
     "pendingAssetProvenance": 13,
     "localComponents": 15,
-    "dependencyLockSha256": "f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921",
+    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },
@@ -4747,10 +4747,10 @@
     {
       "installPath": "node_modules/@testing-library/react-native",
       "name": "@testing-library/react-native",
-      "version": "14.0.1",
+      "version": "14.1.0",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/@testing-library/react-native/-/react-native-14.0.1.tgz",
-      "integrity": "sha512-2r2e2y8SkUNRWKRXlUGqDYunB+AkbdXUPn49Bs5rpv9oxRb0K3USBVugbPbAKJjfj4w5Ba91NJ8LcQCZyopUZA==",
+      "resolved": "https://registry.npmjs.org/@testing-library/react-native/-/react-native-14.1.0.tgz",
+      "integrity": "sha512-tWOam5U3aUE8XqStdWAN/OuUUdGRzh/vJMg7SfCaqXNKx7orRh04590Jp4JbORctYjORoRYfJSg04I2//wnxYw==",
       "optional": false,
       "legalDocuments": [
         {

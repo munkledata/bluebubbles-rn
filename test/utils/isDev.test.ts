@@ -54,7 +54,7 @@ describe('isDevServer', () => {
     expect(isDevServer()).toBe(false);
 
     useSessionStore.setState({
-      status: 'disconnected',
+      status: 'connecting',
       origin: DEV_SERVER_ORIGIN,
       password: DEV_SERVER_PASSWORD,
     });

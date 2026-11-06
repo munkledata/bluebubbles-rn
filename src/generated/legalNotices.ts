@@ -73,7 +73,7 @@ export const LEGAL_INVENTORY_SUMMARY = Object.freeze({
   assetFiles: 13,
   pendingAssetProvenance: 13,
   localComponents: 15,
-  dependencyLockSha256: 'f22b79425f1af714984bd531081680901b306a741f099555c2a8c94db23c8921',
+  dependencyLockSha256: '979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd',
   unresolvedPackageRecords: 127,
   exactAabCoverage: false,
 } as const);

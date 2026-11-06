@@ -137,8 +137,9 @@ describe('FCM V3 identity-bound decryption', () => {
       const attempt = decryptFcmV3Payload(toBase64(tampered), KEY, 'new-message');
       // Node's GCM error is created outside Jest's sandbox realm, so no instanceof here.
       await expect(attempt).rejects.toThrow();
-      const message = await attempt.catch((e: unknown) =>
-        String((e as { message?: unknown }).message ?? e),
+      const message = await attempt.then(
+        () => '',
+        (e: unknown) => String((e as { message?: unknown }).message ?? e),
       );
       // The label rides inside the asserted value so a failure names the byte that leaked.
       expect([label, message.includes('hello')]).toEqual([label, false]);
