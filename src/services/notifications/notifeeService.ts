@@ -22,7 +22,10 @@ import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
 } from '../realtime/deliveryCoordinator';
-import { conversationShortcutIdFor, refreshShareShortcuts } from '../shortcuts/shareShortcuts';
+import {
+  conversationShortcutIdFor,
+  existingConversationShortcutId,
+} from '../shortcuts/shareShortcuts';
 import { isActiveChat } from './activeChat';
 import {
   MESSAGE_HISTORY_IDS_KEY,
@@ -1900,8 +1903,8 @@ function ensureChannel(): Promise<string> {
 /**
  * The shortcut id that makes a message notice an Android conversation, or undefined. Only while App
  * Lock is PROVEN off (a hydrated OFF, or a headless persisted OFF read): shortcuts carry the chat's
- * name and picture outside the app. A killed-app push has no inbox to have published shortcuts, so
- * publish the top chats first; the chat that just got this message is already among them.
+ * name and picture outside the app. This never publishes shortcuts (the inbox does); a killed-app
+ * push asks native whether the chat's shortcut still exists.
  */
 async function conversationShortcutIdForPost(
   chatGuid: string,
@@ -1909,16 +1912,7 @@ async function conversationShortcutIdForPost(
 ): Promise<string | undefined> {
   const lockProvenOff = await resolveMessageNotificationMutationGuard(context);
   if (!lockProvenOff()) return undefined;
-  const known = conversationShortcutIdFor(chatGuid);
-  if (known) return known;
-  const lease = capturePresentationContext(context);
-  await refreshShareShortcuts(false, lease);
-  if (!lockProvenOff()) {
-    // App Lock turned on while we published: scrub again rather than leave names behind.
-    await refreshShareShortcuts(true, lease);
-    return undefined;
-  }
-  return conversationShortcutIdFor(chatGuid) ?? undefined;
+  return existingConversationShortcutId(chatGuid) ?? undefined;
 }
 
 function deliveryIsCurrent(context?: EventDeliveryContext): boolean {

@@ -50,6 +50,16 @@ class ShareShortcutTokenTest {
 
     assertEquals("simulated keystore failure", error.message)
   }
+
+  @Test
+  fun existingShortcutIdOnlyReturnsAnIdThatIsLiveNow() {
+    val token = "${CURRENT_SHARE_SHORTCUT_PREFIX}abc"
+    assertEquals(token, existingShortcutId(token, listOf("other", token)))
+    assertNull(existingShortcutId(token, listOf("other")))
+    assertNull(existingShortcutId(null, listOf(token)))
+    // A legacy (pre-namespace) id is never offered as a conversation shortcut.
+    assertNull(existingShortcutId("legacy-1", listOf("legacy-1")))
+  }
 }
 
 private fun expectFailure(action: () -> Unit): Throwable {

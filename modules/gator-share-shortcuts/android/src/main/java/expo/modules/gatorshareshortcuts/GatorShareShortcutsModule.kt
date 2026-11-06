@@ -358,6 +358,19 @@ class GatorShareShortcutsModule : Module() {
       published
     }
 
+    // A conversation notification's shortcut id, ONLY if that chat's shortcut exists right now
+    // (dynamic, or cached by Android for a conversation). Reads never publish, so a killed-app push
+    // can name its chat without republishing (background shortcut updates are rate-limited).
+    Function("existingShareShortcutId") { chatGuid: String ->
+      val context = requireContext()
+      val token = runCatching { ShareShortcutTokenOwner(context).tokenFor(chatGuid) }.getOrNull()
+      val live = ShortcutManagerCompat.getShortcuts(
+        context,
+        ShortcutManagerCompat.FLAG_MATCH_DYNAMIC or ShortcutManagerCompat.FLAG_MATCH_CACHED,
+      ).map { it.id }
+      existingShortcutId(token, live)
+    }
+
     Function("resolveShareShortcutTarget") { token: String, candidates: List<String> ->
       val context = requireContext()
       ShareShortcutTokenOwner(context).resolve(token, candidates)
@@ -445,3 +458,7 @@ class GatorShareShortcutsModule : Module() {
     return requestedWithTokens.map { it.second }
   }
 }
+
+/** [token] when a live shortcut has exactly that id; null for no token or no such shortcut. */
+internal fun existingShortcutId(token: String?, liveIds: Collection<String>): String? =
+  token?.takeIf { it.startsWith(CURRENT_SHARE_SHORTCUT_PREFIX) && liveIds.contains(it) }

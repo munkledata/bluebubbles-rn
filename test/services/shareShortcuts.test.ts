@@ -11,6 +11,7 @@ const native = {
   setShareShortcuts: jest.fn(),
   resolveShareShortcutTarget: jest.fn(),
   reportShareShortcutUsed: jest.fn(),
+  existingShareShortcutId: jest.fn(),
 };
 const moduleRef: { current: typeof native | null } = { current: native };
 
@@ -55,6 +56,7 @@ import {
   publishShareShortcuts,
   refreshShareShortcuts,
   resolveShareShortcutTarget,
+  existingConversationShortcutId,
 } from '@/services/shortcuts/shareShortcuts';
 
 const getDb = getDatabase as jest.MockedFunction<typeof getDatabase>;
@@ -559,5 +561,32 @@ describe('shortcut pictures', () => {
       true,
     );
     expect(Object.keys(published()[0]!).sort()).toEqual(['guid', 'label']);
+  });
+});
+
+describe('existingConversationShortcutId', () => {
+  const token = (n: number) => `gator-share-v2-${String(n).repeat(43)}`;
+
+  it('prefers the id the inbox published, then asks native, and never publishes', () => {
+    native.setShareShortcuts.mockReturnValueOnce([token(1)]);
+    publishShareShortcuts([inboxRow({ guid: 'chat-a' })], false);
+    native.setShareShortcuts.mockClear();
+    expect(existingConversationShortcutId('chat-a')).toBe(token(1));
+
+    native.existingShareShortcutId.mockReturnValueOnce(token(2));
+    expect(existingConversationShortcutId('chat-b')).toBe(token(2));
+    expect(native.existingShareShortcutId).toHaveBeenCalledWith('chat-b');
+    expect(native.setShareShortcuts).not.toHaveBeenCalled();
+  });
+
+  it('treats a malformed id, a native failure, or an older build as no shortcut', () => {
+    native.existingShareShortcutId.mockReturnValueOnce('not-a-token');
+    expect(existingConversationShortcutId('chat-b')).toBeNull();
+    native.existingShareShortcutId.mockImplementationOnce(() => {
+      throw new Error('binder');
+    });
+    expect(existingConversationShortcutId('chat-b')).toBeNull();
+    moduleRef.current = { ...native, existingShareShortcutId: undefined } as never;
+    expect(existingConversationShortcutId('chat-b')).toBeNull();
   });
 });

@@ -57,7 +57,7 @@ import { useSessionStore } from '@state/sessionStore';
 // Conversation shortcut ids come from the native shortcut module; tests choose what it returns.
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
   conversationShortcutIdFor: jest.fn(() => null),
-  refreshShareShortcuts: jest.fn(async () => false),
+  existingConversationShortcutId: jest.fn(() => null),
 }));
 jest.mock('react-native-notify-kit', () => ({
   __esModule: true,

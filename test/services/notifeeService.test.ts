@@ -68,7 +68,7 @@ const notificationTextEncoder = new TextEncoder();
 // Conversation shortcut ids come from the native shortcut module; tests choose what it returns.
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
   conversationShortcutIdFor: jest.fn(() => null),
-  refreshShareShortcuts: jest.fn(async () => false),
+  existingConversationShortcutId: jest.fn(() => null),
 }));
 jest.mock('@/services/clients', () => ({ vault: { get: jest.fn(async () => 'true') } }));
 const { vault: mockVault } = jest.requireMock('@/services/clients') as {
@@ -2166,16 +2166,16 @@ describe('postNotification — detailed message', () => {
     }
   });
 
-  it('keeps a rebuilt notice a conversation without publishing anything', async () => {
+  it('keeps a rebuilt notice a conversation from the published ids only', async () => {
     const shortcuts = jest.requireMock('@/services/shortcuts/shareShortcuts') as {
       conversationShortcutIdFor: jest.Mock;
-      refreshShareShortcuts: jest.Mock;
+      existingConversationShortcutId: jest.Mock;
     };
     const TOKEN = 'gator-share-v2-' + 'b'.repeat(43);
     shortcuts.conversationShortcutIdFor.mockImplementation((guid: string) =>
       guid === 'chat-1' ? TOKEN : null,
     );
-    shortcuts.refreshShareShortcuts.mockClear();
+    shortcuts.existingConversationShortcutId.mockClear();
     const state = installStatefulTray([displayedMessageChild(1, 101)]);
     mockListMessageNotificationTruth.mockResolvedValueOnce([
       messageTruth(101, 1, {
@@ -2198,7 +2198,8 @@ describe('postNotification — detailed message', () => {
         messageGuid: 'msg-1',
       });
       expect(state.tray.get('gator-message-1')!.android.shortcutId).toBe(TOKEN);
-      expect(shortcuts.refreshShareShortcuts).not.toHaveBeenCalled();
+      // A rebuild only reads the ids the inbox published; it never asks native.
+      expect(shortcuts.existingConversationShortcutId).not.toHaveBeenCalled();
     } finally {
       state.restore();
       shortcuts.conversationShortcutIdFor.mockReset().mockReturnValue(null);
@@ -2385,29 +2386,19 @@ describe('postNotification — detailed message', () => {
 
   describe('conversation shortcut', () => {
     const shortcuts = jest.requireMock('@/services/shortcuts/shareShortcuts') as {
-      conversationShortcutIdFor: jest.Mock;
-      refreshShareShortcuts: jest.Mock;
+      existingConversationShortcutId: jest.Mock;
     };
     const TOKEN = 'gator-share-v2-' + 'a'.repeat(43);
     beforeEach(() => {
-      shortcuts.conversationShortcutIdFor.mockReset().mockReturnValue(null);
-      shortcuts.refreshShareShortcuts.mockReset().mockResolvedValue(true);
+      shortcuts.existingConversationShortcutId.mockReset().mockReturnValue(null);
     });
 
-    it("names the chat's published shortcut so Android shows a conversation", async () => {
-      shortcuts.conversationShortcutIdFor.mockReturnValue(TOKEN);
+    it("names the chat's existing shortcut so Android shows a conversation", async () => {
+      shortcuts.existingConversationShortcutId.mockReturnValue(TOKEN);
       await postNotification(messageIntent());
-      expect(lastNotif().android?.shortcutId).toBe(TOKEN);
-      expect(shortcuts.refreshShareShortcuts).not.toHaveBeenCalled();
-    });
-
-    it('publishes the top chats first when none are known yet (a killed-app push)', async () => {
-      shortcuts.refreshShareShortcuts.mockImplementation(async () => {
-        shortcuts.conversationShortcutIdFor.mockReturnValue(TOKEN);
-        return true;
-      });
-      await postNotification(messageIntent());
-      expect(shortcuts.refreshShareShortcuts).toHaveBeenCalledWith(false, expect.anything());
+      expect(shortcuts.existingConversationShortcutId).toHaveBeenCalledWith(
+        messageIntent().chatGuid,
+      );
       expect(lastNotif().android?.shortcutId).toBe(TOKEN);
     });
 
@@ -2416,21 +2407,20 @@ describe('postNotification — detailed message', () => {
       expect(lastNotif().android).not.toHaveProperty('shortcutId');
     });
 
-    it('never names or publishes a shortcut while App Lock is on', async () => {
-      shortcuts.conversationShortcutIdFor.mockReturnValue(TOKEN);
+    it('never names a shortcut while App Lock is on', async () => {
+      shortcuts.existingConversationShortcutId.mockReturnValue(TOKEN);
       useLockStore.setState({ enabled: true, locked: false });
       await postNotification(messageIntent());
       expect(JSON.stringify(lastNotif())).not.toContain(TOKEN);
-      expect(shortcuts.refreshShareShortcuts).not.toHaveBeenCalled();
     });
 
-    it('in a killed-app wake, adds a shortcut only after a persisted App Lock OFF read', async () => {
+    it('in a killed-app wake, names a shortcut only after a persisted App Lock OFF read', async () => {
       useLockStore.setState({ enabled: false, locked: false, hydrated: false });
-      shortcuts.conversationShortcutIdFor.mockReturnValue(TOKEN);
+      shortcuts.existingConversationShortcutId.mockReturnValue(TOKEN);
       mockVault.get.mockResolvedValue('true'); // App Lock is actually on
       await postNotification(messageIntent());
       expect(lastNotif().android).not.toHaveProperty('shortcutId');
-      expect(shortcuts.refreshShareShortcuts).not.toHaveBeenCalled();
+      expect(shortcuts.existingConversationShortcutId).not.toHaveBeenCalled();
 
       mockVault.get.mockResolvedValue('false');
       await postNotification(messageIntent({ messageGuid: 'msg-2' }));

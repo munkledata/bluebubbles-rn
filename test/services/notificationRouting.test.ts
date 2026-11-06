@@ -35,7 +35,7 @@ let mockDb: AppDatabase;
 // Conversation shortcut ids come from the native shortcut module; tests choose what it returns.
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
   conversationShortcutIdFor: jest.fn(() => null),
-  refreshShareShortcuts: jest.fn(async () => false),
+  existingConversationShortcutId: jest.fn(() => null),
 }));
 jest.mock('@/services/databaseControl', () => ({
   ensureDatabase: jest.fn(async () => mockDb),

@@ -42,6 +42,8 @@ interface GatorShareShortcutsNative {
     appLockEnabled: boolean,
   ): unknown;
   resolveShareShortcutTarget(token: string, candidates: readonly string[]): string | null;
+  /** The chat's shortcut id only if that shortcut exists right now; never publishes (newer builds). */
+  existingShareShortcutId?(chatGuid: string): string | null;
   reportShareShortcutUsed(token: string): void;
 }
 
@@ -271,6 +273,28 @@ export async function resolveShareShortcutTarget(
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
     }
+    return null;
+  }
+}
+
+/**
+ * The shortcut id a conversation notification can name for this chat, or null. The id the inbox
+ * last published wins; otherwise (a killed-app push, where nothing has published in this process)
+ * native reports the chat's id only if that shortcut still exists. It never publishes: Android
+ * rate-limits background shortcut updates, and a failed publish would wipe the known ids.
+ */
+export function existingConversationShortcutId(chatGuid: string): string | null {
+  const known = conversationShortcutIdFor(chatGuid);
+  if (known) return known;
+  const native = getNative();
+  if (!native || typeof native.existingShareShortcutId !== 'function') return null;
+  try {
+    const id = native.existingShareShortcutId(chatGuid);
+    return typeof id === 'string' && TARGET_TOKEN.test(id) ? id : null;
+  } catch (error) {
+    logger.warn('[shortcuts] conversation lookup failed', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
     return null;
   }
 }

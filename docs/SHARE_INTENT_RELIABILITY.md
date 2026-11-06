@@ -300,12 +300,17 @@ Plus two correctness items:
   and lets the user mark a chat Priority. notify-kit's JS validator used to drop the field; it passes
   a bounded string through via `patches/react-native-notify-kit+10.4.8.patch` (native already
   supported it). The id is the same opaque per-account token Direct Share uses, and is added only
-  while App Lock is proven off (a hydrated OFF, or a headless persisted OFF read). A killed-app push
-  publishes the top chats first (`conversationShortcutIdForPost` in `notifeeService.ts`); the chat
-  that just got the message is already among them. Each shortcut's picture is the chat's photo or
-  its `@core/avatar` letter circle, never the Gator logo. Known edge: a chat pushed out of the top
-  10 while its notice is still showing loses its shortcut, and that notice stops being a
-  conversation.
+  while App Lock is proven off (a hydrated OFF, or a headless persisted OFF read). The notification
+  path **never publishes**: only the inbox does. It uses the id the inbox last published, or, in a
+  killed-app push, asks native (`existingShareShortcutId`) whether the chat's shortcut exists right
+  now. That is a read, because Android rate-limits background shortcut updates, and a refused
+  publish would have wiped the known ids. A chat with no current shortcut gets an ordinary notice.
+  Each shortcut's picture is the chat's photo or its `@core/avatar` letter circle, never the Gator
+  logo.
+- **Known edges.** A chat that drops out of the top 10 loses its shortcut, so a notice still in the
+  tray stops being a conversation. Android keys a conversation's Priority and sound settings by
+  shortcut id, and enabling App Lock rotates the id namespace (`clearCurrentAndRotate`), so after
+  App Lock is turned off again those per-conversation settings start fresh.
 
 ## Historical regression tests
 
