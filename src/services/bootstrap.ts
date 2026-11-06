@@ -792,7 +792,7 @@ export async function connect(
     return;
   }
   if (!password) {
-    store.failed('Please enter your server password or paired-client credential.');
+    store.failed('Enter the server or paired-client password.');
     return;
   }
 

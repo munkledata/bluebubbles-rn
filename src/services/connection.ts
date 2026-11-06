@@ -279,7 +279,7 @@ function mapError(err: unknown): ConnectResult {
         return {
           ok: false,
           kind: 'unauthorized',
-          message: 'Authentication failed — check the password or paired-client credential.',
+          message: 'The password wasn’t accepted. Check the server or paired-client password.',
         };
       case 'no_connection':
       case 'timeout':
