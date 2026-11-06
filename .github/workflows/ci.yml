@@ -107,9 +107,10 @@ jobs:
           fi
 
       - name: Unit tests and UI coverage gate
-        # C-5 experiment: two workers instead of a single band. Keep only if three consecutive runs
-        # print the same coverage totals; the config warns that dual instrumentation of files both
-        # Jest projects load can make merged numbers order-dependent.
+        # Two workers instead of a single band (C-5). Measured 2026-11-06: three consecutive runs
+        # (42301536330, 42303427347, 42304548524) printed totals identical to master's --runInBand
+        # run, so the dual instrumentation of files both Jest projects load does not make the merged
+        # numbers order-dependent at this worker count. Re-measure before raising it further.
         run: npm run coverage:ui -- --ci --maxWorkers=2
 
       # Runs last so a newly published advisory cannot stop the code checks above from running,
