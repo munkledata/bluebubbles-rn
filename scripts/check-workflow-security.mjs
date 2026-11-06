@@ -978,7 +978,7 @@ function validateScheduledAndroidDbJob(workflow, errors) {
       'android/app/build/reports/db-wal-write-death/android-db-wal-write-death-*.json',
       'android/app/build/reports/db-active-migration-death/android-db-active-migration-death-*.json',
       'if-no-files-found: error',
-      'retention-days: 14',
+      'retention-days: 90',
     ],
     errors,
     'The scheduled Android DB job',

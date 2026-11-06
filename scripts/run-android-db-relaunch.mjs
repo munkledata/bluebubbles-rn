@@ -462,6 +462,8 @@ export const LAUNCH_APP_ADB_ARGS = Object.freeze([
 const COMMAND_TIMEOUT_MS = 20_000;
 const LAUNCH_TIMEOUT_MS = 30_000;
 const MARKER_TIMEOUT_MS = 120_000;
+/** A second marker window before failing: emulator logcat has been seen to lag a marker past one. */
+const MARKER_WAIT_ATTEMPTS = 2;
 const PROCESS_TIMEOUT_MS = 10_000;
 const POLL_MS = 250;
 const MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -1559,7 +1561,7 @@ export async function waitForNoProcess(getProcessIdentity, options = {}) {
   );
 }
 
-async function waitForMarkerCount({
+export async function waitForMarkerCount({
   readLogs,
   getProcessIdentity,
   expectedIdentity,
@@ -1570,36 +1572,39 @@ async function waitForMarkerCount({
   pollMs = POLL_MS,
   now = Date.now,
   sleep = delay,
+  attempts = MARKER_WAIT_ATTEMPTS,
 }) {
-  const deadline = now() + timeoutMs;
-  while (now() <= deadline) {
-    const markers = extractMarkers(await readLogs(), markerProcessIds);
-    if (markers[0]?.status === 'fail' || markers.length === count) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const deadline = now() + timeoutMs;
+    while (now() <= deadline) {
+      const markers = extractMarkers(await readLogs(), markerProcessIds);
+      if (markers[0]?.status === 'fail' || markers.length === count) {
+        if (!sameProcessIdentity(await getProcessIdentity(), expectedIdentity)) {
+          throw new HarnessError(
+            'app-process-exited',
+            'The Gator process changed while emitting its expected relaunch marker.',
+          );
+        }
+        return markers;
+      }
+      if (markers.length > count) {
+        throw new HarnessError(
+          'unexpected-relaunch-marker',
+          'A relaunch marker arrived before the required process transition.',
+        );
+      }
       if (!sameProcessIdentity(await getProcessIdentity(), expectedIdentity)) {
         throw new HarnessError(
           'app-process-exited',
-          'The Gator process changed while emitting its expected relaunch marker.',
+          'The Gator process changed before emitting its expected relaunch marker.',
         );
       }
-      return markers;
+      await sleep(pollMs);
     }
-    if (markers.length > count) {
-      throw new HarnessError(
-        'unexpected-relaunch-marker',
-        'A relaunch marker arrived before the required process transition.',
-      );
-    }
-    if (!sameProcessIdentity(await getProcessIdentity(), expectedIdentity)) {
-      throw new HarnessError(
-        'app-process-exited',
-        'The Gator process changed before emitting its expected relaunch marker.',
-      );
-    }
-    await sleep(pollMs);
   }
   throw new HarnessError(
     'relaunch-result-timeout',
-    `No expected DB relaunch marker arrived within ${String(timeoutMs)} ms.`,
+    `No expected DB relaunch marker arrived within ${String(attempts)} windows of ${String(timeoutMs)} ms.`,
   );
 }
 

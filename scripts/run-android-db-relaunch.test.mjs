@@ -74,6 +74,7 @@ import {
   WAL_WRITE_DEATH_PRIVATE_TEST_FILES,
   WAL_WRITE_DEATH_RESUME_CHECKS,
   walFileGrewBeyondHeader,
+  waitForMarkerCount,
   waitForNoProcess,
 } from './run-android-db-relaunch.mjs';
 import { APP_ACTIVITY, APP_PACKAGE, HarnessError } from './run-android-db-contract.mjs';
@@ -2303,4 +2304,35 @@ test('artifact construction rejects nonterminal or internally inconsistent seque
       ),
     /Host checks do not agree/,
   );
+});
+
+test('the marker wait spends two full windows before failing, and only one when asked', async () => {
+  for (const [attempts, expectedElapsed] of [
+    [undefined, 400],
+    [1, 200],
+  ]) {
+    let clock = 0;
+    await assert.rejects(
+      waitForMarkerCount({
+        readLogs: async () => '',
+        getProcessIdentity: async () => ({ pid: '101' }),
+        expectedIdentity: { pid: '101' },
+        markerProcessIds: new Set(['101']),
+        extractMarkers: () => [],
+        count: 1,
+        timeoutMs: 200,
+        pollMs: 100,
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+        ...(attempts === undefined ? {} : { attempts }),
+      }),
+      (error) =>
+        error instanceof HarnessError &&
+        error.code === 'relaunch-result-timeout' &&
+        error.message.includes(`${attempts ?? 2} windows of 200 ms`),
+    );
+    assert.ok(clock >= expectedElapsed, `clock ${clock} < ${expectedElapsed}`);
+  }
 });
