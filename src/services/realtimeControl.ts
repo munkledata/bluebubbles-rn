@@ -1694,6 +1694,8 @@ export function retryRealtimeConnection(): boolean {
       errorName: error instanceof Error ? error.name : 'UnknownError',
     });
   }
-  probeReachabilityNow();
+  // The store now says `unknown`; the watch still remembers the last answer. Ask it to publish the
+  // fresh result even when that answer has not changed, or the status would stay on "Reconnecting".
+  probeReachabilityNow({ republish: true });
   return true;
 }

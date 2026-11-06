@@ -60,6 +60,34 @@ describe('reachability watch account ownership', () => {
     expect(onRecovered).toHaveBeenCalledTimes(1);
   });
 
+  it('re-publishes an unchanged answer only when asked, without faking a recovery', async () => {
+    const probe = jest.fn<Promise<unknown>, [AbortSignal]>().mockResolvedValue(undefined);
+    const onStateChange = jest.fn();
+    const onRecovered = jest.fn();
+    startReachabilityWatch(probe, { onStateChange, onRecovered }, 1_000);
+    await settle();
+    expect(onStateChange.mock.calls.map(([state]) => state)).toEqual(['reachable']);
+
+    // A plain re-probe (network came back) keeps the dedup: same answer, nothing published.
+    probeReachabilityNow();
+    await settle();
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(onStateChange).toHaveBeenCalledTimes(1);
+
+    // A Retry re-probe publishes the same answer again so a reset store can show it.
+    probeReachabilityNow({ republish: true });
+    await settle();
+    expect(probe).toHaveBeenCalledTimes(3);
+    expect(onStateChange.mock.calls.map(([state]) => state)).toEqual(['reachable', 'reachable']);
+    expect(onRecovered).not.toHaveBeenCalled();
+
+    // The flag is consumed by that one publication; the interval probe dedups again.
+    await jest.advanceTimersByTimeAsync(1_000);
+    await settle();
+    expect(probe).toHaveBeenCalledTimes(4);
+    expect(onStateChange).toHaveBeenCalledTimes(2);
+  });
+
   it('classifies transport failures separately from server/auth/schema errors', () => {
     expect(classifyReachabilityFailure(new ApiError('no_connection', 'down'))).toBe('unreachable');
     expect(classifyReachabilityFailure(new ApiError('timeout', 'slow'))).toBe('unreachable');

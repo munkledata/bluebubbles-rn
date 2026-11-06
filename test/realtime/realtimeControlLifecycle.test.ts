@@ -583,15 +583,21 @@ describe('realtime lifecycle against a real DB and a fake socket', () => {
       server: 'unknown',
       status: 'reconnecting',
     });
-    // The retry re-probes the server through the real HttpClient at once. Known gap, deliberately
-    // not asserted either way: the watch dedups its result against its own last state
-    // (reachability.ts `publish`), so this unchanged 'reachable' answer never reaches the store,
-    // which keeps `server: 'unknown'` until the socket reconnects or the answer changes.
+    // The retry re-probes the server through the real HttpClient at once, and the watch publishes
+    // the answer even though it has not changed, so the reset store leaves `unknown` again instead
+    // of sitting on "Reconnecting" until the socket happens to reconnect.
     await waitForCondition(
       () => fakeServer.pings === pingsBefore + 1,
       'server re-probed after retry',
       WAIT_TURNS,
     );
+    await waitForCondition(
+      () => health().server === 'reachable',
+      'unchanged server answer re-published after retry',
+      WAIT_TURNS,
+    );
+    // Not a recovery: the server never went away, so sync is not asked to catch up here.
+    expect(mockSync.resumeCalls).toBe(1);
     expect(fakeServer.requests[fakeServer.requests.length - 1]).toMatchObject({
       url: `${ORIGIN}/api/v1/ping`,
       authorization: `Bearer ${PASSWORD}`,
