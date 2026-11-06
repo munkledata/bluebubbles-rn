@@ -8,7 +8,7 @@ import {
   withDbTransaction,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import { dedupeBy } from './_shared';
 import {
   attachmentIsUserFileSql,
@@ -209,7 +209,7 @@ export interface ListAttachmentsByMessageIdsOptions {
 }
 
 export async function listAttachmentsByMessageIds(
-  db: AppDatabase,
+  db: Queryable,
   messageIds: number[],
   rowLimit?: number,
   options: ListAttachmentsByMessageIdsOptions = {},
@@ -299,7 +299,7 @@ export interface StickerRow extends StickerMessageRow {
  * different concern (keeping stickers out of the media gallery) and stay as they are.
  */
 export async function listStickersForTargets(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   targetGuids: string[],
 ): Promise<Map<string, StickerRow[]>> {
@@ -367,7 +367,7 @@ export async function listStickersForTargets(
 }
 
 async function queryAttachmentByGuid(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
   visibleOnly: boolean,
 ): Promise<AttachmentRow | null> {
@@ -398,7 +398,7 @@ async function queryAttachmentByGuid(
 
 /** Unrestricted identity lookup for internal transfer/retry bookkeeping. */
 export async function getAttachmentByGuid(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
 ): Promise<AttachmentRow | null> {
   return queryAttachmentByGuid(db, guid, false);
@@ -406,7 +406,7 @@ export async function getAttachmentByGuid(
 
 /** User-visible media-route admission; private extension payloads fail closed. */
 export async function getVisibleAttachmentByGuid(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
 ): Promise<AttachmentRow | null> {
   return queryAttachmentByGuid(db, guid, true);
@@ -427,7 +427,7 @@ function inlineImageMimeList() {
  * NOT included (a tapped video opens singly). `index` is -1 when `guid` isn't an image in the set.
  */
 export async function listChatImageAttachmentsByAttachmentGuid(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
 ): Promise<{ items: AttachmentRow[]; index: number }> {
   const rows = await db.all<AttachmentRow>(sql`
@@ -520,7 +520,7 @@ function attachmentKindSql(kind: ChatAttachmentPageKind) {
  * lowercased MIME tests, so each visible file appears in exactly one tab.
  */
 export async function listChatAttachmentsPage(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   kind: ChatAttachmentPageKind,
   limit = CHAT_DOCUMENT_PAGE_SIZE,
@@ -557,7 +557,7 @@ export async function listChatAttachmentsPage(
 
 /** Visible documents for one chat, newest-first. See {@link listChatAttachmentsPage}. */
 export function listChatDocumentAttachmentsPage(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   limit = CHAT_DOCUMENT_PAGE_SIZE,
 ): Promise<ChatDocumentPage> {
@@ -579,7 +579,7 @@ export interface ChatLinkPage {
  * reaches older messages.
  */
 export async function listChatLinksPage(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   limit = CHAT_DOCUMENT_PAGE_SIZE,
 ): Promise<ChatLinkPage> {
@@ -617,7 +617,7 @@ export async function listChatLinksPage(
  * recent occurrence. `limit` caps each bucket so the strip stays lightweight.
  */
 export async function listChatAttachmentsByKind(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   limit = 60,
 ): Promise<ChatMediaByKind> {
@@ -855,11 +855,11 @@ export function replaceVisibleAttachmentLocalPathWithinTransaction(
  * file instead of reporting a success that no visible row owns.
  */
 export async function updateAttachmentLocalPath(
-  db: AppDatabase,
+  db: ReadDb,
   attachmentGuid: string,
   localPath: string,
 ): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     updateAttachmentLocalPathWithinTransaction(context, attachmentGuid, localPath),
   );
 }

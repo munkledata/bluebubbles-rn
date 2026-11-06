@@ -10,7 +10,7 @@ import {
   type AttachmentMediaExportDestination,
   type ClaimedAttachmentMediaExport,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
@@ -82,7 +82,7 @@ function claimIdentity(claim: ClaimedAttachmentMediaExport) {
 }
 
 async function settleFailedExport(
-  db: AppDatabase,
+  db: ReadDb,
   claim: ClaimedAttachmentMediaExport,
   result: 'skipped' | 'denied' | 'error',
   lease: RealtimeDeliveryLease,
@@ -101,7 +101,7 @@ async function settleFailedExport(
 }
 
 async function drainInsideNativeOwner(
-  db: AppDatabase,
+  db: ReadDb,
   lease: RealtimeDeliveryLease,
   attachmentGuid?: string,
 ): Promise<AttachmentMediaExportDrainResult> {
@@ -166,7 +166,7 @@ async function drainInsideNativeOwner(
 }
 
 async function runMediaExportDrain(
-  db: AppDatabase,
+  db: ReadDb,
   lease: RealtimeDeliveryLease,
   attachmentGuid?: string,
 ): Promise<AttachmentMediaExportDrainResult> {
@@ -185,7 +185,7 @@ async function runMediaExportDrain(
 
 /** Try the receipt for the image whose private-cache download just completed. */
 export function fulfillAttachmentMediaExport(
-  db: AppDatabase,
+  db: ReadDb,
   attachmentGuid: string,
   lease: RealtimeDeliveryLease,
 ): Promise<AttachmentMediaExportDrainResult> {
@@ -199,7 +199,7 @@ export function drainPendingAttachmentMediaExports(
   const existing = passiveDrainFlight;
   if (existing?.generation === lease.generation) return existing.promise;
 
-  let db: AppDatabase;
+  let db: ReadDb;
   try {
     db = getDatabase();
   } catch (error) {

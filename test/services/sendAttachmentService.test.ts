@@ -15,7 +15,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { MAX_RCS_ATTACHMENT_UPLOAD_BYTES } from '@core/models/serverInfo';
 import {
   RcsAttachmentTooLargeError,
@@ -101,13 +101,13 @@ const IMG = {
   height: 600,
 };
 
-async function seedChat(db: AppDatabase, guid: string) {
+async function seedChat(db: ReadDb, guid: string) {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], handles);
 }
 
 async function seedProvenImessageChat(
-  db: AppDatabase,
+  db: ReadDb,
   guid = 'any;-;+15551234567',
   service: 'iMessage' | 'SMS' = 'iMessage',
   style = 45,
@@ -117,7 +117,7 @@ async function seedProvenImessageChat(
   await upsertChats(db, [Chat.parse({ guid, style, participants: [participant] })], handles);
 }
 
-async function seedReplyTarget(db: AppDatabase) {
+async function seedReplyTarget(db: ReadDb) {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const chats = await upsertChats(
     db,
@@ -154,7 +154,7 @@ const one = (raw: Database.Database, sql: string) =>
  * attachment in place (preserving local_path).
  */
 async function echoMessageWithAttachment(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   msgGuid: string,
   attGuid: string,
@@ -1382,7 +1382,7 @@ describe('sendImageMessage', () => {
       hasAttachments: true,
       attachments: [{ guid: 'rcs-media-1', mimeType: 'image/jpeg' }],
     });
-    await withDbTransaction(db, (context) => reconcileEchoByContent(context, echo, chatId));
+    await withDbTransaction(db, (db, context) => reconcileEchoByContent(context, echo, chatId));
     const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertMessages(db, [echo], () => chatId, handles);
 
@@ -1515,7 +1515,7 @@ describe('sendImageMessage', () => {
       });
 
     async function sendModernPicture(
-      db: AppDatabase,
+      db: ReadDb,
       now = 1000,
       image = IMG,
       text?: string,
@@ -1537,7 +1537,7 @@ describe('sendImageMessage', () => {
     }
 
     /** A modern send whose upload failed, so the server never acknowledged it. */
-    async function sendFailedModernPicture(db: AppDatabase, now: number, image = IMG) {
+    async function sendFailedModernPicture(db: ReadDb, now: number, image = IMG) {
       const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
       const up = fakeUploader(async () => {
         throw new ApiError('server_error', 'boom', 500);
@@ -1547,13 +1547,13 @@ describe('sendImageMessage', () => {
       return up.captured!.tempGuid;
     }
 
-    async function liveCopy(db: AppDatabase, chatId: number, copy: Message): Promise<void> {
-      await withDbTransaction(db, (context) => reconcileEchoByContent(context, copy, chatId));
+    async function liveCopy(db: ReadDb, chatId: number, copy: Message): Promise<void> {
+      await withDbTransaction(db, (db, context) => reconcileEchoByContent(context, copy, chatId));
       const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
       await upsertMessages(db, [copy], () => chatId, handles);
     }
 
-    async function syncedCopy(db: AppDatabase, chatId: number, copy: Message): Promise<void> {
+    async function syncedCopy(db: ReadDb, chatId: number, copy: Message): Promise<void> {
       await reconcileOutgoingAttachmentByContent(db, copy, chatId);
       const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
       await upsertMessages(db, [copy], () => chatId, handles);
@@ -1926,7 +1926,7 @@ describe('sendImageMessage', () => {
           supports_imessage_group_attachment_upload: switches.group ?? false,
         }),
       );
-    async function seedGroup(db: AppDatabase, secondService = 'iMessage'): Promise<void> {
+    async function seedGroup(db: ReadDb, secondService = 'iMessage'): Promise<void> {
       const participants = [
         { address: 'ann@example.com', service: 'iMessage' },
         { address: 'ben@example.com', service: secondService },
@@ -1935,7 +1935,7 @@ describe('sendImageMessage', () => {
       await upsertChats(db, [Chat.parse({ guid: GROUP, style: 43, participants })], handles);
     }
     const send = (
-      db: AppDatabase,
+      db: ReadDb,
       chatGuid: string,
       image: typeof IMG | typeof HEIC,
       upload: AttachmentUploader,

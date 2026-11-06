@@ -45,7 +45,7 @@ import {
   DbCommitGuardRejectedError,
   withDbTransaction,
 } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import {
   fullSync,
   incrementalSync,
@@ -88,7 +88,7 @@ function providerRepairDelayMs(failures: number): number {
 }
 
 /** A failed automatic repair waits; a wait further ahead than the maximum means the clock moved. */
-async function providerRepairIsWaiting(db: AppDatabase, providerEpoch: string): Promise<boolean> {
+async function providerRepairIsWaiting(db: Queryable, providerEpoch: string): Promise<boolean> {
   const backoff = await getProviderRepairBackoff(db);
   const now = Date.now();
   return (
@@ -127,7 +127,7 @@ async function beginProviderRepairWhenReady(
  * owner makes sync restart it from the server, retried on later syncs until a refresh finishes.
  */
 async function installAuthorityFromCheckpoint(
-  db: AppDatabase,
+  db: ReadDb,
   controlApi: SyncApi,
   providerEpoch: string,
   signal?: AbortSignal,
@@ -136,7 +136,7 @@ async function installAuthorityFromCheckpoint(
   // The checkpoint is a self-contained ledger cursor; the snapshot lease itself is not needed.
   await controlApi.cancelProviderRepair?.(lease.token).catch(() => undefined);
   if (lease.providerEpoch !== providerEpoch) throw new MessageStateRepairRequiredError();
-  await withDbTransaction(db, async (context) => {
+  await withDbTransaction(db, async (db, context) => {
     const previous = await getMessageStateAuthorityWithinTransaction(context);
     await installCheckpointAuthorityWithinTransaction(context, {
       version: 1,
@@ -202,7 +202,7 @@ function stampAt(authority: MessageStateAuthority, sequence: string): MessageSta
  * inside its own transaction and commits with its progress; any error pauses without advancing.
  */
 async function auditMessagesOnPhone(
-  db: AppDatabase,
+  db: ReadDb,
   options: ProviderSyncOptions,
   providerEpoch: string,
 ): Promise<void> {
@@ -233,7 +233,7 @@ async function auditMessagesOnPhone(
         // Planned inside an owner, so another writer's uncommitted rows are never planned.
         const planned = await withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             readMessageStateAuditReceiptsWithinTransaction(
               context,
               audit,
@@ -245,7 +245,7 @@ async function auditMessagesOnPhone(
         if (planned.length === 0) {
           const advanced = await withDbTransaction(
             db,
-            async (context) => {
+            async (db, context) => {
               if (!(await messageStateAuditIsCurrentWithinTransaction(context, audit)))
                 return false;
               await setMessageStateAuditWithinTransaction(context, { ...audit, phase: 'hide' });
@@ -286,7 +286,7 @@ async function auditMessagesOnPhone(
           const next: MessageStateAudit = { ...settled, afterGuid: slice.at(-1)!.guid };
           const advanced = await withDbTransaction(
             db,
-            async (context) => {
+            async (db, context) => {
               if (!(await messageStateAuditIsCurrentWithinTransaction(context, settled)))
                 return false;
               // Writes nothing if a planned receipt or its local owner changed meanwhile.
@@ -319,7 +319,7 @@ async function auditMessagesOnPhone(
       if (candidates.length === 0) {
         await withDbTransaction(
           db,
-          async (context) => {
+          async (db, context) => {
             if (await messageStateAuditIsCurrentWithinTransaction(context, audit))
               await setMessageStateAuditWithinTransaction(context, null);
           },
@@ -349,7 +349,7 @@ async function auditMessagesOnPhone(
         const next: MessageStateAudit = { ...expected, afterMessageId: chunk.at(-1)!.id };
         const advanced = await withDbTransaction(
           db,
-          async (context) => {
+          async (db, context) => {
             if (!(await messageStateAuditIsCurrentWithinTransaction(context, expected)))
               return false;
             // Ambiguous and elsewhere-filed messages stay visible; only positive absence hides.
@@ -392,7 +392,7 @@ export interface ProviderSyncProgress extends SyncProgress {
  * the Mac during a chat's download can shift one older message past the next page; a later Full
  * Repair reads it.
  */
-function fullRepairReader(db: AppDatabase, api: SyncApi, shouldAbort: () => boolean): SyncApi {
+function fullRepairReader(db: ReadDb, api: SyncApi, shouldAbort: () => boolean): SyncApi {
   return {
     ...api,
     fetchChatMessages: async (chatGuid, offset, limit, signal) => {
@@ -402,7 +402,7 @@ function fullRepairReader(db: AppDatabase, api: SyncApi, shouldAbort: () => bool
         const slice = messages.slice(index, index + 25);
         await withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             bindSnapshotMessageOwnersWithinTransaction(
               context,
               slice.map((message) => ({ guid: message.guid, chatGuid })),
@@ -441,7 +441,7 @@ export interface ProviderSyncOptions {
  * first) sync still run, and only a user-started repair reports its failure afterwards.
  */
 export async function syncProviderMessages(
-  db: AppDatabase,
+  db: ReadDb,
   options: ProviderSyncOptions,
 ): Promise<ProviderSyncProgress> {
   const { api, controlApi, serverInfo, shouldAbort, signal } = options;
@@ -536,7 +536,7 @@ export async function syncProviderMessages(
               for (let offset = 0; offset < messages.length; offset += 25) {
                 await withDbTransaction(
                   db,
-                  (context) =>
+                  (db, context) =>
                     bindSnapshotMessageOwnersWithinTransaction(
                       context,
                       messages
@@ -601,7 +601,7 @@ export async function syncProviderMessages(
           // ordinary sync must still honour the deletions it already recorded (review M053).
           await withDbTransaction(
             db,
-            (context) => setPendingMessageStateRepairWithinTransaction(context, nextAuthority),
+            (db, context) => setPendingMessageStateRepairWithinTransaction(context, nextAuthority),
             fence.commitGuard,
           );
           let rebaseAfter: string | null = null;
@@ -609,7 +609,7 @@ export async function syncProviderMessages(
             const after: string | null = rebaseAfter;
             rebaseAfter = await withDbTransaction(
               db,
-              (context) =>
+              (db, context) =>
                 rebaseOldMessageStateBatchWithinTransaction(
                   context,
                   after,
@@ -622,7 +622,7 @@ export async function syncProviderMessages(
           for (let offset = 0; offset < present.length; offset += 25) {
             await withDbTransaction(
               db,
-              (context) =>
+              (db, context) =>
                 restoreSnapshotMessagesWithinTransaction(
                   context,
                   present.slice(offset, offset + 25),
@@ -644,7 +644,7 @@ export async function syncProviderMessages(
           for (let offset = 0; offset < absent.length; offset += 25) {
             await withDbTransaction(
               db,
-              (context) =>
+              (db, context) =>
                 hideSnapshotMessagesWithinTransaction(
                   context,
                   absent.slice(offset, offset + 25),
@@ -655,7 +655,7 @@ export async function syncProviderMessages(
           }
           await withDbTransaction(
             db,
-            async (context) => {
+            async (db, context) => {
               await setSyncMarkerWithinTransaction(context, marker);
               await setMessageStateAuthorityWithinTransaction(context, nextAuthority);
               await clearPendingMessageStateRepairWithinTransaction(context);
@@ -678,7 +678,7 @@ export async function syncProviderMessages(
       logger.warn('[sync] provider repair failed; ordinary sync continues', {
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordProviderRepairFailureWithinTransaction(
           context,
           providerEpoch,
@@ -771,7 +771,7 @@ export async function syncProviderMessages(
       if (!shouldAbort() && hasSyncPosition(restart))
         await withDbTransaction(
           db,
-          (context) => setSyncMarkerWithinTransaction(context, restart),
+          (db, context) => setSyncMarkerWithinTransaction(context, restart),
           () => !shouldAbort(),
         );
     }

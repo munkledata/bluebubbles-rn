@@ -9,10 +9,10 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
-async function seed(db: AppDatabase): Promise<number> {
+async function seed(db: ReadDb): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
@@ -354,7 +354,7 @@ describe('listChatDocumentAttachmentsPage (FEAT-07A)', () => {
 
 describe('listChatImageAttachmentsByAttachmentGuid (fullscreen carousel)', () => {
   async function seedImages(
-    db: AppDatabase,
+    db: ReadDb,
     extra: ReturnType<typeof Message.parse>[] = [],
   ): Promise<void> {
     const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);

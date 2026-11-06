@@ -9,7 +9,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { setChatUnreadLocal } from '../support/repositoryWrappers';
 
@@ -37,7 +37,7 @@ function received(guid: string, dateCreated: number, extra: Record<string, unkno
 }
 
 /** Ingest a chat exactly as the sync/chat-query path does: handles first, then upsertChats. */
-async function ingestChat(db: AppDatabase, c: Chat): Promise<void> {
+async function ingestChat(db: ReadDb, c: Chat): Promise<void> {
   const handles = await upsertHandles(db, c.participants ?? []);
   await upsertChats(db, [c], handles);
 }
@@ -58,13 +58,13 @@ function markedUnreadAt(raw: Database.Database, chatGuid: string): number | null
   return row?.t ?? null;
 }
 
-async function unreadCount(db: AppDatabase, chatGuid: string): Promise<number> {
+async function unreadCount(db: Queryable, chatGuid: string): Promise<number> {
   const rows = await listChatsForInbox(db);
   return rows.find((r) => r.guid === chatGuid)?.unreadCount ?? -1;
 }
 
 /** Seed chat 'c1' with three received messages at 1000 / 2000 / 3000 and its handle links. */
-async function seedThree(db: AppDatabase): Promise<number> {
+async function seedThree(db: ReadDb): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'alice@me.com' }]);
   const map = await upsertChats(db, [chat('c1')], handles);
   const chatId = map.get('c1')!;

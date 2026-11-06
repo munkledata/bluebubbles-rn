@@ -23,7 +23,7 @@ import {
   type SendAttemptOwnerToken,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { utf8Encode } from '@utils/bytes';
 import {
   isProvenIMessageGroupChat,
@@ -129,7 +129,7 @@ export interface PreparedAttachmentOwnership {
 
 /** Native/file-system ownership preparation injected by the production composition root. */
 export type AttachmentOwnershipPreparer = (input: {
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   readonly image: PickedImage;
   readonly attachmentGuid: string;
 }) => Promise<PreparedAttachmentOwnership>;
@@ -178,7 +178,7 @@ export function isSupportedImessageVoiceFile(image: PickedImage): boolean {
  * disk by the native layer, so a large video is never read into JS memory.
  */
 export async function sendImageMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendImageMessageArgs,
   upload: AttachmentUploader,
@@ -418,7 +418,7 @@ export async function sendImageMessage(
   try {
     const admission = await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         if (args.shareIntake) {
           const shareClaim = await claimShareIntakeFileWithinTransaction(context, {
             identity: args.shareIntake,

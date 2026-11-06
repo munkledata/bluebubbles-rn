@@ -8,9 +8,8 @@
  */
 import type Database from 'better-sqlite3';
 import { sql } from 'drizzle-orm';
-import type { AppDatabase } from '@db/types';
 
-let mockDb: AppDatabase;
+let mockDb: TestDb['db'];
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => mockDb) }));
 
 // eslint-disable-next-line import/first
@@ -175,7 +174,7 @@ it('lets a write that queued during a batch run before the next batch', async ()
     order.push('batch');
     // A send or sync write arriving while the first batch runs queues behind it, not behind the
     // whole search.
-    queuedWrite ??= withDbTransaction(t.db, async () => {
+    queuedWrite ??= withDbTransaction(t.db, async (db) => {
       await t.db.run(sql`UPDATE chats SET custom_name = custom_name WHERE guid = 'member'`);
       order.push('write');
     });

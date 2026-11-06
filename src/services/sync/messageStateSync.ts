@@ -22,7 +22,7 @@ import { logger } from '@core/secure';
 import { resolveMessageChatGuid } from '@core/models';
 import { classifyRcsMessageRecord } from '@core/rcs';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import type { SyncApi } from './types';
 
 export const MESSAGE_STATE_FOREGROUND_MAX_PAGES = 1_000;
@@ -46,7 +46,7 @@ export interface MessageStateSyncOptions {
 
 /** Each bounded page and its continuation commit together; realtime never writes this cursor. */
 export async function syncMessageState(
-  db: AppDatabase,
+  db: ReadDb,
   api: SyncApi,
   options: MessageStateSyncOptions,
 ): Promise<void> {
@@ -61,7 +61,7 @@ export async function syncMessageState(
   if (!guard()) return;
   let authority = await withDbTransaction(
     db,
-    (context) => getMessageStateAuthorityWithinTransaction(context),
+    (db, context) => getMessageStateAuthorityWithinTransaction(context),
     guard,
   );
   if (!authority || authority.providerEpoch !== options.providerEpoch)
@@ -167,7 +167,7 @@ export async function syncMessageState(
       ];
       await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           // Active exact-GUID hydration supplies the missing owner for a previously quarantined
           // server receipt. Local/legacy ownerless deletion receipts remain independently closed.
           await bindHydratedMessageOwnerWithinTransaction(context, {
@@ -194,7 +194,7 @@ export async function syncMessageState(
     const next = { ...previous, cursor: page.cursor, sequence: page.sequence };
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         const current = await getMessageStateAuthorityWithinTransaction(context);
         if (
           !current ||

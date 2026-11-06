@@ -17,7 +17,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { setChatMute } from '../support/repositoryWrappers';
 
@@ -25,7 +25,7 @@ const ANN = { address: 'ann@x.com' };
 const BOB = { address: 'bob@x.com' };
 
 interface Fixture {
-  db: AppDatabase;
+  db: TestDb;
   raw: Database.Database;
   chatId: number;
   handles: Map<string, number>;

@@ -2,7 +2,7 @@ import { sendLocation } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
 import { getChatHeader, insertOutgoingLocationWithinTransaction } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils';
 import {
   resolveRcsAttemptOwnership,
@@ -44,7 +44,7 @@ function validateCoordinates(coordinates: CurrentLocationCoordinates): void {
  * durable idempotency key, so ordinary transport and temporary-service failures remain retryable.
  */
 export async function sendCurrentLocationMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: { chatGuid: string; coordinates: CurrentLocationCoordinates },
   now: number = Date.now(),
@@ -77,7 +77,7 @@ export async function sendCurrentLocationMessage(
 
   await withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       insertOutgoingLocationWithinTransaction(context, {
         tempGuid,
         chatGuid: args.chatGuid,

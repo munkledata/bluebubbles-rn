@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 
 const MAX_DIAGNOSTIC_LEDGER_ROWS = 8_192;
 const MAX_DIAGNOSTIC_WALLPAPER_PATHS = 8_192;
@@ -152,7 +152,7 @@ function cacheState(value: unknown): DownloadIntegrityCacheState {
  * caller retries by taking its required before/after snapshots instead of presenting mixed state.
  */
 export async function readDownloadIntegrityDbSnapshot(
-  db: AppDatabase,
+  db: Queryable,
 ): Promise<DownloadIntegrityDbSnapshot> {
   const countRows = await db.all<CountsRow>(sql`
     WITH latest_receipt AS (

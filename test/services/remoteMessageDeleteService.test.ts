@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo } from '@core/models';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { remoteDeleteExactIMessage } from '@/services/remoteMessageDeleteService';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { createTestDb } from '../support/testDb';
@@ -69,7 +69,7 @@ function fakeHttp(impl: (path: string, options: RequestOptions) => Promise<unkno
 }
 
 describe('whole-message remote deletion', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {

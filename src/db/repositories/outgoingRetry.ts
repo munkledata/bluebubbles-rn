@@ -9,7 +9,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import {
   findAttemptOwnerSnapshotWithinTransaction,
   MAX_SEND_ATTEMPT_OWNER_GENERATION,
@@ -183,7 +183,7 @@ export async function reconcileOutgoingErrorWithinTransaction(
 
 /** Public failed-send reconciliation owns one short, optionally account-guarded transaction. */
 export async function reconcileOutgoingError(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   errorCode: number,
   now: number = Date.now(),
@@ -194,7 +194,7 @@ export async function reconcileOutgoingError(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       reconcileOutgoingErrorWithinTransaction(
         context,
         tempGuid,
@@ -626,7 +626,7 @@ export interface RetryableOutgoing {
  * in-flight grace window (a UI send that never completed — e.g. a crash mid-send).
  */
 export async function listRetryableOutgoing(
-  db: AppDatabase,
+  db: Queryable,
   now: number,
   limit?: number,
   excludeRcs = false,
@@ -1003,7 +1003,7 @@ export interface OutgoingQueueHealth {
  * every synced message. The half-open RANGE below is the same set of guids (they are minted
  * lowercase by `generateTempGuid`; '.' is the next byte after '-') and plans as an index search.
  */
-export async function countOutgoingQueueHealth(db: AppDatabase): Promise<OutgoingQueueHealth> {
+export async function countOutgoingQueueHealth(db: Queryable): Promise<OutgoingQueueHealth> {
   const rows = await db.all<OutgoingQueueHealth>(sql`
     SELECT
       (SELECT COUNT(*) FROM messages m

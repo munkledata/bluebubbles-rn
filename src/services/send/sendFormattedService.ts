@@ -17,7 +17,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { isProvenOneToOneIMessageChat } from '@utils';
 import {
   resolveRcsAttemptOwnership,
@@ -40,9 +40,9 @@ export type SendFormattedResult =
   | { readonly status: 'outcome-unknown'; readonly tempGuid: string };
 
 /** Formatted sends are destructive one-shot work: never queue two attempts for one chat. */
-const activeFormattedSends = new WeakMap<AppDatabase, Set<string>>();
+const activeFormattedSends = new WeakMap<Queryable, Set<string>>();
 
-function claimFormattedSend(db: AppDatabase, chatGuid: string): boolean {
+function claimFormattedSend(db: Queryable, chatGuid: string): boolean {
   let active = activeFormattedSends.get(db);
   if (!active) {
     active = new Set();
@@ -53,7 +53,7 @@ function claimFormattedSend(db: AppDatabase, chatGuid: string): boolean {
   return true;
 }
 
-function releaseFormattedSend(db: AppDatabase, chatGuid: string): void {
+function releaseFormattedSend(db: Queryable, chatGuid: string): void {
   const active = activeFormattedSends.get(db);
   active?.delete(chatGuid);
   if (active?.size === 0) activeFormattedSends.delete(db);
@@ -70,14 +70,14 @@ function exactFormattedTargetWithinTransaction(
 }
 
 async function discardDefiniteAttempt(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   now: number,
   commitGuard: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => discardOutgoingMessageWithinTransaction(context, tempGuid, now),
+    (db, context) => discardOutgoingMessageWithinTransaction(context, tempGuid, now),
     commitGuard,
   );
 }
@@ -91,7 +91,7 @@ class FormattedTargetRejectedError extends Error {
 
 /** Admit, dispatch, and settle one bounded formatted message without any automatic replay. */
 export async function sendIMessageFormatted(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendFormattedArgs,
   now: number = Date.now(),
@@ -128,7 +128,7 @@ export async function sendIMessageFormatted(
     try {
       await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           if (!(await exactFormattedTargetWithinTransaction(context, request.chatGuid))) {
             throw new FormattedTargetRejectedError();
           }
@@ -174,7 +174,7 @@ export async function sendIMessageFormatted(
     try {
       const targetCurrent = await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           const current = await exactFormattedTargetWithinTransaction(context, request.chatGuid);
           if (!current) {
             await discardOutgoingMessageWithinTransaction(context, tempGuid, now);

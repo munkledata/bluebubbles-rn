@@ -14,7 +14,7 @@ import {
   setHandleServerAvatarWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import type { HttpClient } from '@core/api';
 import {
   BoundedDownloadError,
@@ -48,7 +48,7 @@ export const SERVER_AVATAR_MAX_TOTAL_DOWNLOAD_BYTES = 32 * 1024 * 1024; // 32 Mi
  * Returns the number of handles a server avatar was written to.
  */
 export async function backfillServerAvatars(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<number> {
@@ -120,7 +120,7 @@ export async function backfillServerAvatars(
         if (!activeLease.isCurrent()) return;
         await withDbTransaction(
           db,
-          (context) => setHandleServerAvatarWithinTransaction(context, h.id, null, h.avatar),
+          (db, context) => setHandleServerAvatarWithinTransaction(context, h.id, null, h.avatar),
           () => activeLease.isCurrent(),
         );
       });
@@ -180,7 +180,7 @@ export async function backfillServerAvatars(
           try {
             avatarWritten = await withDbTransaction(
               db,
-              (context) =>
+              (db, context) =>
                 setHandleServerAvatarWithinTransaction(context, handleId, avatarUri, h.avatar),
               () => activeLease.isCurrent(),
             );
@@ -221,7 +221,7 @@ export async function backfillServerAvatars(
         if (!activeLease.isCurrent()) return;
         await withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             kvSetWithinTransaction(context, SERVER_AVATAR_CURSOR_KEY, String(nextCursor)),
           () => activeLease.isCurrent(),
         );
@@ -250,7 +250,7 @@ function isReusableAvatar(file: File): boolean {
  * handle still shows is kept. Best-effort: after any failure the file waits for Forget's sweep.
  */
 async function deleteAvatarIfUnreferenced(
-  db: AppDatabase,
+  db: Queryable,
   rootUri: string,
   uri: string,
   lease: RealtimeDeliveryLease,

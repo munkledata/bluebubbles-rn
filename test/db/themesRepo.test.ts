@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { getCustomThemeById, listCustomThemes } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import {
   createCustomTheme,
@@ -11,7 +11,7 @@ import {
 
 const tokens = (tint: string) => JSON.stringify({ mode: 'dark', color: { tint } });
 
-async function holdRollingBackTransaction(db: AppDatabase): Promise<{
+async function holdRollingBackTransaction(db: ReadDb): Promise<{
   release: () => void;
   failure: Promise<unknown>;
 }> {
@@ -23,7 +23,7 @@ async function holdRollingBackTransaction(db: AppDatabase): Promise<{
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const neighbour = withDbTransaction(db, async () => {
+  const neighbour = withDbTransaction(db, async (db) => {
     markStarted();
     await held;
     throw new Error('neighbour rollback');

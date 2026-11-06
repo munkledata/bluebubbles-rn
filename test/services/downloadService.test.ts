@@ -10,7 +10,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import {
   ATTACHMENT_IMAGE_MAX_PIXELS,
   AttachmentFetchError,
@@ -50,7 +50,7 @@ async function ensureDownloaded(
 
 const fetched = (localPath: string, bytes = 1) => ({ localPath, bytes });
 
-async function seedAttachment(db: AppDatabase, guid: string) {
+async function seedAttachment(db: ReadDb, guid: string) {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
@@ -586,7 +586,7 @@ describe('ensureDownloaded', () => {
       const beginProtectionHandoff = jest.fn(() => true);
       const rollbackProtectionHandoff = jest.fn(() => true);
       const reserveCache = jest.fn(async (_path: string, maxBytes: number) => {
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           createAttachmentCacheReservation(context, {
             path: finalPath,
             maxBytes,
@@ -753,14 +753,14 @@ describe('ensureDownloaded', () => {
     const replacementPath = 'file:///documents/attachments/copy-on-write/redownload-test.jpg';
     await seedAttachment(db, guid);
     await updateAttachmentLocalPath(db, guid, oldPath);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: oldPath, bytes: 10, lastUsedAt: 1 }),
     );
     const release = jest.fn(async () => undefined);
     const beginProtectionHandoff = jest.fn(() => true);
     const rollbackProtectionHandoff = jest.fn(() => true);
     const reserveCache = jest.fn(async (_path: string, maxBytes: number) => {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         createAttachmentCacheReservation(context, {
           path: replacementPath,
           maxBytes,
@@ -848,7 +848,7 @@ describe('ensureDownloaded', () => {
       isCurrent: () => true,
       runCommit: (task) => task(),
       reserveCache: async (_path, maxBytes) => {
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           createAttachmentCacheReservation(context, {
             path: replacementPath,
             maxBytes,
@@ -970,10 +970,10 @@ describe('ensureDownloaded', () => {
     await seedAttachment(db, 'quota-retiring');
     const finalPath =
       'file:///documents/attachments/media-quota-retiring/generation-10/media-photo.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: finalPath, bytes: 15, lastUsedAt: 1 }),
     );
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       const claim = await claimAttachmentCachePathsForRetirement(context, [finalPath]);
       expect(claim.status).toBe('claimed');
     });
@@ -1043,7 +1043,7 @@ describe('ensureDownloaded', () => {
       isCurrent: () => true,
       runCommit: (task) => task(),
       reserveCache: async (_path, maxBytes) => {
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           createAttachmentCacheReservation(context, {
             path: finalPath,
             maxBytes,
@@ -1150,7 +1150,7 @@ describe('ensureDownloaded', () => {
       isCurrent: () => true,
       runCommit: (task) => task(),
       reserveCache: async (_path, maxBytes) => {
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           createAttachmentCacheReservation(context, {
             path: finalPath,
             maxBytes,

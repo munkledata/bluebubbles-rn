@@ -22,7 +22,7 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
@@ -56,7 +56,7 @@ import { insertScheduled, updateScheduled } from '../support/repositoryWrappers'
 
 const mockGetScheduled = getScheduled as jest.Mock;
 
-async function seedChat(db: AppDatabase): Promise<void> {
+async function seedChat(db: ReadDb): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(
     db,
@@ -74,7 +74,7 @@ const item = (id: string, text: string) => ({
   status: 'pending',
 });
 
-const serverIdsOf = async (db: AppDatabase): Promise<(string | null)[]> =>
+const serverIdsOf = async (db: Queryable): Promise<(string | null)[]> =>
   (await listAllScheduled(db)).map((r) => r.serverId);
 
 /** Native SQLite errors can belong to a prior Jest VM, so match their text without `instanceof`. */
@@ -286,7 +286,7 @@ describe('reconcileServerScheduled — serialized bounded writes', () => {
     const held = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw
         .prepare(
           `INSERT INTO scheduled_messages
@@ -355,7 +355,7 @@ describe('reconcileServerScheduled — serialized bounded writes', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -439,7 +439,7 @@ describe('reconcileServerScheduled — serialized bounded writes', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');

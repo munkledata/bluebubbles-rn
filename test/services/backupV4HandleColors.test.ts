@@ -74,7 +74,7 @@ async function seedColoredHandle(
     [Chat.parse({ guid, style: 45, participants: [participant] })],
     handles,
   );
-  await withDbTransaction(testDb.db, (context) =>
+  await withDbTransaction(testDb.db, (db, context) =>
     setHandleColorWithinTransaction(context, guid, ADDRESS, service, color),
   );
 }

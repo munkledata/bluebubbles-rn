@@ -1,6 +1,6 @@
 import { getBackupV4ExportData, restorePreparedBackupWithinTransaction } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   isChunkedSecretBoxEnvelope,
   SecretBoxPlaintextLimitError,
@@ -98,7 +98,7 @@ const BACKUP_EXPORT_LIMITS = {
  * inverted rather than a deny-list.
  */
 export async function buildBackupWithCustomFolders(
-  db: AppDatabase,
+  db: ReadDb,
   opts: { exportedAt: number; appVersion?: string },
   ownershipGuard?: DbCommitGuard,
 ): Promise<BackupV5> {
@@ -140,7 +140,7 @@ function assertRestoreOwned(ownershipGuard?: DbCommitGuard): void {
  * pushing this device's deletion watermark past messages it has not caught up on yet.
  */
 export async function restoreBackup(
-  db: AppDatabase,
+  db: ReadDb,
   backup: Backup,
   ownershipGuard?: DbCommitGuard,
 ): Promise<RestoreResult> {
@@ -201,7 +201,7 @@ export async function restoreBackup(
   assertRestoreOwned(ownershipGuard);
   const applied = await withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const result = await restorePreparedBackupWithinTransaction(context, prepared);
       // Checked inside the transaction so an impossible result rolls back instead of being
       // reported as a failed restore after it was already committed.

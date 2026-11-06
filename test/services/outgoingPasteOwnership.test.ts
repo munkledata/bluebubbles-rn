@@ -10,7 +10,7 @@ jest.mock('expo-file-system', () => {
 });
 
 import { adoptNativePastedAttachment } from '@native/boundedDownload';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import {
   attachmentCacheCoordinator,
   type AttachmentCacheReservation,
@@ -18,7 +18,7 @@ import {
 } from '@/services/download/attachmentCacheCoordinator';
 import { createOutgoingPasteOwnershipPreparer } from '@/services/send/outgoingPasteOwnership';
 
-const db = {} as AppDatabase;
+const db = {} as TestDb;
 const source = {
   uri: 'file:///cache/pasted-in/1000-1/photo.jpg',
   name: 'photo one.jpg',

@@ -28,7 +28,7 @@ import {
   getIncomingEventQueueHealth,
   INCOMING_EVENT_DEPENDENCY_RETRY_MS,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
@@ -222,7 +222,7 @@ function retireForegroundSocket(): void {
 
 interface RealtimeRecoveryJob {
   readonly key: string;
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   readonly generation: number;
   readonly task: Promise<RealtimePrerequisiteRecoveryOutcome>;
   references: number;
@@ -230,7 +230,7 @@ interface RealtimeRecoveryJob {
 }
 
 interface RealtimeRecoveryCollector {
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   readonly generation: number;
   readonly owner: EventDeliveryContext;
   readonly jobs: Set<RealtimeRecoveryJob>;
@@ -240,7 +240,7 @@ interface RealtimeRecoveryCollector {
   waitOnlyDependencyDeferred: boolean;
 }
 
-const pendingRealtimeRecoveries = new Map<AppDatabase, Map<string, RealtimeRecoveryJob>>();
+const pendingRealtimeRecoveries = new Map<Queryable, Map<string, RealtimeRecoveryJob>>();
 const activeRealtimeRecoveryCollectors = new Set<RealtimeRecoveryCollector>();
 const REALTIME_RECOVERY_RETRY_DRAIN_BUDGET_MS = 20_000;
 
@@ -294,7 +294,7 @@ function permanentFailureRecovery(eventName: string): IncomingEventConflictRecov
  * its own native lifetime; foreground/socket delivery can rely on IncomingEventDrain's wake timer.
  */
 function requestRealtimeRecovery(
-  db: AppDatabase,
+  db: ReadDb,
   recovery: IncomingEventConflictRecovery,
   context?: EventDeliveryContext,
   dependencyRetry = false,
@@ -371,7 +371,7 @@ function requestRealtimeRecovery(
 }
 
 function beginRealtimeRecoveryCollector(
-  db: AppDatabase,
+  db: ReadDb,
   owner: EventDeliveryContext,
 ): RealtimeRecoveryCollector {
   const collector: RealtimeRecoveryCollector = {
@@ -388,7 +388,7 @@ function beginRealtimeRecoveryCollector(
   return collector;
 }
 
-function noteRealtimeDependencyDeferred(db: AppDatabase, context?: EventDeliveryContext): void {
+function noteRealtimeDependencyDeferred(db: Queryable, context?: EventDeliveryContext): void {
   if (!context?.isCurrent()) return;
   for (const collector of activeRealtimeRecoveryCollectors) {
     if (collector.db !== db || collector.generation !== context.generation) continue;
@@ -616,7 +616,7 @@ function canPersistRealtimeEvent(event: NormalizedEvent): boolean {
 // identical regardless of how the event arrived. Outer layer routes ephemeral typing
 // events to UI state; inner layer writes the DB (source of truth) then notifies.
 let realtimeSinkInstance: EventSink | null = null;
-function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
+function realtimeSink(db: ReadDb, accountGeneration: number): EventSink {
   realtimeSinkInstance ??= new RcsProviderEpochEventSink(
     new ServerUrlEventSink(
       new RcsAlertEventSink(
@@ -800,13 +800,13 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
 // One normalizer/sink chain per account generation. Durable receipts, rather than EventRouter's
 // legacy in-memory set, own cross-transport deduplication and process-death recovery.
 let sharedRouterInstance: EventRouter | null = null;
-function sharedRouter(db: AppDatabase, accountGeneration: number): EventRouter {
+function sharedRouter(db: ReadDb, accountGeneration: number): EventRouter {
   sharedRouterInstance ??= new EventRouter(realtimeSink(db, accountGeneration));
   return sharedRouterInstance;
 }
 
 interface RealtimeRuntime {
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   readonly generation: number;
   readonly dispatcher: DurableRealtimeDispatcher;
   unsubscribeInvalidation: () => void;
@@ -903,10 +903,7 @@ function resetRealtimeRuntime(expected?: RealtimeRuntime): void {
   sharedRouterInstance = null;
 }
 
-function getRealtimeRuntime(
-  db: AppDatabase,
-  context: EventDeliveryContext,
-): RealtimeRuntime | null {
+function getRealtimeRuntime(db: ReadDb, context: EventDeliveryContext): RealtimeRuntime | null {
   if (!context.isCurrent()) return null;
   const existing = realtimeRuntimeInstance;
   if (existing?.db === db && existing.generation === context.generation) return existing;
@@ -1151,7 +1148,7 @@ function createDevProofContext(context: EventDeliveryContext): EventDeliveryCont
 }
 
 async function readDevIncomingEventQueueHealth(
-  db: AppDatabase,
+  db: Queryable,
 ): Promise<DevIncomingEventQueueHealth> {
   const health = await getIncomingEventQueueHealth(db, Date.now());
   return {

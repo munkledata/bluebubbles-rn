@@ -1,5 +1,5 @@
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -79,7 +79,7 @@ export interface RollingBackDbNeighbour {
  * neighbour is held to prove it queues instead of silently joining the open transaction.
  */
 export function holdRollingBackDbNeighbour(
-  db: AppDatabase,
+  db: ReadDb,
   insideTransaction: () => void | Promise<void>,
   rollbackMessage = 'proof neighbour rollback',
 ): RollingBackDbNeighbour {
@@ -90,7 +90,7 @@ export function holdRollingBackDbNeighbour(
   // that rejecting it before the caller awaits `entered` is still safe.
   void entered.promise.catch(() => undefined);
 
-  const transaction = withDbTransaction(db, async () => {
+  const transaction = withDbTransaction(db, async (db) => {
     try {
       await insideTransaction();
       entered.resolve(undefined);

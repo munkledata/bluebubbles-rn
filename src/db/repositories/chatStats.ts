@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { mediaSection } from '@utils';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 import { attachmentIsUserFileSql, messageVisibleInChatSql } from './chatVisibility';
 
 /** Counts for one chat's Details screen, from what is stored on this phone. */
@@ -24,7 +24,7 @@ const MAX_MIME_GROUPS = 500;
  * by sender, and attachments grouped by type, which `mediaSection` then classifies in JS exactly as
  * the media lists do, so the numbers can't disagree with what Details shows.
  */
-export async function getChatStats(db: AppDatabase, chatGuid: string): Promise<ChatStats> {
+export async function getChatStats(db: Queryable, chatGuid: string): Promise<ChatStats> {
   const messageRows = await db.all<{
     sent: number | null;
     received: number | null;

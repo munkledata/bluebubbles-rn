@@ -7,7 +7,7 @@ import {
 } from '@core/models/messageState';
 import { kv, messageServerStates } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 import { kvGet, kvGetWithinTransaction, kvSetWithinTransaction } from './kv';
 import type { FullRepairMessageExposure } from './repair';
 import { chatLatestMessageDateSql, deletionRecordAppliesSql } from './chatVisibility';
@@ -33,7 +33,7 @@ function parseAuthority(raw: string | null): MessageStateAuthority | null {
 }
 
 export async function getMessageStateAuthority(
-  db: AppDatabase,
+  db: Queryable,
 ): Promise<MessageStateAuthority | null> {
   return parseAuthority(await kvGet(db, MESSAGE_STATE_AUTHORITY_KEY));
 }
@@ -200,7 +200,7 @@ function parseProviderRepairBackoff(raw: string | null): ProviderRepairBackoff |
 }
 
 export async function getProviderRepairBackoff(
-  db: AppDatabase,
+  db: Queryable,
 ): Promise<ProviderRepairBackoff | null> {
   return parseProviderRepairBackoff(await kvGet(db, PROVIDER_REPAIR_BACKOFF_KEY));
 }
@@ -268,7 +268,7 @@ function parseMessageStateAudit(raw: string | null): MessageStateAudit | null {
   }
 }
 
-export async function getMessageStateAudit(db: AppDatabase): Promise<MessageStateAudit | null> {
+export async function getMessageStateAudit(db: Queryable): Promise<MessageStateAudit | null> {
   return parseMessageStateAudit(await kvGet(db, MESSAGE_STATE_AUDIT_KEY));
 }
 
@@ -331,7 +331,7 @@ export async function readMessageStateAuditReceiptsWithinTransaction(
 
 /** Visible Apple messages that were on the phone at the checkpoint, oldest local id first. */
 export async function readMessageStateAuditCandidates(
-  db: AppDatabase,
+  db: Queryable,
   audit: MessageStateAudit,
   limit: number,
   now: number,
@@ -461,7 +461,7 @@ export async function reconcileMessageStateAuditReceiptsWithinTransaction(
 
 /** This ledger's stored transition for one message, if any. */
 export async function getMessageStateTransition(
-  db: AppDatabase,
+  db: Queryable,
   identity: Pick<MessageStateChanged, 'providerEpoch' | 'ledgerEpoch' | 'guid'>,
 ): Promise<{ sequence: string; kind: string } | null> {
   const rows = await db.all<{ sequence: string; kind: string }>(sql`

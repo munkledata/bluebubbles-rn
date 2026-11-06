@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { NOTIFICATION_ROUTE_KV_PREFIX } from '@db/repositories';
 import {
   attachmentIsUserFileSql,
@@ -114,7 +114,7 @@ function stringValue(value: unknown): string | undefined {
 }
 
 /** Keep op-sqlite out of Node/pure-service import graphs until a route actually needs the DB. */
-async function notificationDatabase(): Promise<AppDatabase> {
+async function notificationDatabase(): Promise<ReadDb> {
   const { openNotificationDatabase } = await import('./notificationDatabase');
   return openNotificationDatabase();
 }
@@ -123,7 +123,7 @@ async function notificationDatabase(): Promise<AppDatabase> {
 export async function localRouteForGuids(
   chatGuid: string,
   messageGuid?: string,
-  db?: AppDatabase,
+  db?: Queryable,
 ): Promise<LocalNotificationRoute | null> {
   const database = db ?? (await notificationDatabase());
   const rows = await database.all<{ chatId: number; messageId: number | null }>(sql`
@@ -143,7 +143,7 @@ export async function localRouteForGuids(
 /** Resolve one message to opaque local keys without requiring its chat GUID at the call site. */
 export async function localRouteForMessageGuid(
   messageGuid: string,
-  db?: AppDatabase,
+  db?: Queryable,
 ): Promise<(LocalNotificationRoute & { messageId: number }) | null> {
   const database = db ?? (await notificationDatabase());
   // Two indexed lookups, the exact guid first, then an alias owned by the message's own chat. An
@@ -175,7 +175,7 @@ export async function localRouteForMessageGuid(
  */
 export async function listMessageNotificationTruth(
   messageIds: readonly number[],
-  db?: AppDatabase,
+  db?: Queryable,
 ): Promise<MessageNotificationTruth[]> {
   const uniqueIds = [...new Set(messageIds)];
   if (
@@ -261,7 +261,7 @@ export async function listMessageNotificationTruth(
  */
 export async function localFailedMessageRoute(
   messageGuid: string,
-  db?: AppDatabase,
+  db?: Queryable,
 ): Promise<FailedMessageNotificationRoute | null> {
   const database = db ?? (await notificationDatabase());
   const rows = await database.all<{
@@ -491,7 +491,7 @@ export async function resolveNotificationData(
 
 /** Generate a safe id for a newly scheduled reminder, preferring its local message key. */
 export async function newReminderNotificationId(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
   scheduledFor: number,
 ): Promise<string> {
@@ -540,7 +540,7 @@ export async function migrateReminderNotificationId(
   const db = await notificationDatabase();
   return withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       if (oldNotificationId !== newNotificationId) {
         const moved = await db.all<{ id: number }>(sql`
           UPDATE reminders SET notification_id = ${newNotificationId}
@@ -565,7 +565,7 @@ export async function deleteFaceTimeRoute(
   const db = await notificationDatabase();
   await withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       await db.run(sql`DELETE FROM kv WHERE key = ${`${FACE_TIME_ROUTE_PREFIX}${token}`}`);
     },
     commitGuard,
@@ -578,7 +578,7 @@ export async function clearNotificationRoutes(commitGuard?: DbCommitGuard): Prom
   while (true) {
     const deletedCount = await withDbTransaction(
       db,
-      async () => {
+      async (db) => {
         const deleted = await db.all<{ rowid: number }>(sql`
           DELETE FROM kv
           WHERE rowid IN (

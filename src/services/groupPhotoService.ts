@@ -12,7 +12,7 @@ import {
 import { restoredGroupCommandsAcceptAnyPrefix } from '@core/models/imessageRestoredFeatures';
 import { getChatHeader } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable } from '@db/types';
 import { isProvenIMessageGroupChat } from '@utils';
 import {
   resolveRcsAttemptOwnership,
@@ -80,9 +80,9 @@ export type GroupPhotoUploader = (input: {
 }) => Promise<IMessageGroupPhotoSetAck>;
 
 /** Set and remove share one lane: neither may queue behind another mutation for the same group. */
-const activeGroupPhotoOperations = new WeakMap<AppDatabase, Set<string>>();
+const activeGroupPhotoOperations = new WeakMap<Queryable, Set<string>>();
 
-function claimGroupPhotoOperation(db: AppDatabase, chatGuid: string): boolean {
+function claimGroupPhotoOperation(db: Queryable, chatGuid: string): boolean {
   let active = activeGroupPhotoOperations.get(db);
   if (!active) {
     active = new Set();
@@ -93,7 +93,7 @@ function claimGroupPhotoOperation(db: AppDatabase, chatGuid: string): boolean {
   return true;
 }
 
-function releaseGroupPhotoOperation(db: AppDatabase, chatGuid: string): void {
+function releaseGroupPhotoOperation(db: Queryable, chatGuid: string): void {
   const active = activeGroupPhotoOperations.get(db);
   active?.delete(chatGuid);
   if (active?.size === 0) activeGroupPhotoOperations.delete(db);
@@ -185,7 +185,7 @@ function assertPreDispatchCurrent(
 }
 
 async function proveGroupPhotoTarget(
-  db: AppDatabase,
+  db: Queryable,
   http: HttpClient,
   chatGuid: string,
   accountGuard: DbCommitGuard | undefined,
@@ -233,7 +233,7 @@ export interface PreparedIMessageGroupPhotoSet {
  * UI. The returned opaque owner is single-use and holds the one active mutation lane.
  */
 export async function prepareExactIMessageGroupPhotoSet(
-  db: AppDatabase,
+  db: Queryable,
   http: HttpClient,
   chatGuid: string,
   upload: GroupPhotoUploader,
@@ -350,7 +350,7 @@ export async function prepareExactIMessageGroupPhotoSet(
 
 /** Remove one proven Apple-group photo. No automatic retry and no optimistic local mutation. */
 export async function removeExactIMessageGroupPhoto(
-  db: AppDatabase,
+  db: Queryable,
   http: HttpClient,
   args: RemoveAppleGroupPhotoArgs,
   accountGuard?: DbCommitGuard,

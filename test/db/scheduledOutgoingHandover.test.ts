@@ -6,12 +6,12 @@ import {
   type InsertOutgoingTextArgs,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { claimScheduled, insertScheduled } from '../support/repositoryWrappers';
 
 interface Fixture {
-  db: AppDatabase;
+  db: TestDb;
   raw: import('better-sqlite3').Database;
   chatId: number;
   scheduledId: number;
@@ -187,7 +187,7 @@ describe('scheduled → outgoing repository handoff', () => {
     // Fail the second optimistic INSERT deterministically. Relying on a missing-chat foreign key
     // made this regression sensitive to connection PRAGMA state and test ordering.
     let inserts = 0;
-    const failingDb: AppDatabase = Object.create(db);
+    const failingDb: TestDb = Object.create(db);
     failingDb.insert = ((...args: Parameters<AppDatabase['insert']>) => {
       inserts += 1;
       if (inserts === 2) throw new Error('injected optimistic message insert failure');

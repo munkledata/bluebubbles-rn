@@ -181,7 +181,7 @@ describe('handle (address, service) identity', () => {
     const guid = `iMessage;-;${ADDR}`;
     const chatMap = await upsertChats(db, [chatWith(guid, 'iMessage')], handles);
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         setHandleColorWithinTransaction(context, guid, ADDR, 'iMessage', '#abcdef'),
       ),
     ).resolves.toBe(true);
@@ -199,7 +199,7 @@ describe('handle (address, service) identity', () => {
     const smsGuid = `SMS;-;${ADDR}`;
     await upsertChats(db, [chatWith(smsGuid, 'SMS')], smsHandles);
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         setHandleColorWithinTransaction(context, smsGuid, ADDR, 'SMS', '#123456'),
       ),
     ).resolves.toBe(true);
@@ -231,17 +231,17 @@ describe('handle (address, service) identity', () => {
     expect((await listMessagesWithSenders(db, chatMap.get(guid)!))[0]?.senderColor).toBe('#ABCDEF');
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         setHandleColorWithinTransaction(context, guid, ADDR, 'SMS', '#654321'),
       ),
     ).resolves.toBe(false);
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         setHandleColorWithinTransaction(context, guid, ADDR, 'iMessage', 'red'),
       ),
     ).rejects.toThrow('six-digit hex color');
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         setHandleColorWithinTransaction(context, guid, ADDR, 'iMessage', null),
       ),
     ).resolves.toBe(true);

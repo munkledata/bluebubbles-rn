@@ -11,7 +11,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import {
   sendIMessageReactionMessage,
   sendReactionMessage,
@@ -34,7 +34,7 @@ function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
 const one = (raw: Database.Database, sql: string) =>
   raw.prepare(sql).get() as Record<string, unknown>;
 
-async function seed(db: AppDatabase) {
+async function seed(db: ReadDb) {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
@@ -63,7 +63,7 @@ async function seed(db: AppDatabase) {
   );
 }
 
-async function seedWholeMessageRcsTarget(db: AppDatabase) {
+async function seedWholeMessageRcsTarget(db: ReadDb) {
   const handles = await upsertHandles(db, [{ address: '+15550001111' }]);
   const chats = await upsertChats(
     db,
@@ -78,7 +78,7 @@ async function seedWholeMessageRcsTarget(db: AppDatabase) {
   );
 }
 
-async function seedExactIMessageTarget(db: AppDatabase) {
+async function seedExactIMessageTarget(db: ReadDb) {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const chats = await upsertChats(
     db,

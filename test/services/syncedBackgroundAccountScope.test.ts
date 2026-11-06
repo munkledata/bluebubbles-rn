@@ -10,7 +10,7 @@ const getSyncedBackgroundState = jest.fn(
 );
 const setSyncedBackgroundUriIfCurrent = jest.fn(
   async (
-    _db: AppDatabase,
+    _db: Queryable,
     _guid: string,
     _channel: string | null,
     _previousUri: string | null,
@@ -22,12 +22,12 @@ const setSyncedBackgroundLuminanceIfCurrent = jest.fn(async () => true);
 const mockDbCommitGuardRejectedError = class DbCommitGuardRejectedError extends Error {};
 const mockWithDbTransaction = jest.fn(
   async (
-    _db: unknown,
-    task: (context: object) => Promise<unknown>,
+    db: unknown,
+    task: (tx: unknown, context: object) => Promise<unknown>,
     commitGuard?: () => boolean,
   ) => {
     if (commitGuard && !commitGuard()) throw new mockDbCommitGuardRejectedError();
-    const result = await task({});
+    const result = await task(db, {});
     if (commitGuard && !commitGuard()) throw new mockDbCommitGuardRejectedError();
     return result;
   },
@@ -146,7 +146,7 @@ jest.mock('expo-file-system', () => ({
 import type { EventDeliveryContext } from '@core/realtime';
 import { ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, TestDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import {
   deleteNativeSyncedBackgroundCacheFile,
@@ -232,7 +232,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         guid,
         { generation: 1, isCurrent: () => true },
       );
@@ -266,7 +266,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => transportCurrent,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 1, isCurrent: () => true },
     );
@@ -300,7 +300,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -310,7 +310,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -345,7 +345,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 1, isCurrent: () => true },
     );
@@ -362,7 +362,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -372,7 +372,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -381,7 +381,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -409,7 +409,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 4, isCurrent: () => true },
     );
@@ -449,7 +449,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -461,7 +461,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -486,7 +486,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         `chat-${index}`,
         { generation: 6, isCurrent: () => true },
       ),
@@ -514,7 +514,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -542,7 +542,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         'chat-1',
         context,
       );
@@ -574,7 +574,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -603,7 +603,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 18, isCurrent: () => true },
     );
@@ -621,7 +621,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 16, isCurrent: () => true },
     );
@@ -660,7 +660,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         'chat-1',
         { generation: 17, isCurrent: () => true },
       );
@@ -703,7 +703,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         'chat-1',
         { generation: 19, isCurrent: () => true },
       );
@@ -752,7 +752,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         'chat-1',
         { generation: 23, isCurrent: () => true },
       );
@@ -765,7 +765,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         'chat-1',
         { generation: 24, isCurrent: () => true },
       );
@@ -804,7 +804,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 14, isCurrent: () => true },
     );
@@ -830,7 +830,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 14, isCurrent: () => true },
     );
@@ -859,7 +859,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 15, isCurrent: () => true },
     );
@@ -887,7 +887,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 20, isCurrent: () => true },
     );
@@ -922,7 +922,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 20, isCurrent: () => true },
     );
@@ -945,7 +945,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 20, isCurrent: () => true },
     );
@@ -973,7 +973,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 20, isCurrent: () => true },
     );
@@ -1004,7 +1004,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 20, isCurrent: () => current },
     );
@@ -1036,7 +1036,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -1066,7 +1066,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       { generation: 22, isCurrent: () => true },
     );
@@ -1098,7 +1098,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -1124,7 +1124,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -1145,7 +1145,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -1166,7 +1166,7 @@ describe('account-scoped synced backgrounds', () => {
         snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
         isTransportCurrent: () => true,
       } as never,
-      {} as AppDatabase,
+      {} as TestDb,
       'chat-1',
       context,
     );
@@ -1188,7 +1188,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         'chat-1',
         context,
       );
@@ -1216,7 +1216,7 @@ describe('account-scoped synced backgrounds', () => {
           snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
           isTransportCurrent: () => true,
         } as never,
-        {} as AppDatabase,
+        {} as TestDb,
         'chat-1',
         context,
       );

@@ -14,7 +14,7 @@ import {
   type RetryableErrorReport,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
@@ -86,7 +86,7 @@ async function runAccountCommit(
 }
 
 async function runQueueBody(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   now: number,
   ctx: ClientContext,
@@ -98,7 +98,8 @@ async function runQueueBody(
   try {
     rows = await withDbTransaction(
       db,
-      (context) => listRetryableErrorReportsWithinTransaction(context, Date.now, UPLOAD_BATCH_SIZE),
+      (db, context) =>
+        listRetryableErrorReportsWithinTransaction(context, Date.now, UPLOAD_BATCH_SIZE),
       accountLease || policy
         ? () => accountIsCurrent(accountLease) && policyAllowsUpload(policy)
         : undefined,
@@ -115,7 +116,7 @@ async function runQueueBody(
   const claimCommitted = await runAccountCommit(accountLease, policy, async (guard) => {
     claimed = await withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         claimErrorReportsWithinTransaction(
           context,
           rows.map((r) => r.id),
@@ -154,7 +155,7 @@ async function runQueueBody(
     const deleted = await runAccountCommit(accountLease, policy, (guard) =>
       withDbTransaction(
         db,
-        (context) => deleteErrorReportsWithinTransaction(context, claimed),
+        (db, context) => deleteErrorReportsWithinTransaction(context, claimed),
         guard,
       ),
     );
@@ -171,7 +172,7 @@ async function runQueueBody(
     const marked = await runAccountCommit(accountLease, policy, (guard) =>
       withDbTransaction(
         db,
-        (context) => markErrorReportsFailedWithinTransaction(context, claimed, Date.now),
+        (db, context) => markErrorReportsFailedWithinTransaction(context, claimed, Date.now),
         guard,
       ),
     );
@@ -189,7 +190,7 @@ async function runQueueBody(
  * enqueue another report.
  */
 export async function runErrorReportQueue(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   now: number = Date.now(),
   ctx: ClientContext = {},

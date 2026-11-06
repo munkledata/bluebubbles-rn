@@ -6,7 +6,7 @@ import {
   updateReminderTimeWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import type { Reminder } from '@core/models';
 import { logger } from '@core/secure';
 import { parseRcsChatGuid, parseRcsMessageGuid } from '@core/rcs';
@@ -82,8 +82,8 @@ function captureReminderIdentityGuard(
 }
 
 /** Acquire the composition-root database while the originating account remains admitted. */
-async function acquireReminderDatabase(lease: RealtimeDeliveryLease): Promise<AppDatabase> {
-  const opened: { db?: AppDatabase } = {};
+async function acquireReminderDatabase(lease: RealtimeDeliveryLease): Promise<ReadDb> {
+  const opened: { db?: ReadDb } = {};
   const status = await runTrackedRealtimeWork(lease, async () => {
     assertReminderLease(lease);
     const db = await ensureDatabase();
@@ -234,7 +234,7 @@ export async function rescheduleMessageReminder(
  * all-or-nothing: any throw rewinds to exactly the previous state.
  */
 export async function scheduleReminder(
-  db: AppDatabase,
+  db: ReadDb,
   args: ScheduleReminderArgs,
   scheduler: ReminderScheduler = notifeeScheduler,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
@@ -296,7 +296,7 @@ export async function scheduleReminder(
         if (existing) {
           const moved = await withDbTransaction(
             db,
-            (context) =>
+            (db, context) =>
               updateReminderTimeWithinTransaction(
                 context,
                 existing.id,
@@ -313,7 +313,7 @@ export async function scheduleReminder(
         if (id == null) {
           id = await withDbTransaction(
             db,
-            (context) =>
+            (db, context) =>
               createReminderWithinTransaction(context, {
                 messageGuid: args.messageGuid,
                 chatGuid: args.chatGuid,
@@ -343,7 +343,7 @@ export async function scheduleReminder(
 
 /** Cancel + delete a reminder (the Notifee trigger and the DB row). */
 export async function cancelReminder(
-  db: AppDatabase,
+  db: ReadDb,
   reminder: Pick<Reminder, 'id' | 'notificationId' | 'chatGuid' | 'messageGuid'>,
   scheduler: ReminderScheduler = notifeeScheduler,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
@@ -373,7 +373,7 @@ export async function cancelReminder(
         assertOperationCurrent();
         rowDeleted = await withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             deleteReminderWithinTransaction(context, reminder.id, reminder.notificationId),
           () => accountLease.isCurrent(),
         );
@@ -405,7 +405,7 @@ export async function cancelReminder(
  * Throws when the reminder no longer exists, so the caller reports a failure instead of a lie.
  */
 export async function rescheduleReminder(
-  db: AppDatabase,
+  db: ReadDb,
   reminder: Reminder,
   scheduledFor: number,
   scheduler: ReminderScheduler = notifeeScheduler,
@@ -447,7 +447,7 @@ export async function rescheduleReminder(
       try {
         moved = await withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             updateReminderTimeWithinTransaction(
               context,
               reminder.id,

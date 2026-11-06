@@ -17,7 +17,7 @@ import {
   type EnqueueIncomingEventResult,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { IncomingEventDrain } from './incomingEventDrain';
 
 export interface DurableRealtimeDispatcherOptions {
@@ -70,7 +70,7 @@ export class DurableRealtimeDispatcher {
   private readonly now: () => number;
 
   constructor(
-    private readonly db: AppDatabase,
+    private readonly db: ReadDb,
     private readonly digest: DigestBackend,
     private readonly drain: IncomingEventDrain,
     private readonly options: DurableRealtimeDispatcherOptions,

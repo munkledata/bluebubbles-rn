@@ -157,7 +157,7 @@ describe('a new message brings an archived chat back', () => {
     const t = await createTestDb();
     const chat = await seed(t);
     await archiveAt(t, chat.guid);
-    await withDbTransaction(t.db, (context) =>
+    await withDbTransaction(t.db, (db, context) =>
       setChatAutoUnarchiveWithinTransaction(context, chat.guid, false),
     );
     await receive(t, chat, {});
@@ -186,11 +186,11 @@ describe('only messages this batch adds can bring a chat back (independent revie
     const t = await createTestDb();
     const chat = await seed(t);
     await archiveAt(t, chat.guid);
-    await withDbTransaction(t.db, (context) =>
+    await withDbTransaction(t.db, (db, context) =>
       setChatAutoUnarchiveWithinTransaction(context, chat.guid, false),
     );
     await receive(t, chat, { guid: 'while-off', date: ARCHIVED_AT + 1_000 });
-    await withDbTransaction(t.db, (context) =>
+    await withDbTransaction(t.db, (db, context) =>
       setChatAutoUnarchiveWithinTransaction(context, chat.guid, true),
     );
 
@@ -211,11 +211,11 @@ describe('only messages this batch adds can bring a chat back (independent revie
     const t = await createTestDb();
     const chat = await seed(t);
     await archiveAt(t, chat.guid);
-    await withDbTransaction(t.db, (context) =>
+    await withDbTransaction(t.db, (db, context) =>
       setChatAutoUnarchiveWithinTransaction(context, chat.guid, false),
     );
     await receive(t, chat, { guid: 'stored', date: ARCHIVED_AT + 1_000 });
-    await withDbTransaction(t.db, (context) =>
+    await withDbTransaction(t.db, (db, context) =>
       setChatAutoUnarchiveWithinTransaction(context, chat.guid, true),
     );
     await receive(t, chat, { guid: 'stored', date: ARCHIVED_AT + 1_000 });

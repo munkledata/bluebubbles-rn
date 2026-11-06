@@ -84,7 +84,7 @@ import {
   updateCustomThemeWithinTransaction,
 } from '@db/repositories/themes';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import { type AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import { and, eq, sql } from 'drizzle-orm';
 import { toFtsQuery } from '@db/repositories/_shared';
 import { type AttachmentCacheState } from '@db/repositories/attachmentCache';
@@ -127,20 +127,20 @@ import { runInTransactionContext, type DbTransactionContext } from '@db/transact
 
 /** Public standalone attachment ingestion. Never wrap this helper in another transaction. */
 export async function upsertAttachments(
-  db: AppDatabase,
+  db: ReadDb,
   items: Array<{ att: Attachment; messageId: number }>,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => upsertAttachmentsWithinTransaction(context, items),
+    (db, context) => upsertAttachmentsWithinTransaction(context, items),
     commitGuard,
   );
 }
 
 /** Persist a server-returned chat atomically, then apply presentation-only device-contact names. */
-export async function persistServerChat(db: AppDatabase, chat: Chat): Promise<void> {
-  await withDbTransaction(db, (context) => persistServerChatWithinTransaction(context, chat));
+export async function persistServerChat(db: ReadDb, chat: Chat): Promise<void> {
+  await withDbTransaction(db, (db, context) => persistServerChatWithinTransaction(context, chat));
   await linkHandlesToContacts(
     db,
     (chat.participants ?? []).map((participant) => participant.address),
@@ -149,11 +149,13 @@ export async function persistServerChat(db: AppDatabase, chat: Chat): Promise<vo
 
 /** Set a chat's local mute preference ('mute' to mute, null to clear). */
 export async function setChatMute(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   muteType: string | null,
 ): Promise<void> {
-  await withDbTransaction(db, (context) => setChatMuteWithinTransaction(context, guid, muteType));
+  await withDbTransaction(db, (db, context) =>
+    setChatMuteWithinTransaction(context, guid, muteType),
+  );
 }
 
 /**
@@ -161,38 +163,34 @@ export async function setChatMute(
  * concept; kept out of `upsertChats`' conflict set so a re-sync can't clobber it.
  * The inbox sorts pinned chats first (see `listChatsForInbox`).
  */
-export async function setChatPin(db: AppDatabase, guid: string, pinned: boolean): Promise<void> {
-  await withDbTransaction(db, (context) => setChatPinWithinTransaction(context, guid, pinned));
+export async function setChatPin(db: ReadDb, guid: string, pinned: boolean): Promise<void> {
+  await withDbTransaction(db, (db, context) => setChatPinWithinTransaction(context, guid, pinned));
 }
 
 /** Archive / unarchive a chat (client-local). Archived chats drop out of the main inbox. */
-export async function setChatArchive(
-  db: AppDatabase,
-  guid: string,
-  archived: boolean,
-): Promise<void> {
-  await withDbTransaction(db, (context) =>
+export async function setChatArchive(db: ReadDb, guid: string, archived: boolean): Promise<void> {
+  await withDbTransaction(db, (db, context) =>
     setChatArchiveWithinTransaction(context, guid, archived),
   );
 }
 
 /** Standalone un-hide. Existing domain transactions must use the explicitly scoped form above. */
-export async function clearChatTombstone(db: AppDatabase, guid: string): Promise<void> {
-  await withDbTransaction(db, (context) => clearChatTombstoneWithinTransaction(context, guid));
+export async function clearChatTombstone(db: ReadDb, guid: string): Promise<void> {
+  await withDbTransaction(db, (db, context) => clearChatTombstoneWithinTransaction(context, guid));
 }
 
 export async function setChatUnreadLocal(
-  db: AppDatabase,
+  db: ReadDb,
   chatGuid: string,
   now: number = Date.now(),
 ): Promise<void> {
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     setChatUnreadLocalWithinTransaction(context, chatGuid, now),
   );
 }
 
-export async function markAllChatsReadLocal(db: AppDatabase): Promise<void> {
-  await withDbTransaction(db, (context) => markAllChatsReadLocalWithinTransaction(context));
+export async function markAllChatsReadLocal(db: ReadDb): Promise<void> {
+  await withDbTransaction(db, (db, context) => markAllChatsReadLocalWithinTransaction(context));
 }
 
 /**
@@ -203,119 +201,119 @@ export async function markAllChatsReadLocal(db: AppDatabase): Promise<void> {
  * is checked again after the download, so a device-contact photo that arrived meanwhile wins.
  */
 export async function setHandleServerAvatar(
-  db: AppDatabase,
+  db: ReadDb,
   handleId: number,
   uri: string,
 ): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     setHandleServerAvatarWithinTransaction(context, handleId, uri),
   );
 }
 
 /** Consistency-sensitive read: queue behind mutations so partial reorder/replacement is invisible. */
 export function listCustomFolders(
-  db: AppDatabase,
+  db: ReadDb,
   commitGuard?: DbCommitGuard,
 ): Promise<CustomFolderListRow[]> {
   return withDbTransaction(
     db,
-    (context) => listCustomFoldersWithinTransaction(context),
+    (db, context) => listCustomFoldersWithinTransaction(context),
     commitGuard,
   );
 }
 
 /** Consistency-sensitive read: queue behind add-before-prune membership replacement. */
 export function listCustomFolderChatGuids(
-  db: AppDatabase,
+  db: ReadDb,
   folderId: number,
   commitGuard?: DbCommitGuard,
 ): Promise<string[]> {
   return withDbTransaction(
     db,
-    (context) => listCustomFolderChatGuidsWithinTransaction(context, folderId),
+    (db, context) => listCustomFolderChatGuidsWithinTransaction(context, folderId),
     commitGuard,
   );
 }
 
 export function createCustomFolder(
-  db: AppDatabase,
+  db: ReadDb,
   name: string,
   commitGuard?: DbCommitGuard,
 ): Promise<CustomFolderRow> {
   return withDbTransaction(
     db,
-    (context) => createCustomFolderWithinTransaction(context, name),
+    (db, context) => createCustomFolderWithinTransaction(context, name),
     commitGuard,
   );
 }
 
 export function renameCustomFolder(
-  db: AppDatabase,
+  db: ReadDb,
   folderId: number,
   name: string,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => renameCustomFolderWithinTransaction(context, folderId, name),
+    (db, context) => renameCustomFolderWithinTransaction(context, folderId, name),
     commitGuard,
   );
 }
 
 export function setCustomFolderShowUnreadBadge(
-  db: AppDatabase,
+  db: ReadDb,
   folderId: number,
   showUnreadBadge: boolean,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       setCustomFolderShowUnreadBadgeWithinTransaction(context, folderId, showUnreadBadge),
     commitGuard,
   );
 }
 
 export function deleteCustomFolder(
-  db: AppDatabase,
+  db: ReadDb,
   folderId: number,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => deleteCustomFolderWithinTransaction(context, folderId),
+    (db, context) => deleteCustomFolderWithinTransaction(context, folderId),
     commitGuard,
   );
 }
 
 export function reorderCustomFolders(
-  db: AppDatabase,
+  db: ReadDb,
   ids: readonly number[],
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => reorderCustomFoldersWithinTransaction(context, ids),
+    (db, context) => reorderCustomFoldersWithinTransaction(context, ids),
     commitGuard,
   );
 }
 
 export function replaceCustomFolderMembership(
-  db: AppDatabase,
+  db: ReadDb,
   folderId: number,
   chatGuids: readonly string[],
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => replaceCustomFolderMembershipWithinTransaction(context, folderId, chatGuids),
+    (db, context) => replaceCustomFolderMembershipWithinTransaction(context, folderId, chatGuids),
     commitGuard,
   );
 }
 
 /** Standalone key/value upsert. Callers already inside a transaction must use the scoped form. */
-export async function kvSet(db: AppDatabase, key: string, value: string): Promise<void> {
-  await withDbTransaction(db, (context) => kvSetWithinTransaction(context, key, value));
+export async function kvSet(db: ReadDb, key: string, value: string): Promise<void> {
+  await withDbTransaction(db, (db, context) => kvSetWithinTransaction(context, key, value));
 }
 
 /**
@@ -324,46 +322,48 @@ export async function kvSet(db: AppDatabase, key: string, value: string): Promis
  * wrapper.
  */
 export async function deleteMessageLocal(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   now: number,
 ): Promise<DeleteMessageLocalResult> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     deleteMessageLocalWithinTransaction(context, guid, now),
   );
 }
 
 /** Standalone optimistic-edit owner; composing services use the transaction-only body. */
 export async function applyLocalEdit(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   newText: string,
   now: number,
 ): Promise<LocalEditSnapshot | null> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     applyLocalEditWithinTransaction(context, guid, newText, now),
   );
 }
 
 /** Standalone optimistic-unsend owner; composing services use the transaction-only body. */
 export async function applyLocalUnsend(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   now: number,
   partIndex: number = 0,
 ): Promise<LocalUnsendSnapshot | null> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     applyLocalUnsendWithinTransaction(context, guid, now, partIndex),
   );
 }
 
 /** Standalone optimistic contact-card owner; composing services use the transaction-only body. */
 export async function insertOutgoingContact(
-  db: AppDatabase,
+  db: ReadDb,
   args: InsertOutgoingContactArgs,
 ): Promise<OutgoingInsertResult> {
   // ONE transaction — see the insert-atomicity note above insertOutgoingText.
-  return withDbTransaction(db, (context) => insertOutgoingContactWithinTransaction(context, args));
+  return withDbTransaction(db, (db, context) =>
+    insertOutgoingContactWithinTransaction(context, args),
+  );
 }
 
 /**
@@ -382,27 +382,27 @@ export async function insertOutgoingContact(
  * fanout will promote (see the cancelled-send rule at the top of this file).
  */
 export async function markOutgoingSentNoGuid(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   commitGuard?: DbCommitGuard,
   settlement?: OutgoingAttemptSettlement,
 ): Promise<OutgoingAckDisposition> {
   return withDbTransaction(
     db,
-    (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid, settlement),
+    (db, context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid, settlement),
     commitGuard,
   );
 }
 
 /** Standalone owner for exact capable-RCS success reconciliation. */
 export function reconcileExactOutgoingAttemptSuccess(
-  db: AppDatabase,
+  db: ReadDb,
   success: ExactOutgoingAttemptSuccess,
   commitGuard?: DbCommitGuard,
 ): Promise<ExactOutgoingAttemptSuccessDisposition> {
   return withDbTransaction(
     db,
-    (context) => reconcileExactOutgoingAttemptSuccessWithinTransaction(context, success),
+    (db, context) => reconcileExactOutgoingAttemptSuccessWithinTransaction(context, success),
     commitGuard,
   );
 }
@@ -418,21 +418,21 @@ export function reconcileExactOutgoingAttemptSuccess(
  * {@link retireOutgoingWithinTransaction} inside their own short guarded owner.
  */
 export async function retireOutgoing(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   errorCode = 1,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => retireOutgoingWithinTransaction(context, tempGuid, errorCode),
+    (db, context) => retireOutgoingWithinTransaction(context, tempGuid, errorCode),
     commitGuard,
   );
 }
 
 /** Standalone server-pushed send-error owner. */
 export async function markMessageSendError(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   errorCode = 1,
   commitGuard?: DbCommitGuard,
@@ -440,7 +440,7 @@ export async function markMessageSendError(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => markMessageSendErrorWithinTransaction(context, guid, errorCode, errorMessage),
+    (db, context) => markMessageSendErrorWithinTransaction(context, guid, errorCode, errorMessage),
     commitGuard,
   );
 }
@@ -451,14 +451,14 @@ export async function markMessageSendError(
  * guarded owner instead of nesting this wrapper.
  */
 export async function claimOutgoingForSend(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   clock: () => number,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   const result = await withDbTransaction(
     db,
-    (context) => claimOutgoingForSendWithinTransaction(context, id, clock),
+    (db, context) => claimOutgoingForSendWithinTransaction(context, id, clock),
     commitGuard,
   );
   return result.claimed;
@@ -466,119 +466,123 @@ export async function claimOutgoingForSend(
 
 /** Standalone reminder-creation owner; composing services use the transaction-only body. */
 export async function createReminder(
-  db: AppDatabase,
+  db: ReadDb,
   r: CreateReminderArgs,
   commitGuard?: DbCommitGuard,
 ): Promise<number> {
   return withDbTransaction(
     db,
-    (context) => createReminderWithinTransaction(context, r),
+    (db, context) => createReminderWithinTransaction(context, r),
     commitGuard,
   );
 }
 
 export async function deleteReminder(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   commitGuard?: DbCommitGuard,
   expectedNotificationId?: string,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => deleteReminderWithinTransaction(context, id, expectedNotificationId),
+    (db, context) => deleteReminderWithinTransaction(context, id, expectedNotificationId),
     commitGuard,
   );
 }
 
-export async function insertScheduled(db: AppDatabase, args: InsertScheduledArgs): Promise<number> {
-  return withDbTransaction(db, (context) => insertScheduledWithinTransaction(context, args));
+export async function insertScheduled(db: ReadDb, args: InsertScheduledArgs): Promise<number> {
+  return withDbTransaction(db, (db, context) => insertScheduledWithinTransaction(context, args));
 }
 
 export function updateScheduled(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   patch: UpdateScheduledPatch,
   expected?: Omit<ScheduledOccurrence, 'id'>,
 ): Promise<ScheduledEditResult> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     updateScheduledWithinTransaction(context, id, patch, expected),
   );
 }
 
 /** Delete a COMPLETED (sent/error/uncertain) row from the local history list. */
-export async function deleteScheduledHistory(db: AppDatabase, id: number): Promise<void> {
-  await withDbTransaction(db, (context) => deleteScheduledHistoryWithinTransaction(context, id));
+export async function deleteScheduledHistory(db: ReadDb, id: number): Promise<void> {
+  await withDbTransaction(db, (db, context) =>
+    deleteScheduledHistoryWithinTransaction(context, id),
+  );
 }
 
-export async function deleteScheduled(db: AppDatabase, id: number): Promise<void> {
-  await withDbTransaction(db, (context) => deleteScheduledWithinTransaction(context, id));
+export async function deleteScheduled(db: ReadDb, id: number): Promise<void> {
+  await withDbTransaction(db, (db, context) => deleteScheduledWithinTransaction(context, id));
 }
 
 export async function prepareShareIntakeNewChatPlan(
-  db: AppDatabase,
+  db: ReadDb,
   identity: ShareIntakeManifestIdentity,
   plan: ShareIntakeNewChatPlan,
 ): Promise<ShareIntakeNewChatPlan> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     prepareShareIntakeNewChatPlanWithinTransaction(context, identity, plan),
   );
 }
 
 /** Standalone sync-marker owner. Existing transaction owners use the context-only form above. */
 export async function setSyncMarker(
-  db: AppDatabase,
+  db: ReadDb,
   marker: SyncMarker,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   return withDbTransaction(
     db,
-    (context) => setSyncMarkerWithinTransaction(context, marker),
+    (db, context) => setSyncMarkerWithinTransaction(context, marker),
     commitGuard,
   );
 }
 
 /** Public standalone create. Never wrap this helper in another transaction. */
 export async function createCustomTheme(
-  db: AppDatabase,
+  db: ReadDb,
   theme: { name: string; mode: string; tokens: string },
 ): Promise<number> {
-  return withDbTransaction(db, (context) => createCustomThemeWithinTransaction(context, theme));
+  return withDbTransaction(db, (db, context) => createCustomThemeWithinTransaction(context, theme));
 }
 
 /** Public standalone update. Never wrap this helper in another transaction. */
 export async function updateCustomTheme(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   patch: { name: string; mode: string; tokens: string },
 ): Promise<void> {
-  await withDbTransaction(db, (context) => updateCustomThemeWithinTransaction(context, id, patch));
+  await withDbTransaction(db, (db, context) =>
+    updateCustomThemeWithinTransaction(context, id, patch),
+  );
 }
 
 /** Public standalone delete. Never wrap this helper in another transaction. */
-export async function deleteCustomTheme(db: AppDatabase, id: number): Promise<void> {
-  await withDbTransaction(db, (context) => deleteCustomThemeWithinTransaction(context, id));
+export async function deleteCustomTheme(db: ReadDb, id: number): Promise<void> {
+  await withDbTransaction(db, (db, context) => deleteCustomThemeWithinTransaction(context, id));
 }
 
 // ---- Moved in Phase 6 slice 5: wrappers whose cores already validate, plus test fixtures/readers.
 
 export async function setSyncedBackgroundUri(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   uri: string | null,
 ): Promise<void> {
-  await withDbTransaction(db, () =>
+  await withDbTransaction(db, (db) =>
     db.update(chats).set({ syncedBackgroundUri: uri }).where(eq(chats.guid, guid)),
   );
 }
 
 export function setSyncedBackgroundUriIfCurrent(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   expectedChannel: string | null,
   expectedUri: string | null,
   nextUri: string | null,
 ): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     setSyncedBackgroundUriIfCurrentWithinTransaction(
       context,
       guid,
@@ -590,13 +594,13 @@ export function setSyncedBackgroundUriIfCurrent(
 }
 
 export function setSyncedBackgroundLuminanceIfCurrent(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   expectedChannel: string,
   expectedUri: string,
   isLight: boolean,
 ): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
       context,
       guid,
@@ -608,7 +612,7 @@ export function setSyncedBackgroundLuminanceIfCurrent(
 }
 
 export async function insertErrorReport(
-  db: AppDatabase,
+  db: ReadDb,
   report: NewErrorReport,
   now = Date.now(),
 ): Promise<void> {
@@ -616,70 +620,67 @@ export async function insertErrorReport(
 }
 
 export async function trimErrorReports(
-  db: AppDatabase,
+  db: ReadDb,
   capacity = REPORT_CAPACITY,
   now?: number,
   byteBudget = REPORT_BYTE_BUDGET,
 ): Promise<void> {
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     trimErrorReportsInTx(context, capacity, now, byteBudget),
   );
 }
 
-export async function clearErrorReports(
-  db: AppDatabase,
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  await withDbTransaction(db, (context) => clearErrorReportsInTx(context), commitGuard);
+export async function clearErrorReports(db: ReadDb, commitGuard?: DbCommitGuard): Promise<void> {
+  await withDbTransaction(db, (db, context) => clearErrorReportsInTx(context), commitGuard);
 }
 
 export function listRetryableErrorReports(
-  db: AppDatabase,
+  db: ReadDb,
   clock: ReportClock = Date.now,
   limit = ERROR_REPORT_UPLOAD_BATCH_SIZE,
   commitGuard?: DbCommitGuard,
 ) {
   return withDbTransaction(
     db,
-    (context) => listRetryableErrorReportsWithinTransaction(context, clock, limit),
+    (db, context) => listRetryableErrorReportsWithinTransaction(context, clock, limit),
     commitGuard,
   );
 }
 
 export function claimErrorReports(
-  db: AppDatabase,
+  db: ReadDb,
   ids: number[],
   clock: ReportClock = Date.now,
   commitGuard?: DbCommitGuard,
 ): Promise<number[]> {
   return withDbTransaction(
     db,
-    (context) => claimErrorReportsInTx(context, ids, clock),
+    (db, context) => claimErrorReportsInTx(context, ids, clock),
     commitGuard,
   );
 }
 
 export async function markErrorReportsFailed(
-  db: AppDatabase,
+  db: ReadDb,
   ids: number[],
   clock: ReportClock = Date.now,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => markErrorReportsFailedInTx(context, ids, clock),
+    (db, context) => markErrorReportsFailedInTx(context, ids, clock),
     commitGuard,
   );
 }
 
 export async function deleteErrorReports(
-  db: AppDatabase,
+  db: ReadDb,
   ids: number[],
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => deleteErrorReportsWithinTransaction(context, ids),
+    (db, context) => deleteErrorReportsWithinTransaction(context, ids),
     commitGuard,
   );
 }
@@ -706,7 +707,7 @@ export function recordAttachmentCacheEntry(
   });
 }
 
-export function listChats(db: AppDatabase, opts: { includeArchived?: boolean } = {}) {
+export function listChats(db: Queryable, opts: { includeArchived?: boolean } = {}) {
   const visible = chatVisible('chats');
   return db
     .select()
@@ -715,7 +716,7 @@ export function listChats(db: AppDatabase, opts: { includeArchived?: boolean } =
     .orderBy(sql`${chats.latestMessageDate} DESC NULLS LAST`);
 }
 
-export function listMessages(db: AppDatabase, chatId: number, limit = 100) {
+export function listMessages(db: Queryable, chatId: number, limit = 100) {
   return db
     .select()
     .from(messages)
@@ -726,7 +727,7 @@ export function listMessages(db: AppDatabase, chatId: number, limit = 100) {
 
 /** Local full-text search over visible, non-deleted messages (the FTS index keeps tombstones). */
 export async function searchMessages(
-  db: AppDatabase,
+  db: Queryable,
   queryText: string,
   limit = 50,
 ): Promise<Array<Record<string, unknown>>> {
@@ -743,7 +744,7 @@ export async function searchMessages(
 }
 
 export async function listOrphanedAttachmentGuids(
-  db: AppDatabase,
+  db: Queryable,
   guids: string[],
 ): Promise<string[]> {
   if (guids.length === 0) return [];
@@ -763,13 +764,13 @@ export async function listOrphanedAttachmentGuids(
 
 /** Move one pending scheduled row to `sending` (production claims due rows with claimDueScheduled). */
 export function claimScheduled(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       const rows = await db
         .update(scheduledMessages)
         .set({ status: 'sending' })
@@ -782,7 +783,7 @@ export function claimScheduled(
 }
 
 export function revertLocalUnsend(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   appliedAt: number,
   previousDateRetracted?: number | null,
@@ -790,7 +791,7 @@ export function revertLocalUnsend(
   previousPendingRetractionPartIndex?: number | null,
   expectedAppliedPartIndex?: number,
 ): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     revertLocalUnsendWithinTransaction(
       context,
       guid,
@@ -804,7 +805,7 @@ export function revertLocalUnsend(
 }
 
 export async function applyServerSendError(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   errorCode = 1,
   now: number = Date.now(),
@@ -813,7 +814,7 @@ export async function applyServerSendError(
   errorMessage?: string | null,
   attemptIdentity?: ServerSendAttemptIdentity,
 ): Promise<boolean> {
-  const result = await withDbTransaction(db, (context) =>
+  const result = await withDbTransaction(db, (db, context) =>
     applyServerSendErrorWithinTransaction(
       context,
       guid,
@@ -830,7 +831,7 @@ export async function applyServerSendError(
 }
 
 export function updateReminderTime(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   scheduledFor: number,
   notificationId: string,
@@ -839,7 +840,7 @@ export function updateReminderTime(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       updateReminderTimeWithinTransaction(
         context,
         id,
@@ -852,7 +853,7 @@ export function updateReminderTime(
 }
 
 export async function setUrlPreview(
-  db: AppDatabase,
+  db: ReadDb,
   url: string,
   data: Parameters<typeof setUrlPreviewWithinTransaction>[2],
   now: number,
@@ -860,44 +861,44 @@ export async function setUrlPreview(
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => setUrlPreviewWithinTransaction(context, url, data, now),
+    (db, context) => setUrlPreviewWithinTransaction(context, url, data, now),
     commitGuard,
   );
 }
 
 export async function setChatCustomization(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   patch: Parameters<typeof setChatCustomizationWithinTransaction>[2],
 ): Promise<void> {
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     setChatCustomizationWithinTransaction(context, guid, patch),
   );
 }
 
 export async function setChatTheme(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   patch: Pick<ChatAppearancePatch, 'themeTokens' | 'backgroundUri'>,
 ): Promise<void> {
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     setChatAppearanceWithinTransaction(context, guid, patch),
   );
 }
 
 export async function setBackgroundIsLight(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   isLight: boolean | null,
 ): Promise<void> {
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     setChatAppearanceWithinTransaction(context, guid, { backgroundIsLight: isLight }),
   );
 }
 
 /** Insert one optimistic outgoing attachment in its own transaction (services compose the body). */
-export function insertOutgoingAttachment(db: AppDatabase, args: InsertOutgoingAttachmentArgs) {
-  return withDbTransaction(db, (context) =>
+export function insertOutgoingAttachment(db: ReadDb, args: InsertOutgoingAttachmentArgs) {
+  return withDbTransaction(db, (db, context) =>
     insertOutgoingAttachmentWithinTransaction(context, args),
   );
 }

@@ -60,7 +60,7 @@ export const useSyncSettingsStore = create<SyncSettingsState>((set, get) => ({
     set({ messagesPerChat: value, unsaved: true }); // optimistic
     try {
       const db = getDatabase();
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         kvSetWithinTransaction(context, SYNC_MESSAGES_PER_CHAT_KEY, String(value)),
       );
       // Only this value is now saved; a newer choice made meanwhile stays unsaved until its own

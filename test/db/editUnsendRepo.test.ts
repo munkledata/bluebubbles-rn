@@ -8,14 +8,14 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 import { applyLocalEdit, applyLocalUnsend, revertLocalUnsend } from '../support/repositoryWrappers';
 
 type Outcome<T> = { kind: 'fulfilled'; value: T } | { kind: 'rejected'; error: unknown };
 
-async function seed(db: AppDatabase): Promise<number> {
+async function seed(db: ReadDb): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
@@ -204,7 +204,7 @@ describe('edit/unsend repo fns', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');

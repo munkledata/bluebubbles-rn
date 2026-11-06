@@ -5,7 +5,7 @@ import type {
   NormalizedEvent,
   NotificationIntent,
 } from '@core/realtime';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 
 /**
  * Decorates an inner EventSink (the DB sink): writes the DB first (the source of
@@ -18,9 +18,9 @@ import type { AppDatabase } from '@db/types';
 export class NotifyingEventSink implements EventSink {
   constructor(
     private readonly inner: EventSink,
-    private readonly db: AppDatabase,
+    private readonly db: ReadDb,
     private readonly buildIntents: (
-      db: AppDatabase,
+      db: ReadDb,
       event: NormalizedEvent,
     ) => Promise<NotificationIntent[]>,
     private readonly notify: (

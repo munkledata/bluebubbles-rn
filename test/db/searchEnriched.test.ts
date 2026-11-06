@@ -14,10 +14,10 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
-async function seed(db: AppDatabase) {
+async function seed(db: ReadDb) {
   const hm = await upsertHandles(db, [{ address: 'craig@apple.com', displayName: 'Craig' }]);
   const map = await upsertChats(
     db,
@@ -61,7 +61,7 @@ async function seed(db: AppDatabase) {
 }
 
 describe('symbol-only queries (no letters or digits for FTS to index)', () => {
-  async function seedSymbols(db: AppDatabase) {
+  async function seedSymbols(db: ReadDb) {
     await seed(db);
     const chatId = (await getChatIdByGuid(db, 'c-craig'))!;
     await upsertMessages(

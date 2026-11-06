@@ -6,7 +6,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { ReadDb } from '../types';
 import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
 import { RECENT_UNFENCED_OUTGOING_GRACE_MS } from './messageState';
 import { chatLatestMessageDateSql } from './chatVisibility';
@@ -74,12 +74,12 @@ interface ExposureHighWater {
  * so it cannot observe a neighbouring writer's uncommitted rows on the shared connection.
  */
 export async function captureFullRepairPruneExposure(
-  db: AppDatabase,
+  db: ReadDb,
   commitGuard?: DbCommitGuard,
 ): Promise<FullRepairPruneExposure> {
   const highWater = await withDbTransaction<ExposureHighWater>(
     db,
-    async () => {
+    async (db) => {
       const rows = await db.all<ExposureHighWater>(sql`
         SELECT COALESCE((SELECT MAX(id) FROM chats), 0) AS chatId,
                COALESCE((SELECT MAX(id) FROM messages), 0) AS messageId,
@@ -99,7 +99,7 @@ export async function captureFullRepairPruneExposure(
   while (afterChatId < highWater.chatId) {
     const page = await withDbTransaction<FullRepairChatExposure[]>(
       db,
-      () =>
+      (db) =>
         db.all<FullRepairChatExposure>(sql`
           SELECT id, guid
             FROM chats
@@ -118,7 +118,7 @@ export async function captureFullRepairPruneExposure(
   while (afterMessageId < highWater.messageId) {
     const page = await withDbTransaction<FullRepairMessageExposure[]>(
       db,
-      () =>
+      (db) =>
         db.all<FullRepairMessageExposure>(sql`
           SELECT id, guid, original_row_id AS originalRowId, chat_id AS chatId,
                  date_created AS dateCreated
@@ -149,7 +149,7 @@ export async function captureFullRepairPruneExposure(
   while (afterAttachmentId < highWater.attachmentId) {
     const page = await withDbTransaction<FullRepairAttachmentExposure[]>(
       db,
-      () =>
+      (db) =>
         db.all<FullRepairAttachmentExposure>(sql`
           SELECT a.id, a.guid, a.message_id AS messageId, m.guid AS messageGuid
             FROM attachments a
@@ -436,7 +436,7 @@ function retireRepairChatWithinTransaction(
  * remain outside absence authority because the server cache is intentionally bounded.
  */
 export async function reconcileFullRepairPruneExposure(
-  db: AppDatabase,
+  db: ReadDb,
   exposure: FullRepairPruneExposure,
   view: FullRepairAuthoritativeView,
   commitGuard?: DbCommitGuard,
@@ -450,7 +450,7 @@ export async function reconcileFullRepairPruneExposure(
   for (let i = 0; i < attachmentCandidates.length; i += REPAIR_RECONCILE_BATCH_SIZE) {
     attachmentsRemoved += await withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         removeRepairAttachmentsWithinTransaction(
           context,
           attachmentCandidates.slice(i, i + REPAIR_RECONCILE_BATCH_SIZE),
@@ -468,7 +468,7 @@ export async function reconcileFullRepairPruneExposure(
   for (let i = 0; i < messageCandidates.length; i += REPAIR_RECONCILE_BATCH_SIZE) {
     messagesRemoved += await withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         removeRepairMessagesWithinTransaction(
           context,
           messageCandidates.slice(i, i + REPAIR_RECONCILE_BATCH_SIZE),
@@ -486,7 +486,7 @@ export async function reconcileFullRepairPruneExposure(
     if (view.chatGuids.has(row.guid)) continue;
     const outcome = await withDbTransaction(
       db,
-      (context) => retireRepairChatWithinTransaction(context, row),
+      (db, context) => retireRepairChatWithinTransaction(context, row),
       commitGuard,
     );
     if (outcome === 'removed') chatsRemoved += 1;

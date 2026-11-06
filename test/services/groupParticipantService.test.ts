@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo } from '@core/models';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import {
   addExactIMessageGroupParticipant,
@@ -104,7 +104,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 }
 
 describe('addExactIMessageGroupParticipant', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {
@@ -266,7 +266,7 @@ describe('addExactIMessageGroupParticipant', () => {
 });
 
 describe('removeExactIMessageGroupParticipant', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {
@@ -415,7 +415,7 @@ describe('removeExactIMessageGroupParticipant', () => {
 });
 
 describe('leaveExactIMessageGroup', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {

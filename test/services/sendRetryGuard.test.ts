@@ -20,7 +20,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
@@ -59,7 +59,7 @@ type JsonBody = Record<string, unknown>;
 /** Every POST the retry made: `{ path, body }` (body = the request's `json` payload). */
 const posts: Array<{ path: string; body: JsonBody }> = [];
 
-async function seedChat(db: AppDatabase): Promise<number> {
+async function seedChat(db: ReadDb): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(
     db,
@@ -70,7 +70,7 @@ async function seedChat(db: AppDatabase): Promise<number> {
 }
 
 async function seedExactTextTarget(
-  db: AppDatabase,
+  db: ReadDb,
   chatId: number,
   guid: string,
   partIndex: number,
@@ -98,7 +98,7 @@ async function seedExactTextTarget(
 
 /** Seed a failed optimistic TEXT send (message 'error' + a queue row with a spent attempt). */
 async function seedFailedText(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   tempGuid: string,
   text: string,

@@ -9,7 +9,7 @@ import {
   type DeviceContact,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const contact = (over: Partial<DeviceContact>): DeviceContact => ({
@@ -24,7 +24,7 @@ const contact = (over: Partial<DeviceContact>): DeviceContact => ({
 });
 
 async function holdRollingBackNeighbour(
-  db: AppDatabase,
+  db: ReadDb,
   setup: () => void | Promise<void> = () => {},
 ): Promise<{ release: () => void; finished: Promise<never> }> {
   let neighbourStarted!: () => void;
@@ -35,7 +35,7 @@ async function holdRollingBackNeighbour(
   const held = new Promise<void>((resolve) => {
     releaseNeighbour = resolve;
   });
-  const finished = withDbTransaction(db, async () => {
+  const finished = withDbTransaction(db, async (db) => {
     await setup();
     neighbourStarted();
     await held;
@@ -778,7 +778,7 @@ describe('contacts account commit boundary', () => {
     ]);
 
     await expect(
-      withDbTransaction(db, async (context) => {
+      withDbTransaction(db, async (db, context) => {
         const ids = await upsertHandlesWithinTransaction(context, [
           { address: 'owned@example.com', displayName: 'Server Name' },
         ]);

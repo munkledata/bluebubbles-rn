@@ -9,7 +9,7 @@ import {
   insertErrorReports,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import {
   claimErrorReports,
@@ -45,7 +45,7 @@ const serializedQueueBytes = (raw: Database.Database): number =>
     }
   ).bytes;
 
-async function seed(db: AppDatabase, n: number, createdAt = 1000): Promise<void> {
+async function seed(db: ReadDb, n: number, createdAt = 1000): Promise<void> {
   for (let i = 0; i < n; i++) {
     await insertErrorReport(
       db,
@@ -55,7 +55,7 @@ async function seed(db: AppDatabase, n: number, createdAt = 1000): Promise<void>
   }
 }
 
-async function holdRollingBackTransaction(db: AppDatabase): Promise<{
+async function holdRollingBackTransaction(db: ReadDb): Promise<{
   release: () => void;
   failure: Promise<unknown>;
 }> {
@@ -67,7 +67,7 @@ async function holdRollingBackTransaction(db: AppDatabase): Promise<{
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const neighbour = withDbTransaction(db, async () => {
+  const neighbour = withDbTransaction(db, async (db) => {
     markStarted();
     await held;
     throw new Error('neighbour rollback');

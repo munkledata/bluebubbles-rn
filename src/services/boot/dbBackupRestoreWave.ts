@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { CHUNKED_SECRET_BOX_CHUNK_BYTES, CHUNKED_SECRET_BOX_PREFIX } from '@core/crypto';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase, DbBackupRestoreWaveChecks } from '@db/types';
+import type { DbBackupRestoreWaveChecks, Queryable, ReadDb } from '@db/types';
 import { utf8Encode } from '@utils/bytes';
 import { getSecretBox } from '../clients';
 import { openBackup, restoreBackup, sealBackup, serializeBackup } from '../backup/backup';
@@ -108,7 +108,7 @@ export function buildNearLimitBackupRestoreFixture(): {
   return { backup, plaintext };
 }
 
-async function count(db: AppDatabase, statement: ReturnType<typeof sql>): Promise<number> {
+async function count(db: Queryable, statement: ReturnType<typeof sql>): Promise<number> {
   const rows = await db.all<{ count: number }>(statement);
   return Number(rows[0]?.count ?? 0);
 }
@@ -131,13 +131,13 @@ function containsFault(error: unknown): boolean {
   return false;
 }
 
-async function dropFaultTrigger(db: AppDatabase): Promise<void> {
-  await withDbTransaction(db, async () => {
+async function dropFaultTrigger(db: ReadDb): Promise<void> {
+  await withDbTransaction(db, async (db) => {
     await db.run(sql.raw(`DROP TRIGGER IF EXISTS temp.${FAULT_TRIGGER}`));
   });
 }
 
-async function temporaryRestoreTablesAreAbsent(db: AppDatabase): Promise<boolean> {
+async function temporaryRestoreTablesAreAbsent(db: Queryable): Promise<boolean> {
   return (
     (await count(
       db,
@@ -153,7 +153,7 @@ async function temporaryRestoreTablesAreAbsent(db: AppDatabase): Promise<boolean
  * Exercise native BB2 crypto and a late, atomic v3 restore failure on the disposable SQLCipher DB.
  * All data and credentials are fixed synthetic values; errors are reduced to finite booleans.
  */
-export async function runDbBackupRestoreWave(db: AppDatabase): Promise<DbBackupRestoreWaveChecks> {
+export async function runDbBackupRestoreWave(db: ReadDb): Promise<DbBackupRestoreWaveChecks> {
   const checks = emptyChecks();
   let triggerInstalled = false;
 
@@ -174,7 +174,7 @@ export async function runDbBackupRestoreWave(db: AppDatabase): Promise<DbBackupR
     const opened = await openBackup(box, sealed, PASSPHRASE);
     checks.nativeOpen = serializeBackup(opened) === plaintext;
 
-    await withDbTransaction(db, async () => {
+    await withDbTransaction(db, async (db) => {
       await db.run(
         sql`INSERT INTO kv (key, value) VALUES ('theme.preset', 'before')
               ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
@@ -197,7 +197,7 @@ export async function runDbBackupRestoreWave(db: AppDatabase): Promise<DbBackupR
       );
     });
 
-    await withDbTransaction(db, async () => {
+    await withDbTransaction(db, async (db) => {
       await db.run(
         sql.raw(`
         CREATE TEMP TRIGGER ${FAULT_TRIGGER}
@@ -215,7 +215,7 @@ export async function runDbBackupRestoreWave(db: AppDatabase): Promise<DbBackupR
     // Claim the successor immediately afterward so it is ordered behind the faulting owner; the
     // host source-contract test pins that prerequisite against future restore refactors.
     const faultingRestore = restoreBackup(db, opened);
-    const queuedSuccessor = withDbTransaction(db, async () => {
+    const queuedSuccessor = withDbTransaction(db, async (db) => {
       await db.run(sql`INSERT INTO kv (key, value) VALUES (${SUCCESSOR_KEY}, 'committed')`);
     });
     const [restoreOutcome, successorOutcome] = await Promise.allSettled([

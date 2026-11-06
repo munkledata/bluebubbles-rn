@@ -928,7 +928,7 @@ describe('restoreBackup round-trip', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(t.db, async () => {
+    const neighbour = withDbTransaction(t.db, async (db) => {
       t.raw.prepare("UPDATE chats SET custom_name = 'phantom' WHERE guid = ?").run(guid);
       neighbourStarted();
       await release;

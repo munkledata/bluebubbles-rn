@@ -14,7 +14,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 import { createTestDb } from '../support/testDb';
 
@@ -24,7 +24,7 @@ function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
   } as unknown as HttpClient;
 }
 
-async function seed(db: AppDatabase) {
+async function seed(db: ReadDb) {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,

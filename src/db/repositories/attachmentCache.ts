@@ -4,7 +4,7 @@ import {
   withDbTransaction,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import {
   attachmentMediaExportOwnerEligibleSql,
   attachmentMediaExportProtectsCacheSql,
@@ -205,7 +205,7 @@ export const ATTACHMENT_CACHE_RETIREMENT_RETRY_MAX_MS = 6 * 60 * 60 * 1000;
  * excludes mounted/current paths.
  */
 export async function listInactiveAttachmentCachePaths(
-  db: AppDatabase,
+  db: Queryable,
   limit = MAX_RETIREMENT_BATCH,
 ): Promise<string[]> {
   requireNonnegativeSafeInteger(limit, 'Attachment cache inactive-path limit');
@@ -285,7 +285,7 @@ function chatIdByGuidSql(chatGuid: string) {
  * reserved and in-flight paths.
  */
 export async function listChatOnlyAttachmentCachePaths(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   limit = MAX_RETIREMENT_BATCH,
 ): Promise<string[]> {
@@ -321,7 +321,7 @@ export interface ChatDownloadedFilesSummary {
  * holds to {@link ATTACHMENT_CACHE_RECOVERY_MAX_FILES} rows.
  */
 export async function getChatDownloadedFilesSummary(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
 ): Promise<ChatDownloadedFilesSummary> {
   const empty = { files: 0, bytes: 0, keptFiles: 0 };
@@ -393,7 +393,7 @@ function pathSqlList(paths: readonly string[]) {
  * corrupt/hostile duplicate set from making COUNT scan the rest of an unbounded attachments table.
  */
 async function boundedAttachmentReferenceCount(
-  db: AppDatabase,
+  db: Queryable,
   paths: readonly string[],
 ): Promise<number> {
   if (paths.length === 0) return 0;
@@ -517,9 +517,9 @@ export function listPastedAttachmentProtectionPathsWithinTransaction(
 
 /** Standalone short owner for the foreground paste-listener readiness snapshot. */
 export function listPastedAttachmentProtectionPaths(
-  db: AppDatabase,
+  db: ReadDb,
 ): Promise<PastedAttachmentProtectionSnapshot> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     listPastedAttachmentProtectionPathsWithinTransaction(context),
   );
 }
@@ -648,7 +648,7 @@ export async function adoptAttachmentCacheScanBatch(
  * Read every durable cache owner with one extra row so startup can reject over-limit corruption.
  */
 export async function listAttachmentCacheEntriesForRecovery(
-  db: AppDatabase,
+  db: Queryable,
   limit = ATTACHMENT_CACHE_RECOVERY_MAX_FILES + 1,
 ): Promise<AttachmentCacheEntry[]> {
   requireNonnegativeSafeInteger(limit, 'Attachment cache recovery entry limit');
@@ -664,7 +664,7 @@ export async function listAttachmentCacheEntriesForRecovery(
 }
 
 export async function getAttachmentCacheEntry(
-  db: AppDatabase,
+  db: Queryable,
   path: string,
 ): Promise<AttachmentCacheEntry | null> {
   requirePath(path);
@@ -794,7 +794,7 @@ export async function repairMissingActiveAttachmentCacheEntry(
 }
 
 /** Both active and retiring files count until native deletion is confirmed. */
-export async function getAttachmentCacheUsage(db: AppDatabase): Promise<AttachmentCacheUsage> {
+export async function getAttachmentCacheUsage(db: Queryable): Promise<AttachmentCacheUsage> {
   const rows = await db.all<AttachmentCacheUsage>(sql`
     SELECT COUNT(*) AS files, COALESCE(SUM(bytes), 0) AS bytes
     FROM attachment_cache_entries
@@ -812,7 +812,7 @@ export async function getAttachmentCacheUsage(db: AppDatabase): Promise<Attachme
  * or retire a safe returned batch and then recompute from a fresh snapshot.
  */
 export async function getAttachmentCacheQuotaSnapshot(
-  db: AppDatabase,
+  db: Queryable,
   limit = MAX_SNAPSHOT_CANDIDATES,
 ): Promise<AttachmentCacheQuotaSnapshot> {
   requireNonnegativeSafeInteger(limit, 'Attachment cache snapshot limit');
@@ -1087,7 +1087,7 @@ export async function scheduleAttachmentCacheRetirementRetry(
 
 /** Bounded recovery query for deletion work that survived a crash or process restart. */
 export async function listDueAttachmentCacheRetirements(
-  db: AppDatabase,
+  db: Queryable,
   now: number,
   limit = MAX_RETIREMENT_BATCH,
 ): Promise<AttachmentCacheEntry[]> {

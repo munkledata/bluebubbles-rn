@@ -101,7 +101,7 @@ describe('FEAT-06 legacy alias ownership quarantine', () => {
     await expect(reconcileOutgoingError(db, 'temp-ownerless-alias', 42, 1_000)).resolves.toBe(true);
     await expect(claimOutgoingForSend(db, queue.id, () => 1_000_000)).resolves.toBe(false);
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         retireUncertainOutgoingWithinTransaction(
           context,
           'temp-ownerless-alias',

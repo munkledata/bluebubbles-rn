@@ -7,7 +7,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import { messageHasVisibleContentSql } from './chatVisibility';
 
 // ---- Reminders -------------------------------------------------------------
@@ -53,7 +53,7 @@ const REMINDER_COLS = sql`id, message_guid AS messageGuid, chat_guid AS chatGuid
  * All reminders, soonest first, each with its message's LIVE text and sender. Rows store no copy, so
  * an unsent message shows no text and a locally deleted or missing one shows neither.
  */
-export async function listReminders(db: AppDatabase): Promise<Reminder[]> {
+export async function listReminders(db: Queryable): Promise<Reminder[]> {
   return db.all<Reminder>(sql`
     SELECT r.id, r.message_guid AS messageGuid, r.chat_guid AS chatGuid,
            CASE WHEN ${messageHasVisibleContentSql('m')} THEN NULLIF(TRIM(m.text), '') END
@@ -71,7 +71,7 @@ export async function listReminders(db: AppDatabase): Promise<Reminder[]> {
 }
 
 export async function getReminderByMessageGuid(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
 ): Promise<Reminder | null> {
   const rows = await db.all<Reminder>(
@@ -108,13 +108,13 @@ export function deleteReminderByNotificationIdWithinTransaction(
 }
 
 export async function deleteReminderByNotificationId(
-  db: AppDatabase,
+  db: ReadDb,
   notificationId: string,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => deleteReminderByNotificationIdWithinTransaction(context, notificationId),
+    (db, context) => deleteReminderByNotificationIdWithinTransaction(context, notificationId),
     commitGuard,
   );
 }

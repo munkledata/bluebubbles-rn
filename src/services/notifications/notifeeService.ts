@@ -15,7 +15,7 @@ import type { EventDeliveryContext, NotificationIntent } from '@core/realtime';
 import { isExactMessagePartTopology } from '@core/messages/retraction';
 import { parseMessagePartTopology, restoredChatKind } from '@core/models';
 import { logger } from '@core/secure';
-import type { AppDatabase } from '@db/types';
+import type { Queryable } from '@db/types';
 import { useLockStore } from '@state/lockStore';
 import { buildMessageSnippet, isRcsChatGuid } from '@utils';
 import {
@@ -820,7 +820,7 @@ async function revalidateDisplayedMessageHistoryForMutation(
 
 /** Private DB-truth reconciliation. The caller already owns the global native mutation slot. */
 async function reconcileDisplayedMessageHistoriesNow(
-  db?: AppDatabase,
+  db?: Queryable,
   context?: EventDeliveryContext,
 ): Promise<void> {
   context ??= captureRealtimeDeliveryLease();
@@ -2154,7 +2154,7 @@ export function postNotification(
 async function postNotificationNow(
   intent: NotificationIntent,
   context?: EventDeliveryContext,
-  routeDb?: AppDatabase,
+  routeDb?: Queryable,
 ): Promise<void> {
   if (!deliveryIsCurrent(context)) return;
   // Defense in depth for the common socket/FCM pipeline. The AppState coordinator normally keeps
@@ -2351,7 +2351,7 @@ async function withdrawMessageNotificationNow(
   chatGuid: string,
   _messageGuid: string,
   context?: EventDeliveryContext,
-  db?: AppDatabase,
+  db?: Queryable,
 ): Promise<void> {
   if (!deliveryIsCurrent(context)) return;
   const failures: unknown[] = [];
@@ -2374,7 +2374,7 @@ async function withdrawMessageNotificationNow(
 async function postSendFailureNotificationNow(
   intent: Extract<NotificationIntent, { kind: 'send-failure' }>,
   context?: EventDeliveryContext,
-  db?: AppDatabase,
+  db?: Queryable,
 ): Promise<void> {
   if (!deliveryIsCurrent(context) || isActiveChat(intent.chatGuid)) return;
   await ensureChannel();
@@ -2398,7 +2398,7 @@ async function postSendFailureNotificationNow(
 async function cancelSendFailureNotificationNow(
   messageGuid: string,
   context?: EventDeliveryContext,
-  db?: AppDatabase,
+  db?: Queryable,
 ): Promise<void> {
   if (!deliveryIsCurrent(context)) return;
   // An RCS bridge can acknowledge with the temp guid just after a server error. The repository
@@ -2413,7 +2413,7 @@ async function cancelSendFailureNotificationNow(
 
 /** Post fixed app-authored failure copy only after the supplied DB contains a current error row. */
 export function postSendFailureNotification(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   messageGuid: string,
   context?: EventDeliveryContext,
@@ -2426,7 +2426,7 @@ export function postSendFailureNotification(
 
 /** Best-effort exact withdrawal after a retry/ack settles the same local message row. */
 export function cancelSendFailureNotification(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
   context?: EventDeliveryContext,
 ): Promise<void> {
@@ -2500,7 +2500,7 @@ function runTrackedMessageGroupReconciliation(): Promise<void> {
  * Registration precedes the FIFO wait so Disconnect drains an admitted reconciliation.
  */
 export function reconcileMessageNotificationsWithDatabase(
-  db: AppDatabase,
+  db: Queryable,
   context?: EventDeliveryContext,
 ): Promise<void> {
   const accountLease = context ?? captureRealtimeDeliveryLease();

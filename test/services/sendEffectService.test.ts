@@ -3,7 +3,7 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo } from '@core/models';
 import { claimFailedOutgoingForRetry, OUTGOING_MAX_ATTEMPTS } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import {
   fixedRcsCapabilitySource,
@@ -67,7 +67,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 }
 
 describe('sendIMessageEffect', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {
@@ -288,7 +288,7 @@ describe('sendIMessageEffect', () => {
 // the same one-shot route with the group's guid.
 describe('sendIMessageEffect in an iMessage group (FP-006)', () => {
   const GROUP = 'any;+;chat-effects-1';
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   function seedGroup(services: string[] = ['iMessage', 'iMessage']): void {

@@ -29,7 +29,7 @@ import {
   upsertMessagesWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import { createTestDb } from '../support/testDb';
 
@@ -66,7 +66,7 @@ import { deleteMessageLocal, insertOutgoingAttachment } from '../support/reposit
 
 jest.setTimeout(120_000);
 
-async function seedChat(db: AppDatabase): Promise<number> {
+async function seedChat(db: ReadDb): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(
     db,
@@ -124,9 +124,9 @@ const rcsInfo = (epoch: string) =>
  * The live fanout, exactly as DbEventSink applies it: content-reconcile the optimistic row, then
  * upsert the server's message. This is what re-materializes anything the delete destroyed.
  */
-async function fanout(db: AppDatabase, chatId: number, guid: string, text: string): Promise<void> {
+async function fanout(db: ReadDb, chatId: number, guid: string, text: string): Promise<void> {
   const echo = { guid, isFromMe: true, text, dateCreated: 100 };
-  await withDbTransaction(db, (context) => reconcileEchoByContent(context, echo, chatId));
+  await withDbTransaction(db, (db, context) => reconcileEchoByContent(context, echo, chatId));
   await upsertMessages(
     db,
     [Message.parse({ guid, isFromMe: true, text, dateCreated: 100 })],
@@ -210,7 +210,7 @@ describe('discardMessage — the two guarded steps together', () => {
       .prepare("UPDATE messages SET send_state='error', error=500 WHERE guid='temp-failed-notice'")
       .run();
     (clearFailedSendNotice as jest.Mock).mockImplementationOnce(
-      async (_db: AppDatabase, guid: string, guard?: () => boolean) => {
+      async (_db: Queryable, guid: string, guard?: () => boolean) => {
         expect(guid).toBe('temp-failed-notice');
         expect(guard?.()).toBe(true);
         expect(deletionDate(raw, guid)).toBe(6_000);
@@ -540,7 +540,7 @@ describe('discardMessage — the two guarded steps together', () => {
       text: 'same live echo',
       dateCreated: 100,
     });
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       await reconcileEchoByContent(context, echo, chatId);
       await upsertMessagesWithinTransaction(context, [echo], () => chatId, new Map());
     });

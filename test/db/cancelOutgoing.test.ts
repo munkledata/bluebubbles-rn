@@ -12,10 +12,10 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
-async function seedChat(db: AppDatabase, guid: string): Promise<number> {
+async function seedChat(db: ReadDb, guid: string): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
@@ -277,7 +277,7 @@ describe('cancelOutgoing (2.3)', () => {
       // The send had actually gone through; its echo arrives minutes later. Promoted in place,
       // still hidden — a hard delete here left nothing for the echo to attach the deletion to and
       // the message returned as an ordinary sent bubble.
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         reconcileEchoByContent(
           context,
           { guid: 'real-errd', isFromMe: true, text: 'failed', dateCreated: 100 },

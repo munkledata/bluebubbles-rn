@@ -123,7 +123,7 @@ describe('url preview cache repository', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(t.db, async () => {
+    const neighbour = withDbTransaction(t.db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');

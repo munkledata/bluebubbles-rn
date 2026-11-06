@@ -21,7 +21,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { isProvenIMessageGroupChat } from '@utils';
 import {
   resolveRcsAttemptOwnership,
@@ -44,9 +44,9 @@ export type SendMentionResult =
   | { readonly status: 'outcome-unknown'; readonly tempGuid: string };
 
 /** Mention sends are destructive one-shot work: never queue behind another attempt for the chat. */
-const activeMentions = new WeakMap<AppDatabase, Set<string>>();
+const activeMentions = new WeakMap<Queryable, Set<string>>();
 
-function claimMention(db: AppDatabase, chatGuid: string): boolean {
+function claimMention(db: Queryable, chatGuid: string): boolean {
   let active = activeMentions.get(db);
   if (!active) {
     active = new Set();
@@ -57,7 +57,7 @@ function claimMention(db: AppDatabase, chatGuid: string): boolean {
   return true;
 }
 
-function releaseMention(db: AppDatabase, chatGuid: string): void {
+function releaseMention(db: Queryable, chatGuid: string): void {
   const active = activeMentions.get(db);
   active?.delete(chatGuid);
   if (active?.size === 0) activeMentions.delete(db);
@@ -104,14 +104,14 @@ function exactMentionTargetWithinTransaction(
 }
 
 async function discardDefiniteAttempt(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   now: number,
   commitGuard: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => discardOutgoingMessageWithinTransaction(context, tempGuid, now),
+    (db, context) => discardOutgoingMessageWithinTransaction(context, tempGuid, now),
     commitGuard,
   );
 }
@@ -128,7 +128,7 @@ class MentionTargetRejectedError extends Error {
  * an attempt whose dispatch outcome is uncertain.
  */
 export async function sendIMessageMention(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendMentionArgs,
   now: number = Date.now(),
@@ -167,7 +167,7 @@ export async function sendIMessageMention(
     try {
       await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           if (
             !(await exactMentionTargetWithinTransaction(
               context,
@@ -220,7 +220,7 @@ export async function sendIMessageMention(
     try {
       const targetCurrent = await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           const current = await exactMentionTargetWithinTransaction(
             context,
             request.chatGuid,

@@ -11,7 +11,7 @@ import { createCustomFolder, listCustomFolderChatGuids } from '../support/reposi
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 
 const add = (t: Db, folderId: number, chatGuid: string) =>
-  withDbTransaction(t.db, (context) =>
+  withDbTransaction(t.db, (db, context) =>
     addChatToCustomFolderWithinTransaction(context, folderId, chatGuid),
   );
 

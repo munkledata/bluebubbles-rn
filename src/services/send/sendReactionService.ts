@@ -9,7 +9,7 @@ import {
   type MessageTargetServerAuthorization,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { isRcsChatGuid } from '@utils/chat';
 import { parseReactionType } from '@core/reactions/reactionType';
 import {
@@ -39,7 +39,7 @@ export interface SendReactionArgs {
  * them. Mirrors sendTextMessage (Node-testable, no RN imports).
  */
 export async function sendReactionMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendReactionArgs,
   now: number = Date.now(),
@@ -62,7 +62,7 @@ export async function sendReactionMessage(
   const tempGuid = generateTempGuid();
   await withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const resolvedTarget = await resolveMessageTargetWithinTransaction(context, target);
       if (!resolvedTarget) throw new MessageTargetUnavailableError();
       return insertOutgoingReactionWithinTransaction(context, {
@@ -124,7 +124,7 @@ export async function sendReactionMessage(
 
 /** No optimistic row or retry queue: an acknowledgement-lost iMessage tapback may have sent. */
 export async function sendIMessageReactionMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendReactionArgs,
   commitGuard: DbCommitGuard,

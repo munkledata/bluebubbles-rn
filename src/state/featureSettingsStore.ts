@@ -14,7 +14,7 @@ import {
   kvSetWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   DEFAULT_MAX_CONCURRENT_DOWNLOADS,
   MAX_CONCURRENT_DOWNLOADS_LIMIT,
@@ -106,21 +106,21 @@ export const PERMISSION_ONBOARDING_COMPLETED_KEY = 'onboarding.permissionsComple
 
 export interface PermissionOnboardingWriteContext extends HydrationOptions {
   /** Exact account database captured before the completion write starts. */
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   /** Required account/route authority; checked before admission, COMMIT, and state publication. */
   readonly shouldCommit: () => boolean;
 }
 
 export interface ErrorReportingConsentWriteContext extends HydrationOptions {
   /** Exact account database captured before this choice joins the serialized tail. */
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   /** Required account/run authority; checked before admission, BEGIN, and COMMIT. */
   readonly shouldCommit: () => boolean;
 }
 
 export interface AutoDownloadPolicyWriteContext extends HydrationOptions {
   /** Exact account database captured before changing export policy. */
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   /** Account/route authority checked before COMMIT and optimistic-state rollback/publication. */
   readonly shouldCommit: () => boolean;
 }
@@ -149,7 +149,7 @@ function enqueueErrorReportingConsentWrite(
     try {
       await withDbTransaction(
         context.db,
-        async (transactionContext) => {
+        async (db, transactionContext) => {
           await kvSetWithinTransaction(transactionContext, ERROR_REPORTING_CONSENT_KEY, value);
           // Every explicit choice starts from an empty diagnostic queue. This makes both directions
           // safe when a newer choice supersedes an older queued one: Allow can never authorize rows
@@ -322,7 +322,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
       if (retiredPrivateApiMasterRaw === '1' || retiredPrivateApiSubjectRaw === '1') {
         await withDbTransaction(
           db,
-          async (transactionContext) => {
+          async (db, transactionContext) => {
             if (retiredPrivateApiMasterRaw === '1') {
               await kvSetWithinTransaction(transactionContext, RETIRED_PRIVATE_API_MASTER_KEY, '0');
             }
@@ -390,7 +390,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     try {
       await withDbTransaction(
         context?.db ?? getDatabase(),
-        async (transactionContext) => {
+        async (db, transactionContext) => {
           await kvSetWithinTransaction(transactionContext, FLAGS[flag].key, value ? '1' : '0');
           if (flag === 'autoDownloadAttachments' && !value) {
             await cancelPendingAttachmentMediaExportsWithinTransaction(transactionContext);
@@ -442,7 +442,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     setting.apply(val); // apply immediately, before the persist
     set({ maxConcurrentDownloads: val }); // optimistic
     try {
-      await withDbTransaction(getDatabase(), (context) =>
+      await withDbTransaction(getDatabase(), (db, context) =>
         kvSetWithinTransaction(context, setting.key, setting.serialize(val)),
       );
     } catch {
@@ -456,7 +456,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     try {
       await withDbTransaction(
         context.db,
-        async (transactionContext) => {
+        async (db, transactionContext) => {
           await kvSetWithinTransaction(transactionContext, AUTO_DOWNLOAD_DEST_KEY, dest);
           await cancelPendingAttachmentMediaExportsWithinTransaction(transactionContext);
         },
@@ -471,7 +471,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     const normalized = normalizeInboxFilters(filters);
     set({ inboxFilters: normalized }); // optimistic: the inbox switches query keys immediately
     try {
-      await withDbTransaction(getDatabase(), (context) =>
+      await withDbTransaction(getDatabase(), (db, context) =>
         kvSetWithinTransaction(context, INBOX_FILTERS_KEY, serializeInboxFilters(normalized)),
       );
     } catch {
@@ -490,7 +490,7 @@ export async function completePermissionOnboarding(
   if (!canCommitHydration(context)) return false;
   await withDbTransaction(
     context.db,
-    (transactionContext) =>
+    (db, transactionContext) =>
       kvSetWithinTransaction(transactionContext, PERMISSION_ONBOARDING_COMPLETED_KEY, '1'),
     () => canCommitHydration(context),
   );

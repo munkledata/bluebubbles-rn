@@ -34,7 +34,7 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import { appleScreeningEmitted, appleScreeningFlagForStorage } from '../appleScreeningCapability';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import { dedupeBy } from './_shared';
 import { upsertAttachmentsWithinTransaction } from './attachments';
 import {
@@ -980,7 +980,7 @@ export function upsertMessagesWithinTransaction(
  * the same bounded commit.
  */
 export async function upsertMessages(
-  db: AppDatabase,
+  db: ReadDb,
   items: Message[],
   resolveChatId: (m: Message) => number | undefined,
   handleIdByKey: Map<string, number>,
@@ -988,7 +988,7 @@ export async function upsertMessages(
 ): Promise<Map<string, number>> {
   return withDbTransaction(
     db,
-    (context) => upsertMessagesWithinTransaction(context, items, resolveChatId, handleIdByKey),
+    (db, context) => upsertMessagesWithinTransaction(context, items, resolveChatId, handleIdByKey),
     commitGuard,
   );
 }
@@ -1268,7 +1268,7 @@ export function recordUnconfirmedUnsendWithinTransaction(
 
 /** The local unsend fence and its marker, to tell whether an unconfirmed unsend still stands. */
 export async function readMessageUnsendFence(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
 ): Promise<{ pendingPartIndex: number | null; dateRetracted: number | null } | null> {
   const rows = await db.all<{ pendingPartIndex: number | null; dateRetracted: number | null }>(sql`
@@ -1281,7 +1281,7 @@ export async function readMessageUnsendFence(
 }
 
 export async function readUnconfirmedUnsend(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
 ): Promise<UnconfirmedUnsend | null> {
   const raw = await kvGet(db, `${UNSEND_UNCONFIRMED_KV_PREFIX}${messageGuid}`);
@@ -1366,7 +1366,7 @@ export function revertLocalEditWithinTransaction(
 
 /** Standalone optimistic-edit revert owner; composing services use the transaction-only body. */
 export async function revertLocalEdit(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   prevText: string | null,
   prevDateEdited: number | null,
@@ -1374,7 +1374,7 @@ export async function revertLocalEdit(
   prevAttributedBody?: string | null,
   expectedOptimisticText?: string,
 ): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     revertLocalEditWithinTransaction(
       context,
       guid,
@@ -1555,7 +1555,7 @@ export function markMessageDeletedWithinTransaction(
  * instead; nesting this public owner would wedge the process-wide write queue.
  */
 export async function markMessageDeleted(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   dateDeleted: number,
   commitGuard?: DbCommitGuard,
@@ -1563,7 +1563,8 @@ export async function markMessageDeleted(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => markMessageDeletedWithinTransaction(context, guid, dateDeleted, expectedChatGuid),
+    (db, context) =>
+      markMessageDeletedWithinTransaction(context, guid, dateDeleted, expectedChatGuid),
     commitGuard,
   );
 }

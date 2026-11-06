@@ -7,7 +7,7 @@ import {
   insertOutgoingText,
   OUTGOING_MAX_ATTEMPTS,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { sendIMessageFormatted } from '@/services/send/sendFormattedService';
@@ -71,7 +71,7 @@ function one(raw: Database.Database, sql: string): Record<string, unknown> {
 }
 
 describe('sendIMessageFormatted', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {

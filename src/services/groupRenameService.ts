@@ -8,7 +8,7 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { getChatHeader } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable } from '@db/types';
 import { isProvenIMessageGroupChat } from '@utils';
 import {
   resolveRcsAttemptOwnership,
@@ -40,9 +40,9 @@ export type RenameAppleGroupResult =
   | { readonly status: 'outcome-unknown'; readonly tempGuid: string };
 
 /** Group renames are one-shot mutations; a second tap cannot queue behind an active request. */
-const activeGroupRenames = new WeakMap<AppDatabase, Set<string>>();
+const activeGroupRenames = new WeakMap<Queryable, Set<string>>();
 
-function claimGroupRename(db: AppDatabase, chatGuid: string): boolean {
+function claimGroupRename(db: Queryable, chatGuid: string): boolean {
   let active = activeGroupRenames.get(db);
   if (!active) {
     active = new Set();
@@ -53,7 +53,7 @@ function claimGroupRename(db: AppDatabase, chatGuid: string): boolean {
   return true;
 }
 
-function releaseGroupRename(db: AppDatabase, chatGuid: string): void {
+function releaseGroupRename(db: Queryable, chatGuid: string): void {
   const active = activeGroupRenames.get(db);
   active?.delete(chatGuid);
   if (active?.size === 0) activeGroupRenames.delete(db);
@@ -80,7 +80,7 @@ function isDefiniteGroupRenameFailure(error: unknown): boolean {
  * No local chat title is changed: sync remains the authority for Apple Messages' group name.
  */
 export async function renameExactIMessageGroup(
-  db: AppDatabase,
+  db: Queryable,
   client: HttpClient,
   args: RenameAppleGroupArgs,
   accountGuard?: DbCommitGuard,

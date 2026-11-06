@@ -12,7 +12,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import {
   captureSessionRcsCapabilityLease,
@@ -78,7 +78,7 @@ function revisionPinnedHttp(options: {
   return root;
 }
 
-async function seedChat(db: AppDatabase, guid: string) {
+async function seedChat(db: ReadDb, guid: string) {
   const handles = await upsertHandles(db, [{ address: 'craig@apple.com' }]);
   await upsertChats(
     db,
@@ -87,7 +87,7 @@ async function seedChat(db: AppDatabase, guid: string) {
   );
 }
 
-async function seedProvenIMessageChat(db: AppDatabase, guid: string) {
+async function seedProvenIMessageChat(db: ReadDb, guid: string) {
   const participant = { address: '+15551234567', service: 'iMessage' as const };
   const handles = await upsertHandles(db, [participant]);
   await upsertChats(db, [Chat.parse({ guid, style: 45, participants: [participant] })], handles);

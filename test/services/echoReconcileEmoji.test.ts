@@ -16,12 +16,12 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { createTestDb } from '../support/testDb';
 import { markOutgoingSentNoGuid } from '../support/repositoryWrappers';
 
-async function seed(db: AppDatabase): Promise<number> {
+async function seed(db: ReadDb): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,

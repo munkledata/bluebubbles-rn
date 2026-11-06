@@ -20,7 +20,7 @@ import {
   getMessageStateAuthorityWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import type { SyncApi } from './types';
 
 /** Deleted-message catch-up is isolated from full, targeted, and incremental sync flows. */
@@ -208,14 +208,14 @@ function normalizePositiveBound(
 
 /** Read the one-time stable-deletion initialization proof under the global DB owner + account guard. */
 export async function isDeletionSnapshotInitialized(
-  db: AppDatabase,
+  db: ReadDb,
   opts: DeletionSnapshotInitializationReadOptions = {},
 ): Promise<boolean> {
   const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
   const commitGuard = opts.commitGuard ?? (opts.shouldAbort ? shouldContinue : undefined);
   const value = await withDbTransaction(
     db,
-    (transactionContext) =>
+    (db, transactionContext) =>
       kvGetWithinTransaction(transactionContext, DELETION_SNAPSHOT_INITIALIZED_KEY),
     commitGuard,
   );
@@ -264,7 +264,7 @@ function isOldServerV2CursorRejection(error: unknown, cursor: string | null): bo
  * the opaque cursor, not those dates, owns continuation progress.
  */
 export async function syncDeletedMessages(
-  db: AppDatabase,
+  db: ReadDb,
   api: SyncApi,
   opts: DeletionSyncOptions,
 ): Promise<number> {
@@ -308,7 +308,8 @@ export async function syncDeletedMessages(
   if (!config.startFromZero) {
     const rawState = await withDbTransaction(
       db,
-      (transactionContext) => kvGetWithinTransaction(transactionContext, DELETIONS_SYNCED_AT_KEY),
+      (db, transactionContext) =>
+        kvGetWithinTransaction(transactionContext, DELETIONS_SYNCED_AT_KEY),
       commitGuard,
     );
     state = parseState(rawState);
@@ -440,7 +441,7 @@ export async function syncDeletedMessages(
     const serializedNextState = serializeState(nextState);
     await withDbTransaction(
       db,
-      async (transactionContext) => {
+      async (db, transactionContext) => {
         if (await getMessageStateAuthorityWithinTransaction(transactionContext)) return;
         for (const row of preparedRows) {
           await markMessageDeletedWithinTransaction(

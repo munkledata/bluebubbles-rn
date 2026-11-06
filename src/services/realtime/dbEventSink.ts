@@ -33,7 +33,7 @@ import {
   DbCommitGuardRejectedError,
   withDbTransaction,
 } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { supportsMessageStateSync } from '../sync/providerRepair';
 import {
   IncomingEventDependencyPendingError,
@@ -92,7 +92,7 @@ export class RealtimeReadStatusUnavailableError extends IncomingEventDependencyP
  * lease. The second check runs before COMMIT; throwing rolls every write in this callback back.
  */
 async function withCurrentDeliveryTransaction<T>(
-  db: AppDatabase,
+  db: ReadDb,
   context: EventDeliveryContext | undefined,
   task: (transactionContext: DbTransactionContext) => Promise<T>,
   additionalGuard?: () => boolean,
@@ -100,7 +100,7 @@ async function withCurrentDeliveryTransaction<T>(
   try {
     return await withDbTransaction(
       db,
-      async (transactionContext) => {
+      async (db, transactionContext) => {
         if ((context && !context.isCurrent()) || additionalGuard?.() === false) return null;
         const result = await task(transactionContext);
         if ((context && !context.isCurrent()) || additionalGuard?.() === false) {
@@ -164,7 +164,7 @@ export class DbEventSink implements EventSink {
    *   graph never pulls native download/media modules.
    */
   constructor(
-    private readonly db: AppDatabase,
+    private readonly db: ReadDb,
     private readonly onMessageStored?: (
       messageId: number,
       source: EventSource,

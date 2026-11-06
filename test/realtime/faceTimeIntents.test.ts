@@ -1,9 +1,9 @@
 import type { NormalizedEvent } from '@core/realtime';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { buildMessageIntents } from '@/services/notifications/intents';
 
 // FaceTime intents don't touch the DB; a stub is fine.
-const db = {} as AppDatabase;
+const db = {} as TestDb;
 
 describe('buildMessageIntents — FaceTime', () => {
   it('drops a legacy incoming-facetime event', async () => {

@@ -152,7 +152,7 @@ describe('backup v3 custom folders', () => {
     const neighbourRelease = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(source.db, async () => {
+    const neighbour = withDbTransaction(source.db, async (db) => {
       source.raw.prepare("UPDATE kv SET value = 'phantom-theme' WHERE key = 'theme.preset'").run();
       source.raw
         .prepare(
@@ -234,7 +234,7 @@ describe('backup v3 custom folders', () => {
 
     const exporting = buildBackupWithCustomFolders(interceptedDb, { exportedAt: 43 });
     await firstReadStarted;
-    const writer = withDbTransaction(source.db, async () => {
+    const writer = withDbTransaction(source.db, async (db) => {
       source.raw.prepare("UPDATE kv SET value = 'generation-new' WHERE key = 'theme.preset'").run();
       source.raw
         .prepare(

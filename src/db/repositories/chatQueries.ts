@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm';
 import { normalizeInboxFilters, type InboxFilters } from '@core/models';
 import { resolveTitle } from '@utils/chat';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 import {
   attachmentIsUserFileSql,
   chatHasKnownSenderSql,
@@ -238,7 +238,7 @@ class InboxSearchTextChangedError extends Error {
  * safely be applied to independent chunks. Preserve an initial U+FEFF just like a text read.
  */
 async function readLargeInboxSearchParticipantName(
-  db: AppDatabase,
+  db: Queryable,
   chatId: number,
   handleId: number,
   checkCurrent: () => void,
@@ -336,7 +336,7 @@ async function readLargeInboxSearchParticipantName(
  * preserve matches across the participant separator and resolved-title/participant boundary.
  */
 async function exactInboxSearchNameMatches(
-  db: AppDatabase,
+  db: Queryable,
   candidates: readonly InboxSearchCandidate[],
   foldedQuery: string,
   checkCurrent: () => void,
@@ -546,7 +546,7 @@ function inboxChatGuidRestrictionSql(chatGuids: readonly string[] | undefined) {
 }
 
 async function queryChatsForInbox(
-  db: AppDatabase,
+  db: Queryable,
   options: {
     archive: InboxArchiveFilter;
     sender: InboxSenderFilter;
@@ -653,7 +653,7 @@ async function queryChatsForInbox(
  * appear twice.
  */
 export async function listChatsForInbox(
-  db: AppDatabase,
+  db: Queryable,
   opts: { includeArchived?: boolean; filters?: InboxFilters; appleScreening?: boolean } = {},
 ): Promise<InboxRow[]> {
   const filters = normalizeInboxFilters(opts.filters);
@@ -667,7 +667,7 @@ export async function listChatsForInbox(
 
 /** One growing-prefix page; the extra row is consumed only as the `hasMore` sentinel. */
 export async function listChatsForInboxPage(
-  db: AppDatabase,
+  db: Queryable,
   opts: InboxPageOptions = {},
 ): Promise<InboxPage> {
   const requested = opts.limit ?? 50;
@@ -733,7 +733,7 @@ function boundedMessageMatchSet(guids: readonly string[] | undefined): Set<strin
  * and folding one full name, candidate title fields, and final decoration remain data-sized.
  */
 export async function searchChatsForInboxPage(
-  db: AppDatabase,
+  db: Queryable,
   opts: InboxSearchOptions,
 ): Promise<InboxPage> {
   const query = normalizeSearchTerm(opts.query, 'Inbox');
@@ -1105,7 +1105,7 @@ export function listCustomFolderInboxPageWithinTransaction(
 
 /** Lightweight exact count for page-external affordances such as the Unknown Senders footer. */
 export async function countChatsForInbox(
-  db: AppDatabase,
+  db: Queryable,
   opts: Omit<InboxPageOptions, 'limit'> = {},
 ): Promise<number> {
   const filters = inboxFilterSql({
@@ -1128,7 +1128,7 @@ export async function countChatsForInbox(
  * exactly when the list applies the same screening rule; an unknown sender notifies silently.
  * A server without the screening capability leaves both flags null, so only contacts decide.
  */
-export async function chatHasKnownSender(db: AppDatabase, guid: string): Promise<boolean> {
+export async function chatHasKnownSender(db: Queryable, guid: string): Promise<boolean> {
   const rows = await db.all<{ known: number }>(sql`
     SELECT ${chatHasKnownSenderSql('c', true)} AS known
       FROM chats c WHERE c.guid = ${guid} LIMIT 1
@@ -1137,7 +1137,7 @@ export async function chatHasKnownSender(db: AppDatabase, guid: string): Promise
 }
 
 /** Resolve a chat's local integer id from its server guid. */
-export async function getChatIdByGuid(db: AppDatabase, guid: string): Promise<number | null> {
+export async function getChatIdByGuid(db: Queryable, guid: string): Promise<number | null> {
   const rows = await db.all<{ id: number }>(sql`SELECT id FROM chats WHERE guid = ${guid} LIMIT 1`);
   return rows[0]?.id ?? null;
 }
@@ -1202,7 +1202,7 @@ export interface ChatHeaderRow {
  * which can never make the chat findable again (a tapback in a deleted thread). Reporting the stamp
  * lets it apply the tombstone itself; filtering on it would take mute down with it.
  */
-export async function getChatHeader(db: AppDatabase, guid: string): Promise<ChatHeaderRow | null> {
+export async function getChatHeader(db: Queryable, guid: string): Promise<ChatHeaderRow | null> {
   const rows = await db.all<ChatHeaderRow>(sql`
     SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier, c.display_name AS displayName,
       c.custom_name AS customName, c.custom_color AS customColor, c.mute_type AS muteType, c.style,
@@ -1266,7 +1266,7 @@ export interface ExistingChatMatch {
  * exact string equality. Starting an RCS message uses the server's Google-owned find/create route.
  */
 export async function findChatsByParticipantAddresses(
-  db: AppDatabase,
+  db: Queryable,
   addresses: string[],
   service: 'RCS' | 'iMessage',
 ): Promise<ExistingChatMatch[]> {
@@ -1351,10 +1351,7 @@ export interface ChatParticipant {
 }
 
 /** A chat's exact participant handles for details and device-local color customization. */
-export async function getChatParticipants(
-  db: AppDatabase,
-  guid: string,
-): Promise<ChatParticipant[]> {
+export async function getChatParticipants(db: Queryable, guid: string): Promise<ChatParticipant[]> {
   return db.all<ChatParticipant>(sql`
     SELECT h.address AS address, COALESCE(h.display_name, h.address) AS name,
            NULLIF(h.service, '') AS service, h.color
@@ -1381,7 +1378,7 @@ export interface ChatParticipantContact {
  * paths (mentions, group commands) compare with the chat header.
  */
 export async function getChatParticipantContacts(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
 ): Promise<ChatParticipantContact[]> {
   return db.all<ChatParticipantContact>(sql`

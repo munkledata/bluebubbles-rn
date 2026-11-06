@@ -10,7 +10,7 @@ import type Database from 'better-sqlite3';
 import { chatsApi } from '@core/api';
 import { Chat } from '@core/models';
 import * as chatRepositories from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { createNewChat } from '@/services/chatActions';
 import { ensureDatabase } from '@/services/databaseControl';
 import {
@@ -19,7 +19,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 let mockServerRcsEnabled = true;
 let mockRcsProviderEpoch: string | null;
 let mockImessageNewChatEnabled = false;
@@ -310,7 +310,7 @@ describe('createNewChat account lease', () => {
   });
 
   it('does not start a B-credential request when an A call wakes after database setup', async () => {
-    const database = deferred<AppDatabase>();
+    const database = deferred<TestDb>();
     mockEnsureDatabase.mockReturnValueOnce(database.promise);
     const oldCreate = createNewChat(['old@example.com'], 'old account message');
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
@@ -326,7 +326,7 @@ describe('createNewChat account lease', () => {
   });
 
   it('rechecks capability after database setup before starting HTTP', async () => {
-    const database = deferred<AppDatabase>();
+    const database = deferred<TestDb>();
     mockEnsureDatabase.mockReturnValueOnce(database.promise);
     const create = createNewChat(['old@example.com'], 'hello');
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
@@ -340,7 +340,7 @@ describe('createNewChat account lease', () => {
   });
 
   it('does not start HTTP after the same session rotates to another RCS provider epoch', async () => {
-    const database = deferred<AppDatabase>();
+    const database = deferred<TestDb>();
     mockEnsureDatabase.mockReturnValueOnce(database.promise);
     const create = createNewChat(['old@example.com'], 'hello');
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);

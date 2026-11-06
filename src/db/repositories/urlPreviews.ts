@@ -5,7 +5,7 @@ import {
 } from '@core/api/endpoints/urlPreviews';
 import { urlPreviews } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 
 // ---- URL preview cache ----
 
@@ -65,7 +65,7 @@ export function isUrlPreviewCacheFresh(
   return true;
 }
 
-export async function getUrlPreview(db: AppDatabase, url: string): Promise<UrlPreviewRow | null> {
+export async function getUrlPreview(db: Queryable, url: string): Promise<UrlPreviewRow | null> {
   const rows = await db.all<UrlPreviewRow>(sql`
     SELECT url, title, description, image_url AS imageUrl, site_name AS siteName,
            fetched_at AS fetchedAt, error FROM url_previews WHERE url = ${url} LIMIT 1`);

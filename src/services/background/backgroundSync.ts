@@ -10,7 +10,7 @@ import {
 } from '@core/rcs/providerIdentity';
 import { logger } from '@core/secure';
 import { kvGet } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { ERROR_REPORTING_CONSENT_KEY, useFeatureSettingsStore } from '@state/featureSettingsStore';
 import type { BackgroundTaskExecution } from '@/native/backgroundTaskExecution';
 import { accountRevocationMarker, vault } from '../clients';
@@ -157,7 +157,7 @@ function asRealtimeLease(scope: BackgroundAccountScope): RealtimeDeliveryLease {
 }
 
 async function reconcileBackgroundMessageNotifications(
-  db: AppDatabase,
+  db: Queryable,
   scope: BackgroundAccountScope,
 ): Promise<void> {
   const { reconcileMessageNotificationsWithDatabase } =
@@ -167,7 +167,7 @@ async function reconcileBackgroundMessageNotifications(
 
 /** Hand due local schedules to the outgoing queue; the runner owns its once-per-generation recovery. */
 async function recoverAndDrainBackgroundSchedules(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   scope: BackgroundAccountScope,
   serverInfo: ServerInfo,
@@ -188,13 +188,13 @@ async function recoverAndDrainBackgroundSchedules(
 }
 
 /** Versioned consent is read from this account's DB; missing/corrupt/denied is a safe no-op. */
-async function hasDurableErrorReportingConsent(db: AppDatabase): Promise<boolean> {
+async function hasDurableErrorReportingConsent(db: Queryable): Promise<boolean> {
   return (await kvGet(db, ERROR_REPORTING_CONSENT_KEY)) === 'granted';
 }
 
 /** Upload at most the queue service's one bounded batch, with immediate in-process opt-out abort. */
 async function flushBackgroundDiagnostics(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   supportsUpload: boolean,
   scope: BackgroundAccountScope,

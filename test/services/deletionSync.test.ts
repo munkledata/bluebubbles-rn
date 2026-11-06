@@ -16,7 +16,7 @@ import {
 } from '@db/repositories';
 import * as kvRepository from '@db/repositories/kv';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import {
   DELETION_SNAPSHOT_INITIALIZED_KEY,
   DELETION_SNAPSHOT_INITIALIZED_VALUE,
@@ -63,7 +63,7 @@ function cursorState(afterMs: number, cursor: string): string {
 }
 
 /** Seed a chat + messages through the same upsert path the sync engine uses. */
-async function seed(db: AppDatabase, chatGuid: string, guids: string[]): Promise<void> {
+async function seed(db: ReadDb, chatGuid: string, guids: string[]): Promise<void> {
   const msgs = guids.map((g, i) =>
     Message.parse({
       guid: g,
@@ -655,7 +655,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async (context) => {
+    const neighbour = withDbTransaction(db, async (db, context) => {
       await kvSetWithinTransaction(context, DELETIONS_SYNCED_AT_KEY, '9999');
       neighbourStarted();
       await release;
@@ -692,7 +692,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -733,7 +733,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     const fetch = jest.fn<Promise<DeletedMessage[]>, [number]>(async () => {
       // This transaction can acquire while the request is active only if deletion sync released
       // its initial watermark lock before starting network I/O.
-      neighbour = withDbTransaction(db, async () => {
+      neighbour = withDbTransaction(db, async (db) => {
         neighbourStarted();
         await release;
         throw new Error('neighbour rollback');

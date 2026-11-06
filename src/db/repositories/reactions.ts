@@ -4,7 +4,7 @@ import {
   reactionKindKey,
   type ReactionKind,
 } from '@core/reactions/reactionType';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 
 export interface ReactionRow {
   targetGuid: string;
@@ -25,7 +25,7 @@ export interface ReactionRow {
  * retaining that winning part so a later removal can target it exactly.
  */
 export async function listReactionsByMessageGuids(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   guids: string[],
 ): Promise<Map<string, ReactionRow[]>> {

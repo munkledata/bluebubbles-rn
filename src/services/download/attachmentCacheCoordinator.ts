@@ -15,7 +15,7 @@ import {
   type AttachmentCacheRetirementClaim,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import {
   deleteNativeAttachmentCacheFile,
   getNativeAttachmentCacheAvailableBytes,
@@ -200,7 +200,7 @@ export class AttachmentCacheCoordinator {
    * re-reads native free space plus the ledger before admitting. Predicted deletion is never enough.
    */
   async reserve(
-    db: AppDatabase,
+    db: ReadDb,
     input: {
       readonly path: string;
       readonly maxBytes: number;
@@ -247,7 +247,7 @@ export class AttachmentCacheCoordinator {
    * confirmation happen outside both locks, then the next pass proves whether the cache conforms.
    */
   async conformCurrentQuota(
-    db: AppDatabase,
+    db: ReadDb,
     input: { readonly scope?: AttachmentCacheReservationScope } = {},
   ): Promise<AttachmentCacheQuotaConformanceResult> {
     const recovery = await this.drainDueRetirements(db, {
@@ -339,7 +339,7 @@ export class AttachmentCacheCoordinator {
    * recovery instead of being adopted here.
    */
   reuseExisting(
-    db: AppDatabase,
+    db: ReadDb,
     input: {
       readonly path: string;
       readonly scope?: AttachmentCacheReservationScope;
@@ -359,7 +359,7 @@ export class AttachmentCacheCoordinator {
    * pass leaves an active, still-accounted file; the next authorized startup repeats the scan.
    */
   async retireInactiveEntries(
-    db: AppDatabase,
+    db: ReadDb,
     input: { readonly scope?: AttachmentCacheReservationScope; readonly limit?: number } = {},
   ): Promise<AttachmentCacheRetirementDrainResult> {
     return this.retireCandidates(db, input, (reader) =>
@@ -375,7 +375,7 @@ export class AttachmentCacheCoordinator {
    * its message offers the download again. Callers repeat while `confirmed > 0`.
    */
   async retireChatEntries(
-    db: AppDatabase,
+    db: ReadDb,
     input: {
       readonly chatGuid: string;
       readonly scope?: AttachmentCacheReservationScope;
@@ -392,9 +392,9 @@ export class AttachmentCacheCoordinator {
    * own outer transaction, so the candidates and the exact claim see one ledger moment.
    */
   private async retireCandidates(
-    db: AppDatabase,
+    db: ReadDb,
     input: { readonly scope?: AttachmentCacheReservationScope },
-    listCandidates: (reader: AppDatabase) => Promise<string[]>,
+    listCandidates: (reader: Queryable) => Promise<string[]>,
   ): Promise<AttachmentCacheRetirementDrainResult> {
     let skipped = 0;
     const step = await this.runExclusive(async () => {
@@ -413,7 +413,7 @@ export class AttachmentCacheCoordinator {
             claimResult = await scope.runTracked(() =>
               withDbTransaction(
                 db,
-                async (context) => {
+                async (db, context) => {
                   const candidates = await listCandidates(db);
                   const eligible = candidates.filter((path) => {
                     const blocked =
@@ -465,7 +465,7 @@ export class AttachmentCacheCoordinator {
               ),
             );
           } else {
-            claimResult = await withDbTransaction(db, async (context) => {
+            claimResult = await withDbTransaction(db, async (db, context) => {
               const candidates = await listCandidates(db);
               const eligible = candidates.filter((path) => {
                 const blocked =
@@ -588,7 +588,7 @@ export class AttachmentCacheCoordinator {
 
   /** Retry a bounded set of crash-surviving `retiring` rows after session authorization. */
   async drainDueRetirements(
-    db: AppDatabase,
+    db: ReadDb,
     input: { readonly scope?: AttachmentCacheReservationScope; readonly limit?: number } = {},
   ): Promise<AttachmentCacheRetirementDrainResult> {
     const scope = input.scope;
@@ -600,12 +600,12 @@ export class AttachmentCacheCoordinator {
         entries = await scope.runTracked(() =>
           withDbTransaction(
             db,
-            () => listDueAttachmentCacheRetirements(db, this.now(), input.limit),
+            (db) => listDueAttachmentCacheRetirements(db, this.now(), input.limit),
             () => scope.isCurrent(),
           ),
         );
       } else {
-        entries = await withDbTransaction(db, () =>
+        entries = await withDbTransaction(db, (db) =>
           listDueAttachmentCacheRetirements(db, this.now(), input.limit),
         );
       }
@@ -640,12 +640,12 @@ export class AttachmentCacheCoordinator {
             current = await scope.runTracked(() =>
               withDbTransaction(
                 db,
-                async () => ({ entry: await getAttachmentCacheEntry(db, entry.path) }),
+                async (db) => ({ entry: await getAttachmentCacheEntry(db, entry.path) }),
                 () => scope.isCurrent(),
               ),
             );
           } else {
-            current = await withDbTransaction(db, async () => ({
+            current = await withDbTransaction(db, async (db) => ({
               entry: await getAttachmentCacheEntry(db, entry.path),
             }));
           }
@@ -683,7 +683,7 @@ export class AttachmentCacheCoordinator {
   }
 
   private async planAdmissionStep(
-    db: AppDatabase,
+    db: ReadDb,
     path: string,
     maxBytes: number,
     scope: AttachmentCacheReservationScope | undefined,
@@ -717,14 +717,14 @@ export class AttachmentCacheCoordinator {
         ? await scope.runTracked(() =>
             withDbTransaction(
               db,
-              async () => ({
+              async (db) => ({
                 requested: await getAttachmentCacheEntry(db, path),
                 quota: await getAttachmentCacheQuotaSnapshot(db, ATTACHMENT_CACHE_MAX_FILES),
               }),
               () => scope.isCurrent(),
             ),
           )
-        : await withDbTransaction(db, async () => ({
+        : await withDbTransaction(db, async (db) => ({
             requested: await getAttachmentCacheEntry(db, path),
             quota: await getAttachmentCacheQuotaSnapshot(db, ATTACHMENT_CACHE_MAX_FILES),
           }));
@@ -767,7 +767,7 @@ export class AttachmentCacheCoordinator {
           ? await scope.runTracked(() =>
               withDbTransaction(
                 db,
-                (context) =>
+                (db, context) =>
                   createAttachmentCacheReservation(context, {
                     path,
                     maxBytes,
@@ -776,7 +776,7 @@ export class AttachmentCacheCoordinator {
                 () => scope.isCurrent(),
               ),
             )
-          : await withDbTransaction(db, (context) =>
+          : await withDbTransaction(db, (db, context) =>
               createAttachmentCacheReservation(context, {
                 path,
                 maxBytes,
@@ -826,11 +826,11 @@ export class AttachmentCacheCoordinator {
           ? await scope.runTracked(() =>
               withDbTransaction(
                 db,
-                (context) => claimAttachmentCachePathsForRetirement(context, claimPaths),
+                (db, context) => claimAttachmentCachePathsForRetirement(context, claimPaths),
                 () => scope.isCurrent(),
               ),
             )
-          : await withDbTransaction(db, (context) =>
+          : await withDbTransaction(db, (db, context) =>
               claimAttachmentCachePathsForRetirement(context, claimPaths),
             );
       } catch (error) {
@@ -855,7 +855,7 @@ export class AttachmentCacheCoordinator {
   }
 
   private async planConformanceStep(
-    db: AppDatabase,
+    db: ReadDb,
     scope: AttachmentCacheReservationScope | undefined,
     deniedPaths: Set<string>,
   ): Promise<ConformanceStep> {
@@ -877,11 +877,11 @@ export class AttachmentCacheCoordinator {
         ? await scope.runTracked(() =>
             withDbTransaction(
               db,
-              () => getAttachmentCacheQuotaSnapshot(db, ATTACHMENT_CACHE_MAX_FILES),
+              (db) => getAttachmentCacheQuotaSnapshot(db, ATTACHMENT_CACHE_MAX_FILES),
               () => scope.isCurrent(),
             ),
           )
-        : await withDbTransaction(db, () =>
+        : await withDbTransaction(db, (db) =>
             getAttachmentCacheQuotaSnapshot(db, ATTACHMENT_CACHE_MAX_FILES),
           );
     } catch (error) {
@@ -931,11 +931,11 @@ export class AttachmentCacheCoordinator {
           ? await scope.runTracked(() =>
               withDbTransaction(
                 db,
-                (context) => claimAttachmentCachePathsForRetirement(context, claimPaths),
+                (db, context) => claimAttachmentCachePathsForRetirement(context, claimPaths),
                 () => scope.isCurrent(),
               ),
             )
-          : await withDbTransaction(db, (context) =>
+          : await withDbTransaction(db, (db, context) =>
               claimAttachmentCachePathsForRetirement(context, claimPaths),
             );
       } catch (error) {
@@ -960,7 +960,7 @@ export class AttachmentCacheCoordinator {
   }
 
   private async reuseProtected(
-    db: AppDatabase,
+    db: ReadDb,
     path: string,
     scope?: AttachmentCacheReservationScope,
   ): Promise<AttachmentCacheReuseResult> {
@@ -991,7 +991,7 @@ export class AttachmentCacheCoordinator {
         result = await scope.runTracked(() =>
           withDbTransaction(
             db,
-            async (context): Promise<AttachmentCacheReuseResult> => {
+            async (db, context): Promise<AttachmentCacheReuseResult> => {
               if (stat.exists) {
                 const access = await recordAttachmentCacheAccess(context, {
                   path,
@@ -1019,7 +1019,7 @@ export class AttachmentCacheCoordinator {
       } else {
         result = await withDbTransaction(
           db,
-          async (context): Promise<AttachmentCacheReuseResult> => {
+          async (db, context): Promise<AttachmentCacheReuseResult> => {
             if (stat.exists) {
               const access = await recordAttachmentCacheAccess(context, {
                 path,
@@ -1062,7 +1062,7 @@ export class AttachmentCacheCoordinator {
   }
 
   private publicReservation(
-    db: AppDatabase,
+    db: ReadDb,
     record: ReservationRecord,
     scope?: AttachmentCacheReservationScope,
   ): AttachmentCacheReservation {
@@ -1102,7 +1102,7 @@ export class AttachmentCacheCoordinator {
   }
 
   private async settleRetirement(
-    db: AppDatabase,
+    db: ReadDb,
     record: RetirementRecord,
     scope?: AttachmentCacheReservationScope,
   ): Promise<'confirmed' | 'failed' | 'stale'> {
@@ -1123,7 +1123,7 @@ export class AttachmentCacheCoordinator {
           const confirmed = await scope.runTracked(() =>
             withDbTransaction(
               db,
-              (context) => confirmAttachmentCacheEntryDeleted(context, record.path),
+              (db, context) => confirmAttachmentCacheEntryDeleted(context, record.path),
               () => scope.isCurrent(),
             ),
           );
@@ -1132,19 +1132,20 @@ export class AttachmentCacheCoordinator {
           const scheduled = await scope.runTracked(() =>
             withDbTransaction(
               db,
-              (context) => scheduleAttachmentCacheRetirementRetry(context, record.path, this.now()),
+              (db, context) =>
+                scheduleAttachmentCacheRetirementRetry(context, record.path, this.now()),
               () => scope.isCurrent(),
             ),
           );
           outcome = scheduled === null && !scope.isCurrent() ? 'stale' : 'failed';
         }
       } else if (nativeConfirmedAbsent) {
-        const confirmed = await withDbTransaction(db, (context) =>
+        const confirmed = await withDbTransaction(db, (db, context) =>
           confirmAttachmentCacheEntryDeleted(context, record.path),
         );
         outcome = confirmed ? 'confirmed' : 'failed';
       } else {
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           scheduleAttachmentCacheRetirementRetry(context, record.path, this.now()),
         );
         outcome = 'failed';

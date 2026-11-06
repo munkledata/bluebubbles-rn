@@ -22,7 +22,7 @@ import {
   type IncomingEventClaimIdentity,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   IncomingEventDependencyPendingError,
   IncomingEventPermanentPayloadError,
@@ -90,7 +90,7 @@ export class IncomingEventDrain {
   private readonly deliveryTimeoutMs: number;
 
   constructor(
-    private readonly db: AppDatabase,
+    private readonly db: ReadDb,
     private readonly handler: NormalizedIncomingEventHandler,
     private readonly digest: DigestBackend,
     private readonly options: IncomingEventDrainOptions,

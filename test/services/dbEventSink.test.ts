@@ -11,7 +11,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import {
   DbEventSink,
   RealtimeGroupMutationUnavailableError,
@@ -696,7 +696,7 @@ describe('DbEventSink (live path)', () => {
     // socket copy of the same message has a different intake key, so both are applied.
     const full = `${'Long message body. '.repeat(200)}The end.`;
     const preview = `${full.slice(0, 120)}…`;
-    async function seedChat(db: AppDatabase) {
+    async function seedChat(db: ReadDb) {
       const hm = await upsertHandles(db, [{ address: 'bob@x.com' }]);
       await upsertChats(
         db,
@@ -1043,7 +1043,7 @@ describe('DbEventSink — write atomicity under a concurrent transaction', () =>
     const gate = new Promise<void>((r) => {
       releaseGate = r;
     });
-    const doomed = withDbTransaction(db, async () => {
+    const doomed = withDbTransaction(db, async (db) => {
       markBegun();
       await gate;
       throw new Error('neighbouring transaction failed');
@@ -1249,7 +1249,7 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
   // Seed a received message via the live new-message path (creates the chat + row), returning the
   // router so the follow-up message-deleted rides the SAME sink/db.
   async function seedInbound(
-    db: AppDatabase,
+    db: ReadDb,
     guid: string,
     chatGuid: string,
     onAttachmentCacheRetirement?: () => void | Promise<void>,

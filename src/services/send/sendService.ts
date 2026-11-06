@@ -20,7 +20,7 @@ import {
   type ScheduledTextHandoverTransition,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   isProvenIMessageGroupChat,
   isProvenOneToOneIMessageChat,
@@ -98,7 +98,7 @@ export interface ScheduledTextHandover {
  * better-sqlite3, mirroring the sync engine.
  */
 export async function sendTextMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendTextArgs,
   now: number = Date.now(),
@@ -245,7 +245,7 @@ export async function sendTextMessage(
       )
     : await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           const resolvedTarget = authorizedTarget
             ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
             : null;

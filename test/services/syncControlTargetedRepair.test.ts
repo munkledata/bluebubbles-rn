@@ -147,12 +147,12 @@ beforeEach(async () => {
   mockChatExistsAndIsVisible.mockResolvedValue(false);
   mockWithDbTransaction.mockImplementation(
     async (
-      _db: unknown,
-      work: (context: typeof mockTransactionContext) => Promise<unknown>,
+      db: unknown,
+      work: (tx: unknown, context: typeof mockTransactionContext) => Promise<unknown>,
       canCommit?: () => boolean,
     ): Promise<unknown> => {
       if (canCommit && !canCommit()) throw new Error('Synthetic transaction guard rejected');
-      const value = await work(mockTransactionContext);
+      const value = await work(db, mockTransactionContext);
       if (canCommit && !canCommit()) throw new Error('Synthetic transaction guard rejected');
       return value;
     },

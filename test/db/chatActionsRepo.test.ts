@@ -27,7 +27,7 @@ import {
 } from '@db/repositories';
 import { kv, outgoingQueue, scheduledMessages } from '@db/schema';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import {
   clearChatTombstone,
@@ -65,7 +65,7 @@ function retracted(guid: string, dateCreated: number) {
 }
 
 async function seedChat(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   extra: Record<string, unknown> = {},
 ): Promise<void> {
@@ -206,7 +206,7 @@ describe('chat actions repo', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async (context) => {
+    const neighbour = withDbTransaction(db, async (db, context) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -248,7 +248,7 @@ describe('chat actions repo', () => {
     await expect(
       withDbTransaction(
         db,
-        (context) => setChatPinWithinTransaction(context, 'c1', true),
+        (db, context) => setChatPinWithinTransaction(context, 'c1', true),
         () => current,
       ),
     ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
@@ -273,7 +273,7 @@ describe('chat actions repo', () => {
     await expect(
       withDbTransaction(
         db,
-        (context) => setChatArchiveWithinTransaction(context, 'c1', true),
+        (db, context) => setChatArchiveWithinTransaction(context, 'c1', true),
         () => current,
       ),
     ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
@@ -339,7 +339,7 @@ describe('chat actions repo', () => {
     const neighbourHeld = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbourOutcome = withDbTransaction(db, async (context) => {
+    const neighbourOutcome = withDbTransaction(db, async (db, context) => {
       const inserted = await db.all<{ id: number }>(sql`
         INSERT INTO chats (guid) VALUES ('rollback-target') RETURNING id
       `);
@@ -355,7 +355,7 @@ describe('chat actions repo', () => {
 
     let innocentId: number | undefined;
     let innocentSettled = false;
-    const innocentOutcome = withDbTransaction(db, async (context) => {
+    const innocentOutcome = withDbTransaction(db, async (db, context) => {
       const inserted = await db.all<{ id: number }>(sql`
         INSERT INTO chats (guid, latest_message_date)
         VALUES ('innocent-replacement', 7000)
@@ -466,7 +466,7 @@ describe('chat actions repo', () => {
     const neighbourHeld = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbourOutcome = withDbTransaction(db, async (context) => {
+    const neighbourOutcome = withDbTransaction(db, async (db, context) => {
       await db.run(sql`
         INSERT INTO kv (key, value) VALUES ('chat.delete.neighbour.phantom', 'rollback')
       `);
@@ -780,7 +780,7 @@ describe('chat actions repo', () => {
     raw
       .prepare('INSERT INTO attachments (guid, message_id, local_path) VALUES (?,?,?)')
       .run('att-cache', message.id, cachePath);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: cachePath, bytes: 1234, lastUsedAt: 100 }),
     );
 
@@ -1007,7 +1007,7 @@ describe('chat actions repo', () => {
     const held = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async (context) => {
+    const neighbour = withDbTransaction(db, async (db, context) => {
       neighbourStarted();
       await held;
       throw new Error('neighbour rollback');
@@ -1094,7 +1094,7 @@ describe('chat actions repo', () => {
     // Rows left ambiently by an interrupted purge are not proof that THIS bounded crawl reached a
     // safe floor. Only a candidate carried from the fetched prefix (or full exhaustion) may restore.
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         restoreDeletedChatWithinTransaction(context, {
           guid: 'c1',
           expectedDeletedAt: 5000,
@@ -1104,7 +1104,7 @@ describe('chat actions repo', () => {
       ),
     ).resolves.toBe(false);
 
-    const restored = await withDbTransaction(db, (context) =>
+    const restored = await withDbTransaction(db, (db, context) =>
       restoreDeletedChatWithinTransaction(context, {
         guid: 'c1',
         expectedDeletedAt: 5000,
@@ -1133,7 +1133,7 @@ describe('chat actions repo', () => {
     // A retained restore callback from the first deletion cannot clear a newer delete.
     await deleteChatLocal(db, 'c1', 7000);
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         restoreDeletedChatWithinTransaction(context, {
           guid: 'c1',
           expectedDeletedAt: 5000,
@@ -1164,7 +1164,7 @@ describe('chat actions repo', () => {
       .prepare('UPDATE chats SET deleted_at = 5000, history_deleted_at = 5000 WHERE guid = ?')
       .run('c1');
 
-    const restored = await withDbTransaction(db, (context) =>
+    const restored = await withDbTransaction(db, (db, context) =>
       restoreDeletedChatWithinTransaction(context, {
         guid: 'c1',
         expectedDeletedAt: 5000,
@@ -1190,7 +1190,7 @@ describe('chat actions repo', () => {
     await upsertMessages(db, [received('h1', 1000), received('h2', 2000)], () => chatId, handles);
     const providerEpoch = '11111111-1111-4111-8111-111111111111';
     const ledgerEpoch = '22222222-2222-4222-8222-222222222222';
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       await setMessageStateAuthorityWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -1227,7 +1227,7 @@ describe('chat actions repo', () => {
       .run('c1');
     raw.prepare('UPDATE messages SET date_deleted = 5000 WHERE chat_id = ?').run(chatId);
 
-    const restored = await withDbTransaction(db, (context) =>
+    const restored = await withDbTransaction(db, (db, context) =>
       restoreDeletedChatWithinTransaction(context, {
         guid: 'c1',
         expectedDeletedAt: 5000,
@@ -1581,7 +1581,7 @@ describe('chat actions repo', () => {
     expect(counts(raw, 'messages')).toBe(100);
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         restoreDeletedChatWithinTransaction(context, {
           guid: 'c1',
           expectedDeletedAt: 5000,

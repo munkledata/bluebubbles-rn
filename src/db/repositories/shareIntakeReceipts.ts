@@ -7,7 +7,7 @@ import {
   withDbWriteLock,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 
 /** Encrypted, account-scoped receipts for native Android share batches. */
 export const SHARE_INTAKE_RECEIPT_KV_PREFIX = 'share.intake.v1.';
@@ -282,7 +282,7 @@ function assertDestination(receipt: ShareIntakeReceipt, destination: ShareIntake
 }
 
 async function readReceiptValue(
-  db: AppDatabase,
+  db: Queryable,
   batchId: string,
 ): Promise<ShareIntakeReceipt | null> {
   const rows = await db.all<{ value: string | null }>(
@@ -315,7 +315,7 @@ export function isShareIntakeReceiptComplete(receipt: ShareIntakeReceipt): boole
 }
 
 export async function getShareIntakeReceipt(
-  db: AppDatabase,
+  db: Queryable,
   identity: ShareIntakeManifestIdentity,
 ): Promise<ShareIntakeReceipt | null> {
   return withDbWriteLock(async () => {
@@ -585,15 +585,15 @@ export async function discardShareIntakeItemWithinTransaction(
   });
 }
 
-export async function deleteShareIntakeReceipt(db: AppDatabase, batchId: string): Promise<void> {
-  await withDbTransaction(db, (context) =>
+export async function deleteShareIntakeReceipt(db: ReadDb, batchId: string): Promise<void> {
+  await withDbTransaction(db, (db, context) =>
     runInTransactionContext(context, async (owner) => {
       await owner.delete(kv).where(sql`${kv.key} = ${receiptKey(batchId)}`);
     }),
   );
 }
 
-export async function listShareIntakeReceiptBatchIds(db: AppDatabase): Promise<string[]> {
+export async function listShareIntakeReceiptBatchIds(db: Queryable): Promise<string[]> {
   return withDbWriteLock(async () => {
     const batchIds: string[] = [];
     let cursor = SHARE_INTAKE_RECEIPT_KV_PREFIX;

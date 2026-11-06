@@ -9,7 +9,7 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { getChatHeader, type ChatHeaderRow } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable } from '@db/types';
 import { restoredGroupCommandsAcceptAnyPrefix } from '@core/models/imessageRestoredFeatures';
 import { isProvenIMessageGroupChat } from '@utils';
 import {
@@ -90,9 +90,9 @@ export type LeaveAppleGroupResult =
   | { readonly status: 'outcome-unknown'; readonly tempGuid: string };
 
 /** Add, remove, and leave share one one-shot lane; none may queue behind another for one group. */
-const activeGroupMembershipOperations = new WeakMap<AppDatabase, Set<string>>();
+const activeGroupMembershipOperations = new WeakMap<Queryable, Set<string>>();
 
-function claimGroupMembershipOperation(db: AppDatabase, chatGuid: string): boolean {
+function claimGroupMembershipOperation(db: Queryable, chatGuid: string): boolean {
   let active = activeGroupMembershipOperations.get(db);
   if (!active) {
     active = new Set();
@@ -103,7 +103,7 @@ function claimGroupMembershipOperation(db: AppDatabase, chatGuid: string): boole
   return true;
 }
 
-function releaseGroupMembershipOperation(db: AppDatabase, chatGuid: string): void {
+function releaseGroupMembershipOperation(db: Queryable, chatGuid: string): void {
   const active = activeGroupMembershipOperations.get(db);
   active?.delete(chatGuid);
   if (active?.size === 0) activeGroupMembershipOperations.delete(db);
@@ -176,7 +176,7 @@ function isDefiniteGroupLeaveFailure(error: unknown): boolean {
  * membership is never edited here: the server sync/event path remains the only roster authority.
  */
 export async function addExactIMessageGroupParticipant(
-  db: AppDatabase,
+  db: Queryable,
   client: HttpClient,
   args: AddAppleGroupParticipantArgs,
   accountGuard?: DbCommitGuard,
@@ -275,7 +275,7 @@ export async function addExactIMessageGroupParticipant(
  * Local membership is never edited here; an authoritative sync/event owns the visible roster.
  */
 export async function removeExactIMessageGroupParticipant(
-  db: AppDatabase,
+  db: Queryable,
   client: HttpClient,
   args: RemoveAppleGroupParticipantArgs,
   accountGuard?: DbCommitGuard,
@@ -374,7 +374,7 @@ export async function removeExactIMessageGroupParticipant(
  * report post-dispatch uncertainty, which stays terminal and is never promoted to success here.
  */
 export async function leaveExactIMessageGroup(
-  db: AppDatabase,
+  db: Queryable,
   client: HttpClient,
   args: LeaveAppleGroupArgs,
   accountGuard?: DbCommitGuard,

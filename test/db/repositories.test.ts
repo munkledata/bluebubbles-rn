@@ -51,7 +51,7 @@ describe('repositories', () => {
     const { db, raw } = await createTestDb();
 
     await expect(
-      withDbTransaction(db, async (context) => {
+      withDbTransaction(db, async (db, context) => {
         await upsertHandlesWithinTransaction(context, [{ address: 'rollback@x.com' }]);
         await setSyncMarkerWithinTransaction(context, {
           lastSyncedRowId: 42,

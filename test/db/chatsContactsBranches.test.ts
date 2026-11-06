@@ -337,7 +337,7 @@ describe('local read / unread markers', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -377,7 +377,7 @@ describe('local read / unread markers', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -485,7 +485,7 @@ describe('local read / unread markers', () => {
     await expect(
       withDbTransaction(
         db,
-        (context) => markAllChatsReadLocalWithinTransaction(context),
+        (db, context) => markAllChatsReadLocalWithinTransaction(context),
         () => current,
       ),
     ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
@@ -510,7 +510,7 @@ describe('local read / unread markers', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -585,7 +585,7 @@ describe('server-avatar helpers', () => {
     await expect(
       withDbTransaction(
         db,
-        (context) =>
+        (db, context) =>
           setHandleServerAvatarWithinTransaction(context, handleId, 'file:///doc/rollback.img'),
         () => current,
       ),
@@ -614,7 +614,7 @@ describe('server-avatar helpers', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');

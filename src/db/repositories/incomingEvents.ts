@@ -1,7 +1,7 @@
 import type { EventSource } from '@core/realtime';
 import { sql } from 'drizzle-orm';
 import { utf8Encode } from '@utils/bytes';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import {
   DbCommitGuardRejectedError,
   runInTransactionContext,
@@ -541,7 +541,7 @@ async function enqueuePreparedIncomingEvent(
  * state, but cannot recreate a one-time event such as message-send-error.
  */
 export async function enqueueIncomingEvent(
-  db: AppDatabase,
+  db: ReadDb,
   event: NewIncomingEvent,
   guard: DbCommitGuard,
   clock: IncomingEventClock = Date.now,
@@ -552,7 +552,7 @@ export async function enqueueIncomingEvent(
 
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = sampleIncomingEventClock(clock);
       await maintainRows(context, now);
       return enqueuePreparedIncomingEvent(context, event, prepared, now);
@@ -567,7 +567,7 @@ export async function enqueueIncomingEvent(
  * enqueue/claim helpers, so it cannot nest the process-wide DB mutex.
  */
 export async function enqueueAndClaimIncomingEventIfQueueEmpty(
-  db: AppDatabase,
+  db: ReadDb,
   event: NewIncomingEvent,
   options: { readonly now: number; readonly clock: () => number; readonly leaseToken: string },
   guard: DbCommitGuard,
@@ -577,7 +577,7 @@ export async function enqueueAndClaimIncomingEventIfQueueEmpty(
 
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = options.clock();
       assertTimestamp(now, 'now');
       const leaseExpiresAt = now + INCOMING_EVENT_LEASE_MS;
@@ -636,7 +636,7 @@ export async function enqueueAndClaimIncomingEventIfQueueEmpty(
  * Attempts increment here—not on failure—so a hard process death consumes an attempt too.
  */
 export async function claimIncomingEvents(
-  db: AppDatabase,
+  db: ReadDb,
   options: { readonly clock: () => number; readonly limit?: number; readonly leaseToken: string },
   guard: DbCommitGuard,
 ): Promise<ClaimedIncomingEvent[]> {
@@ -650,7 +650,7 @@ export async function claimIncomingEvents(
 
   const rows: ClaimedIncomingEvent[] = await withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = options.clock();
       assertTimestamp(now, 'now');
       const leaseExpiresAt = now + INCOMING_EVENT_LEASE_MS;
@@ -756,7 +756,7 @@ export async function markIncomingEventDbAppliedWithinTransaction(
 
 /** Mark one exact leased row successful and scrub its private payload. */
 export async function completeIncomingEvent(
-  db: AppDatabase,
+  db: ReadDb,
   claim: IncomingEventClaimIdentity,
   guard: DbCommitGuard,
   clock: IncomingEventClock = Date.now,
@@ -764,7 +764,7 @@ export async function completeIncomingEvent(
   validateClaimIdentity(claim);
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = sampleIncomingEventClock(clock);
       const rows = await db.all<{ id: number }>(sql`
         UPDATE incoming_event_queue
@@ -789,7 +789,7 @@ export async function completeIncomingEvent(
  * remain for duplicate suppression and diagnostics.
  */
 export async function poisonIncomingEvent(
-  db: AppDatabase,
+  db: ReadDb,
   claim: IncomingEventClaimIdentity & { readonly errorCode: string },
   guard: DbCommitGuard,
   clock: IncomingEventClock = Date.now,
@@ -798,7 +798,7 @@ export async function poisonIncomingEvent(
   const errorCode = normalizeFailureCode(claim.errorCode);
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = sampleIncomingEventClock(clock);
       const rows = await db.all<{ id: number }>(sql`
         UPDATE incoming_event_queue
@@ -819,7 +819,7 @@ export async function poisonIncomingEvent(
 
 /** Reschedule one exact lease, or poison/scrub it at expiry or the fifth claimed attempt. */
 export async function failIncomingEvent(
-  db: AppDatabase,
+  db: ReadDb,
   claim: IncomingEventClaimIdentity & { readonly errorCode: string },
   guard: DbCommitGuard,
   clock: IncomingEventClock = Date.now,
@@ -828,7 +828,7 @@ export async function failIncomingEvent(
   const errorCode = normalizeFailureCode(claim.errorCode);
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = sampleIncomingEventClock(clock);
       assertTimestamp(now + incomingEventBackoffMs(INCOMING_EVENT_MAX_ATTEMPTS), 'nextAttemptAt');
       const rows = await db.all<{
@@ -892,7 +892,7 @@ export async function failIncomingEvent(
  * successor's lease.
  */
 export async function deferIncomingEventForDependency(
-  db: AppDatabase,
+  db: ReadDb,
   claim: IncomingEventClaimIdentity,
   guard: DbCommitGuard,
   clock: IncomingEventClock = Date.now,
@@ -900,7 +900,7 @@ export async function deferIncomingEventForDependency(
   validateClaimIdentity(claim);
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = sampleIncomingEventClock(clock);
       const received = await db.all<{ receivedAt: number }>(sql`
         SELECT received_at AS receivedAt FROM incoming_event_queue WHERE id = ${claim.id}
@@ -950,13 +950,13 @@ export async function deferIncomingEventForDependency(
 
 /** Expire exhausted work and trim receipts under the account's revocable write guard. */
 export async function maintainIncomingEvents(
-  db: AppDatabase,
+  db: ReadDb,
   clock: IncomingEventClock,
   guard: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => maintainRows(context, sampleIncomingEventClock(clock)),
+    (db, context) => maintainRows(context, sampleIncomingEventClock(clock)),
     guard,
   );
 }
@@ -970,7 +970,7 @@ export async function maintainIncomingEvents(
  * result is metadata-only and does not materialize private payloads.
  */
 export async function getNextIncomingEventWakeAt(
-  db: AppDatabase,
+  db: Queryable,
   now: number,
 ): Promise<number | null> {
   assertTimestamp(now, 'now');
@@ -1012,7 +1012,7 @@ export async function getNextIncomingEventWakeAt(
 
 /** Bounded aggregate for diagnostics; it never returns payloads or identifying keys. */
 export async function getIncomingEventQueueHealth(
-  db: AppDatabase,
+  db: Queryable,
   now: number,
 ): Promise<IncomingEventQueueHealth> {
   assertTimestamp(now, 'now');

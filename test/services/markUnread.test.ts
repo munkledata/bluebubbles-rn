@@ -29,11 +29,11 @@ import {
   upsertMessagesWithinTransaction,
 } from '@db/repositories';
 import { runInTransactionContext, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 let mockServerPrivateApiEnabled = true;
 let mockServerRcsEnabled = false;
 let mockAcceptsRcsChat = true;
@@ -127,7 +127,7 @@ async function waitForCall(mock: jest.Mock): Promise<void> {
   }
 }
 
-async function seedChat(db: AppDatabase, guid: string): Promise<void> {
+async function seedChat(db: ReadDb, guid: string): Promise<void> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
   await setLastReadMessageGuid(db, guid, 'marker-1'); // start READ
@@ -443,7 +443,7 @@ describe('markUnread', () => {
 
     const neighbourReady = deferred<void>();
     const releaseNeighbour = deferred<void>();
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourReady.resolve();
       await releaseNeighbour.promise;
       throw new Error('mark-unread neighbour rollback');
@@ -1023,7 +1023,7 @@ describe('markRead', () => {
 
     const replacementReady = deferred<void>();
     const releaseReplacement = deferred<void>();
-    const replacement = withDbTransaction(db, async (context) => {
+    const replacement = withDbTransaction(db, async (db, context) => {
       await runInTransactionContext(context, async (transactionDb) => {
         await transactionDb.run(sql`DELETE FROM chats WHERE guid = ${guid}`);
       });
@@ -1183,7 +1183,7 @@ describe('account-switch containment', () => {
     const guid = 'iMessage;-;+15551234567';
     await seedChat(accountB.db, guid);
 
-    const opening = deferred<AppDatabase>();
+    const opening = deferred<TestDb>();
     (ensureDatabase as jest.Mock).mockImplementationOnce(() => opening.promise);
     const oldAction = markUnread(guid);
     expect(ensureDatabase).toHaveBeenCalledTimes(1);

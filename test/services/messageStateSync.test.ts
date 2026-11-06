@@ -27,7 +27,7 @@ import {
   MESSAGE_STATE_AUTHORITY_KEY,
 } from '@db/repositories/messageState';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import {
   syncMessageState,
   MessageStateSyncIncompleteError,
@@ -102,11 +102,11 @@ const repairFor = (reason: RegExp) =>
     cause: expect.objectContaining({ message: expect.stringMatching(reason) }),
   });
 describe('versioned message state', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
   beforeEach(async () => {
     ({ db, raw } = await createTestDb());
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       setMessageStateAuthorityWithinTransaction(context, authority),
     );
   });
@@ -132,7 +132,7 @@ describe('versioned message state', () => {
       }
     ).value;
   const apply = (sequence: string, kind: MessageStateEvent['kind']) =>
-    withDbTransaction(db, (context) =>
+    withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, changed(sequence, kind)),
     );
   async function evictRetainingOwner(kind: 'ledger' | 'alias') {
@@ -156,7 +156,7 @@ describe('versioned message state', () => {
     async (kind) => {
       await evictRetainingOwner(kind);
       const retained = retainedOwners();
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           ...changed('11', 'deleted'),
           chatGuid: 'iMessage;-;foreign@example.test',
@@ -178,7 +178,7 @@ describe('versioned message state', () => {
     async (kind) => {
       await evictRetainingOwner(kind);
       const retained = retainedOwners();
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           ...changed('12', 'restored'),
           chatGuid: null,
@@ -228,7 +228,7 @@ describe('versioned message state', () => {
         avatar: null,
       },
     ]);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, {
         ...changed('12', 'restored'),
         chatGuid: null,
@@ -258,14 +258,14 @@ describe('versioned message state', () => {
     async (kind) => {
       await evictRetainingOwner(kind);
       const retained = retainedOwners();
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           ...changed('12', 'restored'),
           chatGuid: null,
         }),
       );
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           bindSnapshotMessageOwnersWithinTransaction(context, [
             { guid: 'message-1', chatGuid: 'iMessage;-;foreign@example.test' },
           ]),
@@ -275,7 +275,7 @@ describe('versioned message state', () => {
         chat_guid: null,
       });
       expect(retainedOwners()).toEqual(retained);
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         bindSnapshotMessageOwnersWithinTransaction(context, [{ guid: 'message-1', chatGuid }]),
       );
       await seed();
@@ -403,7 +403,7 @@ describe('versioned message state', () => {
       { ...changed('11', 'deleted'), ledgerEpoch: providerEpoch },
       { ...changed('11', 'deleted'), chatGuid: 'SMS;-;other' },
     ]) {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, payload),
       );
     }
@@ -582,7 +582,7 @@ describe('versioned message state', () => {
     expect((await getMessageStateAuthority(db))?.sequence).toBe('12');
   });
   it('learns an absent restore owner only from exact active hydration', async () => {
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, { ...changed('11', 'deleted'), chatGuid: null }),
     );
     const adapter = api(async () => page([{ ...event('12', 'restored'), chatGuid: null }]));
@@ -632,12 +632,12 @@ describe('versioned message state', () => {
     expect(requestRecovery).toHaveBeenCalledWith(null, context, 'restored-message');
   });
   it('preserves a newer ownerless deletion arriving during exact restore hydration', async () => {
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, { ...changed('12', 'restored'), chatGuid: null }),
     );
     const adapter = api(async () => page([{ ...event('12', 'restored'), chatGuid: null }]));
     adapter.fetchActiveMessage = async () => {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           ...changed('13', 'deleted'),
           chatGuid: null,
@@ -665,13 +665,13 @@ describe('versioned message state', () => {
     expect(raw.prepare('SELECT * FROM message_deletion_ledger').all()).toEqual([]);
   });
   it('does not let a generic equal-sequence event bind an ownerless receipt', async () => {
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, { ...changed('12', 'restored'), chatGuid: null }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, changed('12', 'deleted')),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, changed('12', 'restored')),
     );
     expect(
@@ -683,7 +683,7 @@ describe('versioned message state', () => {
     });
   });
   it('requests a repair for a restoration that conflicts with an equal-sequence deletion', async () => {
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, { ...changed('12', 'deleted'), chatGuid: null }),
     );
     const adapter = api(async () => page([{ ...event('12', 'restored'), chatGuid: null }]));
@@ -710,7 +710,7 @@ describe('versioned message state', () => {
   it.each(['providerEpoch', 'ledgerEpoch'] as const)(
     'rejects exact hydration after its %s authority changes',
     async (field) => {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           ...changed('12', 'restored'),
           chatGuid: null,
@@ -723,7 +723,7 @@ describe('versioned message state', () => {
       };
       const adapter = api(async () => page([{ ...event('12', 'restored'), chatGuid: null }]));
       adapter.fetchActiveMessage = async () => {
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           setMessageStateAuthorityWithinTransaction(context, replacement),
         );
         return Message.parse({
@@ -741,7 +741,7 @@ describe('versioned message state', () => {
     },
   );
   it('rejects exact hydration overtaken by a newer snapshot floor', async () => {
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, { ...changed('12', 'restored'), chatGuid: null }),
     );
     const replacement = {
@@ -752,7 +752,7 @@ describe('versioned message state', () => {
     };
     const adapter = api(async () => page([{ ...event('12', 'restored'), chatGuid: null }]));
     adapter.fetchActiveMessage = async () => {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, replacement),
       );
       return Message.parse({
@@ -774,7 +774,7 @@ describe('versioned message state', () => {
       await markMessageDeleted(db, 'message-1', 200, undefined, localOwner ?? undefined);
       const receipt = raw.prepare('SELECT * FROM message_deletion_ledger').all();
       expect(receipt).toHaveLength(1);
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           ...changed('12', 'restored'),
           chatGuid: null,
@@ -854,7 +854,7 @@ describe('versioned message state', () => {
   it('restores only server-owned hides for exact positive snapshot rows', async () => {
     await seed();
     await apply('11', 'deleted');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       restoreSnapshotMessagesWithinTransaction(context, [{ guid: 'message-1', chatGuid }], {
         ...authority,
         snapshotSequence: '20',
@@ -866,7 +866,7 @@ describe('versioned message state', () => {
   it('does not overwrite a newer same-ledger transition during snapshot projection', async () => {
     await seed();
     await apply('30', 'deleted');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       restoreSnapshotMessagesWithinTransaction(context, [{ guid: 'message-1', chatGuid }], {
         ...authority,
         snapshotSequence: '20',
@@ -878,7 +878,7 @@ describe('versioned message state', () => {
   it('accepts positive snapshot evidence from a new ledger after server rollback', async () => {
     await seed();
     await apply('30', 'deleted');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       restoreSnapshotMessagesWithinTransaction(context, [{ guid: 'message-1', chatGuid }], {
         ...authority,
         ledgerEpoch: providerEpoch,
@@ -920,7 +920,7 @@ describe('versioned message state', () => {
   it('does not reuse a prior ledger hide when upserting into the current authority', async () => {
     await seed();
     await apply('11', 'deleted');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       setMessageStateAuthorityWithinTransaction(context, {
         ...authority,
         ledgerEpoch: providerEpoch,

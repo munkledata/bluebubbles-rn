@@ -36,7 +36,7 @@ describe('contact-link on handle ingestion (1.5)', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw
         .prepare(
           `INSERT INTO handles (address, service, display_name)

@@ -16,11 +16,13 @@ describe('custom folder input errors', () => {
 
     const { db, raw } = await createTestDb();
     try {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         createCustomFolderWithinTransaction(context, 'Work'),
       );
       await expect(
-        withDbTransaction(db, (context) => createCustomFolderWithinTransaction(context, 'Work')),
+        withDbTransaction(db, (db, context) =>
+          createCustomFolderWithinTransaction(context, 'Work'),
+        ),
       ).rejects.toThrow(new CustomFolderInputError('A folder with that name already exists.'));
     } finally {
       raw.close();

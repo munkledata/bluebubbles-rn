@@ -2,7 +2,7 @@ import { logSinks } from '@core/secure';
 import { getDatabase } from '@db/database';
 import { clearErrorReportsWithinTransaction } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { hasErrorReportingConsent, useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { dbWriteWedgeMarker, http } from '../clients';
@@ -35,7 +35,7 @@ let purgeInFlight: Promise<void> | null = null;
 let nextPurgeGeneration = 0;
 let purgeRequiredGeneration: number | null = null;
 
-function captureOpenDatabase(): AppDatabase | null {
+function captureOpenDatabase(): ReadDb | null {
   try {
     return getDatabase();
   } catch {
@@ -66,7 +66,7 @@ function revokeErrorReporting(): Promise<void> {
       if (!db || !accountLease.isCurrent()) return;
       await withDbTransaction(
         db,
-        (context) => clearErrorReportsWithinTransaction(context),
+        (db, context) => clearErrorReportsWithinTransaction(context),
         () => accountLease.isCurrent(),
       );
       if (accountLease.isCurrent() && purgeRequiredGeneration === generation) {

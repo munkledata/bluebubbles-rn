@@ -4,7 +4,7 @@ import {
   listAttachmentCacheEntriesForRecovery,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { WriteDb } from '@db/types';
 import { NativeBoundedDownloadError, type AttachmentCacheScanFile } from '@native/boundedDownload';
 import { sql } from 'drizzle-orm';
 import {
@@ -90,7 +90,7 @@ function nativeBoundary(
   };
 }
 
-async function seedLiveReference(db: AppDatabase, guid: string, path: string): Promise<void> {
+async function seedLiveReference(db: WriteDb, guid: string, path: string): Promise<void> {
   // Recovery only needs an exact attachment reference; a missing message owner follows the same
   // conservative live-reference rule as outgoing/local rows.
   await db.run(sql`INSERT INTO attachments (guid, local_path) VALUES (${guid}, ${path})`);
@@ -116,7 +116,7 @@ it('adopts exact legacy/scoped references, retires orphans, and repairs missing 
   await seedLiveReference(db, 'legacy-live', liveLegacy);
   await seedLiveReference(db, 'scoped-live', liveScoped);
   await seedLiveReference(db, 'missing-ref', missing);
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     recordAttachmentCacheEntry(context, { path: missing, bytes: 99, lastUsedAt: 1 }),
   );
   const physical = new Map([
@@ -574,7 +574,7 @@ it('drains a crash-surviving reserved file instead of reviving it', async () => 
   const { db } = await createTestDb();
   const currentLease = lease();
   const reserved = scoped('reserved');
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     createAttachmentCacheReservation(context, { path: reserved, maxBytes: 100, createdAt: 1 }),
   );
   const physical = new Map([[reserved, 40]]);
@@ -597,7 +597,7 @@ it('stays ready while this process is still deleting and downloading cache files
   const { db } = await createTestDb();
   const currentLease = lease();
   const deleting = scoped('deleting-now');
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     recordAttachmentCacheEntry(context, { path: deleting, bytes: 40, lastUsedAt: 1 }),
   );
   const physical = new Map([[deleting, 40]]);
@@ -717,7 +717,7 @@ it('keeps recovery closed and untouched when missing-file repair exceeds the ref
   const { db, raw } = await createTestDb();
   const currentLease = lease();
   const missing = scoped('missing-reference-overflow');
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     recordAttachmentCacheEntry(context, { path: missing, bytes: 99, lastUsedAt: 1 }),
   );
   seedAttachmentReferences(raw, missing, OVER_LIMIT_REFERENCES, 'missing-overflow-reference');

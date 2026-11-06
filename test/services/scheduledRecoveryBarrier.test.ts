@@ -1,6 +1,6 @@
 import type { HttpClient } from '@core/api/http';
 import { getScheduledById } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import {
   ensureScheduledRecovery,
   runDueScheduled,
@@ -230,7 +230,7 @@ describe('scheduled crash-recovery barrier', () => {
       scheduledFor: 1,
     });
     await claimScheduled(db, id);
-    const flaky: AppDatabase = Object.create(db);
+    const flaky: TestDb = Object.create(db);
     let failReset = true;
     flaky.all = ((...args: Parameters<AppDatabase['all']>) => {
       if (failReset) {

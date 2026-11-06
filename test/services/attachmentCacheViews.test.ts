@@ -37,7 +37,7 @@ jest.mock('@/services/download/attachmentCacheRecovery', () => ({
 
 import { getAttachmentCacheEntry } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { createAttachmentCacheAccountScope } from '@/services/download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
 import {
@@ -62,11 +62,11 @@ const path = (name: string): string =>
   `file:///documents/attachments/media-${name}/generation-1/media-file.jpg`;
 
 async function seedUsage(
-  db: AppDatabase,
+  db: ReadDb,
   entries: { path: string; bytes: number; lastUsedAt: number }[],
 ): Promise<void> {
   for (const entry of entries) {
-    await withDbTransaction(db, (context) => recordAttachmentCacheEntry(context, entry));
+    await withDbTransaction(db, (db, context) => recordAttachmentCacheEntry(context, entry));
   }
 }
 

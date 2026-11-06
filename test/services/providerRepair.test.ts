@@ -26,7 +26,7 @@ import {
 } from '@db/repositories/messageState';
 import * as messageStateRepository from '@db/repositories/messageState';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { syncProviderMessages, type ProviderSyncOptions } from '@/services/sync/providerRepair';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
@@ -73,7 +73,7 @@ const lease: ProviderRepairLease = {
 };
 
 describe('provider-scoped repair', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
   beforeEach(async () => {
     ({ db, raw } = await createTestDb());
@@ -99,7 +99,7 @@ describe('provider-scoped repair', () => {
   /** Deletions recorded under an older ledger, as left by a previous pairing's history. */
   async function installOldLedgerDeletions(guids: readonly string[]) {
     const oldLedger = lease.token;
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       setMessageStateAuthorityWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -111,7 +111,7 @@ describe('provider-scoped repair', () => {
       }),
     );
     for (const guid of guids)
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -269,7 +269,7 @@ describe('provider-scoped repair', () => {
   it('allows a later versioned restore of snapshot absence', async () => {
     await seed('absent');
     await fixture().run();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -295,7 +295,7 @@ describe('provider-scoped repair', () => {
     await seed('absent');
     await seed('present');
     const oldLedger = lease.token;
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       setMessageStateAuthorityWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -307,7 +307,7 @@ describe('provider-scoped repair', () => {
       }),
     );
     for (const guid of ['absent', 'present', 'evicted'])
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -375,7 +375,7 @@ describe('provider-scoped repair', () => {
 
     // Ordinary sync then receives the message again, and its visibility is recomputed.
     await seed('gone');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       messageStateRepository.projectMessageStateWithinTransaction(context, 'gone', chatGuid),
     );
     expect(dates()).toEqual([
@@ -416,7 +416,7 @@ describe('provider-scoped repair', () => {
     } finally {
       stopBeforeInstall.mockRestore();
     }
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       messageStateRepository.setPendingMessageStateRepairWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -437,7 +437,7 @@ describe('provider-scoped repair', () => {
     );
   });
   it('hydrates a snapshot message whose server deletion receipt had no owner', async () => {
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       setMessageStateAuthorityWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -448,7 +448,7 @@ describe('provider-scoped repair', () => {
         sequence: '0',
       }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -469,7 +469,7 @@ describe('provider-scoped repair', () => {
   it('does not hide protected local work when rebasing an old restored state', async () => {
     await seed('local-work');
     const oldLedger = lease.token;
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       setMessageStateAuthorityWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -480,7 +480,7 @@ describe('provider-scoped repair', () => {
         sequence: '0',
       }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       applyMessageStateWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -594,7 +594,7 @@ describe('provider-scoped repair', () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     await seed('existing');
     await setSyncMarker(db, { lastSyncedRowId: 3, lastSyncedTimestamp: 50 });
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       setMessageStateAuthorityWithinTransaction(context, {
         version: 1,
         provider: 'imessage',
@@ -682,7 +682,7 @@ describe('provider-scoped repair', () => {
       return f;
     }
     async function previousProvider(epoch: string) {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -846,7 +846,7 @@ describe('provider-scoped repair', () => {
       });
     /** An ordinary run: current authority and an iMessage bookmark, so incremental sync runs. */
     async function ordinaryRun() {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -925,7 +925,7 @@ describe('provider-scoped repair', () => {
 
   describe('deleted-message catch-up never stops ordinary sync', () => {
     async function ordinaryRun(cursor = 'old-cursor') {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1156,7 +1156,7 @@ describe('provider-scoped repair', () => {
 
     it('stores a message whose earlier deletion was recorded without a chat', async () => {
       // This ledger's ownerless deletion from before the repair would keep the message out.
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1167,7 +1167,7 @@ describe('provider-scoped repair', () => {
           sequence: '5',
         }),
       );
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1589,7 +1589,7 @@ describe('provider-scoped repair', () => {
     it('records deletions kept from an older ledger for the restore phase', async () => {
       await seed('kept-hidden');
       const oldLedger = lease.token;
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1600,7 +1600,7 @@ describe('provider-scoped repair', () => {
           sequence: '0',
         }),
       );
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1623,7 +1623,7 @@ describe('provider-scoped repair', () => {
 
     it('records same-ledger deletions from before a re-setup for the restore phase', async () => {
       await seed('deleted-before');
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1634,7 +1634,7 @@ describe('provider-scoped repair', () => {
           sequence: '5',
         }),
       );
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1843,7 +1843,7 @@ describe('provider-scoped repair', () => {
       expect(dates()).toEqual([{ guid: 'gone', d: 0 }]);
 
       const transition = (sequence: string) =>
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           applyMessageStateWithinTransaction(context, {
             version: 1,
             provider: 'imessage',
@@ -1882,7 +1882,7 @@ describe('provider-scoped repair', () => {
 
     it('restores same-ledger deletions from before a re-setup that the server still has', async () => {
       await seed('restored-in-gap');
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1893,7 +1893,7 @@ describe('provider-scoped repair', () => {
           sequence: '5',
         }),
       );
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -1929,7 +1929,7 @@ describe('provider-scoped repair', () => {
       const original = f.base.fetchMessagePresence!;
       f.base.fetchMessagePresence = async (epoch, requested, signal) => {
         // A realtime transition moves a planned receipt into the new ledger mid-check.
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           applyMessageStateWithinTransaction(context, {
             version: 1,
             provider: 'imessage',
@@ -1958,7 +1958,7 @@ describe('provider-scoped repair', () => {
       const f = fixture();
       const original = f.base.fetchMessagePresence!;
       f.base.fetchMessagePresence = async (epoch, guids, signal) => {
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           setMessageStateAuthorityWithinTransaction(context, {
             version: 1,
             provider: 'imessage',
@@ -2033,7 +2033,7 @@ describe('provider-scoped repair', () => {
       const f = fixture(['kept']);
       const original = f.base.fetchMessagePresence!;
       f.base.fetchMessagePresence = async (epoch, guids, signal) => {
-        await withDbTransaction(db, (context) =>
+        await withDbTransaction(db, (db, context) =>
           setMessageStateAuthorityWithinTransaction(context, {
             version: 1,
             provider: 'imessage',
@@ -2079,7 +2079,7 @@ describe('provider-scoped repair', () => {
 
     /** This ledger's deletion recorded before a re-setup, as an earlier sync left it. */
     async function staleDeletion(guid: string, owner: string | null) {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         setMessageStateAuthorityWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -2090,7 +2090,7 @@ describe('provider-scoped repair', () => {
           sequence: '5',
         }),
       );
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           version: 1,
           provider: 'imessage',
@@ -2216,7 +2216,7 @@ describe('provider-scoped repair', () => {
       await seed('asked');
       await seed('was-restored');
       await installOldLedgerDeletions(['asked', 'was-restored']);
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         applyMessageStateWithinTransaction(context, {
           version: 1,
           provider: 'imessage',

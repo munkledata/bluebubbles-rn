@@ -24,7 +24,7 @@ import {
 } from '@db/repositories';
 import { getDatabase } from '@db/database';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { useShareIntentStore } from '@state/shareIntentStore';
 import {
   runTrackedRealtimeWork,
@@ -41,12 +41,12 @@ let attemptedWakeGeneration = 0;
 /** Account owner captured synchronously by the screen before any native or database await. */
 export interface ShareIntakeSettlementOptions {
   /** Test/bootstrap injection; UI callers deliberately leave database ownership in this service. */
-  readonly db?: AppDatabase;
+  readonly db?: ReadDb;
   readonly lease: RealtimeDeliveryLease;
   readonly drainNext?: boolean;
 }
 
-function settlementDatabase(options: ShareIntakeSettlementOptions): AppDatabase {
+function settlementDatabase(options: ShareIntakeSettlementOptions): ReadDb {
   return options.db ?? getDatabase();
 }
 
@@ -90,7 +90,7 @@ export function discardShareIntakeItem(
 ): Promise<void> {
   return withDbTransaction(
     getDatabase(),
-    (context) =>
+    (db, context) =>
       discardShareIntakeItemWithinTransaction(context, {
         identity: args.identity,
         ...(args.chatGuid === undefined ? {} : { chatGuid: args.chatGuid }),
@@ -114,7 +114,7 @@ export function admitShareIntakeTextDraft(
 ): Promise<{ readonly draft: string; readonly alreadyApplied: boolean }> {
   return withDbTransaction(
     getDatabase(),
-    (context) => admitShareIntakeTextDraftWithinTransaction(context, args),
+    (db, context) => admitShareIntakeTextDraftWithinTransaction(context, args),
     commitGuard,
   );
 }
@@ -127,7 +127,7 @@ export function prepareShareIntakeNewChatPlan(
 ): Promise<ShareIntakeNewChatPlan> {
   return withDbTransaction(
     getDatabase(),
-    (context) => prepareShareIntakeNewChatPlanWithinTransaction(context, identity, plan),
+    (db, context) => prepareShareIntakeNewChatPlanWithinTransaction(context, identity, plan),
     commitGuard,
   );
 }
@@ -370,7 +370,7 @@ export async function discardShareIntakeBatch(
  * receipt and replay under the next account. Entirely unbound pre-login shares have no receipt and
  * deliberately survive this sweep.
  */
-export async function discardAccountBoundShareIntake(db: AppDatabase): Promise<void> {
+export async function discardAccountBoundShareIntake(db: Queryable): Promise<void> {
   const batchIds = await listShareIntakeReceiptBatchIds(db);
   for (const batchId of batchIds) {
     await discardNativeShareBatchForAccountReset(batchId);

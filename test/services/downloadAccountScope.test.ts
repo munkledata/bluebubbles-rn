@@ -20,7 +20,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import {
   deleteNativeAttachmentCacheFile,
   getNativeAttachmentCacheAvailableBytes,
@@ -91,7 +91,7 @@ async function waitFor(predicate: () => boolean, description: string): Promise<v
   throw new Error(`timed out waiting for ${description}`);
 }
 
-async function seedRcsAttachment(db: AppDatabase) {
+async function seedRcsAttachment(db: ReadDb) {
   const handles = await upsertHandles(db, [{ address: 'rcs@x.com' }]);
   const chats = await upsertChats(
     db,
@@ -129,7 +129,7 @@ async function seedRcsAttachment(db: AppDatabase) {
   return (await getAttachmentByGuid(db, RCS_ATTACHMENT_GUID))!;
 }
 
-async function seedImessageAttachment(db: AppDatabase) {
+async function seedImessageAttachment(db: ReadDb) {
   const handles = await upsertHandles(db, [{ address: '+15550000000' }]);
   const chats = await upsertChats(
     db,
@@ -236,7 +236,7 @@ describe('account-scoped attachment retries', () => {
     const seeded = await seedImessageAttachment(db);
     const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/old.jpg';
     await updateAttachmentLocalPath(db, seeded.guid, oldPath);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: oldPath, bytes: 1_000, lastUsedAt: 1 }),
     );
     const attachment = {
@@ -308,7 +308,7 @@ describe('account-scoped attachment retries', () => {
     const seeded = await seedRcsAttachment(db);
     const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/rcs-old.jpg';
     await updateAttachmentLocalPath(db, seeded.guid, oldPath);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: oldPath, bytes: 1_000, lastUsedAt: 1 }),
     );
     const attachment = (await getAttachmentByGuid(db, seeded.guid))!;
@@ -389,7 +389,7 @@ describe('account-scoped attachment retries', () => {
     const oldPathA = 'file:///documents/attachments/scope-attachment/generation-0/source-a.jpg';
     const oldPathB = 'file:///documents/attachments/scope-attachment/generation-0/source-b.jpg';
     await updateAttachmentLocalPath(db, seeded.guid, oldPathA);
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       await recordAttachmentCacheEntry(context, { path: oldPathA, bytes: 1_000, lastUsedAt: 1 });
       await recordAttachmentCacheEntry(context, { path: oldPathB, bytes: 1_000, lastUsedAt: 1 });
     });
@@ -474,7 +474,7 @@ describe('account-scoped attachment retries', () => {
     const seeded = await seedRcsAttachment(db);
     const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/rcs-corrupt.jpg';
     await updateAttachmentLocalPath(db, seeded.guid, oldPath);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: oldPath, bytes: 1_000, lastUsedAt: 1 }),
     );
     const attachment = (await getAttachmentByGuid(db, seeded.guid))!;
@@ -562,7 +562,7 @@ describe('account-scoped attachment retries', () => {
     const replacementPath =
       'file:///documents/attachments/scope-attachment/generation-0/race-replacement.jpg';
     await updateAttachmentLocalPath(db, seeded.guid, oldPath);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: oldPath, bytes: 1_000, lastUsedAt: 1 }),
     );
     const attachment = (await getAttachmentByGuid(db, seeded.guid))!;
@@ -675,7 +675,7 @@ describe('account-scoped attachment retries', () => {
         // Claim the next queue slot while the quota snapshot transaction is still open. This
         // positions the rolling neighbour directly between planning and reservation creation.
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw
               .prepare("INSERT INTO kv (key, value) VALUES ('cache-owner-neighbour', 'dirty')")
               .run();
@@ -829,7 +829,7 @@ describe('account-scoped attachment retries', () => {
       const shape = JSON.stringify(args[0]).replace(/\s+/g, ' ').toLowerCase();
       if (!neighbour && shape.includes('candidate_page') && shape.includes('usage_files')) {
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw
               .prepare("INSERT INTO kv (key, value) VALUES ('cache-revoke-neighbour', 'dirty')")
               .run();
@@ -917,7 +917,7 @@ describe('account-scoped attachment retries', () => {
       'file:///documents/attachments/media-admission-victim/generation-0/media-old.jpg';
     const destination =
       'file:///documents/attachments/media-scope-attachment/generation-1/media-admission-new.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, {
         path: victim,
         bytes: ATTACHMENT_CACHE_MAX_BYTES,
@@ -941,7 +941,7 @@ describe('account-scoped attachment retries', () => {
       const shape = JSON.stringify(args[0]).replace(/\s+/g, ' ').toLowerCase();
       if (!neighbour && shape.includes('candidate_page') && shape.includes('usage_files')) {
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw.prepare("INSERT INTO kv (key, value) VALUES ('cache-claim-revoke', 'dirty')").run();
             neighbourStarted = true;
             await neighbourGate;
@@ -1064,7 +1064,7 @@ describe('account-scoped attachment retries', () => {
     const attachment = await seedRcsAttachment(db);
     const existingPath =
       'file:///documents/attachments/media-scope-attachment/generation-1/media-photo.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: existingPath, bytes: 999, lastUsedAt: 1 }),
     );
     await updateAttachmentLocalPath(db, attachment.guid, existingPath);
@@ -1087,7 +1087,7 @@ describe('account-scoped attachment retries', () => {
     jest.mocked(statNativeAttachmentCacheFile).mockImplementationOnce(async () => {
       transactionAtStat = raw.inTransaction;
       neighbour = observe(
-        withDbTransaction(db, async (_context) => {
+        withDbTransaction(db, async (db, _context) => {
           raw
             .prepare("INSERT INTO kv (key, value) VALUES ('cache-reuse-neighbour', 'dirty')")
             .run();
@@ -1144,7 +1144,7 @@ describe('account-scoped attachment retries', () => {
     const attachment = await seedRcsAttachment(db);
     const existingPath =
       'file:///documents/attachments/media-scope-attachment/generation-1/media-reuse-revoke.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: existingPath, bytes: 999, lastUsedAt: 1 }),
     );
     await updateAttachmentLocalPath(db, attachment.guid, existingPath);
@@ -1167,7 +1167,7 @@ describe('account-scoped attachment retries', () => {
       .mockImplementationOnce(async () => {
         transactionAtStat = raw.inTransaction;
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw.prepare("INSERT INTO kv (key, value) VALUES ('cache-reuse-revoke', 'dirty')").run();
             neighbourStarted = true;
             await neighbourGate;
@@ -1263,7 +1263,7 @@ describe('account-scoped attachment retries', () => {
       'file:///documents/attachments/media-retirement-victim/generation-1/media-old.jpg';
     const destinationPath =
       'file:///documents/attachments/media-scope-attachment/generation-1/media-retirement-new.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, {
         path: retiringPath,
         bytes: ATTACHMENT_CACHE_MAX_BYTES,
@@ -1290,7 +1290,7 @@ describe('account-scoped attachment retries', () => {
       .mockImplementationOnce(async () => {
         transactionAtDelete = raw.inTransaction;
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw
               .prepare("INSERT INTO kv (key, value) VALUES ('cache-settlement-revoke', 'dirty')")
               .run();
@@ -1361,7 +1361,7 @@ describe('account-scoped attachment retries', () => {
         phase === 'due-list'
           ? 'file:///documents/attachments/media-drain-due-owner/generation-1/media-old.jpg'
           : 'file:///documents/attachments/media-drain-recheck-owner/generation-1/media-old.jpg';
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         createAttachmentCacheReservation(context, {
           path: retiringPath,
           maxBytes: 1,
@@ -1497,7 +1497,7 @@ describe('account-scoped attachment retries', () => {
       'file:///documents/attachments/media-retirement-retry/generation-1/media-old.jpg';
     const destinationPath =
       'file:///documents/attachments/media-scope-attachment/generation-1/media-retirement-retry.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, {
         path: retiringPath,
         bytes: ATTACHMENT_CACHE_MAX_BYTES,
@@ -1524,7 +1524,7 @@ describe('account-scoped attachment retries', () => {
       .mockImplementationOnce(async () => {
         transactionAtDelete = raw.inTransaction;
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw.prepare("INSERT INTO kv (key, value) VALUES ('cache-retry-revoke', 'dirty')").run();
             neighbourStarted = true;
             await neighbourGate;

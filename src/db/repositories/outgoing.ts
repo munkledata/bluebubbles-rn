@@ -13,7 +13,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import {
   projectMessageStateWithinTransaction,
   getTrustedMessageStateLedgersWithinTransaction,
@@ -460,11 +460,11 @@ export async function insertOutgoingTextWithinTransaction(
 
 /** Optimistically insert an outgoing text message + its queue row, and bump the chat. */
 export async function insertOutgoingText(
-  db: AppDatabase,
+  db: ReadDb,
   args: InsertOutgoingTextArgs,
 ): Promise<OutgoingInsertResult> {
   // ONE transaction — see the insert-atomicity note directly above.
-  return withDbTransaction(db, (context) => insertOutgoingTextWithinTransaction(context, args));
+  return withDbTransaction(db, (db, context) => insertOutgoingTextWithinTransaction(context, args));
 }
 
 /**
@@ -654,11 +654,13 @@ export function insertOutgoingReactionWithinTransaction(
 
 /** Standalone optimistic-reaction owner; composing services use the transaction-only body. */
 export async function insertOutgoingReaction(
-  db: AppDatabase,
+  db: ReadDb,
   args: InsertOutgoingReactionArgs,
 ): Promise<void> {
   // ONE transaction — see the insert-atomicity note above insertOutgoingText.
-  await withDbTransaction(db, (context) => insertOutgoingReactionWithinTransaction(context, args));
+  await withDbTransaction(db, (db, context) =>
+    insertOutgoingReactionWithinTransaction(context, args),
+  );
 }
 
 /**
@@ -719,11 +721,11 @@ export function discardOutgoingMessageWithinTransaction(
  * wrapper.
  */
 export async function discardOutgoingMessage(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   now: number = Date.now(),
 ): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
+  return withDbTransaction(db, (db, context) =>
     discardOutgoingMessageWithinTransaction(context, guid, now),
   );
 }
@@ -784,7 +786,7 @@ function isQueuedOneShotText(row: Pick<RetryableOutgoing, 'kind' | 'payload'>): 
 
 /** Read-only preflight for the UI retry gate; the transaction below still revalidates this row. */
 export async function getOutgoingRetryChatGuid(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
 ): Promise<string | null> {
   const rows = await db.all<{ chatGuid: string }>(sql`
@@ -1047,7 +1049,7 @@ export function claimFailedOutgoingForRetryWithinTransaction(
  * must use {@link claimFailedOutgoingForRetryWithinTransaction} instead of nesting this wrapper.
  */
 export async function claimFailedOutgoingForRetry(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   clock: () => number = Date.now,
   commitGuard?: DbCommitGuard,
@@ -1058,7 +1060,7 @@ export async function claimFailedOutgoingForRetry(
 ): Promise<RetryHandover> {
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       claimFailedOutgoingForRetryWithinTransaction(
         context,
         guid,
@@ -1091,7 +1093,7 @@ export async function claimFailedOutgoingForRetry(
  * `DbEventSink`, which reconciles inside its own transaction for exactly this pair of writes.
  */
 export async function reconcileOutgoingSuccess(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   server: ServerMsgFields,
   commitGuard?: DbCommitGuard,
@@ -1103,14 +1105,14 @@ export async function reconcileOutgoingSuccess(
   if (server.guid === tempGuid) {
     await withDbTransaction(
       db,
-      (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid),
+      (db, context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid),
       commitGuard,
     );
     return;
   }
   await withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       reconcileOutgoingSuccessWithinTransaction(context, tempGuid, server, expectedChatGuid),
     commitGuard,
   );
@@ -2265,7 +2267,7 @@ export async function reconcileEchoByContent(
  * `temp-…` `-att` exists at sync time) and for received messages (not is-from-me).
  */
 export async function reconcileOutgoingAttachmentByContent(
-  db: AppDatabase,
+  db: ReadDb,
   m: EchoMatchFields,
   chatId: number,
   commitGuard?: DbCommitGuard,
@@ -2274,7 +2276,7 @@ export async function reconcileOutgoingAttachmentByContent(
   if (m.sendAttemptCorrelationInvalid === true) return 'unmatched';
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const hasExactAttemptField =
         m.tempGuid != null || m.attemptGuid != null || m.clientAttemptGeneration != null;
       if (hasExactAttemptField) {

@@ -20,7 +20,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { setChatMute } from '../support/repositoryWrappers';
 
@@ -39,7 +39,7 @@ function inbound(fields: Record<string, unknown>): NormalizedEvent {
 
 /** Match the production NotifyingEventSink contract: derive intents only after DbEventSink lands. */
 async function buildAfterDbWrite(
-  db: AppDatabase,
+  db: ReadDb,
   event: NormalizedEvent,
 ): ReturnType<typeof buildMessageIntents> {
   if (event.type !== 'new-message') return buildMessageIntents(db, event);
@@ -62,7 +62,7 @@ async function buildAfterDbWrite(
   return buildMessageIntents(db, event);
 }
 
-async function seedDeletedChat(): Promise<AppDatabase> {
+async function seedDeletedChat(): Promise<TestDb> {
   const { db } = await createTestDb();
   const handles = await upsertHandles(db, [{ address: 'bob@x.com' }]);
   await upsertChats(

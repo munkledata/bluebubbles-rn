@@ -59,7 +59,7 @@ describe('attachment cache ledger', () => {
     const rolledBackPath = `${PATH}-rolled-back`;
     let staleContext!: DbTransactionContext;
 
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       staleContext = context;
     });
     await expect(
@@ -80,7 +80,7 @@ describe('attachment cache ledger', () => {
     ).rejects.toBeInstanceOf(DbTransactionContextRejectedError);
 
     await expect(
-      withDbTransaction(db, async (context) => {
+      withDbTransaction(db, async (db, context) => {
         await createAttachmentCacheReservation(context, {
           path: rolledBackPath,
           maxBytes: 10,
@@ -98,7 +98,7 @@ describe('attachment cache ledger', () => {
   it('durably charges a native reservation, commits exact bytes, and recovers an abandoned one', async () => {
     const { db } = await createTestDb();
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         createAttachmentCacheReservation(context, {
           path: PATH,
           maxBytes: 100,
@@ -107,7 +107,7 @@ describe('attachment cache ledger', () => {
       ),
     ).toBe(true);
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         createAttachmentCacheReservation(context, {
           path: PATH,
           maxBytes: 100,
@@ -129,7 +129,7 @@ describe('attachment cache ledger', () => {
     ]);
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         commitAttachmentCacheReservation(context, {
           path: PATH,
           bytes: 60,
@@ -143,7 +143,7 @@ describe('attachment cache ledger', () => {
       lastUsedAt: 75,
     });
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         commitAttachmentCacheReservation(context, {
           path: PATH,
           bytes: 60,
@@ -153,7 +153,7 @@ describe('attachment cache ledger', () => {
     ).toBe(false);
 
     const abandoned = 'file:///documents/attachments/aa/abandoned.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       createAttachmentCacheReservation(context, {
         path: abandoned,
         maxBytes: 80,
@@ -161,7 +161,7 @@ describe('attachment cache ledger', () => {
       }),
     );
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         scheduleAttachmentCacheRetirementRetry(context, abandoned, 100),
       ),
     ).toEqual({
@@ -173,7 +173,7 @@ describe('attachment cache ledger', () => {
       bytes: 80,
     });
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         confirmAttachmentCacheEntryDeleted(context, abandoned),
       ),
     ).toBe(true);
@@ -182,13 +182,13 @@ describe('attachment cache ledger', () => {
   it('records one active row per path and never regresses a newer observation', async () => {
     const { db, raw } = await createTestDb();
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 200 }),
       ),
     ).toBe(true);
     // A stale completion must not move access time or its matching byte observation backward.
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordAttachmentCacheEntry(context, { path: PATH, bytes: 10, lastUsedAt: 100 }),
       ),
     ).toBe(true);
@@ -202,7 +202,7 @@ describe('attachment cache ledger', () => {
     });
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordAttachmentCacheEntry(context, { path: PATH, bytes: 60, lastUsedAt: 300 }),
       ),
     ).toBe(true);
@@ -217,26 +217,26 @@ describe('attachment cache ledger', () => {
     const active = `${PATH}-active`;
     const reserved = `${PATH}-reserved`;
     const retiring = `${PATH}-retiring`;
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: active, bytes: 10, lastUsedAt: 500 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       createAttachmentCacheReservation(context, {
         path: reserved,
         maxBytes: 100,
         createdAt: 100,
       }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: retiring, bytes: 30, lastUsedAt: 100 }),
     );
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       const claim = await claimAttachmentCachePathsForRetirement(context, [retiring]);
       if (claim.status !== 'claimed') throw new Error(`test retirement refused: ${claim.reason}`);
     });
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         adoptAttachmentCacheScanBatch(context, [
           { path: PATH, bytes: 0, lastUsedAt: 200 },
           { path: active, bytes: 25, lastUsedAt: 400 },
@@ -270,7 +270,7 @@ describe('attachment cache ledger', () => {
     const { db } = await createTestDb();
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         adoptAttachmentCacheScanBatch(context, [
           { path: PATH, bytes: 1, lastUsedAt: 1 },
           { path: PATH, bytes: 2, lastUsedAt: 2 },
@@ -283,13 +283,13 @@ describe('attachment cache ledger', () => {
   it('clears zero-byte references and clamps corrupt future access time in the outer transaction', async () => {
     const { db, raw } = await createTestDb();
     const zero = `${PATH}-zero`;
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: zero, bytes: 10, lastUsedAt: 50_000 }),
     );
     raw.prepare(`INSERT INTO attachments (guid, local_path) VALUES ('zero-cache', ?)`).run(zero);
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         adoptAttachmentCacheScanBatch(context, [{ path: zero, bytes: 0, lastUsedAt: 1 }], 100),
       ),
     ).resolves.toEqual({ activePaths: [], retiringPaths: [zero], deferredPaths: [] });
@@ -312,7 +312,7 @@ describe('attachment cache ledger', () => {
       `${PATH}-zero-reference-limit-b`,
     ] as const;
     for (const path of acceptedPaths) {
-      await withDbTransaction(accepted.db, (context) =>
+      await withDbTransaction(accepted.db, (db, context) =>
         recordAttachmentCacheEntry(context, {
           path,
           bytes: 10,
@@ -334,7 +334,7 @@ describe('attachment cache ledger', () => {
     );
 
     await expect(
-      withDbTransaction(accepted.db, (context) =>
+      withDbTransaction(accepted.db, (db, context) =>
         adoptAttachmentCacheScanBatch(
           context,
           acceptedPaths.map((path) => ({ path, bytes: 0, lastUsedAt: 2 })),
@@ -359,7 +359,7 @@ describe('attachment cache ledger', () => {
       `${PATH}-zero-reference-overflow-b`,
     ] as const;
     for (const path of refusedPaths) {
-      await withDbTransaction(refused.db, (context) =>
+      await withDbTransaction(refused.db, (db, context) =>
         recordAttachmentCacheEntry(context, {
           path,
           bytes: 10,
@@ -381,7 +381,7 @@ describe('attachment cache ledger', () => {
     );
 
     await expect(
-      withDbTransaction(refused.db, (context) =>
+      withDbTransaction(refused.db, (db, context) =>
         adoptAttachmentCacheScanBatch(
           context,
           refusedPaths.map((path) => ({ path, bytes: 0, lastUsedAt: 2 })),
@@ -402,10 +402,10 @@ describe('attachment cache ledger', () => {
 
   it('lists durable recovery owners in exact deterministic path order', async () => {
     const { db } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: `${PATH}-z`, bytes: 1, lastUsedAt: 1 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: `${PATH}-a`, bytes: 2, lastUsedAt: 2 }),
     );
 
@@ -417,12 +417,12 @@ describe('attachment cache ledger', () => {
 
   it('coalesces access-time writes while immediately repairing exact byte accounting', async () => {
     const { db } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1_000 }),
     );
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         recordAttachmentCacheAccess(context, {
           path: PATH,
           bytes: 50,
@@ -437,7 +437,7 @@ describe('attachment cache ledger', () => {
     });
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         recordAttachmentCacheAccess(context, {
           path: PATH,
           bytes: 75,
@@ -452,7 +452,7 @@ describe('attachment cache ledger', () => {
     });
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         recordAttachmentCacheAccess(context, {
           path: PATH,
           bytes: 75,
@@ -469,7 +469,7 @@ describe('attachment cache ledger', () => {
 
   it('atomically clears every reference and ledger row for an active file proved missing', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1_000 }),
     );
     raw
@@ -477,7 +477,9 @@ describe('attachment cache ledger', () => {
       .run('missing-reference-a', PATH, 'missing-reference-b', PATH);
 
     await expect(
-      withDbTransaction(db, (context) => repairMissingActiveAttachmentCacheEntry(context, PATH)),
+      withDbTransaction(db, (db, context) =>
+        repairMissingActiveAttachmentCacheEntry(context, PATH),
+      ),
     ).resolves.toEqual({ clearedReferences: 2 });
     expect(await getAttachmentCacheEntry(db, PATH)).toBeNull();
     expect(
@@ -490,7 +492,7 @@ describe('attachment cache ledger', () => {
 
   it('rolls every cleared reference back when missing-file ledger removal fails', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1_000 }),
     );
     raw
@@ -505,7 +507,9 @@ describe('attachment cache ledger', () => {
     `);
 
     await expect(
-      withDbTransaction(db, (context) => repairMissingActiveAttachmentCacheEntry(context, PATH)),
+      withDbTransaction(db, (db, context) =>
+        repairMissingActiveAttachmentCacheEntry(context, PATH),
+      ),
     ).rejects.toThrow('Attachment cache missing-file repair changed during its transaction');
     expect(await getAttachmentCacheEntry(db, PATH)).toMatchObject({ state: 'active' });
     expect(
@@ -518,7 +522,7 @@ describe('attachment cache ledger', () => {
   it('caps missing-file repair reference clearing at exactly 1,000 rows', async () => {
     const accepted = await createTestDb();
     const acceptedPath = `${PATH}-missing-reference-limit`;
-    await withDbTransaction(accepted.db, (context) =>
+    await withDbTransaction(accepted.db, (db, context) =>
       recordAttachmentCacheEntry(context, {
         path: acceptedPath,
         bytes: 10,
@@ -533,7 +537,7 @@ describe('attachment cache ledger', () => {
     );
 
     await expect(
-      withDbTransaction(accepted.db, (context) =>
+      withDbTransaction(accepted.db, (db, context) =>
         repairMissingActiveAttachmentCacheEntry(context, acceptedPath),
       ),
     ).resolves.toEqual({ clearedReferences: MAX_REFERENCE_CLEAR_ROWS });
@@ -542,7 +546,7 @@ describe('attachment cache ledger', () => {
 
     const refused = await createTestDb();
     const refusedPath = `${PATH}-missing-reference-overflow`;
-    await withDbTransaction(refused.db, (context) =>
+    await withDbTransaction(refused.db, (db, context) =>
       recordAttachmentCacheEntry(context, {
         path: refusedPath,
         bytes: 10,
@@ -557,7 +561,7 @@ describe('attachment cache ledger', () => {
     );
 
     await expect(
-      withDbTransaction(refused.db, (context) =>
+      withDbTransaction(refused.db, (db, context) =>
         repairMissingActiveAttachmentCacheEntry(context, refusedPath),
       ),
     ).rejects.toThrow('must not exceed 1000 rows per transaction');
@@ -575,10 +579,10 @@ describe('attachment cache ledger', () => {
       .prepare(`INSERT INTO attachments (guid, local_path) VALUES (?, ?), (?, ?)`)
       .run('attachment-a', PATH, 'attachment-b', PATH);
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 80, lastUsedAt: 100 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 80, lastUsedAt: 200 }),
     );
 
@@ -590,34 +594,36 @@ describe('attachment cache ledger', () => {
 
   it('keeps retirement sticky and durable until deletion is confirmed', async () => {
     const { db } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 75, lastUsedAt: 100 }),
     );
     // An active entry cannot be removed by a stale delete completion.
     expect(
-      await withDbTransaction(db, (context) => confirmAttachmentCacheEntryDeleted(context, PATH)),
+      await withDbTransaction(db, (db, context) =>
+        confirmAttachmentCacheEntryDeleted(context, PATH),
+      ),
     ).toBe(false);
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'claimed', paths: [PATH], clearedReferences: 0 });
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'refused', reason: 'not_active', paths: [PATH] });
     // A late download completion cannot resurrect a path while native deletion may own it.
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordAttachmentCacheEntry(context, { path: PATH, bytes: 90, lastUsedAt: 200 }),
       ),
     ).toBe(false);
     expect(await getAttachmentCacheUsage(db)).toEqual({ files: 1, bytes: 75 });
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         scheduleAttachmentCacheRetirementRetry(context, PATH, 500),
       ),
     ).toEqual({
@@ -637,10 +643,14 @@ describe('attachment cache ledger', () => {
     ]);
 
     expect(
-      await withDbTransaction(db, (context) => confirmAttachmentCacheEntryDeleted(context, PATH)),
+      await withDbTransaction(db, (db, context) =>
+        confirmAttachmentCacheEntryDeleted(context, PATH),
+      ),
     ).toBe(true);
     expect(
-      await withDbTransaction(db, (context) => confirmAttachmentCacheEntryDeleted(context, PATH)),
+      await withDbTransaction(db, (db, context) =>
+        confirmAttachmentCacheEntryDeleted(context, PATH),
+      ),
     ).toBe(false);
     expect(await getAttachmentCacheEntry(db, PATH)).toBeNull();
     expect(await getAttachmentCacheUsage(db)).toEqual({ files: 0, bytes: 0 });
@@ -652,19 +662,19 @@ describe('attachment cache ledger', () => {
     const tiedB = 'file:///documents/attachments/b/tied.jpg';
     const tiedA = 'file:///documents/attachments/a/tied.jpg';
     const retiring = 'file:///documents/attachments/r/retiring.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: newer, bytes: 40, lastUsedAt: 300 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: tiedB, bytes: 20, lastUsedAt: 100 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: tiedA, bytes: 10, lastUsedAt: 100 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: retiring, bytes: 30, lastUsedAt: 50 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       claimAttachmentCachePathsForRetirement(context, [retiring]),
     );
 
@@ -687,13 +697,13 @@ describe('attachment cache ledger', () => {
     const { db, raw } = await createTestDb();
     const second = 'file:///documents/attachments/b/file.jpg';
     const untouched = 'file:///documents/attachments/c/file.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: second, bytes: 60, lastUsedAt: 2 }),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: untouched, bytes: 70, lastUsedAt: 3 }),
     );
     raw
@@ -703,7 +713,7 @@ describe('attachment cache ledger', () => {
       )
       .run(PATH, PATH, second, untouched);
 
-    const result = await withDbTransaction(db, (context) =>
+    const result = await withDbTransaction(db, (db, context) =>
       claimAttachmentCachePathsForRetirement(context, [second, PATH]),
     );
 
@@ -727,7 +737,7 @@ describe('attachment cache ledger', () => {
 
   it('leaves a shared path active until its final live message reference is tombstoned', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     raw.prepare(`INSERT INTO chats (guid) VALUES ('deleted-cache-chat')`).run();
@@ -784,7 +794,7 @@ describe('attachment cache ledger', () => {
 
   it('uses the same retraction and chat-tombstone visibility rules as cache-path writes', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     raw.prepare(`INSERT INTO chats (guid, deleted_at) VALUES ('hidden-cache-chat', 100)`).run();
@@ -821,13 +831,13 @@ describe('attachment cache ledger', () => {
   it('refuses the whole exact batch when any requested path is not active', async () => {
     const { db, raw } = await createTestDb();
     const missing = 'file:///documents/attachments/missing/file.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     raw.prepare(`INSERT INTO attachments (guid, local_path) VALUES ('normal', ?)`).run(PATH);
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH, missing]),
       ),
     ).toEqual({ status: 'refused', reason: 'not_active', paths: [missing] });
@@ -839,7 +849,7 @@ describe('attachment cache ledger', () => {
 
   it('protects a queued payload fallback even when no attachment row references it', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     raw
@@ -850,7 +860,7 @@ describe('attachment cache ledger', () => {
       .run(JSON.stringify({ attachmentGuid: 'missing-att', localPath: PATH }));
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'refused', reason: 'outgoing_protected', paths: [PATH] });
@@ -924,7 +934,7 @@ describe('attachment cache ledger', () => {
   it('protects the current attachment path selected by a queued attachment guid', async () => {
     const { db, raw } = await createTestDb();
     const staleFallback = 'file:///documents/attachments/stale/file.jpg';
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     raw.prepare(`INSERT INTO attachments (guid, local_path) VALUES ('queued-att', ?) `).run(PATH);
@@ -936,7 +946,7 @@ describe('attachment cache ledger', () => {
       .run(JSON.stringify({ attachmentGuid: 'queued-att', localPath: staleFallback }));
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'refused', reason: 'outgoing_protected', paths: [PATH] });
@@ -949,7 +959,7 @@ describe('attachment cache ledger', () => {
 
   it('protects a sent temp attachment that a delayed server error can requeue', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     raw.prepare(`INSERT INTO chats (guid) VALUES ('chat-retry')`).run();
@@ -970,7 +980,7 @@ describe('attachment cache ledger', () => {
       .run(message.id, PATH);
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'refused', reason: 'outgoing_protected', paths: [PATH] });
@@ -984,7 +994,7 @@ describe('attachment cache ledger', () => {
     const { db, raw } = await createTestDb();
     const queuedPath = 'file:///documents/attachments/bb/queued.jpg';
     for (const path of [PATH, queuedPath]) {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordAttachmentCacheEntry(context, { path, bytes: 50, lastUsedAt: 1 }),
       );
     }
@@ -1002,12 +1012,12 @@ describe('attachment cache ledger', () => {
       );
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [queuedPath]),
       ),
     ).toEqual({ status: 'refused', reason: 'outgoing_protected', paths: [queuedPath] });
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'claimed', paths: [PATH], clearedReferences: 0 });
@@ -1015,7 +1025,7 @@ describe('attachment cache ledger', () => {
 
   it('fails closed on malformed or oversized attachment queue payloads', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     raw
@@ -1025,7 +1035,7 @@ describe('attachment cache ledger', () => {
       )
       .run();
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'refused', reason: 'outgoing_scan_incomplete', paths: [PATH] });
@@ -1037,7 +1047,7 @@ describe('attachment cache ledger', () => {
       )
       .run(JSON.stringify({ localPath: 'x'.repeat(8200) }));
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'refused', reason: 'outgoing_scan_incomplete', paths: [PATH] });
@@ -1046,7 +1056,7 @@ describe('attachment cache ledger', () => {
 
   it('fails closed when outgoing protection or duplicate-reference work exceeds its hard bounds', async () => {
     const queueDb = await createTestDb();
-    await withDbTransaction(queueDb.db, (context) =>
+    await withDbTransaction(queueDb.db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     const insertQueue = queueDb.raw.prepare(
@@ -1062,13 +1072,13 @@ describe('attachment cache ledger', () => {
       }
     })();
     expect(
-      await withDbTransaction(queueDb.db, (context) =>
+      await withDbTransaction(queueDb.db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'refused', reason: 'outgoing_scan_incomplete', paths: [PATH] });
 
     const referenceDb = await createTestDb();
-    await withDbTransaction(referenceDb.db, (context) =>
+    await withDbTransaction(referenceDb.db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     const insertReference = referenceDb.raw.prepare(
@@ -1080,7 +1090,7 @@ describe('attachment cache ledger', () => {
       }
     })();
     expect(
-      await withDbTransaction(referenceDb.db, (context) =>
+      await withDbTransaction(referenceDb.db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH]),
       ),
     ).toEqual({ status: 'refused', reason: 'too_many_references', paths: [PATH] });
@@ -1094,13 +1104,13 @@ describe('attachment cache ledger', () => {
 
   it('rolls both ledger claim and reference clear back with its outer transaction', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     raw.prepare(`INSERT INTO attachments (guid, local_path) VALUES ('normal', ?)`).run(PATH);
 
     await expect(
-      withDbTransaction(db, async (context) => {
+      withDbTransaction(db, async (db, context) => {
         expect(await claimAttachmentCachePathsForRetirement(context, [PATH])).toMatchObject({
           status: 'claimed',
         });
@@ -1115,20 +1125,20 @@ describe('attachment cache ledger', () => {
 
   it('persists capped exponential delete retry backoff only for retiring rows', async () => {
     const { db, raw } = await createTestDb();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: PATH, bytes: 50, lastUsedAt: 1 }),
     );
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         scheduleAttachmentCacheRetirementRetry(context, PATH, 100),
       ),
     ).toBeNull();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       claimAttachmentCachePathsForRetirement(context, [PATH]),
     );
 
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         scheduleAttachmentCacheRetirementRetry(context, PATH, 1_000),
       ),
     ).toEqual({
@@ -1136,7 +1146,7 @@ describe('attachment cache ledger', () => {
       nextRetryAt: 6_000,
     });
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         scheduleAttachmentCacheRetirementRetry(context, PATH, 6_000),
       ),
     ).toEqual({
@@ -1145,7 +1155,7 @@ describe('attachment cache ledger', () => {
     });
     raw.prepare(`UPDATE attachment_cache_entries SET attempts = 100 WHERE path = ?`).run(PATH);
     expect(
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         scheduleAttachmentCacheRetirementRetry(context, PATH, 10_000),
       ),
     ).toEqual({
@@ -1163,7 +1173,7 @@ describe('attachment cache ledger', () => {
       'non-negative safe integer',
     );
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         claimAttachmentCachePathsForRetirement(context, [PATH, PATH]),
       ),
     ).rejects.toThrow('must be unique');

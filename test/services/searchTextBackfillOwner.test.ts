@@ -20,7 +20,7 @@ import type Database from 'better-sqlite3';
 import { sql } from 'drizzle-orm';
 import { kvGet } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, TestDb } from '@db/types';
 import { runSearchTextBackfillOnce } from '@/services/databaseControl';
 import {
   captureRealtimeDeliveryLease,
@@ -95,7 +95,7 @@ function sqlText(chunk: unknown): string {
 }
 
 /** Observe the context-owned Drizzle UPDATE while preserving the real database implementation. */
-function transactionDbAdapter(db: AppDatabase, hooks: RawAdapterHooks): AppDatabase {
+function transactionDbAdapter(db: Queryable, hooks: RawAdapterHooks): TestDb {
   return new Proxy(db as object, {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver) as unknown;
@@ -120,7 +120,7 @@ function transactionDbAdapter(db: AppDatabase, hooks: RawAdapterHooks): AppDatab
       }
       return typeof value === 'function' ? value.bind(target) : value;
     },
-  }) as AppDatabase;
+  }) as TestDb;
 }
 
 function attributedBody(text: string): string {
@@ -256,7 +256,7 @@ describe('runSearchTextBackfillOnce — real transaction owner', () => {
       releaseNeighbour = resolve;
     });
     const neighbour = observe(
-      withDbTransaction(db, async () => {
+      withDbTransaction(db, async (db) => {
         raw
           .prepare('UPDATE messages SET text = ? WHERE id = ?')
           .run('temporary neighbour text', temporarilyHidden.id);
@@ -355,7 +355,7 @@ describe('runSearchTextBackfillOnce — real transaction owner', () => {
     try {
       await waitFor(() => updateDidFinish, 'the partial guarded update');
       successor = observe(
-        withDbTransaction(db, async () => {
+        withDbTransaction(db, async (db) => {
           successorStarted = true;
           await db.run(sql`INSERT INTO kv (key, value) VALUES ('search.owner.successor', 'ok')`);
         }),
@@ -444,7 +444,7 @@ describe('runSearchTextBackfillOnce — real transaction owner', () => {
       releaseNeighbour = resolve;
     });
     const neighbour = observe(
-      withDbTransaction(db, async () => {
+      withDbTransaction(db, async (db) => {
         await db.run(sql`INSERT INTO kv (key, value) VALUES ('search.owner.revoked', 'phantom')`);
         signalNeighbourStarted();
         await neighbourHeld;

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 
 export interface ChatStorageUsage {
   chatGuid: string;
@@ -27,7 +27,7 @@ const MAX_TOP_CHATS = 50;
  * `attachments_local_path_idx`; each file counts once per chat. Read-only.
  */
 export async function getStorageBreakdown(
-  db: AppDatabase,
+  db: Queryable,
   topChatLimit = 10,
 ): Promise<StorageBreakdown> {
   const limit = Math.max(1, Math.min(MAX_TOP_CHATS, Math.floor(topChatLimit)));

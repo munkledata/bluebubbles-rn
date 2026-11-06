@@ -78,7 +78,7 @@ export const useThemeStore = create<ThemeState>((set) => ({
     set({ preset, customThemeId: null, customTokens: null }); // optimistic → instant recolor
     try {
       const db = getDatabase();
-      await withDbTransaction(db, async (context) => {
+      await withDbTransaction(db, async (db, context) => {
         await kvSetWithinTransaction(context, THEME_PREF_KEY, preset);
         await kvSetWithinTransaction(context, THEME_CUSTOM_KEY, '');
       });

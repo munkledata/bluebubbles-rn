@@ -9,7 +9,7 @@ import {
   getTapbackNotificationFacts,
   isMessageNotificationEligible,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable } from '@db/types';
 import {
   buildMessageSnippet,
   buildTapbackNotificationText,
@@ -34,7 +34,7 @@ type MessageEvent = Extract<
  * override the first chat that owns the GUID in the encrypted database.
  */
 async function resolvePersistedMessageChatGuid(
-  db: AppDatabase,
+  db: Queryable,
   message: MessageEvent,
   allowMissingClaim: boolean,
 ): Promise<string | null> {
@@ -47,7 +47,7 @@ async function resolvePersistedMessageChatGuid(
 
 /** Resolve a delete only through durable local ownership, including a row already purged. */
 async function resolvePersistedDeletionChatGuid(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
 ): Promise<{ chatGuid: string | null; conflict: boolean }> {
   const rows = await db.all<{
@@ -91,7 +91,7 @@ function isIMessageReactableChat(
 
 /** Build one notification line from current encrypted-DB truth after its event has committed. */
 async function buildCurrentMessageIntent(
-  db: AppDatabase,
+  db: Queryable,
   message: Extract<NormalizedEvent, { type: 'new-message' | 'updated-message' }>['message'],
   chatGuid: string,
 ): Promise<MessageIntent | null> {
@@ -135,7 +135,7 @@ async function buildCurrentMessageIntent(
  * that was removed, read past or whose target was unsent in the meantime.
  */
 async function buildCurrentTapbackIntent(
-  db: AppDatabase,
+  db: Queryable,
   message: MessageEvent,
   chatGuid: string,
 ): Promise<MessageIntent | null> {
@@ -165,7 +165,7 @@ async function buildCurrentTapbackIntent(
 
 /** Who a line is from and how its chat is titled, the same for message and tapback lines. */
 async function linePresentation(
-  db: AppDatabase,
+  db: Queryable,
   header: Awaited<ReturnType<typeof getChatHeader>>,
   message: MessageEvent,
   stored: { readonly senderAddress?: string | null; readonly senderName?: string | null },
@@ -204,7 +204,7 @@ async function linePresentation(
  * independently substitutes the fixed generic App Lock notice before native presentation.
  */
 export async function buildMessageIntents(
-  db: AppDatabase,
+  db: Queryable,
   event: NormalizedEvent,
 ): Promise<NotificationIntent[]> {
   switch (event.type) {

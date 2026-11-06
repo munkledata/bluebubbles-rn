@@ -3,7 +3,7 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo } from '@core/models';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import {
   prepareExactIMessageGroupPhotoSet,
   removeExactIMessageGroupPhoto,
@@ -71,7 +71,7 @@ function fakeHttp(
 }
 
 describe('exact iMessage group photo service', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {

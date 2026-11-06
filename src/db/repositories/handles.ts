@@ -6,7 +6,7 @@ import {
   withDbTransaction,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import { linkHandlesToContacts } from './contacts';
 
 /** A handle's display name + avatar, for the notification's person entry. */
@@ -21,7 +21,7 @@ export interface HandleProfile {
  * the notification shows the contact identity when either variant has it.
  */
 export async function getHandleProfile(
-  db: AppDatabase,
+  db: Queryable,
   address: string,
 ): Promise<HandleProfile | null> {
   const rows = await db.all<HandleProfile>(
@@ -155,13 +155,10 @@ export function setHandleColorWithinTransaction(
  * The authoritative rows own one short transaction; the potentially unbounded device-contact
  * index is read only after that commit, and each actual contact match owns a separate short write.
  */
-export async function upsertHandles(
-  db: AppDatabase,
-  items: Handle[],
-): Promise<Map<string, number>> {
+export async function upsertHandles(db: ReadDb, items: Handle[]): Promise<Map<string, number>> {
   const deduped = prepareHandles(items);
   if (deduped.length === 0) return new Map();
-  const map = await withDbTransaction(db, (context) =>
+  const map = await withDbTransaction(db, (db, context) =>
     upsertHandlesWithinTransaction(context, deduped),
   );
 

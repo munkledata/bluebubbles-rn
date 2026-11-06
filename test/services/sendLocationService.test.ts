@@ -10,7 +10,7 @@ import {
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import { runOutgoingQueue, type OutgoingQueueIO } from '@/services/send/outgoingQueueService';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
@@ -41,7 +41,7 @@ function fakeHttp(impl: (path: string, json: unknown) => Promise<unknown>): {
   return { http, requests };
 }
 
-async function seedProvenImessageChat(db: AppDatabase, guid = 'any;-;+15551234567') {
+async function seedProvenImessageChat(db: ReadDb, guid = 'any;-;+15551234567') {
   const participant = { address: '+15551234567', service: 'iMessage' as const };
   const handles = await upsertHandles(db, [participant]);
   await upsertChats(db, [Chat.parse({ guid, style: 45, participants: [participant] })], handles);

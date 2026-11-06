@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { resolveTitle } from '@utils/chat';
 import { withDbTransaction, withDbWriteLock, type DbCommitGuard } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { ReadDb } from '../types';
 import { foldInboxSearchText, uniqueInboxSearchBigrams } from './inboxSearchText';
 
 /** Keep one rebuild short enough to yield the global writer queue between batches. */
@@ -73,7 +73,7 @@ export interface InboxSearchRebuildBatch {
  * holds the writer queue while building an unbounded posting set.
  */
 export async function rebuildInboxSearchIndexBatch(
-  db: AppDatabase,
+  db: ReadDb,
   afterChatId = 0,
   commitGuard?: DbCommitGuard,
 ): Promise<InboxSearchRebuildBatch> {
@@ -193,7 +193,7 @@ export async function rebuildInboxSearchIndexBatch(
   let deferred = 0;
   await withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       for (const chat of prepared) {
         const state = await db.all<{ revision: number }>(sql`
           SELECT revision FROM inbox_search_state

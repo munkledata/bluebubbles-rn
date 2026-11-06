@@ -8,7 +8,7 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import { appleScreeningEmitted, appleScreeningFlagForStorage } from '../appleScreeningCapability';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import { dedupeBy } from './_shared';
 import { getChatIdByGuid } from './chatQueries';
 import {
@@ -226,14 +226,14 @@ export function upsertChatsWithinTransaction(
 
 /** Public standalone chat ingestion. Never wrap this helper in another transaction. */
 export async function upsertChats(
-  db: AppDatabase,
+  db: ReadDb,
   items: Array<Chat | ChatSummary>,
   handleIdByKey: Map<string, number>,
   commitGuard?: DbCommitGuard,
 ): Promise<Map<string, number>> {
   return withDbTransaction(
     db,
-    (context) => upsertChatsWithinTransaction(context, items, handleIdByKey),
+    (db, context) => upsertChatsWithinTransaction(context, items, handleIdByKey),
     commitGuard,
   );
 }
@@ -380,7 +380,7 @@ export type PinnedOrderMoveDirection = 'earlier' | 'later';
 
 /** Swap two visible, active pinned chats. The UI supplies neighboring rows from its current grid. */
 export async function swapPinnedChatOrder(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   adjacentGuid: string,
   direction: PinnedOrderMoveDirection,
@@ -389,7 +389,7 @@ export async function swapPinnedChatOrder(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       swapPinnedChatOrderWithinTransaction(context, guid, adjacentGuid, direction, sender),
     commitGuard,
   );
@@ -608,14 +608,14 @@ export function setChatAutoUnarchiveWithinTransaction(
  *  - The unread floor is handed to the read marker in the same statement, only ever forward.
  */
 export async function deleteChatLocal(
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   const deleted = await withDbTransaction(
     db,
-    async (): Promise<{ chatId: number; boundary: number } | null> => {
+    async (db): Promise<{ chatId: number; boundary: number } | null> => {
       // Resolve identity only after this owner holds the shared connection. A bare read outside the
       // owner can observe another transaction's row, whose numeric id SQLite may reuse on rollback.
       const chatId = await getChatIdByGuid(db, guid);
@@ -704,7 +704,7 @@ const MESSAGE_PURGE_CHUNK = 500;
  * NULL date can never satisfy `> deleted_at`, so it counts as history and goes.
  */
 async function purgeChatMessages(
-  db: AppDatabase,
+  db: ReadDb,
   chatId: number,
   boundary: number,
   commitGuard?: DbCommitGuard,
@@ -712,7 +712,7 @@ async function purgeChatMessages(
   for (;;) {
     const purged: Array<{ id: number }> = await withDbTransaction(
       db,
-      () =>
+      (db) =>
         db.all(sql`
           DELETE FROM messages
            WHERE id IN (SELECT id FROM messages
@@ -750,10 +750,7 @@ async function purgeChatMessages(
  * finished by the next delete, including its own if `deleteChatLocal`'s loop is what threw. Cheap
  * and idempotent enough to run from a launch path as well.
  */
-export async function resumeChatPurges(
-  db: AppDatabase,
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
+export async function resumeChatPurges(db: ReadDb, commitGuard?: DbCommitGuard): Promise<void> {
   let finished!: () => void;
   const running = new Promise<void>((resolve) => {
     finished = resolve;
@@ -804,7 +801,7 @@ export async function waitForChatPurgeResumes(): Promise<void> {
  * no list, so they can neither see the restored history nor delete it again. Unknown guid → false,
  * so a chat that has not been stored yet still backfills normally.
  */
-export async function isChatHiddenByDeletion(db: AppDatabase, guid: string): Promise<boolean> {
+export async function isChatHiddenByDeletion(db: Queryable, guid: string): Promise<boolean> {
   const rows: Array<{ hidden: number }> = await db.all(sql`
     SELECT 1 AS hidden FROM chats c WHERE c.guid = ${guid} AND NOT ${chatVisible('c')} LIMIT 1
   `);
@@ -812,7 +809,7 @@ export async function isChatHiddenByDeletion(db: AppDatabase, guid: string): Pro
 }
 
 /** True only when the exact chat row still exists and is currently visible in conversation lists. */
-export async function chatExistsAndIsVisible(db: AppDatabase, guid: string): Promise<boolean> {
+export async function chatExistsAndIsVisible(db: Queryable, guid: string): Promise<boolean> {
   const rows: Array<{ visible: number }> = await db.all(sql`
     SELECT 1 AS visible FROM chats c WHERE c.guid = ${guid} AND ${chatVisible('c')} LIMIT 1
   `);
@@ -850,7 +847,7 @@ export interface DeletedChatPage {
  * The restore screen must never offer to "restore" an already-live conversation.
  */
 export async function listDeletedChats(
-  db: AppDatabase,
+  db: Queryable,
   opts: { limit?: number } = {},
 ): Promise<DeletedChatPage> {
   const requested = opts.limit ?? 50;
@@ -999,7 +996,7 @@ export function restoreDeletedChatWithinTransaction(
  * a message sent from this phone carries the phone's clock, which can run ahead of the Mac's.
  */
 export async function listRcsChatNewestMessageGuids(
-  db: AppDatabase,
+  db: Queryable,
 ): Promise<Map<string, string | null>> {
   // LIKE is ASCII case-insensitive, matching looksLikeRcsChatGuid's /^rcs;-;/i. The subquery
   // walks messages_chat_date_idx backwards (the index ends in the rowid tie-breaker).
@@ -1022,10 +1019,7 @@ export async function listRcsChatNewestMessageGuids(
  * null) and to retain the only names of app-owned attachment directories before the message cascade
  * removes their rows. The post-purge orphan probe keeps surviving/newer rows' files safe.
  */
-export async function listChatAttachmentGuids(
-  db: AppDatabase,
-  chatGuid: string,
-): Promise<string[]> {
+export async function listChatAttachmentGuids(db: Queryable, chatGuid: string): Promise<string[]> {
   const rows: Array<{ guid: string }> = await db.all(sql`
     SELECT DISTINCT a.guid AS guid
       FROM attachments a
@@ -1127,11 +1121,11 @@ export function setLastReadMessageGuidWithinTransaction(
  * it behind would keep suppressing the Mac's read watermark for this chat forever.
  */
 export async function setLastReadMessageGuid(
-  db: AppDatabase,
+  db: ReadDb,
   chatGuid: string,
   lastMessageGuid: string,
 ): Promise<void> {
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     setLastReadMessageGuidWithinTransaction(context, chatGuid, lastMessageGuid),
   );
 }

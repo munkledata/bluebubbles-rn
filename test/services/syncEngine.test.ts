@@ -19,7 +19,7 @@ import {
   syncChatMessages,
   syncSingleChat,
 } from '@/services/sync/engine';
-import type { AppDatabase } from '@db/types';
+import type { WriteDb } from '@db/types';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
 import { listChats, listMessages, setSyncMarker } from '../support/repositoryWrappers';
@@ -330,7 +330,7 @@ describe('syncAllChats — account-bound page writes', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -824,7 +824,7 @@ describe('syncChatMessages — account-bound page writes', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -919,7 +919,7 @@ describe('incrementalSync — page write atomicity', () => {
       releaseNeighbour = resolve;
     });
     const neighbourError = new Error('duplicate-marker neighbour rollback');
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw
         .prepare(
           'UPDATE sync_markers SET last_synced_row_id = ?, last_synced_timestamp = ? WHERE id = 1',
@@ -1023,7 +1023,7 @@ describe('incrementalSync — page write atomicity', () => {
       releaseNeighbour = resolve;
     });
     const neighbourError = new Error('retired-marker neighbour rollback');
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw
         .prepare(
           'UPDATE sync_markers SET last_synced_row_id = ?, last_synced_timestamp = ? WHERE id = 1',
@@ -1067,7 +1067,7 @@ describe('incrementalSync — page write atomicity', () => {
     const gate = new Promise<void>((r) => {
       releaseGate = r;
     });
-    const doomed = withDbTransaction(db, async () => {
+    const doomed = withDbTransaction(db, async (db) => {
       markBegun();
       await gate;
       throw new Error('neighbouring transaction failed');
@@ -1117,7 +1117,7 @@ describe('incrementalSync — page write atomicity', () => {
  */
 describe('incrementalSync — page transaction scope', () => {
   /** Spy on the raw BEGIN/COMMIT/ROLLBACK statements `withDbTransaction` issues. */
-  function traceTransactions(db: AppDatabase, opts: { throwOnBegin?: number } = {}): () => number {
+  function traceTransactions(db: WriteDb, opts: { throwOnBegin?: number } = {}): () => number {
     const run = db.run.bind(db) as (q: unknown) => unknown;
     let begins = 0;
     (db as unknown as { run: (q: unknown) => unknown }).run = (q: unknown) => {

@@ -10,7 +10,7 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import {
   contactDisplayName,
   hasContactContent,
@@ -75,7 +75,7 @@ function fakeHttp(impl: (path: string, json: unknown) => Promise<unknown>): {
   return { http, last: () => last };
 }
 
-async function seedChat(db: AppDatabase, guid: string) {
+async function seedChat(db: ReadDb, guid: string) {
   const handles = await upsertHandles(db, [{ address: 'craig@apple.com' }]);
   await upsertChats(
     db,
@@ -85,7 +85,7 @@ async function seedChat(db: AppDatabase, guid: string) {
 }
 
 async function seedProvenImessageChat(
-  db: AppDatabase,
+  db: ReadDb,
   guid = 'any;-;+15551234567',
   service: 'iMessage' | 'SMS' = 'iMessage',
   style = 45,

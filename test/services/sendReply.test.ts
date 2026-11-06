@@ -9,7 +9,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { sendTextMessage } from '@/services/send/sendService';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { ClientErrorCode } from '@utils';
@@ -36,7 +36,7 @@ function fakeHttp(impl: (json?: unknown) => Promise<unknown>): {
 }
 
 async function seedReplyTarget(
-  db: AppDatabase,
+  db: ReadDb,
   options: { service?: 'iMessage' | 'SMS'; style?: number } = {},
 ): Promise<void> {
   const participant = {

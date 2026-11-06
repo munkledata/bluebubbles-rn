@@ -11,7 +11,7 @@ import {
   setSyncedBackgroundUriIfCurrentWithinTransaction,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { sessionAccessors } from '@state/sessionStore';
 import {
   deleteNativeSyncedBackgroundCacheFile,
@@ -50,7 +50,7 @@ const SYNCED_BACKGROUND_CACHE_REPAIR_MAX_ATTEMPTS = 2;
 
 interface SyncedBackgroundRequest {
   http: HttpClient;
-  db: AppDatabase;
+  db: ReadDb;
   guid: string;
   lease: RealtimeDeliveryLease;
   /** Null for Apple chats; exact captured pairing epoch for qualified RCS chats. */
@@ -73,7 +73,7 @@ export async function ensureSyncedBackgroundForChat(
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
   if (guid.startsWith('RCS;-;') && !sessionAccessors.acceptsRcsChat(guid)) return;
-  const opened: { db?: AppDatabase } = {};
+  const opened: { db?: ReadDb } = {};
   try {
     const status = await runTrackedRealtimeWork(accountLease, async (activeLease) => {
       if (!activeLease.isCurrent()) return;
@@ -137,7 +137,7 @@ async function withBackgroundWorkSlot<T>(task: () => Promise<T>): Promise<T> {
  */
 export function ensureSyncedBackground(
   http: HttpClient,
-  db: AppDatabase,
+  db: ReadDb,
   guid: string,
   context?: EventDeliveryContext,
 ): Promise<void> {
@@ -244,7 +244,7 @@ async function runSyncedBackgroundRequest(
         !(await commit(() =>
           withDbTransaction(
             db,
-            (context) => persistServerChatWithinTransaction(context, chat),
+            (db, context) => persistServerChatWithinTransaction(context, chat),
             ownsRequest,
           ),
         ))
@@ -293,7 +293,7 @@ async function runSyncedBackgroundRequest(
         (await commit(() =>
           withDbTransaction(
             db,
-            (context) =>
+            (db, context) =>
               setSyncedBackgroundUriIfCurrentWithinTransaction(
                 context,
                 guid,
@@ -378,7 +378,7 @@ async function runSyncedBackgroundRequest(
         () =>
           withDbTransaction(
             db,
-            (context) =>
+            (db, context) =>
               setSyncedBackgroundUriIfCurrentWithinTransaction(
                 context,
                 guid,
@@ -427,7 +427,7 @@ async function runSyncedBackgroundRequest(
           await commit(() =>
             withDbTransaction(
               db,
-              (context) =>
+              (db, context) =>
                 setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
                   context,
                   guid,

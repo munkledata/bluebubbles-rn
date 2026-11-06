@@ -10,12 +10,12 @@
  */
 import { Chat, Message } from '@core/models';
 import { getChatIdByGuid, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import type Database from 'better-sqlite3';
 import { createTestDb } from '../support/testDb';
 
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 let mockRaw: Database.Database;
 const mockClearAll = jest.fn<Promise<void>, [unknown]>();
 const mockUnreadAtCleanup: (number | null)[] = [];

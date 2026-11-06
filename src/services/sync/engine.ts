@@ -27,7 +27,7 @@ import {
   withDbTransaction,
 } from '@db/transaction';
 import type { Chat, Message } from '@core/models';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import type { SyncApi } from './types';
 
 export interface SyncProgress {
@@ -149,7 +149,7 @@ async function reapplyReadWatermarksWithinTransaction(
 
 /** Public-owner shape: one bounded chat slice per guarded transaction. */
 async function reapplyReadWatermarks(
-  db: AppDatabase,
+  db: ReadDb,
   items: Chat[],
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
@@ -157,7 +157,7 @@ async function reapplyReadWatermarks(
     const slice = items.slice(i, i + WATERMARK_REAPPLY_CHUNK);
     await withDbTransaction(
       db,
-      (transactionContext) => reapplyReadWatermarksWithinTransaction(transactionContext, slice),
+      (db, transactionContext) => reapplyReadWatermarksWithinTransaction(transactionContext, slice),
       commitGuard,
     );
   }
@@ -223,7 +223,7 @@ export interface SyncAllChatsOptions {
  * SMS threads) that an interrupted first sync never reached; their history backfills on demand.
  */
 export async function syncAllChats(
-  db: AppDatabase,
+  db: ReadDb,
   api: SyncApi,
   options: SyncAllChatsOptions = {},
 ): Promise<StoredChat[]> {
@@ -259,7 +259,7 @@ export async function syncAllChats(
       let chatMap = new Map<string, number>();
       await withDbTransaction(
         db,
-        async (transactionContext) => {
+        async (db, transactionContext) => {
           const handleMap = await upsertHandlesWithinTransaction(
             transactionContext,
             participantHandles,
@@ -308,7 +308,7 @@ export async function syncAllChats(
         }
         await withDbTransaction(
           db,
-          async (transactionContext) => {
+          async (db, transactionContext) => {
             const msgHandleMap = await upsertHandlesWithinTransaction(
               transactionContext,
               messageHandles,
@@ -343,7 +343,7 @@ export async function syncAllChats(
  * Finishes by setting the incremental marker to the highest message rowid/date stored.
  */
 export async function fullSync(
-  db: AppDatabase,
+  db: ReadDb,
   api: SyncApi,
   opts: FullSyncOptions = {},
 ): Promise<SyncProgress> {
@@ -508,7 +508,7 @@ export async function fullSync(
           const sliceHandles = slice.flatMap((message) => (message.handle ? [message.handle] : []));
           await withDbTransaction(
             db,
-            async (transactionContext) => {
+            async (db, transactionContext) => {
               const msgHandleMap = await upsertHandlesWithinTransaction(
                 transactionContext,
                 sliceHandles,
@@ -591,7 +591,7 @@ export async function fullSync(
   if (opts.commitMarker !== false) {
     await withDbTransaction(
       db,
-      async (context) => setSyncMarkerWithinTransaction(context, await maxMessageMarker(db)),
+      async (db, context) => setSyncMarkerWithinTransaction(context, await maxMessageMarker(db)),
       commitGuard,
     );
   }
@@ -607,7 +607,7 @@ const CHAT_MESSAGE_MAX = 500;
 
 /** Contact names/photos are presentation-only and must be matched after a domain commit. */
 async function linkHandlesAfterCommit(
-  db: AppDatabase,
+  db: ReadDb,
   addresses: string[],
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
@@ -629,7 +629,7 @@ async function linkHandlesAfterCommit(
  * short guarded writers used by ordinary sync preserve device-local customization and tombstones.
  */
 export async function syncSingleChat(
-  db: AppDatabase,
+  db: ReadDb,
   api: SyncApi,
   chatGuid: string,
   opts: {
@@ -660,7 +660,7 @@ export async function syncSingleChat(
   let chatId: number | null = null;
   await withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const handleMap = await upsertHandlesWithinTransaction(context, participants);
       const chatMap = await upsertChatsWithinTransaction(context, [chat], handleMap);
       chatId = chatMap.get(chatGuid) ?? null;
@@ -677,7 +677,7 @@ export async function syncSingleChat(
     if (!shouldContinue()) return false;
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         const messageHandles = lastMessage.handle ? [lastMessage.handle] : [];
         const handleMap = await upsertHandlesWithinTransaction(context, messageHandles);
         await upsertMessagesWithinTransaction(context, [lastMessage], () => chatId!, handleMap);
@@ -733,7 +733,7 @@ export interface ChatMessageRangeOptions {
  * Idempotent (upsert COALESCE), so re-opening a thread re-confirms without duplicating.
  */
 export async function syncChatMessageRange(
-  db: AppDatabase,
+  db: ReadDb,
   api: SyncApi,
   chatGuid: string,
   opts: ChatMessageRangeOptions = {},
@@ -829,7 +829,7 @@ export async function syncChatMessageRange(
         if (!shouldContinue()) return result(total, false);
         await withDbTransaction(
           db,
-          async (transactionContext) => {
+          async (db, transactionContext) => {
             const handleMap = await upsertHandlesWithinTransaction(
               transactionContext,
               sliceHandles,
@@ -877,7 +877,7 @@ export async function syncChatMessageRange(
 
 /** Existing on-open API: retain its simple numeric result while targeted repair consumes metadata. */
 export async function syncChatMessages(
-  db: AppDatabase,
+  db: ReadDb,
   api: SyncApi,
   chatGuid: string,
   opts: ChatMessageRangeOptions = {},
@@ -945,7 +945,7 @@ export interface IncrementalSyncOptions {
  * flushes op-sqlite's reactive queries, which is what lets the inbox render as data arrives.
  */
 export async function incrementalSync(
-  db: AppDatabase,
+  db: ReadDb,
   api: SyncApi,
   opts: IncrementalSyncOptions,
 ): Promise<SyncProgress> {
@@ -1005,7 +1005,7 @@ export async function incrementalSync(
       // silently join an unrelated writer's transaction and be erased by that writer's rollback.
       await withDbTransaction(
         db,
-        (context) => setSyncMarkerWithinTransaction(context, nextMarker),
+        (db, context) => setSyncMarkerWithinTransaction(context, nextMarker),
         commitGuard,
       );
     } else {
@@ -1019,7 +1019,7 @@ export async function incrementalSync(
         ];
         await withDbTransaction(
           db,
-          async (transactionContext) => {
+          async (db, transactionContext) => {
             const handleMap = await upsertHandlesWithinTransaction(
               transactionContext,
               sliceHandles,

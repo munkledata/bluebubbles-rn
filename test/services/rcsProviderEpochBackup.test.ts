@@ -1,6 +1,6 @@
 import { Chat } from '@core/models';
 import { upsertChats, upsertHandles } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { restoreBackup } from '@/services/backup/backup';
 import { buildV2Backup } from '../support/backupFixtures';
 import { createTestDb } from '../support/testDb';
@@ -12,7 +12,7 @@ const SOURCE_ID = Buffer.from('conversation-a', 'utf8').toString('base64url');
 const chatGuid = (epoch: string): string => `RCS;-;g1.${epoch}.${SOURCE_ID}`;
 const PARTICIPANTS = [{ address: '+15550000001', service: 'RCS' }];
 
-async function seedChat(db: AppDatabase, guid: string): Promise<void> {
+async function seedChat(db: ReadDb, guid: string): Promise<void> {
   const handles = await upsertHandles(db, PARTICIPANTS);
   await upsertChats(
     db,

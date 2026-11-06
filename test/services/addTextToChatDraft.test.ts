@@ -4,7 +4,7 @@
  */
 import type Database from 'better-sqlite3';
 import { DRAFT_KV_PREFIX, kvGet } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { addTextToChatDraft, saveChatDraft } from '@/services/chatActions';
 import {
   captureRealtimeDeliveryLease,
@@ -13,7 +13,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 
 jest.mock('@/services/clients', () => ({ http: {} }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(() => mockDb) }));

@@ -26,7 +26,7 @@ import {
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import { runDueScheduled } from '@/services/send/scheduleService';
 import { runOutgoingQueue, type OutgoingQueueIO } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
@@ -69,14 +69,14 @@ const noAttachmentIo: OutgoingQueueIO = {
   fileExists: async () => true,
 };
 
-async function seedChat(db: AppDatabase, guid: string): Promise<void> {
+async function seedChat(db: ReadDb, guid: string): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@b.com' }] })], handles);
 }
 
 /** Run one synchronous edit after the due SELECT returns but before runDueScheduled can claim it. */
-function raceAfterDueSnapshot(db: AppDatabase, edit: () => void): AppDatabase {
-  const raced = Object.create(db) as AppDatabase;
+function raceAfterDueSnapshot(db: Queryable, edit: () => void): TestDb {
+  const raced = Object.create(db) as TestDb;
   let edited = false;
   raced.all = (async (...args: Parameters<AppDatabase['all']>) => {
     const rows = await db.all(...args);
@@ -213,7 +213,7 @@ describe('runDueScheduled — handover to the outgoing queue', () => {
     // A db whose NEXT `update` fails once, armed the instant the send hands over.
     let armed = false;
     let failures = 0;
-    const flaky: AppDatabase = Object.create(db);
+    const flaky: TestDb = Object.create(db);
     flaky.update = ((...args: Parameters<AppDatabase['update']>) => {
       if (armed) {
         armed = false;
@@ -507,7 +507,7 @@ describe('runDueScheduled — production atomic handover', () => {
       scheduledFor: 1,
     });
     let claimWasMoved = false;
-    const raced: AppDatabase = Object.create(db) as AppDatabase;
+    const raced: TestDb = Object.create(db) as TestDb;
     raced.all = (async (...args: Parameters<AppDatabase['all']>) => {
       const rows = await db.all(...args);
       const row = raw.prepare('SELECT status FROM scheduled_messages WHERE id = ?').get(id) as {
@@ -548,7 +548,7 @@ describe('runDueScheduled — production atomic handover', () => {
     });
     let current = true;
     let revokedAfterClaim = false;
-    const raced: AppDatabase = Object.create(db) as AppDatabase;
+    const raced: TestDb = Object.create(db) as TestDb;
     raced.all = (async (...args: Parameters<AppDatabase['all']>) => {
       const shape = JSON.stringify(args[0]).replace(/\s+/g, ' ').toLowerCase();
       const rows = await db.all(...args);

@@ -63,7 +63,7 @@ describe('syncSettingsStore', () => {
       releaseNeighbour = resolve;
     });
     const neighbourError = new Error('sync settings neighbour rollback');
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw
         .prepare('UPDATE kv SET value = ? WHERE key = ?')
         .run('phantom', SYNC_MESSAGES_PER_CHAT_KEY);

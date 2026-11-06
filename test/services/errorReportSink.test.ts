@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { ERROR_DIAGNOSTIC_SITES, logSinks, type LogSink } from '@core/secure';
 import * as errorReportRepository from '@db/repositories/errorReports';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import {
   pauseRealtimeDeliveries,
@@ -10,7 +10,7 @@ import {
 import { createTestDb } from '../support/testDb';
 
 // The sink drains to `getDatabase()`; point it at a per-test in-memory DB (throws when "closed").
-const mockDbHolder: { db?: AppDatabase } = {};
+const mockDbHolder: { db?: TestDb } = {};
 jest.mock('@db/database', () => ({
   getDatabase: () => {
     if (!mockDbHolder.db) throw new Error('Database not initialized');

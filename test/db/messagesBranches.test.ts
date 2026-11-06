@@ -17,12 +17,12 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { applyLocalEdit, applyLocalUnsend, revertLocalUnsend } from '../support/repositoryWrappers';
 
 async function seedChat(
-  db: AppDatabase,
+  db: ReadDb,
   guid = 'c1',
 ): Promise<{ chatId: number; hm: Map<string, number> }> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
@@ -30,7 +30,7 @@ async function seedChat(
   return { chatId: (await getChatIdByGuid(db, guid))!, hm };
 }
 async function put(
-  db: AppDatabase,
+  db: ReadDb,
   chatId: number,
   hm: Map<string, number>,
   m: Record<string, unknown>,

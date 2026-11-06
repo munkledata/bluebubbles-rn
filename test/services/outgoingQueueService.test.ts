@@ -20,7 +20,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { notifyFailedSend } from '@/services/send/sendFailureNotice';
 import {
   resendOutgoingRow,
@@ -115,16 +115,12 @@ function fakeIo(impl: {
   return holder;
 }
 
-async function seedChat(db: AppDatabase, guid: string): Promise<void> {
+async function seedChat(db: ReadDb, guid: string): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@b.com' }] })], handles);
 }
 
-async function seedExactTextTarget(
-  db: AppDatabase,
-  guid: string,
-  partIndex: number,
-): Promise<void> {
+async function seedExactTextTarget(db: ReadDb, guid: string, partIndex: number): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   const chats = await upsertChats(
     db,
@@ -154,7 +150,7 @@ async function seedExactTextTarget(
   );
 }
 
-async function seedLegacyTextTarget(db: AppDatabase, guid: string): Promise<void> {
+async function seedLegacyTextTarget(db: ReadDb, guid: string): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   const chats = await upsertChats(
     db,
@@ -169,7 +165,7 @@ async function seedLegacyTextTarget(db: AppDatabase, guid: string): Promise<void
   );
 }
 
-async function seedWholeMessageRcsTarget(db: AppDatabase, guid: string): Promise<void> {
+async function seedWholeMessageRcsTarget(db: ReadDb, guid: string): Promise<void> {
   const handles = await upsertHandles(db, [{ address: '+15550001111' }]);
   const chats = await upsertChats(
     db,
@@ -184,11 +180,7 @@ async function seedWholeMessageRcsTarget(db: AppDatabase, guid: string): Promise
   );
 }
 
-async function seedExactRcsTextTarget(
-  db: AppDatabase,
-  guid: string,
-  partIndex: number,
-): Promise<void> {
+async function seedExactRcsTextTarget(db: ReadDb, guid: string, partIndex: number): Promise<void> {
   const handles = await upsertHandles(db, [{ address: '+15550001111' }]);
   const chats = await upsertChats(
     db,
@@ -265,7 +257,7 @@ function revocableLease(): RevocableLeaseHarness {
 }
 
 /** Hold the real process-wide mutex so an account-scoped commit is forced to wait behind it. */
-async function holdDbTransaction(db: AppDatabase): Promise<{
+async function holdDbTransaction(db: ReadDb): Promise<{
   release(): void;
   finished: Promise<void>;
 }> {
@@ -277,7 +269,7 @@ async function holdDbTransaction(db: AppDatabase): Promise<{
   const started = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  const finished = withDbTransaction(db, async () => {
+  const finished = withDbTransaction(db, async (db) => {
     entered();
     await blocked;
   });
@@ -285,7 +277,7 @@ async function holdDbTransaction(db: AppDatabase): Promise<{
   return { release, finished };
 }
 
-async function retryableRow(db: AppDatabase, now: number): Promise<RetryableOutgoing> {
+async function retryableRow(db: Queryable, now: number): Promise<RetryableOutgoing> {
   const rows = await listRetryableOutgoing(db, now);
   const row = rows[0];
   if (!row) throw new Error('expected a retryable outgoing row');
@@ -296,7 +288,7 @@ const RCS_ATTACHMENT_CHAT_GUID = rcsChatGuid('queue-attachment-thread');
 
 /** Insert an outgoing text whose created_at is forced old, so it's a stranded (eligible) row. */
 async function strandedText(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   chatGuid: string,
   tempGuid: string,
@@ -311,7 +303,7 @@ async function strandedText(
 
 /** Seed a FAILED optimistic picture: attachment rows + queue row forced already-failed/eligible. */
 async function seedFailedAttachment(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   tempGuid: string,
   combined?: { text: string; selectedMessageGuid?: string; partIndex?: number },

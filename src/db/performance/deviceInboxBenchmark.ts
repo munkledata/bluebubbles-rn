@@ -7,7 +7,7 @@ import {
 } from '../repositories/chatQueries';
 import { rebuildInboxSearchIndexBatch } from '../repositories/inboxSearchIndex';
 import { withDbTransaction } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb, TestDb } from '../types';
 
 const MESSAGES_PER_CHAT = 4;
 const SEED_BATCH_SIZE = 100;
@@ -71,7 +71,7 @@ async function measure<T>(
   };
 }
 
-async function databaseBytes(db: AppDatabase): Promise<number> {
+async function databaseBytes(db: Queryable): Promise<number> {
   const rows = await db.all<{ bytes: number }>(sql`
     SELECT (SELECT page_count FROM pragma_page_count) *
            (SELECT page_size FROM pragma_page_size) AS bytes
@@ -83,11 +83,7 @@ async function databaseBytes(db: AppDatabase): Promise<number> {
   return bytes;
 }
 
-async function seedFixture(
-  db: AppDatabase,
-  chatCount: number,
-  signal?: AbortSignal,
-): Promise<void> {
+async function seedFixture(db: ReadDb, chatCount: number, signal?: AbortSignal): Promise<void> {
   for (let firstId = 1; firstId <= chatCount; firstId += SEED_BATCH_SIZE) {
     if (signal?.aborted) throw new Error('PERF-02 benchmark was cancelled.');
     const ids = Array.from(
@@ -95,7 +91,7 @@ async function seedFixture(
       (_, offset) => firstId + offset,
     );
     const json = JSON.stringify(ids);
-    await withDbTransaction(db, async () => {
+    await withDbTransaction(db, async (db) => {
       await db.run(sql`
         INSERT INTO handles (id, address, service, display_name)
         SELECT CAST(value AS INTEGER),
@@ -142,7 +138,7 @@ async function seedFixture(
 
 /** Seed only the fixed disposable DEV connection before the rendered-list measurement. */
 export async function seedDeviceInboxBenchmarkFixture(
-  db: AppDatabase,
+  db: TestDb,
   chatCount: 1_000 | 10_000,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -172,7 +168,7 @@ export async function seedDeviceInboxBenchmarkFixture(
 
 /** One bounded, fixture-only arrival that moves a distinct older active chat to the top. */
 export async function bumpDeviceInboxBenchmarkFixture(
-  db: AppDatabase,
+  db: ReadDb,
   chatCount: 1_000 | 10_000,
   revision: number,
 ): Promise<void> {
@@ -184,7 +180,7 @@ export async function bumpDeviceInboxBenchmarkFixture(
   // Every twentieth fixture chat is archived; skip those so each revision is a new visible row.
   const chatId = revision + Math.floor((revision - 1) / 19);
   const date = 1_900_000_000_000 + revision;
-  await withDbTransaction(db, async () => {
+  await withDbTransaction(db, async (db) => {
     await db.run(sql`
       INSERT INTO messages (
         id, guid, original_row_id, chat_id, handle_id, text, is_from_me,
@@ -202,7 +198,7 @@ export async function bumpDeviceInboxBenchmarkFixture(
 
 /** Only the fixed disposable SQLCipher runner in database.ts may call this. */
 export async function runDeviceInboxBenchmarkFixture(
-  db: AppDatabase,
+  db: TestDb,
   chatCount: 1_000 | 10_000,
   capturePlan: DeviceInboxQueryPlanCapture,
 ): Promise<DeviceInboxBenchmarkResult> {

@@ -1448,7 +1448,7 @@ export async function cancelScheduled(
     }
     const result = await withDbTransaction(
       db,
-      (context) => cancelPendingScheduledWithinTransaction(context, expected),
+      (db, context) => cancelPendingScheduledWithinTransaction(context, expected),
       () => accountLease.isCurrent() && identityIsCurrent(),
     );
     assertScheduledMutationCurrent(accountLease, identityIsCurrent);
@@ -1473,7 +1473,7 @@ export function clearScheduledHistoryItem(
     assertScheduledMutationCurrent(accountLease, identityIsCurrent);
     await withDbTransaction(
       db,
-      (context) => deleteScheduledHistoryWithinTransaction(context, id),
+      (db, context) => deleteScheduledHistoryWithinTransaction(context, id),
       () => accountLease.isCurrent() && identityIsCurrent(),
     );
     assertScheduledMutationCurrent(accountLease, identityIsCurrent);
@@ -1524,7 +1524,7 @@ export async function editScheduled(
     const persistPatch = async (localPatch: UpdateScheduledPatch): Promise<void> => {
       const result = await withDbTransaction(
         db,
-        (context) => updateScheduledWithinTransaction(context, id, localPatch, expected),
+        (db, context) => updateScheduledWithinTransaction(context, id, localPatch, expected),
         () => accountLease.isCurrent() && identityIsCurrent(),
       );
       if (result !== 'updated') throw new ScheduledEditChangedError();
@@ -1826,7 +1826,7 @@ export async function retry(
         }
         const { claim, row, attemptOwnerToken } = await withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             claimFailedOutgoingForRetryWithinTransaction(
               context,
               tempGuid,
@@ -1945,7 +1945,7 @@ export async function discardMessage(
     const db = getDatabase();
     const ownerResolution = await withDbTransaction(
       db,
-      (context) => resolveServerSendErrorOwnersWithinTransaction(context, [guid]),
+      (db, context) => resolveServerSendErrorOwnersWithinTransaction(context, [guid]),
       () => accountLease.isCurrent(),
     );
     if (!accountLease.isCurrent()) return 'stale';
@@ -1977,7 +1977,7 @@ export async function discardMessage(
     const attachmentCacheScope = createAttachmentCacheAccountScope(accountLease);
     const transactionResult = await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         const currentOwner = await resolveServerSendErrorOwnersWithinTransaction(context, [guid]);
         if (
           currentOwner.hasConflict ||

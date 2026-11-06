@@ -21,7 +21,7 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { IncomingEventDependencyPendingError } from '@/services/realtime/incomingEventErrors';
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
@@ -72,7 +72,7 @@ function queueState(raw: Database.Database, tempGuid: string) {
     .get(tempGuid) as { id: number; attempts: number; nextRetryAt: number } | undefined;
 }
 
-async function seedChat(db: AppDatabase): Promise<number> {
+async function seedChat(db: ReadDb): Promise<number> {
   const handles = await upsertHandles(db, [
     { address: 'attempt-owner@example.test', service: 'RCS' },
   ]);
@@ -141,7 +141,7 @@ describe('RCS active send-attempt ownership', () => {
 
       // An explicit restore brings it back with the rest of the history.
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           restoreDeletedChatWithinTransaction(context, {
             guid: CHAT_GUID,
             expectedDeletedAt: 2_500,
@@ -209,7 +209,7 @@ describe('RCS active send-attempt ownership', () => {
       expect(row()).toEqual({ dateCreated: 2_500, dateDeleted: 2_500 });
 
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           restoreDeletedChatWithinTransaction(context, {
             guid: CHAT_GUID,
             expectedDeletedAt: 2_500,
@@ -499,7 +499,7 @@ describe('RCS active send-attempt ownership', () => {
            VALUES (?, ?, 'text', '{}', 0, 0)`,
         )
         .run(tempGuid, CHAT_GUID);
-      const errorResult = await withDbTransaction(db, (context) =>
+      const errorResult = await withDbTransaction(db, (db, context) =>
         applyServerSendErrorWithinTransaction(
           context,
           canonicalGuid,
@@ -853,7 +853,7 @@ describe('RCS active send-attempt ownership', () => {
       expect(queued.attempts).toBe(1);
 
       // The automatic retry atomically advances ownership before request B begins.
-      const retryB = await withDbTransaction(db, (context) =>
+      const retryB = await withDbTransaction(db, (db, context) =>
         claimOutgoingForSendWithinTransaction(context, queued.id, () => queued.nextRetryAt),
       );
       expect(retryB).toEqual({
@@ -892,7 +892,7 @@ describe('RCS active send-attempt ownership', () => {
       });
 
       // A's exact pushed outcomes wait while B is unresolved; they become stale once B settles.
-      const pendingError = await withDbTransaction(db, (context) =>
+      const pendingError = await withDbTransaction(db, (db, context) =>
         applyServerSendErrorWithinTransaction(context, tempGuid, 502, 3_100, true, 'test', null, {
           tempGuid,
           attemptGuid: 'attempt-a',
@@ -935,7 +935,7 @@ describe('RCS active send-attempt ownership', () => {
         }),
       ).resolves.toBe('reconciled');
 
-      const staleError = await withDbTransaction(db, (context) =>
+      const staleError = await withDbTransaction(db, (db, context) =>
         applyServerSendErrorWithinTransaction(
           context,
           'rcs-attempt-a',
@@ -989,7 +989,7 @@ describe('RCS active send-attempt ownership', () => {
         inserted.attemptOwnerToken!,
       );
       const queued = queueState(raw, tempGuid)!;
-      const retry = await withDbTransaction(db, (context) =>
+      const retry = await withDbTransaction(db, (db, context) =>
         claimOutgoingForSendWithinTransaction(context, queued.id, () => queued.nextRetryAt),
       );
 
@@ -1076,7 +1076,7 @@ describe('RCS active send-attempt ownership', () => {
       });
       await reconcileOutgoingError(db, legacyGuid, 502, 21_100);
       const queued = queueState(raw, legacyGuid)!;
-      const retry = await withDbTransaction(db, (context) =>
+      const retry = await withDbTransaction(db, (db, context) =>
         claimOutgoingForSendWithinTransaction(context, queued.id, () => queued.nextRetryAt),
       );
       expect(retry).toEqual({
@@ -1119,7 +1119,7 @@ describe('RCS active send-attempt ownership', () => {
           .run('temp-pinned-0000', CHAT_GUID, JSON.stringify({ message: 'pinned' }));
       })();
 
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordMessageGuidAliasWithinTransaction(
           context,
           'temp-pinned-new-a',
@@ -1127,7 +1127,7 @@ describe('RCS active send-attempt ownership', () => {
           CHAT_GUID,
         ),
       );
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordMessageGuidAliasWithinTransaction(
           context,
           'temp-pinned-new-b',
@@ -1301,7 +1301,7 @@ describe('RCS active send-attempt ownership', () => {
         inserted.attemptOwnerToken!,
       );
       const queued = queueState(raw, tempGuid)!;
-      const retry = await withDbTransaction(db, (context) =>
+      const retry = await withDbTransaction(db, (db, context) =>
         claimOutgoingForSendWithinTransaction(context, queued.id, () => queued.nextRetryAt),
       );
 
@@ -1341,7 +1341,7 @@ describe('RCS active send-attempt ownership', () => {
         statements.push(source);
         return prepare(source);
       }) as typeof raw.prepare);
-      const afterPrune = await withDbTransaction(db, (context) =>
+      const afterPrune = await withDbTransaction(db, (db, context) =>
         applyServerSendErrorWithinTransaction(
           context,
           'attempt-retained-a',
@@ -1383,7 +1383,7 @@ describe('RCS active send-attempt ownership', () => {
       const rebuilt = queueState(raw, tempGuid)!;
       expect(rebuilt.attempts).toBe(1);
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           claimOutgoingForSendWithinTransaction(context, rebuilt.id, () => rebuilt.nextRetryAt),
         ),
       ).resolves.toEqual({
@@ -1405,7 +1405,7 @@ describe('RCS active send-attempt ownership', () => {
   // Owner phone session 2026-10-21: a modern send whose server copy carries no attempt ids (Google
   // did not echo the server's temp id) was stored as a second bubble. Only copies with files merge.
   async function sendAcknowledgedPicture(
-    db: AppDatabase,
+    db: ReadDb,
     tempGuid: string,
     now: number,
     totalBytes = 1_000,
@@ -1445,13 +1445,13 @@ describe('RCS active send-attempt ownership', () => {
     dateCreated,
     attachments: [{ totalBytes }],
   });
-  const liveMerge = (db: AppDatabase, copy: CopyFields, chatId: number) =>
-    withDbTransaction(db, (context) => reconcileEchoByContent(context, copy, chatId));
+  const liveMerge = (db: ReadDb, copy: CopyFields, chatId: number) =>
+    withDbTransaction(db, (db, context) => reconcileEchoByContent(context, copy, chatId));
 
   // Google stores a captioned RCS picture as two messages (caption, then a wordless picture); the
   // server links only the picture copy. The sending phone must not keep a second caption.
   async function sendCaptionedPicture(
-    db: AppDatabase,
+    db: ReadDb,
     tempGuid: string,
     now: number,
     chatGuid = CHAT_GUID,
@@ -1958,7 +1958,7 @@ describe('RCS active send-attempt ownership', () => {
     try {
       const chatId = await seedChat(db);
       await sendAcknowledgedPicture(db, 'temp-modern-mine', 120_000);
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordMessageGuidAliasWithinTransaction(
           context,
           'temp-other-send',

@@ -6,11 +6,11 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 /** Two chats: "Mom" (a@b.com) with a birthday message, and "Work" (c@d.com) unrelated. */
-async function seed(db: AppDatabase): Promise<void> {
+async function seed(db: ReadDb): Promise<void> {
   const hm = await upsertHandles(db, [
     { address: 'a@b.com', displayName: 'Mom' },
     { address: 'c@d.com', displayName: 'Boss' },

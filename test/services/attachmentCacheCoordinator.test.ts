@@ -5,7 +5,7 @@ import {
   getAttachmentCacheEntry,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import {
   ATTACHMENT_CACHE_ACCESS_TOUCH_INTERVAL_MS,
   AttachmentCacheCoordinator,
@@ -67,11 +67,11 @@ function nativeBoundary(overrides: Partial<AttachmentCacheNativeBoundary> = {}):
 }
 
 async function seedUsage(
-  db: AppDatabase,
+  db: ReadDb,
   entries: Array<{ path: string; bytes: number; lastUsedAt?: number }>,
 ): Promise<void> {
   for (const entry of entries) {
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, {
         path: entry.path,
         bytes: entry.bytes,
@@ -82,7 +82,7 @@ async function seedUsage(
 }
 
 async function observeDbAllTransactionState<T>(
-  db: AppDatabase,
+  db: Queryable,
   raw: Awaited<ReturnType<typeof createTestDb>>['raw'],
   task: () => Promise<T>,
 ): Promise<{ value: T; transactionStates: boolean[] }> {
@@ -101,7 +101,7 @@ async function observeDbAllTransactionState<T>(
 }
 
 function accountScope(
-  _db: AppDatabase,
+  _db: Queryable,
   generation = 7,
 ): AttachmentCacheReservationScope & { revoke(): void } {
   let current = true;
@@ -236,7 +236,7 @@ describe('attachment cache quota coordinator', () => {
       .mockImplementationOnce(async () => {
         transactionAtStat = raw.inTransaction;
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw
               .prepare("INSERT INTO kv (key, value) VALUES ('cache-repair-neighbour', 'dirty')")
               .run();
@@ -303,11 +303,11 @@ describe('attachment cache quota coordinator', () => {
     const untracked = path('untracked-present');
     const reserved = path('reserved-present');
     const retiring = path('retiring-present');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       createAttachmentCacheReservation(context, { path: reserved, maxBytes: 20, createdAt: NOW }),
     );
     await seedUsage(db, [{ path: retiring, bytes: 20 }]);
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       const claim = await claimAttachmentCachePathsForRetirement(context, [retiring]);
       if (claim.status !== 'claimed') throw new Error(`test setup claim refused: ${claim.reason}`);
     });
@@ -337,7 +337,7 @@ describe('attachment cache quota coordinator', () => {
     const raced = path('stat-state-race');
     await seedUsage(db, [{ path: raced, bytes: 20 }]);
     const statFile = jest.fn(async () => {
-      await withDbTransaction(db, async (context) => {
+      await withDbTransaction(db, async (db, context) => {
         const claim = await claimAttachmentCachePathsForRetirement(context, [raced]);
         if (claim.status !== 'claimed')
           throw new Error(`test setup claim refused: ${claim.reason}`);
@@ -358,7 +358,7 @@ describe('attachment cache quota coordinator', () => {
     const { db } = await createTestDb();
     const native = nativeBoundary();
     const abandoned = path('crash-reserved');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       createAttachmentCacheReservation(context, {
         path: abandoned,
         maxBytes: 40,
@@ -407,7 +407,7 @@ describe('attachment cache quota coordinator', () => {
     try {
       for (const duePath of duePaths) {
         expect(
-          await withDbTransaction(db, (context) =>
+          await withDbTransaction(db, (db, context) =>
             createAttachmentCacheReservation(context, {
               path: duePath,
               maxBytes: 1,
@@ -453,7 +453,7 @@ describe('attachment cache quota coordinator', () => {
     const native = nativeBoundary();
     const coordinator = new AttachmentCacheCoordinator(native.io, () => NOW);
     const promoted = path('snapshot-promoted');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       createAttachmentCacheReservation(context, {
         path: promoted,
         maxBytes: 40,
@@ -478,7 +478,7 @@ describe('attachment cache quota coordinator', () => {
         // Claim the next queue slot synchronously, but do not await it from inside due-list owner A.
         // Promotion B therefore runs after A releases and before recheck owner C can begin.
         promotion = observe(
-          withDbTransaction(db, (context) =>
+          withDbTransaction(db, (db, context) =>
             commitAttachmentCacheReservation(context, {
               path: promoted,
               bytes: 25,
@@ -529,7 +529,7 @@ describe('attachment cache quota coordinator', () => {
     const native = nativeBoundary();
     const coordinator = new AttachmentCacheCoordinator(native.io, () => NOW);
     const promoted = path('tracked-snapshot-promoted');
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       createAttachmentCacheReservation(context, {
         path: promoted,
         maxBytes: 40,
@@ -564,7 +564,7 @@ describe('attachment cache quota coordinator', () => {
         if (trackedCalls === 1) {
           // Promote after the due-list owner commits but before the coordinator obtains the gate.
           expect(
-            await withDbTransaction(db, (context) =>
+            await withDbTransaction(db, (db, context) =>
               commitAttachmentCacheReservation(context, {
                 path: promoted,
                 bytes: 25,
@@ -1013,7 +1013,7 @@ describe('attachment cache quota coordinator', () => {
 
     expect(coordinator.protect(target)).toBeNull();
     let pin: ReturnType<AttachmentCacheCoordinator['protect']> = null;
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       expect(
         await commitAttachmentCacheReservation(context, {
           path: target,
@@ -1058,7 +1058,7 @@ describe('attachment cache quota coordinator', () => {
     if (admission.status !== 'reserved') throw new Error('expected reservation');
 
     await expect(
-      withDbTransaction(db, async (context) => {
+      withDbTransaction(db, async (db, context) => {
         expect(
           await commitAttachmentCacheReservation(context, {
             path: target,
@@ -1897,7 +1897,7 @@ describe('attachment cache quota coordinator', () => {
       { path: deleted, bytes: 10 },
       { path: missing, bytes: 20 },
     ]);
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       const claim = await claimAttachmentCachePathsForRetirement(context, [deleted, missing]);
       if (claim.status !== 'claimed') throw new Error(`test setup claim refused: ${claim.reason}`);
     });
@@ -1913,7 +1913,7 @@ describe('attachment cache quota coordinator', () => {
       transactionAtDelete.push(raw.inTransaction);
       if (candidate === deleted) {
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw
               .prepare("INSERT INTO kv (key, value) VALUES ('cache-settle-neighbour', 'dirty')")
               .run();
@@ -1961,7 +1961,7 @@ describe('attachment cache quota coordinator', () => {
     const { db, raw } = await createTestDb();
     const failed = path('tracked-settle-failed');
     await seedUsage(db, [{ path: failed, bytes: 20 }]);
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       const claim = await claimAttachmentCachePathsForRetirement(context, [failed]);
       if (claim.status !== 'claimed') throw new Error(`test setup claim refused: ${claim.reason}`);
     });
@@ -1978,7 +1978,7 @@ describe('attachment cache quota coordinator', () => {
       .mockImplementationOnce(async () => {
         transactionAtDelete = raw.inTransaction;
         neighbour = observe(
-          withDbTransaction(db, async (_context) => {
+          withDbTransaction(db, async (db, _context) => {
             raw
               .prepare("INSERT INTO kv (key, value) VALUES ('cache-retry-neighbour', 'dirty')")
               .run();
@@ -2039,7 +2039,7 @@ describe('attachment cache quota coordinator', () => {
     const { db, raw } = await createTestDb();
     const retained = path('tracked-confirm-failed');
     await seedUsage(db, [{ path: retained, bytes: 20 }]);
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       const claim = await claimAttachmentCachePathsForRetirement(context, [retained]);
       if (claim.status !== 'claimed') throw new Error(`test setup claim refused: ${claim.reason}`);
     });
@@ -2126,7 +2126,7 @@ describe('attachment cache quota coordinator', () => {
       { path: missing, bytes: 10 },
       { path: failed, bytes: 20 },
     ]);
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       const claim = await claimAttachmentCachePathsForRetirement(context, [missing, failed]);
       if (claim.status !== 'claimed') throw new Error(`test setup claim refused: ${claim.reason}`);
     });

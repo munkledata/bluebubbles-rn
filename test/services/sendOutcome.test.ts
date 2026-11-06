@@ -11,7 +11,7 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { clearFailedSendNotice, notifyFailedSend } from '@/services/send/sendFailureNotice';
 import { handleSendFailure, reconcileSendOutcome } from '@/services/send/sendOutcome';
 import { createTestDb } from '../support/testDb';
@@ -29,7 +29,7 @@ beforeEach(() => {
   mockNotifyFailedSend.mockClear();
 });
 
-async function seedOutgoing(db: AppDatabase, tempGuid: string, now: number): Promise<void> {
+async function seedOutgoing(db: ReadDb, tempGuid: string, now: number): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(
     db,

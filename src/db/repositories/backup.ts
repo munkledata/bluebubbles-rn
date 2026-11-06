@@ -7,7 +7,7 @@ import {
   type DbTransactionContext,
   withDbTransaction,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { ReadDb } from '../types';
 import {
   MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS,
   MAX_CUSTOM_FOLDER_MEMBERS,
@@ -1898,14 +1898,14 @@ function buildBackupBaseExportData(
 
 /** Read every v4 backup domain from one committed point in time on the shared connection. */
 export async function getBackupV4ExportData(
-  db: AppDatabase,
+  db: ReadDb,
   limits: BackupExportLimits,
   commitGuard?: DbCommitGuard,
 ): Promise<BackupV4ExportData> {
   assertBackupExportLimits(limits);
   const rows = await withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const base = await readBackupBaseRowsWithinTransaction(context, limits);
       const handleColors = await readHandleColorBackupRowsWithinTransaction(
         context,

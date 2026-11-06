@@ -8,7 +8,7 @@ import {
   type AttachmentCacheScanObservation,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   scanNativeAttachmentCacheFiles,
   scanNativeAttachmentCacheForRepair,
@@ -32,7 +32,7 @@ const REPAIR_MAX_LEDGER_FILES =
 let readyGeneration: number | null = null;
 let readyResult: AttachmentCacheRecoveryResult | null = null;
 interface AttachmentCacheRecoveryFlight {
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   readonly generation: number;
   readonly promise: Promise<AttachmentCacheRecoveryResult>;
 }
@@ -122,7 +122,7 @@ export function invalidateAttachmentCacheRecoveryReadiness(): void {
  * durably accounted, while readiness remains closed until a later run finishes.
  */
 export function recoverAttachmentCache(
-  db: AppDatabase,
+  db: ReadDb,
   lease: RealtimeDeliveryLease,
   dependencies: AttachmentCacheRecoveryDependencies = {},
 ): Promise<AttachmentCacheRecoveryResult> {
@@ -159,7 +159,7 @@ export function recoverAttachmentCache(
 }
 
 async function performAttachmentCacheRecovery(
-  db: AppDatabase,
+  db: ReadDb,
   lease: RealtimeDeliveryLease,
   dependencies: AttachmentCacheRecoveryDependencies,
 ): Promise<AttachmentCacheRecoveryResult> {
@@ -205,7 +205,7 @@ async function performAttachmentCacheRecovery(
       adoption = await scope.runTracked(() =>
         withDbTransaction(
           db,
-          (context) => adoptAttachmentCacheScanBatch(context, page, now),
+          (db, context) => adoptAttachmentCacheScanBatch(context, page, now),
           () => scope.isCurrent(),
         ),
       );
@@ -223,7 +223,7 @@ async function performAttachmentCacheRecovery(
     entries = await scope.runTracked(() =>
       withDbTransaction(
         db,
-        async () => listAttachmentCacheEntriesForRecovery(db),
+        async (db) => listAttachmentCacheEntriesForRecovery(db),
         () => scope.isCurrent(),
       ),
     );
@@ -289,7 +289,7 @@ async function performAttachmentCacheRecovery(
  * startup's limit, the repair stops as `blocked` instead of growing it. Serialized with recovery.
  */
 export function repairAttachmentCache(
-  db: AppDatabase,
+  db: ReadDb,
   lease: RealtimeDeliveryLease,
   dependencies: AttachmentCacheRepairDependencies = {},
 ): Promise<AttachmentCacheRepairResult> {
@@ -303,7 +303,7 @@ export function repairAttachmentCache(
 }
 
 async function performAttachmentCacheRepair(
-  db: AppDatabase,
+  db: ReadDb,
   lease: RealtimeDeliveryLease,
   dependencies: AttachmentCacheRepairDependencies,
 ): Promise<AttachmentCacheRepairResult> {
@@ -334,7 +334,7 @@ async function performAttachmentCacheRepair(
         const adoption = await scope.runTracked(() =>
           withDbTransaction(
             db,
-            (context) => adoptAttachmentCacheScanBatch(context, observations, now),
+            (db, context) => adoptAttachmentCacheScanBatch(context, observations, now),
             () => scope.isCurrent(),
           ),
         );
@@ -380,7 +380,7 @@ async function performAttachmentCacheRepair(
 
 /** The ordinary cleanup between repair pages; `blocked` once the ledger nears startup's limit. */
 async function cleanUpRepairLedger(
-  db: AppDatabase,
+  db: ReadDb,
   coordinator: AttachmentCacheCoordinator,
   scope: AttachmentCacheReservationScope,
 ): Promise<{ readonly status: 'complete' | 'stale' | 'blocked'; readonly confirmed: number }> {
@@ -393,7 +393,7 @@ async function cleanUpRepairLedger(
   const usage = await scope.runTracked(() =>
     withDbTransaction(
       db,
-      async () => getAttachmentCacheUsage(db),
+      async (db) => getAttachmentCacheUsage(db),
       () => scope.isCurrent(),
     ),
   );
@@ -402,7 +402,7 @@ async function cleanUpRepairLedger(
 }
 
 async function drainCrashOwners(
-  db: AppDatabase,
+  db: ReadDb,
   coordinator: AttachmentCacheCoordinator,
   scope: AttachmentCacheReservationScope,
 ): Promise<RecoveryDrainOutcome> {
@@ -429,7 +429,7 @@ async function drainCrashOwners(
 }
 
 async function retireInactiveFiles(
-  db: AppDatabase,
+  db: ReadDb,
   coordinator: AttachmentCacheCoordinator,
   scope: AttachmentCacheReservationScope,
 ): Promise<RecoveryDrainOutcome> {

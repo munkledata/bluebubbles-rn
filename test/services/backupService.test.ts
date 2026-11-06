@@ -15,7 +15,7 @@ import { SecretBox } from '@core/crypto';
 import { logger } from '@core/secure';
 import { kvGet } from '@db/repositories';
 import { getDatabase } from '@db/database';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { createTestDb } from '../support/testDb';
 
@@ -189,7 +189,7 @@ describe('backup account ownership', () => {
         const value = Reflect.get(target, property, target) as unknown;
         return typeof value === 'function' ? value.bind(target) : value;
       },
-    }) as AppDatabase;
+    }) as TestDb;
     mockGetDatabase.mockReturnValue(delayedDb);
     const oldScreenLease = captureRealtimeDeliveryLease();
 

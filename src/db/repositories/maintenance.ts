@@ -1,7 +1,7 @@
 import { inArray, sql } from 'drizzle-orm';
 import { kv } from '../schema';
 import { withDbTransaction, withDbWriteLock } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import { SHARE_INTAKE_RECEIPT_KV_PREFIX } from './shareIntakeReceipts';
 import { setSyncMarkerWithinTransaction } from './sync';
 import {
@@ -54,7 +54,7 @@ export const NOTIFICATION_ROUTE_KV_PREFIX = 'notification.route.v2.facetime.';
 /** Maximum rows one cache-delete statement may hold the shared write queue for. */
 const CACHE_DELETE_BATCH_SIZE = 500;
 
-async function deleteCustomFolderMembersBatch(db: AppDatabase): Promise<number> {
+async function deleteCustomFolderMembersBatch(db: Queryable): Promise<number> {
   return withDbWriteLock(async () => {
     const rows = await db.all<{ rowid: number }>(sql`
       DELETE FROM custom_folder_members
@@ -67,7 +67,7 @@ async function deleteCustomFolderMembersBatch(db: AppDatabase): Promise<number> 
   });
 }
 
-async function deleteCustomFoldersBatch(db: AppDatabase): Promise<number> {
+async function deleteCustomFoldersBatch(db: Queryable): Promise<number> {
   return withDbWriteLock(async () => {
     const rows = await db.all<{ rowid: number }>(sql`
       DELETE FROM custom_folders
@@ -125,7 +125,7 @@ async function deleteCustomFoldersBatch(db: AppDatabase): Promise<number> {
  * writers not yet migrated to the queue can still interleave, which is why the separate,
  * queue-fenced `localCacheDirty` confirmation remains load-bearing.
  */
-export async function clearLocalCache(db: AppDatabase): Promise<void> {
+export async function clearLocalCache(db: ReadDb): Promise<void> {
   // FIRST, before a single delete. Marker-first bounds what a mid-wipe process death (the user
   // swipes the app away, Android reclaims it) can leave behind — a wipe on a large account is
   // seconds of work, since the FTS delete trigger runs per message row. Reset LAST and a death
@@ -137,7 +137,7 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
   //
   // The row itself must SURVIVE (id = 1, seeded by 0001_init): the scoped marker write is an UPDATE,
   // so deleting it would silently stop every future marker write.
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     setSyncMarkerWithinTransaction(context, {
       lastSyncedRowId: null,
       lastSyncedTimestamp: null,
@@ -388,8 +388,8 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
   // be POSTed to the NEXT server's operator, stacks and meta included.
   let deletedReports = CACHE_DELETE_BATCH_SIZE;
   while (deletedReports === CACHE_DELETE_BATCH_SIZE) {
-    deletedReports = await withDbWriteLock(async () => {
-      const rows = await db.all<{ rowid: number }>(sql`
+    deletedReports = await withDbWriteLock(db, async (tx) => {
+      const rows = await tx.all<{ rowid: number }>(sql`
         DELETE FROM error_reports
          WHERE rowid IN (
            SELECT rowid FROM error_reports ORDER BY rowid LIMIT ${CACHE_DELETE_BATCH_SIZE}
@@ -404,8 +404,8 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
   // whole versioned state makes the next account establish its own continuation from zero. The
   // stable-snapshot proof is account-relative too; retaining it would skip that initialization for
   // the next server.
-  await withDbWriteLock(async () =>
-    db
+  await withDbWriteLock(db, async (tx) =>
+    tx
       .delete(kv)
       .where(
         inArray(kv.key, [
@@ -519,7 +519,7 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
  * own upload lease), so using only those identity tables would report a false clean result and let
  * account B inherit queued sends, diagnostics, reminders, previews, schedules, or draft text.
  */
-export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
+export async function localCacheDirty(db: Queryable): Promise<boolean> {
   return withDbWriteLock(async () => {
     const rows = await db.all<{ dirty: number }>(sql`
       SELECT CASE WHEN

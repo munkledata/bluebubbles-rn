@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { handles } from '@db/schema';
+import type { WriteDb } from '@db/types';
 
 const open = jest.fn();
 const runMigrations = jest.fn();
@@ -36,7 +37,8 @@ describe('Drizzle/op-sqlite adapter contract', () => {
     runMigrations.mockResolvedValueOnce([]);
 
     const { initDatabase } = await import('@db/database');
-    const db = await initDatabase('contract-key');
+    // This contract drives the adapter's raw write path on purpose, outside any owner.
+    const db = (await initDatabase('contract-key')) as unknown as WriteDb;
     raw.execute.mockClear();
 
     await expect(

@@ -6,7 +6,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import { MessageTargetUnavailableError } from './messageTargets';
 import {
   insertOutgoingTextWithinTransaction,
@@ -153,7 +153,7 @@ export function insertScheduledWithinTransaction(
  * flight, and that newer identity must not match the stale response's delete.
  */
 export async function listServerScheduledPruneExposure(
-  db: AppDatabase,
+  db: ReadDb,
   commitGuard?: DbCommitGuard,
 ): Promise<ServerScheduledPruneExposure[]> {
   const exposure: ServerScheduledPruneExposure[] = [];
@@ -163,7 +163,7 @@ export async function listServerScheduledPruneExposure(
     // committed rows in bounded pages so a phantom uuid cannot suppress a real server response.
     const batch = await withDbTransaction<ServerScheduledPruneExposure[]>(
       db,
-      () =>
+      (db) =>
         db.all<ServerScheduledPruneExposure>(sql`
           SELECT id, server_id AS serverId
           FROM scheduled_messages
@@ -195,7 +195,7 @@ export async function listServerScheduledPruneExposure(
  * with public scheduled helpers: those helpers transact internally and would wedge the DB mutex.
  */
 export async function reconcileServerScheduled(
-  db: AppDatabase,
+  db: ReadDb,
   items: {
     serverId: string;
     chatGuid: string;
@@ -216,7 +216,7 @@ export async function reconcileServerScheduled(
   for (const it of items) {
     await withDbTransaction(
       db,
-      async () => {
+      async (db) => {
         const existing = await db.all<{ id: number; payload: string }>(
           sql`SELECT id, payload FROM scheduled_messages WHERE server_id = ${it.serverId} LIMIT 1`,
         );
@@ -261,7 +261,7 @@ export async function reconcileServerScheduled(
     if (keep.has(row.serverId)) continue;
     await withDbTransaction(
       db,
-      () =>
+      (db) =>
         db
           .delete(scheduledMessages)
           .where(
@@ -337,7 +337,7 @@ export function updateScheduledWithinTransaction(
 }
 
 /** Fetch a single scheduled row by id (any status), for the edit screen. */
-export async function getScheduledById(db: AppDatabase, id: number): Promise<ScheduledRow | null> {
+export async function getScheduledById(db: Queryable, id: number): Promise<ScheduledRow | null> {
   const rows = await db.all<Parameters<typeof mapScheduled>[0]>(
     sql`SELECT ${SCHED_COLS} FROM scheduled_messages WHERE id = ${id} LIMIT 1`,
   );
@@ -350,7 +350,7 @@ export async function getScheduledById(db: AppDatabase, id: number): Promise<Sch
  * (status='error') disappeared silently, so the user never learned it didn't go out. The list
  * screen shows these under COMPLETED without claiming an ambiguous legacy handoff failed.
  */
-export async function listScheduledHistory(db: AppDatabase, limit = 50): Promise<ScheduledRow[]> {
+export async function listScheduledHistory(db: Queryable, limit = 50): Promise<ScheduledRow[]> {
   const rows = await db.all<Parameters<typeof mapScheduled>[0]>(
     sql`SELECT ${SCHED_COLS} FROM scheduled_messages WHERE status IN ('sent', 'error', 'uncertain')
         ORDER BY scheduled_for DESC LIMIT ${limit}`,
@@ -375,7 +375,7 @@ export function deleteScheduledHistoryWithinTransaction(
   });
 }
 
-export async function listAllScheduled(db: AppDatabase): Promise<ScheduledRow[]> {
+export async function listAllScheduled(db: Queryable): Promise<ScheduledRow[]> {
   const rows = await db.all<Parameters<typeof mapScheduled>[0]>(
     sql`SELECT ${SCHED_COLS} FROM scheduled_messages WHERE status = 'pending' ORDER BY scheduled_for ASC`,
   );
@@ -383,7 +383,7 @@ export async function listAllScheduled(db: AppDatabase): Promise<ScheduledRow[]>
 }
 
 export async function listScheduledByChat(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
 ): Promise<ScheduledRow[]> {
   const rows = await db.all<Parameters<typeof mapScheduled>[0]>(
@@ -394,7 +394,7 @@ export async function listScheduledByChat(
 
 /** Due = pending AND scheduledFor <= now. `limit` bounds headless/background recovery runs. */
 export async function listDueScheduled(
-  db: AppDatabase,
+  db: Queryable,
   now: number,
   limit?: number,
   localOnly = false,
@@ -449,14 +449,14 @@ export class ScheduledOutgoingTargetUnavailableError extends Error {
  * and the payload the sender is allowed to use.
  */
 export async function claimDueScheduled(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   now: number,
   commitGuard?: DbCommitGuard,
 ): Promise<ScheduledRow | null> {
   return withDbTransaction(
     db,
-    async (_context) => {
+    async (db, _context) => {
       const rows = await db.all<Parameters<typeof mapScheduled>[0]>(sql`
         UPDATE scheduled_messages
            SET status = 'sending'
@@ -504,14 +504,14 @@ export async function claimDueScheduled(
  * server-owned, so a stale runner cannot overwrite its newer state.
  */
 export async function markScheduledSent(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   serverId: string | null = null,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       const rows = await db
         .update(scheduledMessages)
         .set({ status: 'sent', serverId })
@@ -536,14 +536,14 @@ export async function markScheduledSent(
  * the claim contract (exactly one owner between claim and terminal write) is preserved.
  */
 export async function rearmScheduled(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   nextScheduledFor: number,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       const rows = await db
         .update(scheduledMessages)
         .set({ status: 'pending', scheduledFor: nextScheduledFor, attempts: 0 })
@@ -565,13 +565,13 @@ export async function rearmScheduled(
  * never enter the local delivery queue.
  */
 export async function handoverScheduledTextToOutgoing(
-  db: AppDatabase,
+  db: ReadDb,
   args: ScheduledTextHandoverArgs,
   commitGuard?: DbCommitGuard,
 ): Promise<OutgoingInsertResult> {
   const result = await withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const targeted =
         args.outgoing.selectedMessageGuid !== undefined || args.outgoing.partIndex !== undefined;
       if (targeted) {
@@ -643,13 +643,13 @@ export async function handoverScheduledTextToOutgoing(
  * no longer owns the row and nothing was written.
  */
 export async function markScheduledFailed(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   commitGuard?: DbCommitGuard,
 ): Promise<'pending' | 'error' | 'stale'> {
   return withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       const rows = await db.all<{ status: 'pending' | 'error' }>(sql`
         UPDATE scheduled_messages
            SET attempts = attempts + 1,
@@ -669,13 +669,13 @@ export async function markScheduledFailed(
 
 /** Release an unposted claim without consuming an attempt (for temporary capability unknowns). */
 export async function deferScheduledClaim(
-  db: AppDatabase,
+  db: ReadDb,
   id: number,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       const rows = await db
         .update(scheduledMessages)
         .set({ status: 'pending' })
@@ -699,13 +699,13 @@ export async function deferScheduledClaim(
  * the count.
  */
 export async function resetStuckScheduled(
-  db: AppDatabase,
+  db: ReadDb,
   limit?: number,
   commitGuard?: DbCommitGuard,
 ): Promise<number> {
   return withDbTransaction(
     db,
-    async () => {
+    async (db) => {
       const rows = await db.all<{ id: number }>(sql`
         UPDATE scheduled_messages SET status = 'pending'
         WHERE id IN (

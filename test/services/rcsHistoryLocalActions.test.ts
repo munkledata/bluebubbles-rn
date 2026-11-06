@@ -16,11 +16,11 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 const mockDeleteScheduled = jest.fn<Promise<unknown>, [unknown, string]>();
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));

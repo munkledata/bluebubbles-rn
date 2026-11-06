@@ -7,7 +7,7 @@ import {
   insertOutgoingText,
   OUTGOING_MAX_ATTEMPTS,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { sendIMessageSubject } from '@/services/send/sendSubjectService';
@@ -69,7 +69,7 @@ const liveRows = (raw: Database.Database) =>
   one(raw, 'SELECT COUNT(*) AS c FROM messages WHERE date_deleted IS NULL').c;
 
 describe('sendIMessageSubject (FP-006)', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {

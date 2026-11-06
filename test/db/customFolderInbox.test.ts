@@ -84,7 +84,7 @@ async function loadFolderPage(t: TestDb, folderId: number, limit: number, search
     searchText === ''
       ? undefined
       : ((await collectCustomFolderMessageMatches((beforeRowid) =>
-          withDbTransaction(t.db, (context) =>
+          withDbTransaction(t.db, (db, context) =>
             readCustomFolderMessageMatchBatchWithinTransaction(
               context,
               folderId,
@@ -93,7 +93,7 @@ async function loadFolderPage(t: TestDb, folderId: number, limit: number, search
             ),
           ),
         )) ?? undefined);
-  return withDbTransaction(t.db, (context) =>
+  return withDbTransaction(t.db, (db, context) =>
     listCustomFolderInboxPageWithinTransaction(
       context,
       folderId,

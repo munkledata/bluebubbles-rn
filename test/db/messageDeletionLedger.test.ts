@@ -8,10 +8,10 @@ import {
   upsertMessagesWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
-async function seedChat(db: AppDatabase): Promise<{
+async function seedChat(db: ReadDb): Promise<{
   chatId: number;
   handles: Map<string, number>;
 }> {
@@ -58,7 +58,7 @@ describe('message deletion ledger', () => {
         INSERT INTO insertion_probe (date_deleted) VALUES (NEW.date_deleted);
       END
     `);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(context, [message('late-message')], () => chatId, handles),
     );
 
@@ -77,7 +77,7 @@ describe('message deletion ledger', () => {
     await markMessageDeleted(db, 'foreign-owned', 5000, undefined, 'chat-other');
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     try {
-      const stored = await withDbTransaction(db, (context) =>
+      const stored = await withDbTransaction(db, (db, context) =>
         upsertMessagesWithinTransaction(context, [message('foreign-owned')], () => chatId, handles),
       );
 
@@ -99,7 +99,7 @@ describe('message deletion ledger', () => {
   it('keeps the later timestamp across repeated, out-of-order deletion events', async () => {
     const { db, raw } = await createTestDb();
     const { chatId, handles } = await seedChat(db);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(
         context,
         [message('repeated-message')],
@@ -125,13 +125,13 @@ describe('message deletion ledger', () => {
   it('survives a hard row purge and tombstones the next re-ingestion', async () => {
     const { db, raw } = await createTestDb();
     const { chatId, handles } = await seedChat(db);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(context, [message('purged-message')], () => chatId, handles),
     );
     await markMessageDeleted(db, 'purged-message', 5000);
     raw.prepare("DELETE FROM messages WHERE guid = 'purged-message'").run();
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(context, [message('purged-message')], () => chatId, handles),
     );
     expect(
@@ -143,7 +143,7 @@ describe('message deletion ledger', () => {
     const { db, raw } = await createTestDb();
     await markMessageDeleted(db, 'missing-chat-message', 5000, undefined, 'chat-1');
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         upsertMessagesWithinTransaction(
           context,
           [message('missing-chat-message')],
@@ -161,7 +161,7 @@ describe('message deletion ledger', () => {
     ).toEqual({ date_deleted: 5000 });
 
     const { chatId, handles } = await seedChat(db);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(
         context,
         [message('missing-chat-message')],
@@ -177,7 +177,7 @@ describe('message deletion ledger', () => {
   it('rolls back an unknown ledger marker with its owning transaction', async () => {
     const { db, raw } = await createTestDb();
     await expect(
-      withDbTransaction(db, async (context) => {
+      withDbTransaction(db, async (db, context) => {
         await markMessageDeletedWithinTransaction(context, 'rolled-back-message', 5000);
         throw new Error('planned rollback');
       }),
@@ -193,7 +193,7 @@ describe('message deletion ledger', () => {
   it('queues the public writer behind a neighbouring rollback, then commits ledger, message, and chat state together', async () => {
     const { db, raw } = await createTestDb();
     const { chatId, handles } = await seedChat(db);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(context, [message('queued-message')], () => chatId, handles),
     );
 
@@ -205,7 +205,7 @@ describe('message deletion ledger', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       markStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -252,7 +252,7 @@ describe('message deletion ledger', () => {
   it('rolls back ledger and message writes when the final chat-sort update fails', async () => {
     const { db, raw } = await createTestDb();
     const { chatId, handles } = await seedChat(db);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(
         context,
         [message('sort-failure-message')],

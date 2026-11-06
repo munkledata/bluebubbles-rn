@@ -11,12 +11,12 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const ADDRS = ['a@x.com', 'b@x.com'];
 
-async function setup(db: AppDatabase) {
+async function setup(db: ReadDb) {
   const hm = await upsertHandles(
     db,
     ADDRS.map((address) => ({ address })),
@@ -37,7 +37,7 @@ async function setup(db: AppDatabase) {
 }
 
 async function react(
-  db: AppDatabase,
+  db: ReadDb,
   chatId: number,
   hm: Map<string, number>,
   args: { guid: string; type: string; emoji?: string; from?: string; date: number },

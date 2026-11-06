@@ -5,7 +5,7 @@ import {
 } from '@core/messages/retraction';
 import { parseMessagePartTopology } from '@core/models';
 import { REACTION_BASE_TYPES, STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 import { escapeLike, toFtsQuery } from './_shared';
 // The ONE definition of "this chat is not under a local deletion tombstone" — search is a reader
 // of it like the inbox is. Import the owning rule rather than restating it; chats.ts does not import
@@ -61,7 +61,7 @@ interface ChatSearchQueryRow extends ChatSearchResultRow {
  * in an explicit final bucket instead of being conflated with a real timestamp.
  */
 export async function searchMessagesInChat(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   queryText: string,
   cursor: ChatSearchCursor | null = null,
@@ -338,7 +338,7 @@ function toPresentationSearchResults(
  * the next `syncAllChats` re-inserts each chat's `lastMessage` — straight back into the FTS index.
  */
 export async function searchMessagesEnriched(
-  db: AppDatabase,
+  db: Queryable,
   queryText: string,
   limit = 50,
 ): Promise<SearchResultRow[]> {
@@ -376,7 +376,7 @@ export async function searchMessagesEnriched(
  * local hits only after this read proves the message and owning chat committed successfully.
  */
 export async function searchMessagesEnrichedByGuids(
-  db: AppDatabase,
+  db: Queryable,
   guids: readonly string[],
   queryText = '',
 ): Promise<SearchResultRow[]> {
@@ -414,7 +414,7 @@ export async function searchMessagesEnrichedByGuids(
  * Powers the "View Thread" popup (the bubble's reply quote shows only the immediate parent).
  */
 export async function listThreadMessages(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   originatorGuid: string,
 ): Promise<MessageRow[]> {
@@ -442,7 +442,7 @@ export async function listThreadMessages(
  * Call BEFORE markRead (which moves the marker to the newest message).
  */
 export async function getFirstUnreadInChat(
-  db: AppDatabase,
+  db: Queryable,
   chatId: number,
 ): Promise<{ guid: string; dateCreated: number; count: number } | null> {
   const marker = await db.all<{ lastReadMessageGuid: string | null; deletedAt: number | null }>(
@@ -478,10 +478,7 @@ export async function getFirstUnreadInChat(
 }
 
 /** Newest received (inbound) message guid in a chat — the correct mark-read target. */
-export async function getNewestReceivedGuid(
-  db: AppDatabase,
-  chatId: number,
-): Promise<string | null> {
+export async function getNewestReceivedGuid(db: Queryable, chatId: number): Promise<string | null> {
   const rows = await db.all<{ guid: string }>(sql`
     SELECT guid FROM messages
     WHERE chat_id = ${chatId} AND is_from_me = 0 AND date_deleted IS NULL
@@ -499,7 +496,7 @@ export async function getNewestReceivedGuid(
  * message at or before it, so a local delete cannot hold the marker back. Read-only.
  */
 export async function getReadThroughTarget(
-  db: AppDatabase,
+  db: Queryable,
   chatId: number,
   readThroughGuid: string,
   dateReadMs: number | null,
@@ -708,7 +705,7 @@ export const notAnOverlayMessage = (): SQL => {
 
 /** Run the shared message SELECT with extra WHERE conditions + an ORDER BY + LIMIT. */
 function queryMessageRows(
-  db: AppDatabase,
+  db: Queryable,
   chatId: number,
   where: SQL,
   order: SQL,
@@ -729,7 +726,7 @@ function queryMessageRows(
  *  load downward (>= that date). To open ON a search hit with context around it, use
  *  {@link listMessagesAround} instead. */
 export async function listMessagesWithSenders(
-  db: AppDatabase,
+  db: Queryable,
   chatId: number,
   limit = 100,
   beforeDate?: number,
@@ -763,7 +760,7 @@ interface ResolvedMessageWindowAnchor {
  * the target is included even when its date is null or more than a full window shares its timestamp.
  */
 export async function listMessagesAround(
-  db: AppDatabase,
+  db: Queryable,
   chatId: number,
   anchor: MessageWindowAnchor,
   before = 150,
@@ -840,7 +837,7 @@ function visibleMessageMatchSql(): SQL {
  * Locally-deleted chats are excluded here too.
  */
 export async function searchChatGuidsByMessage(
-  db: AppDatabase,
+  db: Queryable,
   queryText: string,
   limit = 300,
 ): Promise<string[]> {
@@ -875,7 +872,7 @@ export interface CustomFolderMessageMatchBatch {
  * for the whole message history at once.
  */
 export async function queryCustomFolderMessageMatchBatch(
-  db: AppDatabase,
+  db: Queryable,
   folderId: number,
   match: string,
   beforeRowid: number | null,
@@ -940,7 +937,7 @@ export interface MessagePreview {
 
 /** A compact preview of a message by guid (for the reply quote). */
 export async function getMessagePreviewByGuid(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   guid: string,
   partIndex?: number | null,
@@ -1054,7 +1051,7 @@ export async function getMessagePreviewByGuid(
  * `?focusDate` deep-link loads a window around the message so scroll-to-message works even for
  * an old message not in the recent window).
  */
-export async function getMessageDateByGuid(db: AppDatabase, guid: string): Promise<number | null> {
+export async function getMessageDateByGuid(db: Queryable, guid: string): Promise<number | null> {
   const rows = await db.all<{ dateCreated: number | null }>(
     sql`SELECT date_created AS dateCreated FROM messages WHERE guid = ${guid} LIMIT 1`,
   );
@@ -1063,7 +1060,7 @@ export async function getMessageDateByGuid(db: AppDatabase, guid: string): Promi
 
 /** Read a message's current text + edit marker. */
 export async function getMessageTextByGuid(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
 ): Promise<{ text: string | null; dateEdited: number | null } | null> {
   const rows = await db.all<{ text: string | null; dateEdited: number | null }>(
@@ -1077,7 +1074,7 @@ export async function getMessageTextByGuid(
  * edit/unsend server routes require `chatGuid`, which the UI doesn't always have in scope.
  */
 export async function getChatGuidByMessageGuid(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
 ): Promise<string | null> {
   const rows = await db.all<{ guid: string }>(
@@ -1094,7 +1091,7 @@ export async function getChatGuidByMessageGuid(
  * unread rule as the inbox filters and badges (`chatUnreadMessagePredicateSql`).
  */
 export async function isMessageNotificationEligible(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
 ): Promise<boolean> {
   const rows = await db.all<{ eligible: number }>(sql`
@@ -1128,7 +1125,7 @@ export interface TapbackNotificationFacts {
  * `isMessageNotificationEligible`, this re-checks current DB truth on every (re)presentation.
  */
 export async function getTapbackNotificationFacts(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
 ): Promise<TapbackNotificationFacts | null> {
   const rows = await db.all<TapbackNotificationFacts>(sql`

@@ -575,7 +575,7 @@ describe('FEAT-06 immutable ingestion ownership', () => {
     await deleteChatLocal(db, 'RCS;-;google-conversation-2', 70);
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         reconcileEchoByContent(
           context,
           {
@@ -620,7 +620,7 @@ describe('FEAT-06 immutable ingestion ownership', () => {
     await cancelOutgoing(db, 'temp-echo-wrong-chat', 91);
     await deleteChatLocal(db, 'RCS;-;google-conversation-2', 92);
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         reconcileEchoByContent(
           context,
           {

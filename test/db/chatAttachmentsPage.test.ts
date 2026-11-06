@@ -6,13 +6,13 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const ADDRESS = 'pages@x.com';
 const CHAT = 'pages-chat';
 
-async function seed(db: AppDatabase, messages: Record<string, unknown>[]) {
+async function seed(db: ReadDb, messages: Record<string, unknown>[]) {
   const handles = await upsertHandles(db, [{ address: ADDRESS }]);
   const chats = await upsertChats(
     db,

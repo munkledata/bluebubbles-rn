@@ -32,7 +32,7 @@ import {
   type ScheduledTextHandoverTransition,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils/chat';
 import { utf8Encode } from '@utils/bytes';
 import {
@@ -188,7 +188,7 @@ function recoveryBatchRows(maxRows?: number): number {
 }
 
 async function recoverInterruptedScheduledRows(
-  db: AppDatabase,
+  db: ReadDb,
   accountScope: ScheduledOperationScope | undefined,
   maxRows: number | undefined,
 ): Promise<number> {
@@ -220,7 +220,7 @@ async function recoverInterruptedScheduledRows(
  * `ensureScheduledRecovery` must never invalidate a cache while a live claim may still exist.
  */
 export function ensureScheduledRecovery(
-  db: AppDatabase,
+  db: ReadDb,
   accountScope?: ScheduledOperationScope,
   maxRows?: number,
 ): Promise<number> {
@@ -300,7 +300,7 @@ async function findServerScheduledCopy(
  * whose reply was lost first looks for the Mac's copy (findServerScheduledCopy).
  */
 export async function scheduleTextMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: ScheduleArgs,
   accountScope?: ScheduledOperationScope,
@@ -351,7 +351,7 @@ export async function scheduleTextMessage(
   assertScheduledScope(accountScope);
   const id = await withDbTransaction(
     db,
-    (context) => insertScheduledWithinTransaction(context, { ...args, serverId }),
+    (db, context) => insertScheduledWithinTransaction(context, { ...args, serverId }),
     commitGuard,
   );
   assertScheduledScope(accountScope);
@@ -364,7 +364,7 @@ export async function scheduleTextMessage(
  * An uncertain create response must be checked in Scheduled before the user tries again.
  */
 export async function scheduleAttachmentMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: ScheduleAttachmentArgs,
   accountScope: ScheduledOperationScope,
@@ -419,7 +419,7 @@ export async function scheduleAttachmentMessage(
   }
   const id = await withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       insertScheduledWithinTransaction(context, {
         chatGuid: args.chatGuid,
         text: args.text,
@@ -501,7 +501,7 @@ function isUnreachableBeforeHandover(error: unknown): boolean {
  * `onQueued` callback uses the standalone terminal helpers and bounded retry path.
  */
 export async function runDueScheduled(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   now: number,
   sender?: Sender,

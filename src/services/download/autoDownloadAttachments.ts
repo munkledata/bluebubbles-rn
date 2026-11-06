@@ -2,7 +2,7 @@ import { logger } from '@core/secure';
 import type { EventDeliveryContext } from '@core/realtime';
 import type { HttpClient } from '@core/api';
 import { enqueueAttachmentMediaExport, listAttachmentsByMessageIds } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { shouldAutoDownload } from '@utils';
 import {
@@ -43,7 +43,7 @@ interface AutoDownloadExecutionOptions {
  * unit-tested in Node) and nothing is pulled unless there's actually an image to fetch.
  */
 export async function autoDownloadMessageAttachments(
-  db: AppDatabase,
+  db: ReadDb,
   messageId: number,
   context?: EventDeliveryContext,
   taskHttp?: HttpClient,
@@ -210,7 +210,7 @@ export async function autoDownloadMessageAttachments(
 
 /** Resolve a task-local transport for a detached socket/FCM ingestion auto-download. */
 export async function autoDownloadMessageAttachmentsForRealtimeEvent(
-  db: AppDatabase,
+  db: ReadDb,
   messageId: number,
   expectedAccountGeneration: number,
   options: {

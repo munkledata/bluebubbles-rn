@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { Message } from '@core/models';
 import { EventRouter, type EventDeliveryContext, type EventSink } from '@core/realtime';
 import { getSyncMarker, kvGet, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { IncomingEventDependencyPendingError } from '@/services/realtime/incomingEventErrors';
 import { RcsProviderEpochEventSink } from '@/services/realtime/rcsProviderEpochEventSink';
@@ -73,7 +73,7 @@ function durableContext(): EventDeliveryContext {
   };
 }
 
-async function seedOptimisticRcsMessage(db: AppDatabase, guid: string): Promise<void> {
+async function seedOptimisticRcsMessage(db: ReadDb, guid: string): Promise<void> {
   const owner = chatGuid(EPOCH_A);
   const handles = await upsertHandles(db, [{ address: '+15550000001', service: 'RCS' }]);
   const chatMap = await upsertChats(

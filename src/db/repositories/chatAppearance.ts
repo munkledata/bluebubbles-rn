@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { chats } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 
 /** Chat customization, theme, and local/synced background persistence. */
 
@@ -73,7 +73,7 @@ export function setChatAppearanceWithinTransaction(
  * (downloaded from the server); the UI resolves the effective background as local ?? synced.
  */
 export async function getChatTheme(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
 ): Promise<{
   themeTokens: string | null;
@@ -102,7 +102,7 @@ export async function getChatTheme(
  * them to decide whether to (re)download.
  */
 export async function getSyncedBackgroundState(
-  db: AppDatabase,
+  db: Queryable,
   guid: string,
 ): Promise<{ channel: string | null; uri: string | null } | null> {
   const rows = await db.all<{ channel: string | null; uri: string | null }>(
@@ -177,7 +177,7 @@ export interface GroupPhotoState {
  * any file at all (the caller compares the exact expected name). Bounded; groups are few.
  */
 export async function listGroupPhotoStates(
-  db: AppDatabase,
+  db: Queryable,
   limit: number,
 ): Promise<GroupPhotoState[]> {
   const bounded = Math.min(Math.max(Math.floor(limit), 1), 500);
@@ -220,7 +220,7 @@ export function setGroupPhotoUriIfCurrentWithinTransaction(
 }
 
 /** True while any chat still shows this photo file (one file per chat today; checked anyway). */
-export async function isGroupPhotoUriReferenced(db: AppDatabase, uri: string): Promise<boolean> {
+export async function isGroupPhotoUriReferenced(db: Queryable, uri: string): Promise<boolean> {
   const rows = await db.all<{ known: number }>(
     sql`SELECT 1 AS known FROM chats WHERE group_photo_uri = ${uri} LIMIT 1`,
   );

@@ -12,7 +12,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { createTestDb } from '../support/testDb';
 import {
@@ -27,7 +27,7 @@ import {
 // (reconcileEchoByContent) and promoted in place. These tests lock that path against the
 // orphan / echo-race / no-guid-requeue bugs an adversarial review surfaced.
 
-async function seedChat(db: AppDatabase, guid: string): Promise<number> {
+async function seedChat(db: ReadDb, guid: string): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], handles);
   return (await getChatIdByGuid(db, guid))!;
@@ -333,14 +333,14 @@ describe('live echo reconcile (Gator: no tempGuid on echo)', () => {
 // sync path must match it too — otherwise the real row is inserted beside the temp row, and the
 // late live echo finds the real guid already stored and leaves the temp bubble as a duplicate.
 describe('sync-first copy of a no-guid text send', () => {
-  async function pendingNoGuidText(db: AppDatabase, chatGuid: string, tempGuid: string) {
+  async function pendingNoGuidText(db: ReadDb, chatGuid: string, tempGuid: string) {
     const chatId = await seedChat(db, chatGuid);
     await insertOutgoingText(db, { tempGuid, chatId, chatGuid, text: 'hello', now: 1000 });
     await markOutgoingSentNoGuid(db, tempGuid);
     return chatId;
   }
 
-  async function syncCopy(db: AppDatabase, chatId: number, fields: Record<string, unknown>) {
+  async function syncCopy(db: ReadDb, chatId: number, fields: Record<string, unknown>) {
     const copy = Message.parse({
       guid: 'real-sync-1',
       text: 'hello',

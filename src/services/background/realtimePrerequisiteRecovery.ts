@@ -2,7 +2,7 @@ import { serverApi } from '@core/api';
 import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
 import type { IncomingEventConflictRecovery } from '@core/realtime';
 import { getMessageStateAuthority } from '@db/repositories/messageState';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { subscribeRealtimeGenerationInvalidation } from '../realtime/deliveryCoordinator';
 import { runTrackedSync } from '../syncControl';
 import {
@@ -44,7 +44,7 @@ export interface RealtimePrerequisiteRecoveryOptions {
  * task-local transport lease as a commit guard; the outer abort also stops an HTTP retry wait.
  */
 export async function recoverRealtimePrerequisite(
-  db: AppDatabase,
+  db: ReadDb,
   recovery: IncomingEventConflictRecovery,
   expectedAccountGeneration: number,
   options: RealtimePrerequisiteRecoveryOptions = {},

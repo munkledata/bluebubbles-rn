@@ -59,7 +59,7 @@ export function saveCustomTheme(
     if (existingId == null) {
       const id = await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           assertAccountOperationCurrent(activeLease);
           const createdId = await createCustomThemeWithinTransaction(context, {
             name: input.name,
@@ -78,7 +78,7 @@ export function saveCustomTheme(
 
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertAccountOperationCurrent(activeLease);
         await updateCustomThemeWithinTransaction(context, existingId, {
           name: input.name,
@@ -103,7 +103,7 @@ export function deleteCustomTheme(
     assertAccountOperationCurrent(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertAccountOperationCurrent(activeLease);
         const persistedActiveId = await kvGetWithinTransaction(context, THEME_CUSTOM_KEY);
         assertAccountOperationCurrent(activeLease);
@@ -129,7 +129,7 @@ export function selectCustomTheme(
     assertAccountOperationCurrent(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertAccountOperationCurrent(activeLease);
         const currentRow = await getCustomThemeByIdWithinTransaction(context, input.id);
         assertAccountOperationCurrent(activeLease);
@@ -153,7 +153,7 @@ export function revertCustomTheme(
     assertAccountOperationCurrent(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertAccountOperationCurrent(activeLease);
         await kvSetWithinTransaction(context, THEME_CUSTOM_KEY, '');
         assertAccountOperationCurrent(activeLease);

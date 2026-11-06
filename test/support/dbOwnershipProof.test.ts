@@ -23,7 +23,7 @@ describe('DB ownership proof harness', () => {
       await neighbour.entered;
 
       successor = observePromise(
-        withDbTransaction(db, async () => {
+        withDbTransaction(db, async (db) => {
           raw.prepare("INSERT INTO kv (key, value) VALUES ('proof-successor', 'safe')").run();
           return 'committed';
         }),
@@ -68,7 +68,7 @@ describe('DB ownership proof harness', () => {
       await Promise.all([neighbour.cleanup(), neighbour.cleanup()]);
 
       await expect(
-        withDbTransaction(db, async () => {
+        withDbTransaction(db, async (db) => {
           raw.prepare("INSERT INTO kv (key, value) VALUES ('proof-after-failure', 'safe')").run();
           return 'usable';
         }),
@@ -116,7 +116,7 @@ describe('DB ownership proof harness', () => {
       expect(ranSetup).toBe(false);
       raw.exec('ROLLBACK');
 
-      await expect(withDbTransaction(db, async () => 'usable')).resolves.toBe('usable');
+      await expect(withDbTransaction(db, async (db) => 'usable')).resolves.toBe('usable');
     } finally {
       if (raw.inTransaction) raw.exec('ROLLBACK');
       await neighbour?.cleanup();

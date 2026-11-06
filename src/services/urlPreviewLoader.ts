@@ -9,7 +9,7 @@ import {
   type UrlPreviewRow,
 } from '@db/repositories';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { http } from './clients';
 import {
@@ -56,8 +56,8 @@ export interface UrlPreviewLoaderDependencies {
     listener: () => void,
   ): () => void;
   captureTransport(): PreviewTransport;
-  getDatabase(): AppDatabase;
-  readPreview(db: AppDatabase, url: string): Promise<UrlPreviewRow | null>;
+  getDatabase(): ReadDb;
+  readPreview(db: ReadDb, url: string): Promise<UrlPreviewRow | null>;
   /** Test seam paired with writePreview; production uses the concrete teardown coordinator. */
   runTrackedWork?(
     lease: RealtimeDeliveryLease,
@@ -65,7 +65,7 @@ export interface UrlPreviewLoaderDependencies {
   ): Promise<RealtimeDeliveryResult>;
   /** Test seam; production omits this and calls the reviewed repository transaction directly. */
   writePreview?(
-    db: AppDatabase,
+    db: ReadDb,
     url: string,
     data: PreviewWriteData,
     now: number,
@@ -134,7 +134,7 @@ interface InFlightPreview {
 interface PreviewScope {
   readonly lease: RealtimeDeliveryLease;
   readonly transport: PreviewTransport;
-  readonly db: AppDatabase;
+  readonly db: ReadDb;
   readonly controller: AbortController;
   readonly key: string;
   ownsWork(): boolean;
@@ -273,7 +273,7 @@ export class UrlPreviewLoader {
       return null;
     }
 
-    let db: AppDatabase;
+    let db: ReadDb;
     try {
       // Capture the current account's handle before the work can wait behind another preview.
       db = this.dependencies.getDatabase();
@@ -415,7 +415,7 @@ export class UrlPreviewLoader {
               if (!scope.ownsWork()) return;
               await withDbTransaction(
                 scope.db,
-                (context) =>
+                (db, context) =>
                   setUrlPreviewWithinTransaction(context, url, data, this.dependencies.now()),
                 scope.ownsWork,
               );

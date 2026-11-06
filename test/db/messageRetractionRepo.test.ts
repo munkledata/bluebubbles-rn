@@ -8,11 +8,11 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { applyLocalUnsend, searchMessages } from '../support/repositoryWrappers';
 
-async function seedChat(db: AppDatabase): Promise<{
+async function seedChat(db: ReadDb): Promise<{
   chatId: number;
   handles: Map<string, number>;
 }> {
@@ -31,7 +31,7 @@ async function seedChat(db: AppDatabase): Promise<{
 }
 
 async function put(
-  db: AppDatabase,
+  db: ReadDb,
   chatId: number,
   handles: Map<string, number>,
   value: Record<string, unknown>,

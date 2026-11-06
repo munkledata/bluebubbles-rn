@@ -14,7 +14,7 @@ import {
   runInTransactionContext,
   withDbTransaction,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable, ReadDb } from '../types';
 import { chunk } from './_shared';
 
 /** Max addresses per `IN (...)` list — well under SQLite's ~999 bound-variable limit. */
@@ -77,12 +77,12 @@ export interface DeviceContact {
  * `matchContactsToHandles`).
  */
 export async function upsertContacts(
-  db: AppDatabase,
+  db: ReadDb,
   items: DeviceContact[],
   runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
 ): Promise<number> {
   const before = await runDbTask<Array<{ cutoff: number | null }>>(() =>
-    withDbTransaction(db, () =>
+    withDbTransaction(db, (db) =>
       db.all<{ cutoff: number | null }>(sql`SELECT MAX(id) AS cutoff FROM contacts`),
     ),
   );
@@ -93,7 +93,7 @@ export async function upsertContacts(
   // long rather than milliseconds.
   for (const batch of chunk(items, CONTACT_INSERT_CHUNK)) {
     await runDbTask(() =>
-      withDbTransaction(db, async () => {
+      withDbTransaction(db, async (db) => {
         await db.insert(contacts).values(
           batch.map((c) => ({
             sourceId: c.sourceId,
@@ -113,7 +113,7 @@ export async function upsertContacts(
     let deleted = CONTACT_PRUNE_CHUNK;
     while (deleted === CONTACT_PRUNE_CHUNK) {
       deleted = await runDbTask(() =>
-        withDbTransaction(db, async () => {
+        withDbTransaction(db, async (db) => {
           const rows = await db.all<{ id: number }>(sql`
             DELETE FROM contacts
              WHERE id IN (
@@ -171,7 +171,7 @@ function isTextableContactAddress(address: string): boolean {
  * hand is not affected.
  */
 export async function searchContactAddresses(
-  db: AppDatabase,
+  db: Queryable,
   query: string,
   limit = 50,
 ): Promise<ContactPick[]> {
@@ -278,7 +278,7 @@ function sameContactName(a: string | null, b: string | null): boolean {
  * per-ingestion link.
  */
 async function buildContactIndex(
-  db: AppDatabase,
+  db: Queryable,
   runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
 ): Promise<ContactIndex> {
   const contactRows = await runDbTask<
@@ -468,7 +468,7 @@ function setHandleContactAmbiguousWithinTransaction(
  * `runDbTask` optionally attaches those transactions to an account-lifecycle admission boundary.
  */
 export async function linkHandlesToContacts(
-  db: AppDatabase,
+  db: ReadDb,
   addresses: string[],
   runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
   commitGuard?: DbCommitGuard,
@@ -505,7 +505,7 @@ export async function linkHandlesToContacts(
           await runDbTask(() =>
             withDbTransaction(
               db,
-              (context) =>
+              (db, context) =>
                 setHandleContactAmbiguousWithinTransaction(context, handle, 1, {
                   witnessContactIds: witnessIds,
                 }),
@@ -520,7 +520,7 @@ export async function linkHandlesToContacts(
         (await runDbTask(() =>
           withDbTransaction(
             db,
-            (context) =>
+            (db, context) =>
               applyContactMatchWithinTransaction(context, handle.id, match, null, index.highWater),
             commitGuard,
           ),
@@ -540,7 +540,7 @@ export async function linkHandlesToContacts(
  * the reactive 'handles' watchers re-render. Returns the count updated.
  */
 export async function matchContactsToHandles(
-  db: AppDatabase,
+  db: ReadDb,
   runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
 ): Promise<number> {
   const index = await buildContactIndex(db, runDbTask);
@@ -586,7 +586,7 @@ export async function matchContactsToHandles(
     if (blocked && h.contactAmbiguous !== 1) {
       const witnessIds = blocked.witnesses.map((witness) => witness.id);
       await runDbTask(() =>
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           setHandleContactAmbiguousWithinTransaction(context, h, 1, {
             witnessContactIds: witnessIds,
           }),
@@ -595,7 +595,7 @@ export async function matchContactsToHandles(
     }
     const wroteMatch = match
       ? await runDbTask(() =>
-          withDbTransaction(db, (context) =>
+          withDbTransaction(db, (db, context) =>
             applyContactMatchWithinTransaction(context, h.id, match, h.contactId, index.highWater),
           ),
         )
@@ -608,7 +608,7 @@ export async function matchContactsToHandles(
       // if the server never sent one) + clear avatar.
       const staleContactId = h.contactId;
       const reverted = await runDbTask(() =>
-        withDbTransaction(db, async () => {
+        withDbTransaction(db, async (db) => {
           const contactEvidence = blocked
             ? and(
                 ...blocked.witnesses.map(
@@ -644,7 +644,7 @@ export async function matchContactsToHandles(
     // the stale-link cleanup above can clear one). With no claimant left, unmark outright.
     if (!blocked && h.contactAmbiguous !== 0) {
       await runDbTask(() =>
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           setHandleContactAmbiguousWithinTransaction(context, h, 0, {
             onlyIfLinked: match !== undefined,
           }),
@@ -665,7 +665,7 @@ export async function matchContactsToHandles(
  * instead of re-reading the same first ones.
  */
 export async function handlesNeedingAvatar(
-  db: AppDatabase,
+  db: Queryable,
   rowLimit?: number,
   serverAvatarRootUri?: string,
   afterId = 0,
@@ -704,7 +704,7 @@ export function setHandleServerAvatarWithinTransaction(
 }
 
 /** Whether any handle still shows this avatar uri; one server photo file can serve several handles. */
-export async function isHandleAvatarReferenced(db: AppDatabase, uri: string): Promise<boolean> {
+export async function isHandleAvatarReferenced(db: Queryable, uri: string): Promise<boolean> {
   const rows = await db.all<{ referenced: number }>(
     sql`SELECT 1 AS referenced FROM handles WHERE avatar = ${uri} LIMIT 1`,
   );

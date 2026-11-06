@@ -10,7 +10,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import {
   cancelReminder,
@@ -74,7 +74,7 @@ function fakeScheduler() {
   return { scheduler, scheduled, cancelled, args };
 }
 
-async function holdWriter(db: AppDatabase): Promise<{
+async function holdWriter(db: ReadDb): Promise<{
   release(): void;
   outcome: Promise<void>;
 }> {
@@ -86,7 +86,7 @@ async function holdWriter(db: AppDatabase): Promise<{
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const outcome = withDbTransaction(db, async () => {
+  const outcome = withDbTransaction(db, async (db) => {
     markStarted();
     await held;
   });
@@ -95,7 +95,7 @@ async function holdWriter(db: AppDatabase): Promise<{
 }
 
 /** Seed a chat with a single message ('m1') at a known date so getMessageDateByGuid resolves. */
-async function seedMessage(db: AppDatabase, guid: string, dateCreated: number): Promise<void> {
+async function seedMessage(db: ReadDb, guid: string, dateCreated: number): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'alice@me.com' }]);
   const chatMap = await upsertChats(
     db,
@@ -1113,7 +1113,7 @@ describe('reminder repository serialization', () => {
       await expect(
         withDbTransaction(
           db,
-          (context) => deleteReminderWithinTransaction(context, id, notificationId),
+          (db, context) => deleteReminderWithinTransaction(context, id, notificationId),
           () => current,
         ),
       ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
@@ -1124,7 +1124,7 @@ describe('reminder repository serialization', () => {
       raw.exec('DROP TRIGGER revoke_exact_reminder_delete_guard');
       current = true;
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           deleteReminderWithinTransaction(context, id, notificationId),
         ),
       ).resolves.toBe(true);
@@ -1159,7 +1159,7 @@ describe('reminder repository serialization', () => {
       await expect(
         withDbTransaction(
           db,
-          (context) => deleteReminderByNotificationIdWithinTransaction(context, notificationId),
+          (db, context) => deleteReminderByNotificationIdWithinTransaction(context, notificationId),
           () => current,
         ),
       ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
@@ -1169,7 +1169,7 @@ describe('reminder repository serialization', () => {
 
       raw.exec('DROP TRIGGER revoke_reminder_notification_delete_guard');
       current = true;
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         deleteReminderByNotificationIdWithinTransaction(context, notificationId),
       );
       expect(await getReminderByMessageGuid(db, 'scoped-delete')).toBeNull();
@@ -1192,7 +1192,7 @@ describe('reminder repository serialization', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');

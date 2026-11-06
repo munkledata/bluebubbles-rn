@@ -18,7 +18,7 @@ import {
   withDbTransaction,
   withDbWriteLock,
 } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb, WriteDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 // withDbTransaction exists for ONE call site today: DbEventSink wraps
@@ -26,7 +26,7 @@ import { createTestDb } from '../support/testDb';
 // commit atomically (a crash in the gap used to strand a queue-less unpromoted temp row — a
 // permanent duplicate bubble). These tests exercise that exact pair through the helper.
 
-async function seedChat(db: AppDatabase, guid: string): Promise<number> {
+async function seedChat(db: ReadDb, guid: string): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], handles);
   return (await getChatIdByGuid(db, guid))!;
@@ -57,7 +57,7 @@ async function settled<T>(promise: Promise<T>): Promise<PromiseSettledResult<T>>
   }
 }
 
-function orderedDatabase(order: string[]): AppDatabase {
+function orderedDatabase(order: string[]): TestDb {
   return {
     run: jest.fn(async (statement: unknown) => {
       const chunks = (statement as { queryChunks?: Array<{ value?: string[] }> }).queryChunks;
@@ -70,7 +70,7 @@ function orderedDatabase(order: string[]): AppDatabase {
       }
       order.push(command === 'BEGIN IMMEDIATE' ? 'BEGIN' : command);
     }),
-  } as unknown as AppDatabase;
+  } as unknown as TestDb;
 }
 
 /**
@@ -83,7 +83,7 @@ function orderedDatabase(order: string[]): AppDatabase {
  * helper forbids; these tests need any pair of plain writes, so they use plain writes.
  */
 async function queueSend(
-  db: AppDatabase,
+  db: WriteDb,
   args: { chatId: number; chatGuid: string; tempGuid: string; text: string; now: number },
 ): Promise<void> {
   await db.run(sql`
@@ -106,7 +106,7 @@ describe('withDbTransaction', () => {
       now: 1000,
     });
 
-    const result = await withDbTransaction(db, async (transactionContext) => {
+    const result = await withDbTransaction(db, async (db, transactionContext) => {
       await reconcileEchoByContent(
         transactionContext,
         { guid: 'real-tx1', isFromMe: true, text: 'hello', dateCreated: 1000 },
@@ -134,7 +134,7 @@ describe('withDbTransaction', () => {
     });
 
     await expect(
-      withDbTransaction(db, async (transactionContext) => {
+      withDbTransaction(db, async (db, transactionContext) => {
         await reconcileEchoByContent(
           transactionContext,
           { guid: 'real-tx2', isFromMe: true, text: 'hello', dateCreated: 1000 },
@@ -156,7 +156,7 @@ describe('withDbTransaction', () => {
     const chatId = await seedChat(db, 'cTx3');
 
     await expect(
-      withDbTransaction(db, async () => {
+      withDbTransaction(db, async (db) => {
         throw new Error('boom');
       }),
     ).rejects.toThrow('boom');
@@ -179,7 +179,7 @@ describe('DbTransactionContext', () => {
     const db = orderedDatabase(order);
     let stale!: DbTransactionContext;
 
-    const result = await withDbTransaction(db, async (context) => {
+    const result = await withDbTransaction(db, async (db, context) => {
       stale = context;
       expect(Object.isFrozen(context)).toBe(true);
       return runInTransactionContext(context, async (transactionDb) => {
@@ -208,7 +208,7 @@ describe('DbTransactionContext', () => {
     let stale!: DbTransactionContext;
 
     await expect(
-      withDbTransaction(db, async (context) => {
+      withDbTransaction(db, async (db, context) => {
         stale = context;
         throw ownerFailure;
       }),
@@ -228,7 +228,7 @@ describe('DbTransactionContext', () => {
     const started = deferred<void>();
     const finish = deferred<void>();
 
-    const transaction = withDbTransaction(db, async (context) => {
+    const transaction = withDbTransaction(db, async (db, context) => {
       void runInTransactionContext(context, async () => {
         order.push('task:start');
         started.resolve();
@@ -262,7 +262,7 @@ describe('DbTransactionContext', () => {
     const slowStarted = deferred<void>();
     const slowTask = deferred<void>();
 
-    const transaction = withDbTransaction(db, async (context) => {
+    const transaction = withDbTransaction(db, async (db, context) => {
       void runInTransactionContext(context, async () => {
         order.push('rejecting');
         throw taskFailure;
@@ -296,7 +296,7 @@ describe('DbTransactionContext', () => {
     const started = deferred<void>();
     const finish = deferred<void>();
 
-    const transaction = withDbTransaction(db, async (context) => {
+    const transaction = withDbTransaction(db, async (db, context) => {
       void runInTransactionContext(context, async () => {
         order.push('task:start');
         started.resolve();
@@ -327,7 +327,7 @@ describe('DbTransactionContext', () => {
       order.push('late:ran');
     });
 
-    const transaction = withDbTransaction(db, async (context) => {
+    const transaction = withDbTransaction(db, async (db, context) => {
       void runInTransactionContext(context, async () => {
         // A timer runs after the owner's promise continuation has synchronously closed admission.
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -356,19 +356,19 @@ describe('withDbTransaction serialization', () => {
 
     await withDbTransaction(
       db,
-      async () => {
+      async (db) => {
         order.push('fenced:first');
       },
       fence.commitGuard,
     );
-    await withDbTransaction(db, async () => {
+    await withDbTransaction(db, async (db) => {
       order.push('foreign');
     });
 
     await expect(
       withDbTransaction(
         db,
-        async () => {
+        async (db) => {
           order.push('fenced:unsafe');
         },
         fence.commitGuard,
@@ -383,7 +383,7 @@ describe('withDbTransaction serialization', () => {
 
     // Deliberately NOT awaiting the first before starting the second: this is the real
     // interleave, and it is what breaks without the queue.
-    const first = withDbTransaction(db, () =>
+    const first = withDbTransaction(db, (db) =>
       queueSend(db, {
         tempGuid: 'temp-tx4a',
         chatId,
@@ -392,7 +392,7 @@ describe('withDbTransaction serialization', () => {
         now: 1000,
       }),
     );
-    const second = withDbTransaction(db, () =>
+    const second = withDbTransaction(db, (db) =>
       queueSend(db, {
         tempGuid: 'temp-tx4b',
         chatId,
@@ -416,7 +416,7 @@ describe('withDbTransaction serialization', () => {
     const { db } = await createTestDb();
     const order: string[] = [];
     const tx = (tag: string): Promise<void> =>
-      withDbTransaction(db, async () => {
+      withDbTransaction(db, async (db) => {
         order.push(`${tag}:start`);
         // Yield mid-transaction — a later caller must still not slip in here.
         await Promise.resolve();
@@ -432,7 +432,7 @@ describe('withDbTransaction serialization', () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'cTx5');
 
-    const failing = withDbTransaction(db, async () => {
+    const failing = withDbTransaction(db, async (db) => {
       await queueSend(db, {
         tempGuid: 'temp-tx5-bad',
         chatId,
@@ -442,7 +442,7 @@ describe('withDbTransaction serialization', () => {
       });
       throw new Error('sink blew up');
     });
-    const next = withDbTransaction(db, () =>
+    const next = withDbTransaction(db, (db) =>
       queueSend(db, {
         tempGuid: 'temp-tx5-ok',
         chatId,
@@ -470,14 +470,14 @@ describe('withDbTransaction serialization', () => {
     raw.exec('BEGIN');
     let ranBody = false;
     await expect(
-      withDbTransaction(db, async () => {
+      withDbTransaction(db, async (db) => {
         ranBody = true;
       }),
     ).rejects.toThrow();
     raw.exec('ROLLBACK');
     expect(ranBody).toBe(false);
 
-    await withDbTransaction(db, () =>
+    await withDbTransaction(db, (db) =>
       queueSend(db, {
         tempGuid: 'temp-tx6',
         chatId,

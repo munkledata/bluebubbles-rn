@@ -5,7 +5,7 @@ import {
   withDbTransaction,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { ReadDb } from '../types';
 
 /**
  * Durable buffer for captured error reports awaiting upload to the server.
@@ -108,12 +108,12 @@ export async function insertErrorReportsWithinTransaction(
 
 /** Insert a bounded batch in one owned transaction. Never wrap this public helper in another one. */
 export async function insertErrorReports(
-  db: AppDatabase,
+  db: ReadDb,
   reports: NewErrorReport[],
   now = Date.now(),
 ): Promise<void> {
   if (reports.length === 0) return;
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     insertErrorReportsWithinTransaction(context, reports, now),
   );
 }

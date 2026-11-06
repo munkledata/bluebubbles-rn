@@ -118,7 +118,7 @@ import {
   upsertChats,
   upsertContacts,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import { ensureSyncedBackground } from '@/services/backgrounds/syncedBackground';
 import {
   pauseRealtimeDeliveries,
@@ -154,7 +154,7 @@ function sqlLiteral(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-async function seedChat(db: AppDatabase, channel: string | null, uri: string): Promise<void> {
+async function seedChat(db: ReadDb, channel: string | null, uri: string): Promise<void> {
   const chat = Chat.parse({
     guid: 'g1',
     style: 43,
@@ -166,7 +166,7 @@ async function seedChat(db: AppDatabase, channel: string | null, uri: string): P
 }
 
 describe('synced-background guarded settlements', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {

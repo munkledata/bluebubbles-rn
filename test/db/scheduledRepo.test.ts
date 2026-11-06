@@ -180,7 +180,7 @@ describe('scheduled messages repo', () => {
     await expect(
       withDbTransaction(
         db,
-        (context) => deleteScheduledHistoryWithinTransaction(context, id),
+        (db, context) => deleteScheduledHistoryWithinTransaction(context, id),
         () => current,
       ),
     ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
@@ -217,7 +217,7 @@ describe('scheduled messages repo', () => {
     await expect(
       withDbTransaction(
         db,
-        (context) => deleteScheduledWithinTransaction(context, id),
+        (db, context) => deleteScheduledWithinTransaction(context, id),
         () => current,
       ),
     ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
@@ -278,7 +278,7 @@ describe('scheduled messages repo', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -367,7 +367,7 @@ describe('scheduled messages repo', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -437,7 +437,7 @@ describe('scheduled messages repo', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -717,7 +717,7 @@ describe('scheduled messages repo', () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const neighbour = withDbTransaction(db, async () => {
+      const neighbour = withDbTransaction(db, async (db) => {
         entered();
         await gate;
         throw new Error('neighbour rolled back');
@@ -771,7 +771,7 @@ describe('scheduled messages repo', () => {
       });
       let neighbour: Promise<unknown> | undefined;
       const run = runDueScheduled(db, noHttp, 1000, async () => {
-        neighbour = withDbTransaction(db, async () => {
+        neighbour = withDbTransaction(db, async (db) => {
           entered();
           await gate;
           throw new Error('neighbour rolled back');
@@ -1148,7 +1148,7 @@ describe('scheduled messages repo', () => {
       const release = new Promise<void>((resolve) => {
         releaseNeighbour = resolve;
       });
-      const neighbour = withDbTransaction(db, async () => {
+      const neighbour = withDbTransaction(db, async (db) => {
         neighbourStarted();
         await release;
         throw new Error('neighbour rollback');

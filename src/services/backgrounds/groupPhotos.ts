@@ -8,7 +8,7 @@ import {
   setGroupPhotoUriIfCurrentWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import {
   BoundedDownloadError,
   deleteOwnedFile,
@@ -43,7 +43,7 @@ export function syncGroupPhotos(
 ): Promise<number> {
   running ??= (async () => {
     try {
-      const opened: { db?: AppDatabase } = {};
+      const opened: { db?: ReadDb } = {};
       const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
         if (!activeLease.isCurrent()) return;
         opened.db = await ensureDatabase();
@@ -70,7 +70,7 @@ export function syncGroupPhotos(
  * the number of chats whose photo reference changed.
  */
 export async function refreshGroupPhotos(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   lease: RealtimeDeliveryLease,
 ): Promise<number> {
@@ -139,7 +139,7 @@ export async function refreshGroupPhotos(
 }
 
 async function commitUri(
-  db: AppDatabase,
+  db: ReadDb,
   lease: RealtimeDeliveryLease,
   state: { guid: string; photoGuid: string | null; uri: string | null },
   nextUri: string | null,
@@ -149,7 +149,7 @@ async function commitUri(
     if (!activeLease.isCurrent()) return;
     written = await withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         setGroupPhotoUriIfCurrentWithinTransaction(
           context,
           state.guid,
@@ -183,7 +183,7 @@ function isUsable(file: File): boolean {
  * Disconnect sweep.
  */
 async function deleteIfUnreferenced(
-  db: AppDatabase,
+  db: Queryable,
   rootUri: string,
   uri: string,
   lease: RealtimeDeliveryLease,

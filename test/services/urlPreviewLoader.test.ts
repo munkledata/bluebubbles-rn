@@ -4,7 +4,7 @@ jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 
 import type { UrlPreviewResult } from '@core/api/endpoints/urlPreviews';
 import { getUrlPreview, type UrlPreviewRow } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, TestDb } from '@db/types';
 import {
   isUrlPreviewCacheFresh,
   URL_PREVIEW_MAX_ACTIVE,
@@ -64,7 +64,7 @@ function row(overrides: Partial<UrlPreviewRow> = {}): UrlPreviewRow {
 }
 
 function createHarness() {
-  const db = {} as AppDatabase;
+  const db = {} as TestDb;
   let accountEpoch = 7;
   let transportRevision = 11;
   let realtimeGeneration = 3;
@@ -117,7 +117,7 @@ function createHarness() {
     };
   });
   const readPreview = jest.fn(
-    async (_db: AppDatabase, _url: string): Promise<UrlPreviewRow | null> => null,
+    async (_db: Queryable, _url: string): Promise<UrlPreviewRow | null> => null,
   );
   const writePreview = jest.fn(
     async (

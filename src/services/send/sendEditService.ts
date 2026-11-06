@@ -23,7 +23,7 @@ import {
   type UnconfirmedUnsend,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { isProvenIMessageGroupChat } from '@utils';
 import { utf8Decode, utf8Encode } from '@utils/bytes';
 import { messageTargetCommitGuard } from './rcsAttemptCapability';
@@ -81,10 +81,10 @@ export type SendUnsendResult =
   | { readonly status: 'outcome-unknown' };
 
 /** One edit/unsend lifecycle at a time per database/message; queued operations are never retried. */
-const messageMutationTails = new WeakMap<AppDatabase, Map<string, Promise<void>>>();
+const messageMutationTails = new WeakMap<Queryable, Map<string, Promise<void>>>();
 
 function queueMessageMutation<T>(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
   operation: () => Promise<T>,
 ): Promise<T> {
@@ -156,7 +156,7 @@ function requireNarrowUnsendArgs(args: SendUnsendArgs): void {
  * the phone only while the stored chat row is this exact guid with an all-iMessage participant
  * set, the same proof the restored tapback and reply use. The server proves it again.
  */
-async function restoredGroupStillProven(db: AppDatabase, chatGuid: string): Promise<boolean> {
+async function restoredGroupStillProven(db: Queryable, chatGuid: string): Promise<boolean> {
   const header = await getChatHeader(db, chatGuid);
   return (
     header?.guid === chatGuid && isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true })
@@ -190,7 +190,7 @@ function unsendOutcomeIsUnknown(error: unknown): boolean {
 }
 
 function revertOptimisticEdit(
-  db: AppDatabase,
+  db: ReadDb,
   messageGuid: string,
   restoreText: string | null,
   previousDateEdited: number | null,
@@ -201,7 +201,7 @@ function revertOptimisticEdit(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       revertLocalEditWithinTransaction(
         context,
         messageGuid,
@@ -216,7 +216,7 @@ function revertOptimisticEdit(
 }
 
 function revertOptimisticUnsend(
-  db: AppDatabase,
+  db: ReadDb,
   messageGuid: string,
   appliedAt: number,
   previousDateRetracted: number | null,
@@ -226,7 +226,7 @@ function revertOptimisticUnsend(
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       revertLocalUnsendWithinTransaction(
         context,
         messageGuid,
@@ -241,7 +241,7 @@ function revertOptimisticUnsend(
 }
 
 async function sendEditOnce(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendEditArgs,
   now: number,
@@ -263,7 +263,7 @@ async function sendEditOnce(
   const targetCommitGuard = messageTargetCommitGuard(commitGuard, serverAuthorization);
   const admission = await withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const resolvedTarget = await resolveMessageTargetWithinTransaction(context, target);
       if (!resolvedTarget || resolvedTarget.partIndex !== 0) return null;
       const previous = await applyLocalEditWithinTransaction(
@@ -376,7 +376,7 @@ async function sendEditOnce(
 
 /** Optimistic exact-part-zero edit. The single POST is never automatically retried. */
 export function sendEdit(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendEditArgs,
   now: number = Date.now(),
@@ -392,7 +392,7 @@ export function sendEdit(
 
 /** Best-effort: without the note the message simply stays hidden, as it always did. */
 async function rememberUnconfirmedUnsend(
-  db: AppDatabase,
+  db: ReadDb,
   messageGuid: string,
   record: UnconfirmedUnsend,
   commitGuard?: DbCommitGuard,
@@ -400,7 +400,7 @@ async function rememberUnconfirmedUnsend(
   try {
     await withDbTransaction(
       db,
-      (context) => recordUnconfirmedUnsendWithinTransaction(context, messageGuid, record),
+      (db, context) => recordUnconfirmedUnsendWithinTransaction(context, messageGuid, record),
       commitGuard,
     );
   } catch (error) {
@@ -412,7 +412,7 @@ async function rememberUnconfirmedUnsend(
 }
 
 async function sendUnsendOnce(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendUnsendArgs,
   now: number,
@@ -440,7 +440,7 @@ async function sendUnsendOnce(
   const targetCommitGuard = messageTargetCommitGuard(commitGuard, serverAuthorization);
   const admission = await withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const resolvedTarget = await resolveMessageTargetWithinTransaction(context, target);
       if (!resolvedTarget || resolvedTarget.partIndex !== 0) return null;
       const previous = await applyLocalUnsendWithinTransaction(
@@ -557,13 +557,13 @@ export type CheckUnsendResult =
 const UNSEND_CHECK_RECENT_MESSAGES = 100;
 
 function forgetUnconfirmedUnsend(
-  db: AppDatabase,
+  db: ReadDb,
   messageGuid: string,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   return withDbTransaction(
     db,
-    (context) => clearUnconfirmedUnsendWithinTransaction(context, messageGuid),
+    (db, context) => clearUnconfirmedUnsendWithinTransaction(context, messageGuid),
     commitGuard,
   );
 }
@@ -575,7 +575,7 @@ function forgetUnconfirmedUnsend(
  * nothing changes.
  */
 export function checkUnconfirmedUnsend(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: { chatGuid: string; messageGuid: string; restoredGroup?: boolean },
   now: number = Date.now(),
@@ -589,7 +589,7 @@ export function checkUnconfirmedUnsend(
 }
 
 async function checkUnconfirmedUnsendOnce(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: { chatGuid: string; messageGuid: string; restoredGroup?: boolean },
   now: number,
@@ -672,7 +672,7 @@ async function checkUnconfirmedUnsendOnce(
 
 /** Optimistic exact-part-zero unsend. The single POST is never automatically retried. */
 export function sendUnsend(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendUnsendArgs,
   now: number = Date.now(),

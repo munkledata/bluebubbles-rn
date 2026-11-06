@@ -3,9 +3,10 @@ import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
 import { withDbTransaction, withDbWriteLock } from '@db/transaction';
 import type {
-  AppDatabase,
   DbRuntimeConcurrencyWaveChecks,
   DbRuntimeConcurrencyWaveOptions,
+  Queryable,
+  ReadDb,
 } from '@db/types';
 import { DbEventSink } from '../realtime/dbEventSink';
 import { sendImageMessage } from '../send/sendAttachmentService';
@@ -126,7 +127,7 @@ function syncApi(chats: Chat[]): SyncApi {
   };
 }
 
-async function count(db: AppDatabase, statement: ReturnType<typeof sql>): Promise<number> {
+async function count(db: Queryable, statement: ReturnType<typeof sql>): Promise<number> {
   const rows = await db.all<{ count: number }>(statement);
   return Number(rows[0]?.count ?? 0);
 }
@@ -135,7 +136,7 @@ async function count(db: AppDatabase, statement: ReturnType<typeof sql>): Promis
  * Submit four owners without yielding so their process-wide queue order is deterministic.
  * Callbacks contain only bounded database work; the upload gate is outside this helper.
  */
-function submitOrderedCoordinatorWave(db: AppDatabase, rawRekey: () => Promise<void>) {
+function submitOrderedCoordinatorWave(db: ReadDb, rawRekey: () => Promise<void>) {
   let rollbackObserved = false;
   let rollbackAbsentBeforeCommit = false;
   let committedWriterFinished = false;
@@ -148,7 +149,7 @@ function submitOrderedCoordinatorWave(db: AppDatabase, rawRekey: () => Promise<v
   let successorEntered = false;
   let successorWaitedForRekey = false;
 
-  const rollback = withDbTransaction(db, async () => {
+  const rollback = withDbTransaction(db, async (db) => {
     await db.run(sql`INSERT INTO kv (key, value) VALUES (${ROLLBACK_KEY}, 'rollback')`);
     throw ROLLBACK_SIGNAL;
   }).then(
@@ -158,7 +159,7 @@ function submitOrderedCoordinatorWave(db: AppDatabase, rawRekey: () => Promise<v
       return rollbackObserved;
     },
   );
-  const committed = withDbTransaction(db, async () => {
+  const committed = withDbTransaction(db, async (db) => {
     rollbackAbsentBeforeCommit =
       (await count(db, sql`SELECT COUNT(*) AS count FROM kv WHERE key = ${ROLLBACK_KEY}`)) === 0;
     await db.run(sql`INSERT INTO kv (key, value) VALUES (${COMMITTED_KEY}, 'committed')`);
@@ -188,7 +189,7 @@ function submitOrderedCoordinatorWave(db: AppDatabase, rawRekey: () => Promise<v
       rekeyFinished = true;
     }
   });
-  const successor = withDbTransaction(db, async () => {
+  const successor = withDbTransaction(db, async (db) => {
     successorEntered = true;
     successorWaitedForRekey = rekeyEntered && rekeyFinished;
     await db.run(sql`INSERT INTO kv (key, value) VALUES (${SUCCESSOR_KEY}, 'resumed')`);
@@ -220,7 +221,7 @@ function submitOrderedCoordinatorWave(db: AppDatabase, rawRekey: () => Promise<v
  * have committed and released the writer queue.
  */
 export async function runDbRuntimeConcurrencyWave(
-  db: AppDatabase,
+  db: ReadDb,
   options: DbRuntimeConcurrencyWaveOptions,
 ): Promise<DbRuntimeConcurrencyWaveChecks> {
   const uploadEntered = deferred();
@@ -347,7 +348,7 @@ export async function runDbRuntimeConcurrencyWave(
         sql`SELECT COUNT(*) AS count FROM outgoing_queue WHERE temp_guid = ${identity.tempGuid}`,
       )) === 0;
 
-    await withDbTransaction(db, async () => {
+    await withDbTransaction(db, async (db) => {
       await db.run(sql`INSERT INTO kv (key, value) VALUES (${SENTINEL_KEY}, 'committed')`);
     });
     const sentinelCommit =

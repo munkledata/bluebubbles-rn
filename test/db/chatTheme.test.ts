@@ -115,7 +115,7 @@ describe('setChatTheme / getChatTheme', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(t.db, async () => {
+    const neighbour = withDbTransaction(t.db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -166,7 +166,7 @@ describe('setChatTheme / getChatTheme', () => {
     await expect(
       withDbTransaction(
         t.db,
-        (context) =>
+        (db, context) =>
           setChatAppearanceWithinTransaction(context, 'g1', {
             themeTokens: '{"next":1}',
             backgroundUri: 'file:///next.jpg',
@@ -188,7 +188,7 @@ describe('setChatTheme / getChatTheme', () => {
     current = true;
     await withDbTransaction(
       t.db,
-      (context) =>
+      (db, context) =>
         setChatAppearanceWithinTransaction(context, 'g1', {
           themeTokens: '{"next":1}',
           backgroundUri: 'file:///next.jpg',
@@ -355,7 +355,7 @@ describe('synced background (macOS 26)', () => {
       await expect(
         withDbTransaction(
           t.db,
-          (context) =>
+          (db, context) =>
             setSyncedBackgroundUriIfCurrentWithinTransaction(
               context,
               'g1',
@@ -373,7 +373,7 @@ describe('synced background (macOS 26)', () => {
       t.raw.exec('DROP TRIGGER revoke_synced_background_uri_guard');
       current = true;
       await expect(
-        withDbTransaction(t.db, (context) =>
+        withDbTransaction(t.db, (db, context) =>
           setSyncedBackgroundUriIfCurrentWithinTransaction(
             context,
             'g1',
@@ -418,7 +418,7 @@ describe('synced background (macOS 26)', () => {
       await expect(
         withDbTransaction(
           t.db,
-          (context) =>
+          (db, context) =>
             setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
               context,
               'g1',
@@ -436,7 +436,7 @@ describe('synced background (macOS 26)', () => {
       t.raw.exec('DROP TRIGGER revoke_synced_background_luminance_guard');
       current = true;
       await expect(
-        withDbTransaction(t.db, (context) =>
+        withDbTransaction(t.db, (db, context) =>
           setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
             context,
             'g1',
@@ -473,7 +473,7 @@ describe('synced background (macOS 26)', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(t.db, async () => {
+    const neighbour = withDbTransaction(t.db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');

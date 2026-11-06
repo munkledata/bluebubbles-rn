@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import {
   listMessagesWithSenders,
   readUnconfirmedUnsend,
@@ -74,7 +74,7 @@ function fakeHttp(impl: (path: string, options?: RequestOptions) => Promise<unkn
 }
 
 describe('narrow one-to-one iMessage edit', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {
@@ -483,7 +483,7 @@ describe('narrow one-to-one iMessage edit', () => {
 // "Check again" on an unsend whose result is unknown: ask the Mac, then finish it either way.
 describe('checking an unconfirmed unsend', () => {
   let raw: Database.Database;
-  let db: AppDatabase;
+  let db: TestDb;
   const SENT_AT = 100;
 
   beforeEach(async () => {
@@ -602,7 +602,7 @@ describe('FP-006 group edit and unsend', () => {
   const GROUP = 'any;+;chat-group-1';
   const GROUP_MESSAGE = 'group-message-1';
   let raw: Database.Database;
-  let db: AppDatabase;
+  let db: TestDb;
 
   async function seedGroupTarget(secondService = 'iMessage'): Promise<void> {
     const participants = [

@@ -11,7 +11,7 @@ import {
   type MessageTargetServerAuthorization,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { isProvenIMessageGroupChat, isProvenOneToOneIMessageChat } from '@utils';
 import { utf8Encode } from '@utils/bytes';
 import { graphemeBoundaries } from '@utils/grapheme';
@@ -38,7 +38,7 @@ function isSingleTapbackEmoji(value: string | undefined): value is string {
  * change) between the tap and the request refuses the send instead of letting the server refuse it.
  */
 export async function sendRestoredIMessageReactionMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendReactionArgs,
   commitGuard: DbCommitGuard,

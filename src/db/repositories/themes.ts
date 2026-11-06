@@ -1,7 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { themes } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 
 // ---- Custom-theme editor (F-12): CRUD over user themes, keyed by id ----
 
@@ -14,14 +14,14 @@ export interface CustomThemeRow {
 }
 
 /** Custom themes with ids, for the theme manager/editor (presets are code, excluded). */
-export async function listCustomThemes(db: AppDatabase): Promise<CustomThemeRow[]> {
+export async function listCustomThemes(db: Queryable): Promise<CustomThemeRow[]> {
   return db.all<CustomThemeRow>(
     sql`SELECT id, name, mode, tokens FROM themes WHERE is_preset = 0 ORDER BY id`,
   );
 }
 
 export async function getCustomThemeById(
-  db: AppDatabase,
+  db: Queryable,
   id: number,
 ): Promise<CustomThemeRow | null> {
   const rows = await db.all<CustomThemeRow>(

@@ -11,7 +11,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { listMessageNotificationTruth } from '@/services/notifications/notificationRouting';
 import { interactiveMessageLabel } from '@utils';
 import { createTestDb } from '../support/testDb';
@@ -20,7 +20,7 @@ const HANDWRITING = 'com.apple.Handwriting.HandwritingProvider';
 const PHOTOS_APP =
   'com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.mobileslideshow.PhotosMessagesApp';
 
-async function seedChat(db: AppDatabase): Promise<number> {
+async function seedChat(db: ReadDb): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@example.com' }]);
   const chats = await upsertChats(
     db,

@@ -19,12 +19,12 @@ const mockAddEventListener = AccessibilityInfo.addEventListener as jest.Mock;
 const mockTransactionContext = Object.freeze({ __transactionContext: true });
 const mockWithDbTransaction = jest.fn(
   async (
-    _db: unknown,
-    task: (context: unknown) => Promise<unknown>,
+    db: unknown,
+    task: (tx: unknown, context: unknown) => Promise<unknown>,
     guard?: () => boolean,
   ): Promise<unknown> => {
     if (guard && !guard()) throw new Error('commit guard rejected before BEGIN');
-    const value = await task(mockTransactionContext);
+    const value = await task(db, mockTransactionContext);
     if (guard && !guard()) throw new Error('commit guard rejected before COMMIT');
     return value;
   },

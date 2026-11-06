@@ -20,7 +20,7 @@ import {
   type InboxRow,
   type InboxSenderFilter,
 } from '../repositories/chatQueries';
-import type { AppDatabase } from '../types';
+import type { TestDb } from '../types';
 
 /**
  * DEV-only PERF-01/PERF-02 inbox fixtures (moved out of database.ts in P6.5 stage 1). Every database
@@ -306,7 +306,7 @@ export function openPerf01ColdFixture(chats: 1_000 | 10_000): Perf01ColdFixtureH
   const name = perf01ColdName(chats);
   const openedAtMs = performance.now();
   const opened = openThrowawayDatabase(name, PERF01_COLD_KEY, true);
-  let database: AppDatabase;
+  let database: TestDb;
   try {
     database = throwawayDrizzle(opened);
   } catch (cause) {

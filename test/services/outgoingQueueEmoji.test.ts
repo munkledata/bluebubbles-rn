@@ -15,7 +15,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
 
@@ -44,7 +44,7 @@ const RCS_TARGET_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('message-tar
 const rcsAvailable = (chatGuid?: string): boolean =>
   chatGuid === undefined || chatGuid === RCS_CHAT_GUID;
 
-async function seed(db: AppDatabase): Promise<number> {
+async function seed(db: ReadDb): Promise<number> {
   const hm = await upsertHandles(db, [{ address: '+15550001111' }]);
   const map = await upsertChats(
     db,
@@ -74,7 +74,7 @@ async function seed(db: AppDatabase): Promise<number> {
  * up deterministically — no reliance on wall-clock backoff windows.
  */
 async function seedFailedReaction(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   args: { chatId: number; tempGuid: string; reaction: string; emoji?: string; partIndex?: number },
 ): Promise<void> {

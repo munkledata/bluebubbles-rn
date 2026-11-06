@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { AUTO_IMAGE_MAX_BYTES } from '@utils/attachment';
 import { utf8Encode } from '@utils/bytes';
-import type { AppDatabase } from '../types';
+import type { ReadDb } from '../types';
 import {
   runInTransactionContext,
   withDbTransaction,
@@ -228,13 +228,13 @@ function maintainAttachmentMediaExportsWithinTransaction(
  * This keeps expired/ineligible rows from pinning app-cache files when permission remains denied.
  */
 export function maintainAttachmentMediaExports(
-  db: AppDatabase,
+  db: ReadDb,
   guard: DbCommitGuard,
   clock: AttachmentMediaExportClock = Date.now,
 ): Promise<void> {
   return withDbTransaction(
     db,
-    (context) => maintainAttachmentMediaExportsWithinTransaction(context, sampleClock(clock)),
+    (db, context) => maintainAttachmentMediaExportsWithinTransaction(context, sampleClock(clock)),
     guard,
   );
 }
@@ -275,7 +275,7 @@ function ensureReceiptSlotWithinTransaction(
  * returned as a duplicate; settings changes delete pending rows transactionally before new work.
  */
 export async function enqueueAttachmentMediaExport(
-  db: AppDatabase,
+  db: ReadDb,
   input: {
     readonly attachmentGuid: string;
     readonly destination: AttachmentMediaExportDestination;
@@ -292,7 +292,7 @@ export async function enqueueAttachmentMediaExport(
 
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = sampleClock(clock);
       await maintainAttachmentMediaExportsWithinTransaction(context, now);
       const preliminary = await runInTransactionContext<EnqueueAttachmentMediaExportResult | null>(
@@ -364,7 +364,7 @@ export async function enqueueAttachmentMediaExport(
  * drains the oldest eligible foreground work.
  */
 export async function claimNextAttachmentMediaExport(
-  db: AppDatabase,
+  db: ReadDb,
   options: {
     readonly leaseToken: string;
     readonly attachmentGuid?: string;
@@ -385,7 +385,7 @@ export async function claimNextAttachmentMediaExport(
   const clock = options.clock ?? Date.now;
   return withDbTransaction(
     db,
-    async (context) => {
+    async (db, context) => {
       const now = sampleClock(clock);
       const leaseExpiresAt = now + ATTACHMENT_MEDIA_EXPORT_LEASE_MS;
       assertTimestamp(leaseExpiresAt, 'attachment media export lease expiry');
@@ -455,7 +455,7 @@ export async function claimNextAttachmentMediaExport(
 
 /** Mark the exact leased receipt complete after MediaStore reports success. */
 export async function completeAttachmentMediaExport(
-  db: AppDatabase,
+  db: ReadDb,
   claim: AttachmentMediaExportClaimIdentity,
   guard: DbCommitGuard,
   clock: AttachmentMediaExportClock = Date.now,
@@ -463,7 +463,7 @@ export async function completeAttachmentMediaExport(
   validateClaimIdentity(claim);
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       runInTransactionContext(context, async (transactionDb) => {
         const now = sampleClock(clock);
         const rows = await transactionDb.all<{ id: number }>(sql`
@@ -487,7 +487,7 @@ export async function completeAttachmentMediaExport(
 
 /** Schedule or terminalize one exact failed native attempt. */
 export async function failAttachmentMediaExport(
-  db: AppDatabase,
+  db: ReadDb,
   claim: AttachmentMediaExportClaimIdentity,
   failureCode: AttachmentMediaExportFailureCode,
   guard: DbCommitGuard,
@@ -496,7 +496,7 @@ export async function failAttachmentMediaExport(
   validateClaimIdentity(claim);
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       runInTransactionContext(context, async (transactionDb) => {
         const now = sampleClock(clock);
         const rows = await transactionDb.all<{ attempts: number; expiresAt: number }>(sql`

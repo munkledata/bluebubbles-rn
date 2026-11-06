@@ -9,7 +9,7 @@ import { Chat, ServerInfo } from '@core/models';
 import type { HttpClient } from '@core/api/http';
 import { getScheduledById, listAllScheduled, upsertChats, upsertHandles } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import { createTestDb } from '../support/testDb';
 
@@ -88,7 +88,7 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
   throw new Error('deferred operation did not reach its test seam');
 }
 
-async function seedChat(db: AppDatabase): Promise<void> {
+async function seedChat(db: ReadDb): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(
     db,
@@ -97,7 +97,7 @@ async function seedChat(db: AppDatabase): Promise<void> {
   );
 }
 
-async function seedProvenImessageChat(db: AppDatabase): Promise<void> {
+async function seedProvenImessageChat(db: ReadDb): Promise<void> {
   const participant = { address: '+15551234567', service: 'iMessage' as const };
   const handles = await upsertHandles(db, [participant]);
   await upsertChats(
@@ -374,7 +374,7 @@ describe('scheduled-message account ownership', () => {
     const dueRead = deferred<void>();
     const releaseDueRead = deferred<void>();
     let allCalls = 0;
-    const fakeDb: AppDatabase = Object.create(db);
+    const fakeDb: TestDb = Object.create(db);
     fakeDb.all = ((...args: Parameters<AppDatabase['all']>) => {
       allCalls += 1;
       const result = db.all(...args);
@@ -417,7 +417,7 @@ describe('scheduled-message account ownership', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');

@@ -11,7 +11,7 @@ import {
   searchChatsForInboxPage,
 } from '@db/repositories';
 import { rebuildInboxSearchIndexBatch } from '@db/repositories/inboxSearchIndex';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const CHAT_COUNTS = [1_000, 10_000] as const;
@@ -76,7 +76,7 @@ async function measureFilePage(databasePath: string): Promise<FreshConnectionMea
     const rssBefore = process.memoryUsage().rss;
     const openStarted = process.hrtime.bigint();
     fileRaw = new Database(databasePath, { readonly: true, fileMustExist: true });
-    const fileDb = drizzle(fileRaw) as unknown as AppDatabase;
+    const fileDb = drizzle(fileRaw) as unknown as TestDb;
     const queryStarted = process.hrtime.bigint();
     const page = await listChatsForInboxPage(fileDb, { limit: 50 });
     const queryFinished = process.hrtime.bigint();
@@ -215,7 +215,7 @@ function seedFixture({ raw }: TestDatabase, chatCount: number): void {
 
 async function captureCompiledQuery(
   raw: TestDatabase['raw'],
-  run: (db: AppDatabase) => Promise<unknown>,
+  run: (db: TestDb) => Promise<unknown>,
 ): Promise<CompiledQuery> {
   let captured: CompiledQuery | undefined;
   const captureDb = drizzle(raw, {
@@ -227,7 +227,7 @@ async function captureCompiledQuery(
         captured = { sql, params: [...params] };
       },
     },
-  }) as unknown as AppDatabase;
+  }) as unknown as TestDb;
 
   await run(captureDb);
   if (!captured) throw new Error('The production inbox query was not captured.');
@@ -246,7 +246,7 @@ async function captureSearchWork(raw: TestDatabase['raw']): Promise<{
         statements.push({ sql, params: [...params] });
       },
     },
-  }) as unknown as AppDatabase;
+  }) as unknown as TestDb;
   await searchChatsForInboxPage(captureDb, { query: 'absent-search-needle', limit: 50 });
   const candidateReads = statements.filter(({ sql }) => /\bFROM chats c\b/.test(sql));
   const candidateIdQuery = statements.find(({ sql }) => /\bFROM inbox_search_postings\b/.test(sql));

@@ -30,7 +30,7 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import {
   claimOutgoingForSend,
@@ -42,7 +42,7 @@ import { nextEventLoopTurn } from '../support/async';
 const OUTGOING_RETRY_LEASE_MS = 120_000;
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 
-async function seedChat(db: AppDatabase, guid: string): Promise<number> {
+async function seedChat(db: ReadDb, guid: string): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
@@ -107,12 +107,12 @@ function errorMessageChain(error: unknown): unknown[] {
 }
 
 /** Seed a failed optimistic text send (message 'error' + a queue row with a spent attempt). */
-async function seedFailed(db: AppDatabase, chatId: number, tempGuid: string): Promise<void> {
+async function seedFailed(db: ReadDb, chatId: number, tempGuid: string): Promise<void> {
   await insertOutgoingText(db, { tempGuid, chatId, chatGuid: 'c1', text: 'hi', now: 100 });
   await reconcileOutgoingError(db, tempGuid, 500, 1_000);
 }
 
-async function holdRollingBackTransaction(db: AppDatabase): Promise<{
+async function holdRollingBackTransaction(db: ReadDb): Promise<{
   release(): void;
   failure: Promise<unknown>;
 }> {
@@ -124,7 +124,7 @@ async function holdRollingBackTransaction(db: AppDatabase): Promise<{
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const neighbour = withDbTransaction(db, async () => {
+  const neighbour = withDbTransaction(db, async (db) => {
     markStarted();
     await held;
     throw new Error('neighbour rollback');
@@ -274,7 +274,7 @@ describe('claimOutgoingForSend — lease + visible ownership', () => {
     );
     const before = readRetryQueueState(raw, tempGuid);
 
-    const claim = await withDbTransaction(db, (context) =>
+    const claim = await withDbTransaction(db, (db, context) =>
       claimOutgoingForSendWithinTransaction(context, before.id, () => before.nextRetryAt),
     );
     expect(claim).toEqual(
@@ -286,7 +286,7 @@ describe('claimOutgoingForSend — lease + visible ownership', () => {
     );
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         deferOutgoingSendClaimWithinTransaction(context, claim.deferToken!),
       ),
     ).resolves.toBe(true);
@@ -334,7 +334,7 @@ describe('claimOutgoingForSend — lease + visible ownership', () => {
       inserted.attemptOwnerToken!,
     );
     const before = readRetryQueueState(raw, tempGuid);
-    const claim = await withDbTransaction(db, (context) =>
+    const claim = await withDbTransaction(db, (db, context) =>
       claimOutgoingForSendWithinTransaction(context, before.id, () => before.nextRetryAt),
     );
     expect(claim.claimed).toBe(true);
@@ -342,7 +342,7 @@ describe('claimOutgoingForSend — lease + visible ownership', () => {
 
     await retireOutgoing(db, tempGuid, 77);
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         deferOutgoingSendClaimWithinTransaction(context, claim.deferToken!),
       ),
     ).resolves.toBe(false);
@@ -812,7 +812,7 @@ describe('discardOutgoingMessage — "Delete" on a not-delivered bubble', () => 
     expect(count(raw, 'outgoing_queue', 'temp_guid = ?', 'temp-live')).toBe(0);
     // The row survives precisely so the server's echo is promoted ONTO it — hard-deleting it left
     // the echo nothing to attach the deletion to, and the message came back as a sent bubble.
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         { guid: 'real-live', isFromMe: true, text: 'too late', dateCreated: 100 },

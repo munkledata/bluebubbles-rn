@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { getDatabase } from '@db/database';
 import { CHAT_DOCUMENT_PAGE_SIZE } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { useReactiveQuery, type ReactiveState } from '@db/useReactiveQuery';
 import {
   runTrackedRealtimeWork,
@@ -23,7 +23,7 @@ export interface ChatRowPage<T> {
  */
 export interface ChatPagedRowSource<T> {
   id: string;
-  fetchPage: (db: AppDatabase, chatGuid: string, limit: number) => Promise<ChatRowPage<T>>;
+  fetchPage: (db: ReadDb, chatGuid: string, limit: number) => Promise<ChatRowPage<T>>;
   rowKey: (row: T) => string;
 }
 

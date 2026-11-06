@@ -116,7 +116,7 @@ export class DeletedChatRestoreUnsafeError extends Error {
 
 /** Keep the sync graph React-free until a completed write pass actually needs native cleanup. */
 async function reconcileSyncedMessageNotifications(
-  db: import('@db/types').AppDatabase,
+  db: import('@db/types').ReadDb,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
   const { reconcileMessageNotificationsWithDatabase } =
@@ -381,7 +381,7 @@ function startTargetedChatRepair(
     if (options.expectedDeletedAt != null) {
       restored = await withDbTransaction(
         db,
-        (context) =>
+        (db, context) =>
           restoreDeletedChatWithinTransaction(context, {
             guid,
             expectedDeletedAt: options.expectedDeletedAt!,
@@ -568,7 +568,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
   let repairLimitedNote: string | undefined;
   let deletionSupported = false;
   let stableInitialization = false;
-  let syncDb: import('@db/types').AppDatabase | null = null;
+  let syncDb: import('@db/types').ReadDb | null = null;
   const repairReconciliation: {
     exposure: FullRepairPruneExposure | null;
     confirmedView: FullSyncServerView | null;
@@ -948,7 +948,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         const finalFirstSyncMarker = deferredFirstSyncMarker;
         await withDbTransaction(
           db,
-          async (context) => {
+          async (db, context) => {
             await setSyncMarkerWithinTransaction(context, finalFirstSyncMarker);
             await kvSetWithinTransaction(
               context,
@@ -1002,7 +1002,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       // succeeded. A cancel/failure/process death before this point leaves the old marker usable.
       await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           await setSyncMarkerWithinTransaction(context, finalRepairMarker);
           await kvSetWithinTransaction(
             context,

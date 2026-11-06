@@ -11,7 +11,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const PAYLOAD = {
@@ -30,7 +30,7 @@ const PAYLOAD = {
   ],
 };
 
-async function seedChat(db: AppDatabase): Promise<number> {
+async function seedChat(db: ReadDb): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,

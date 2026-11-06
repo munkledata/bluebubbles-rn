@@ -39,12 +39,12 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import { deleteNativeAttachmentCacheFile } from '@native/boundedDownload';
 import { createTestDb } from '../support/testDb';
 
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 const mockCancelReminder = jest.fn<Promise<void>, [string]>();
 const mockCancelForChat = jest.fn<Promise<void>, [string]>();
 const mockDeleteScheduled = jest.fn<Promise<unknown>, [unknown, string]>();
@@ -120,12 +120,12 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function seedChat(db: AppDatabase, guid: string): Promise<void> {
+async function seedChat(db: ReadDb, guid: string): Promise<void> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
 }
 
-async function seedReminder(db: AppDatabase, chatGuid: string, id: string): Promise<void> {
+async function seedReminder(db: ReadDb, chatGuid: string, id: string): Promise<void> {
   await createReminder(db, {
     messageGuid: `msg-${id}`,
     chatGuid,
@@ -139,7 +139,7 @@ async function seedReminder(db: AppDatabase, chatGuid: string, id: string): Prom
  * `local_path` that `expoFetcher` wrote. Raw SQL — the point is the row the purge cascades away.
  */
 async function seedDownloadedAttachment(
-  db: AppDatabase,
+  db: Queryable,
   raw: Database.Database,
   chatGuid: string,
   messageGuid: string,
@@ -310,7 +310,7 @@ describe('deleteChat', () => {
          WHERE guid IN ('cache-orphan-message-a', 'cache-orphan-message-b')`,
       )
       .run();
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: inactive, bytes: 20, lastUsedAt: 1 }),
     );
 
@@ -324,7 +324,7 @@ describe('deleteChat', () => {
     let pause: Promise<void> | undefined;
     const retire = jest.spyOn(attachmentCacheCoordinator, 'retireInactiveEntries');
     retire.mockImplementationOnce(async (cacheDb, input) => {
-      neighbour = withDbTransaction(db, async (context) => {
+      neighbour = withDbTransaction(db, async (db, context) => {
         raw.prepare("INSERT INTO kv (key, value) VALUES ('cache-revoke-neighbour', 'dirty')").run();
         neighbourStarted.resolve(undefined);
         await releaseNeighbour.promise;
@@ -415,7 +415,7 @@ describe('deleteChat', () => {
   it('does not let an A-account delete parked on DB open tombstone B’s same-guid row', async () => {
     const accountB = await createTestDb();
     await seedChat(accountB.db, 'same-guid');
-    const opening = deferred<AppDatabase>();
+    const opening = deferred<TestDb>();
     (ensureDatabase as jest.Mock).mockImplementationOnce(() => opening.promise);
 
     const oldDelete = deleteChat('same-guid');
@@ -811,7 +811,7 @@ describe('deleteChat', () => {
     const cachePath =
       'file:///documents/attachments/media-att-managed/generation-1/media-photo.jpg';
     await seedDownloadedAttachment(db, raw, 'c1', 'm-managed', 'att-managed', cachePath);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       recordAttachmentCacheEntry(context, { path: cachePath, bytes: 1234, lastUsedAt: 100 }),
     );
 

@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { rebuildInboxSearchIndexBatch } from '@db/repositories/inboxSearchIndex';
 import { InboxSearchCancelledError, searchChatsForInboxPage } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 describe('inbox search candidate index', () => {
@@ -98,7 +98,7 @@ describe('inbox search candidate index', () => {
             statements.push(query);
           },
         },
-      }) as unknown as AppDatabase;
+      }) as unknown as TestDb;
       expect(await rebuildInboxSearchIndexBatch(observedDb)).toMatchObject({ deferred: 1 });
       expect(statements.some((query) => query.includes('group_concat'))).toBe(false);
       expect(
@@ -133,7 +133,7 @@ describe('inbox search candidate index', () => {
             statements.push(query);
           },
         },
-      }) as unknown as AppDatabase;
+      }) as unknown as TestDb;
       expect(await rebuildInboxSearchIndexBatch(observedDb)).toMatchObject({ deferred: 1 });
       expect(statements.some((query) => query.includes('group_concat'))).toBe(false);
       expect(
@@ -166,7 +166,7 @@ describe('inbox search candidate index', () => {
             statements.push(query);
           },
         },
-      }) as unknown as AppDatabase;
+      }) as unknown as TestDb;
       const detailedIds: number[] = [];
       const observedDb = new Proxy(loggedDb, {
         get(target, property, receiver) {
@@ -220,7 +220,7 @@ describe('inbox search candidate index', () => {
             }
           },
         },
-      }) as unknown as AppDatabase;
+      }) as unknown as TestDb;
       const rawPages: { id: number; candidateId: number | null }[][] = [];
       const observedDb = new Proxy(loggedDb, {
         get(target, property, receiver) {
@@ -396,7 +396,7 @@ describe('inbox search candidate index', () => {
             statements.push(query);
           },
         },
-      }) as unknown as AppDatabase;
+      }) as unknown as TestDb;
       const participantPages: { chatId: number; handleId: number; participantName: string }[][] =
         [];
       const observedDb = new Proxy(loggedDb, {
@@ -498,10 +498,7 @@ describe('inbox search candidate index', () => {
     return t;
   }
 
-  function observeReads(
-    db: AppDatabase,
-    observe: (rows: Record<string, unknown>[]) => void,
-  ): AppDatabase {
+  function observeReads(db: TestDb, observe: (rows: Record<string, unknown>[]) => void): TestDb {
     return new Proxy(db, {
       get(target, property, receiver) {
         if (property !== 'all') return Reflect.get(target, property, receiver);

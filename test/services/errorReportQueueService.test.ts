@@ -37,7 +37,7 @@ import type { ServerInfo } from '@core/models';
 import { ERROR_DIAGNOSTIC_SITES, logger } from '@core/secure';
 
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import { ERROR_REPORTING_CONSENT_KEY, useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useSessionStore } from '@state/sessionStore';
 import { flushErrorReports, initErrorReporting } from '@/services/errors';
@@ -94,7 +94,7 @@ function fakeHttp(
 const count = (raw: Database.Database): number =>
   (raw.prepare('SELECT COUNT(*) c FROM error_reports').get() as { c: number }).c;
 
-async function seed(db: AppDatabase, n: number, now = Date.now()): Promise<void> {
+async function seed(db: ReadDb, n: number, now = Date.now()): Promise<void> {
   for (let i = 0; i < n; i++) {
     await insertErrorReport(
       db,
@@ -141,7 +141,7 @@ function observeLease(base: RealtimeDeliveryLease): ObservedLease {
   };
 }
 
-async function holdDbTransaction(db: AppDatabase): Promise<{
+async function holdDbTransaction(db: ReadDb): Promise<{
   release(): void;
   finished: Promise<void>;
 }> {
@@ -153,7 +153,7 @@ async function holdDbTransaction(db: AppDatabase): Promise<{
   const started = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  const finished = withDbTransaction(db, async () => {
+  const finished = withDbTransaction(db, async (db) => {
     entered();
     await blocked;
   });
@@ -161,7 +161,7 @@ async function holdDbTransaction(db: AppDatabase): Promise<{
   return { release, finished };
 }
 
-async function holdRollingBackDbTransaction(db: AppDatabase): Promise<{
+async function holdRollingBackDbTransaction(db: ReadDb): Promise<{
   release(): void;
   failure: Promise<unknown>;
 }> {
@@ -173,7 +173,7 @@ async function holdRollingBackDbTransaction(db: AppDatabase): Promise<{
   const started = new Promise<void>((resolve) => {
     entered = resolve;
   });
-  const failure = withDbTransaction(db, async () => {
+  const failure = withDbTransaction(db, async (db) => {
     entered();
     await blocked;
     throw new Error('error-report clock neighbour rollback');
@@ -745,7 +745,7 @@ describe('flushErrorReports gates', () => {
   const capable = { supports_error_log_upload: true } as unknown as ServerInfo;
   const notCapable = { supports_error_log_upload: false } as unknown as ServerInfo;
 
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeAll(() => {

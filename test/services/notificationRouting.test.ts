@@ -8,7 +8,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import {
   chatNotificationId,
   clearNotificationRoutes,
@@ -31,7 +31,7 @@ import { createTestDb } from '../support/testDb';
 import { createReminder } from '../support/repositoryWrappers';
 import { nextEventLoopTurn } from '../support/async';
 
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 // Conversation shortcut ids come from the native shortcut module; tests choose what it returns.
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
   conversationShortcutIdFor: jest.fn(() => null),
@@ -103,7 +103,7 @@ function errorMessageChain(error: unknown): unknown[] {
 }
 
 function rollingBackNeighbour(
-  db: AppDatabase,
+  db: ReadDb,
   raw: RawDb,
   phantomKey: string,
   sentinel: string,
@@ -117,7 +117,7 @@ function rollingBackNeighbour(
     release = resolve;
   });
   const state = { didStart: false };
-  const outcome = withDbTransaction(db, async () => {
+  const outcome = withDbTransaction(db, async (db) => {
     raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(phantomKey, 'rollback');
     state.didStart = true;
     await held;
@@ -129,7 +129,7 @@ function rollingBackNeighbour(
   return { state, release, outcome };
 }
 
-async function seedMessage(db: AppDatabase): Promise<void> {
+async function seedMessage(db: ReadDb): Promise<void> {
   const handles = await upsertHandles(db, [{ address: '+15551234567' }]);
   const chatMap = await upsertChats(
     db,
@@ -430,7 +430,7 @@ describe('notificationRouting — native privacy boundary', () => {
     const held = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(mockDb, async () => {
+    const neighbour = withDbTransaction(mockDb, async (mockDb) => {
       markStarted();
       await held;
     });
@@ -754,7 +754,7 @@ describe('notificationRouting — native privacy boundary', () => {
       });
       await waitForCondition(() => updateDriver.didStart, 'exact reminder-id update');
 
-      successorOutcome = withDbTransaction(mockDb, async () => {
+      successorOutcome = withDbTransaction(mockDb, async (mockDb) => {
         successorStarted = true;
       })
         .then(

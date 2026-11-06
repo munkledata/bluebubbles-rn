@@ -163,7 +163,7 @@ export class ErrorReportSink implements LogSink {
       // the lock.
       await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           if (generation !== this.sessionGeneration || !hasErrorReportingConsent()) {
             throw RETIRED_DRAIN;
           }

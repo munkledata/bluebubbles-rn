@@ -27,7 +27,7 @@ import {
   upsertMessagesWithinTransaction,
 } from '@db/repositories';
 import { chats, messages, outgoingQueue } from '@db/schema';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 import {
@@ -41,7 +41,7 @@ import {
 } from '../support/repositoryWrappers';
 import { nextEventLoopTurn } from '../support/async';
 
-async function seedChat(db: AppDatabase, guid: string): Promise<number> {
+async function seedChat(db: ReadDb, guid: string): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
   return (await getChatIdByGuid(db, guid))!;
@@ -126,7 +126,7 @@ function errorMessageChain(error: unknown): unknown[] {
 }
 
 async function holdRollingBackNeighbour(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   phantomKey: string,
 ): Promise<{ release(): void; failure: Promise<unknown> }> {
@@ -138,7 +138,7 @@ async function holdRollingBackNeighbour(
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const failure = withDbTransaction(db, async () => {
+  const failure = withDbTransaction(db, async (db) => {
     raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(phantomKey, 'phantom');
     markStarted();
     await held;
@@ -195,7 +195,7 @@ const contactFor = (args: OutgoingInsertFixture) => ({
 });
 
 async function insertOutgoingFixture(
-  db: AppDatabase,
+  db: ReadDb,
   kind: OutgoingInsertKind,
   args: OutgoingInsertFixture,
 ): Promise<void> {
@@ -349,7 +349,7 @@ async function waitForDriverGate(gate: DriverGate, label: string): Promise<void>
 }
 
 async function expectDeletionSurvivesPurgeAndReingest(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   chatId: number,
   guid: string,
@@ -360,7 +360,7 @@ async function expectDeletionSurvivesPurgeAndReingest(
   expect(tombstone(raw, guid)).toBeUndefined();
   expect(deletionLedgerDate(raw, guid)).toBe(expectedDateDeleted);
 
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     upsertMessagesWithinTransaction(
       context,
       [Message.parse({ guid, isFromMe: true, text, dateCreated: 10_000 })],
@@ -410,7 +410,7 @@ describe('outgoing text/contact inserts — monotonic chat date and transaction 
       const neighbourHeld = new Promise<void>((resolve) => {
         releaseNeighbour = resolve;
       });
-      const neighbourOutcome = withDbTransaction(db, async () => {
+      const neighbourOutcome = withDbTransaction(db, async (db) => {
         raw.prepare('UPDATE chats SET latest_message_date = ? WHERE id = ?').run(newerDate, chatId);
         markNeighbourStarted();
         await neighbourHeld;
@@ -646,7 +646,7 @@ describe('insertOutgoingReaction — private payload and transaction ownership',
     now: number;
   }
 
-  function insertReactionFixture(db: AppDatabase, args: ReactionInsertFixture): Promise<void> {
+  function insertReactionFixture(db: ReadDb, args: ReactionInsertFixture): Promise<void> {
     return insertOutgoingReaction(db, {
       ...args,
       selectedMessageText: privateSelectedText,
@@ -1439,7 +1439,7 @@ describe('cancelOutgoing — branches', () => {
     // temp row and its queue owner are both gone, but the still-running request retains the exact
     // chat it was sent to. That proof permits the late ack to move the deletion marker without
     // guessing from a person, phone number, or message GUID.
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(
         context,
         [
@@ -1535,7 +1535,7 @@ describe('cancelOutgoing — branches', () => {
     });
     raw.prepare("DELETE FROM messages WHERE guid = 'temp-queue-proved-owner'").run();
     expect(queueCount(raw, 'temp-queue-proved-owner')).toBe(1);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       upsertMessagesWithinTransaction(
         context,
         [
@@ -1583,7 +1583,7 @@ describe('cancelOutgoing — branches', () => {
     expect(msgState(raw, 'temp-ng')?.s).toBe('sent');
     expect(tombstone(raw, 'temp-ng')).toBe(9_000);
     expect(queueCount(raw, 'temp-ng')).toBe(0);
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         { guid: 'rcs-42', isFromMe: true, text: 'hi', dateCreated: 1 },
@@ -1934,7 +1934,7 @@ describe('reconcileOutgoingError — attempts + backoff', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -1980,7 +1980,7 @@ describe('retireOutgoing — transaction ownership', () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       markStarted();
       await held;
       throw new Error('neighbour rollback');
@@ -2381,7 +2381,7 @@ describe('sticky-error and ladder-ownership guards are IN the write', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('server-error neighbour rollback');
@@ -2440,7 +2440,7 @@ describe('reconcileEchoByContent — guard clauses', () => {
       text: 'hi',
       now: 1,
     });
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         { guid: 'real-x', isFromMe: false, text: 'hi', dateCreated: 1 },
@@ -2461,7 +2461,7 @@ describe('reconcileEchoByContent — guard clauses', () => {
       text: 'hi',
       now: 1,
     });
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         { guid: 'temp-h', isFromMe: true, text: 'hi', dateCreated: 1 },
@@ -2489,7 +2489,7 @@ describe('reconcileEchoByContent — guard clauses', () => {
       new Map(),
     );
     // No temp row to promote AND the guid exists → pure no-op (no throw, no extra row).
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         { guid: 'real-y', isFromMe: true, text: 'hi', dateCreated: 1 },
@@ -2510,7 +2510,7 @@ describe('reconcileEchoByContent — guard clauses', () => {
       now: 5,
     });
     // dateCreated undefined → the `window` fragment is empty; content match alone promotes.
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(context, { guid: 'real-nw', isFromMe: true, text: 'ping' }, chatId),
     );
     expect(msgState(raw, 'real-nw')?.s).toBe('sent');
@@ -2543,7 +2543,7 @@ describe('reconcileEchoByContent — guard clauses', () => {
       });
     }
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         {
@@ -2566,7 +2566,7 @@ describe('reconcileEchoByContent — guard clauses', () => {
     expect(msgState(raw, 'temp-reply-a')).toBeDefined();
     expect(msgState(raw, 'temp-plain-same')).toBeDefined();
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         { guid: 'real-plain-same', isFromMe: true, text: 'same', dateCreated: 100 },
@@ -2593,7 +2593,7 @@ describe('reconcileEchoByContent — guard clauses', () => {
       });
     }
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         {
@@ -2624,7 +2624,7 @@ describe('reconcileEchoByContent — guard clauses', () => {
     });
     await cancelOutgoing(db, 'temp-live-deleted', 9_001);
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         {
@@ -2734,7 +2734,7 @@ describe('reconcileOutgoingAttachmentByContent — sync-safe promote', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -2842,7 +2842,7 @@ describe('a cancelled send vs a later IDENTICAL one', () => {
       now: 2,
     });
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         { guid: 'real-b', isFromMe: true, text: 'ok', dateCreated: 2 },
@@ -2853,7 +2853,7 @@ describe('a cancelled send vs a later IDENTICAL one', () => {
     expect(msgState(raw, 'temp-a')).toBeDefined(); // the cancelled one is still waiting
 
     // The cancelled send's own echo (it had left the device) then finds the only candidate left.
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       reconcileEchoByContent(
         context,
         { guid: 'real-a', isFromMe: true, text: 'ok', dateCreated: 1 },

@@ -89,7 +89,7 @@ describe('chat customization repo', () => {
     await expect(
       withDbTransaction(
         t.db,
-        (context) =>
+        (db, context) =>
           setChatCustomizationWithinTransaction(context, 'c1', {
             customName: 'Next',
             customColor: '#34C759',
@@ -147,7 +147,7 @@ describe('chat customization repo', () => {
     await expect(
       withDbTransaction(
         t.db,
-        (context) => setChatMuteWithinTransaction(context, 'c1', 'mute'),
+        (db, context) => setChatMuteWithinTransaction(context, 'c1', 'mute'),
         () => current,
       ),
     ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
@@ -167,7 +167,7 @@ describe('chat customization repo', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(t.db, async () => {
+    const neighbour = withDbTransaction(t.db, async (db) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');

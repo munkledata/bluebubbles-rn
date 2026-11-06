@@ -3,7 +3,7 @@ import type { HttpClient } from '@core/api/http';
 import { ServerInfo } from '@core/models';
 
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import { sendImageMessage, type AttachmentUploader } from '@/services/send/sendAttachmentService';
 import { sendContactMessage } from '@/services/send/sendContactService';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
@@ -121,7 +121,7 @@ function outgoingAtNetworkStart(raw: Database.Database, wireChatGuid: string): N
 }
 
 function watchChatResolution(
-  db: AppDatabase,
+  db: Queryable,
   raw: Database.Database,
   scheduledId?: number,
   onFirstLookup?: () => void,
@@ -148,7 +148,7 @@ function watchChatResolution(
 }
 
 async function holdDeletedChatUntilRollback(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   chatGuid: string,
 ): Promise<{ release(): void; outcome: Promise<unknown> }> {
@@ -160,7 +160,7 @@ async function holdDeletedChatUntilRollback(
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const outcome = withDbTransaction(db, async () => {
+  const outcome = withDbTransaction(db, async (db) => {
     raw.prepare('DELETE FROM chats WHERE guid = ?').run(chatGuid);
     markStarted();
     await held;
@@ -175,7 +175,7 @@ async function holdDeletedChatUntilRollback(
 
 function startSend(
   kind: SendKind,
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   chatGuid: string,
   onNetwork: (snapshot: NetworkSnapshot) => Promise<void> | void,
@@ -282,7 +282,7 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
         await waitFor(() => network.length === 1, `${kind} network start`);
         expect(send.settled()).toBe(false);
         successor = observe(
-          withDbTransaction(db, async () => {
+          withDbTransaction(db, async (db) => {
             raw.prepare("INSERT INTO kv(key, value) VALUES ('identity.successor', ?)").run(kind);
           }),
         );
@@ -374,7 +374,7 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
       // Claim the next queue slot synchronously at the exact lookup. If lookup and insert were
       // separate owners, this deletion would commit in their gap. With one owner, the committed
       // message makes the predicate false before this slot runs, so the chat remains available.
-      deletionOutcome = withDbTransaction(db, async () => {
+      deletionOutcome = withDbTransaction(db, async (db) => {
         const result = raw
           .prepare(
             `DELETE FROM chats

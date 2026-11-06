@@ -1,7 +1,7 @@
 import { getDatabase } from '@db/database';
 import { kvGet } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import {
   AUTO_DOWNLOAD_DEST_KEY,
   completePermissionOnboarding,
@@ -55,12 +55,12 @@ async function openTestContext() {
   return t;
 }
 
-async function openTestDb(): Promise<AppDatabase> {
+async function openTestDb(): Promise<TestDb> {
   return (await openTestContext()).db;
 }
 
 function consentContext(
-  db: AppDatabase,
+  db: ReadDb,
   shouldCommit: () => boolean = () => true,
 ): ErrorReportingConsentWriteContext {
   return { db, shouldCommit };
@@ -473,7 +473,7 @@ describe('featureSettingsStore — versioned error-reporting consent', () => {
       releaseNeighbour = resolve;
     });
     const neighbourError = new Error('consent neighbour rollback');
-    const neighbour = withDbTransaction(accountA.db, async () => {
+    const neighbour = withDbTransaction(accountA.db, async (db) => {
       accountA.raw
         .prepare('UPDATE kv SET value = ? WHERE key = ?')
         .run('phantom', ERROR_REPORTING_CONSENT_KEY);
@@ -534,7 +534,7 @@ describe('featureSettingsStore — versioned error-reporting consent', () => {
     const started = new Promise<void>((resolve) => {
       neighbourStarted = resolve;
     });
-    const neighbour = withDbTransaction(older.db, async () => {
+    const neighbour = withDbTransaction(older.db, async (db) => {
       neighbourStarted();
       await held;
     });
@@ -679,7 +679,7 @@ describe('featureSettingsStore — versioned error-reporting consent', () => {
     const started = new Promise<void>((resolve) => {
       neighbourStarted = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await held;
     });

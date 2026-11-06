@@ -9,7 +9,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { ReadDb } from '../types';
 
 export type MessageTargetPartKind = 'any' | 'text';
 
@@ -217,26 +217,26 @@ export async function isMessageTargetAvailableWithinTransaction(
 
 /** Resolve aliases and return the canonical GUID that must be sent on the wire. */
 export function resolveMessageTarget(
-  db: AppDatabase,
+  db: ReadDb,
   target: ExactMessageTarget,
   commitGuard?: DbCommitGuard,
 ): Promise<ResolvedMessageTarget | null> {
   return withDbTransaction(
     db,
-    (context) => resolveMessageTargetWithinTransaction(context, target),
+    (db, context) => resolveMessageTargetWithinTransaction(context, target),
     commitGuard,
   );
 }
 
 /** Resolve the exact optimistic-unsend fence, including a target GUID promoted to its alias. */
 export function resolvePendingUnsendTarget(
-  db: AppDatabase,
+  db: ReadDb,
   target: ExactMessageTarget,
   commitGuard?: DbCommitGuard,
 ): Promise<ResolvedMessageTarget | null> {
   return withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       runInTransactionContext(context, async (owner) => {
         if (!target.chatGuid || !target.messageGuid || !isBoundedPartIndex(target.partIndex)) {
           return null;

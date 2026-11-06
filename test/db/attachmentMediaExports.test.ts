@@ -10,7 +10,7 @@ import {
   maintainAttachmentMediaExports,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const NOW = 1_800_000_000_000;
@@ -40,7 +40,7 @@ function seedEligibleImage(
   return { attachmentId: inserted.id };
 }
 
-async function makeDownloadClaim(db: AppDatabase, raw: import('better-sqlite3').Database) {
+async function makeDownloadClaim(db: ReadDb, raw: import('better-sqlite3').Database) {
   seedEligibleImage(raw, 'attachment-claim');
   await enqueueAttachmentMediaExport(
     db,
@@ -123,7 +123,7 @@ describe('attachment media export receipts', () => {
       ),
     ).resolves.toMatchObject({ status: 'duplicate', state: 'pending' });
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       cancelPendingAttachmentMediaExportsWithinTransaction(context),
     );
     expect(raw.prepare('SELECT COUNT(*) AS rows FROM attachment_media_exports').get()).toEqual({
@@ -232,7 +232,7 @@ describe('attachment media export cache protection', () => {
     const snapshot = await getAttachmentCacheQuotaSnapshot(db);
     expect(snapshot.candidates.map((candidate) => candidate.path)).toEqual(protects ? [] : [PATH]);
 
-    const claim = await withDbTransaction(db, (context) =>
+    const claim = await withDbTransaction(db, (db, context) =>
       claimAttachmentCachePathsForRetirement(context, [PATH]),
     );
     expect(claim).toEqual(

@@ -1,5 +1,5 @@
 import { logger } from '@core/secure';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import {
   cancelSendFailureNotification,
   postSendFailureNotification,
@@ -13,7 +13,7 @@ jest.mock('@/services/notifications/notifeeService', () => ({
 
 const mockCancel = cancelSendFailureNotification as jest.Mock;
 const mockPost = postSendFailureNotification as jest.Mock;
-const db = {} as AppDatabase;
+const db = {} as TestDb;
 
 beforeEach(() => {
   mockCancel.mockReset().mockResolvedValue(undefined);

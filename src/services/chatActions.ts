@@ -43,7 +43,7 @@ import {
   type ShareIntakeManifestIdentity,
   type ShareIntakeNewChatPlan,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   runInTransactionContext,
   withDbTransaction,
@@ -229,7 +229,7 @@ export function setChatMuted(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await setChatMuteWithinTransaction(context, chatGuid, muted ? 'mute' : null);
         assertChatActionLease(activeLease);
@@ -250,7 +250,7 @@ export function setChatArchived(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await setChatArchiveWithinTransaction(context, chatGuid, archived);
         assertChatActionLease(activeLease);
@@ -271,7 +271,7 @@ export function setChatAutoUnarchive(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await setChatAutoUnarchiveWithinTransaction(context, chatGuid, enabled);
         assertChatActionLease(activeLease);
@@ -292,7 +292,7 @@ export function setChatPinned(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await setChatPinWithinTransaction(context, chatGuid, pinned);
         assertChatActionLease(activeLease);
@@ -319,7 +319,7 @@ export function updateChatCustomization(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await setChatCustomizationWithinTransaction(context, chatGuid, patch);
         assertChatActionLease(activeLease);
@@ -342,7 +342,7 @@ export function updateHandleColor(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         const updated = await setHandleColorWithinTransaction(
           context,
@@ -371,7 +371,7 @@ export function updateChatAppearance(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await setChatAppearanceWithinTransaction(context, chatGuid, patch);
         assertChatActionLease(activeLease);
@@ -394,7 +394,7 @@ export function resetChatLocalPreferences(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await setChatCustomizationWithinTransaction(context, chatGuid, {
           customName: null,
@@ -449,7 +449,7 @@ export async function markAllChatsRead(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await markAllChatsReadLocalWithinTransaction(context);
         assertChatActionLease(activeLease);
@@ -492,7 +492,7 @@ export function saveChatDraft(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await kvSetWithinTransaction(context, `${DRAFT_KV_PREFIX}${chatGuid}`, text);
         assertChatActionLease(activeLease);
@@ -513,7 +513,7 @@ export function saveChatDraftReply(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await kvSetWithinTransaction(
           context,
@@ -542,7 +542,7 @@ export function addTextToChatDraft(
     assertChatActionLease(activeLease);
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         const key = `${DRAFT_KV_PREFIX}${chatGuid}`;
         const saved = (await kvGetWithinTransaction(context, key)) ?? '';
@@ -651,7 +651,7 @@ export async function createNewChat(
     const commit = await runTrackedRealtimeWork(accountLease, () =>
       withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           assertCreateChatLease(accountLease);
           // The reply usually carries only the chat GUID plus the typed address (see
           // chatsApi.createChat). Saved over a conversation this device already has, it would blank
@@ -754,7 +754,7 @@ export async function findOrCreateRcsChat(
     const commit = await runTrackedRealtimeWork(accountLease, () =>
       withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           assertCreateChatLease(accountLease);
           const isNewHere = !(await chatExistsWithinTransaction(context, chat.guid));
           assertCreateChatLease(accountLease);
@@ -1068,7 +1068,7 @@ export function markRead(
     assertChatActionLease(activeLease);
     const target = await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         const resolved = await resolveMarkReadTargetWithinTransaction(context, chatGuid);
         assertChatActionLease(activeLease);
@@ -1197,7 +1197,7 @@ export function markUnread(
     const markedUnreadAt = Date.now();
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         assertChatActionLease(activeLease);
         await setChatUnreadLocalWithinTransaction(context, chatGuid, markedUnreadAt);
         assertChatActionLease(activeLease);
@@ -1384,7 +1384,7 @@ async function cancelChatNotification(
  * `allSettled`, not `all`: one unreachable trigger must not cost the other reminders their delete.
  */
 async function cancelRemindersForChat(
-  db: AppDatabase,
+  db: ReadDb,
   chatGuid: string,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
@@ -1407,7 +1407,7 @@ async function cancelRemindersForChat(
       if (s.status === 'fulfilled') {
         await withDbTransaction(
           db,
-          (context) => deleteReminderByNotificationIdWithinTransaction(context, s.value),
+          (db, context) => deleteReminderByNotificationIdWithinTransaction(context, s.value),
           () => accountLease.isCurrent(),
         );
         assertChatActionLease(accountLease);
@@ -1439,7 +1439,7 @@ async function cancelRemindersForChat(
  * one unreachable server call must not skip the rest, nor block the delete.
  */
 async function cancelServerScheduledForChat(
-  db: AppDatabase,
+  db: ReadDb,
   chatGuid: string,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
@@ -1461,7 +1461,7 @@ async function cancelServerScheduledForChat(
       assertChatActionLease(accountLease);
       await withDbTransaction(
         db,
-        (context) => deleteScheduledWithinTransaction(context, row.id),
+        (db, context) => deleteScheduledWithinTransaction(context, row.id),
         () => accountLease.isCurrent(),
       );
       assertChatActionLease(accountLease);

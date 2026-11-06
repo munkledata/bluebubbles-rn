@@ -10,7 +10,7 @@ import {
   getMessagePreviewByGuid,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { isProvenIMessageGroupChat, isProvenOneToOneIMessageChat } from '@utils';
 import { utf8Decode, utf8Encode } from '@utils/bytes';
 import {
@@ -39,9 +39,9 @@ export type RemoteDeleteMessageResult =
   | { readonly status: 'outcome-unknown' };
 
 /** A destructive remote delete has one active lane per exact stored message. */
-const activeRemoteDeletes = new WeakMap<AppDatabase, Set<string>>();
+const activeRemoteDeletes = new WeakMap<Queryable, Set<string>>();
 
-function claimRemoteDelete(db: AppDatabase, key: string): boolean {
+function claimRemoteDelete(db: Queryable, key: string): boolean {
   let active = activeRemoteDeletes.get(db);
   if (!active) {
     active = new Set();
@@ -52,7 +52,7 @@ function claimRemoteDelete(db: AppDatabase, key: string): boolean {
   return true;
 }
 
-function releaseRemoteDelete(db: AppDatabase, key: string): void {
+function releaseRemoteDelete(db: Queryable, key: string): void {
   const active = activeRemoteDeletes.get(db);
   active?.delete(key);
   if (active?.size === 0) activeRemoteDeletes.delete(db);
@@ -105,7 +105,7 @@ function isEligibleIMessageChat(
  * deliberately leave the local row visible so the user can inspect Messages before acting again.
  */
 export async function remoteDeleteExactIMessage(
-  db: AppDatabase,
+  db: ReadDb,
   client: HttpClient,
   args: RemoteDeleteMessageArgs,
   now: number = Date.now(),
@@ -183,7 +183,7 @@ export async function remoteDeleteExactIMessage(
     try {
       await withDbTransaction(
         db,
-        (context) => deleteMessageLocalWithinTransaction(context, args.messageGuid, now),
+        (db, context) => deleteMessageLocalWithinTransaction(context, args.messageGuid, now),
         transport.admissionGuard,
       );
     } catch (error) {

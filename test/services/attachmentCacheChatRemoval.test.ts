@@ -4,7 +4,7 @@
  */
 import { getAttachmentCacheEntry } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   AttachmentCacheCoordinator,
   type AttachmentCacheNativeBoundary,
@@ -53,7 +53,7 @@ function accountScope(): AttachmentCacheReservationScope & { revoke(): void } {
 }
 
 /** Two chats, A and B, with one message each; returns a function that attaches files. */
-async function seedChats(db: AppDatabase, raw: Raw) {
+async function seedChats(db: ReadDb, raw: Raw) {
   raw.prepare(`INSERT INTO chats (guid) VALUES ('chat-a'), ('chat-b')`).run();
   const chatId = (guid: string) =>
     (raw.prepare('SELECT id FROM chats WHERE guid = ?').get(guid) as { id: number }).id;
@@ -66,7 +66,7 @@ async function seedChats(db: AppDatabase, raw: Raw) {
     (raw.prepare('SELECT id FROM messages WHERE guid = ?').get(guid) as { id: number }).id;
   return async (messageGuid: string, attachmentGuid: string, file: string): Promise<void> => {
     if (!(await getAttachmentCacheEntry(db, file))) {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordAttachmentCacheEntry(context, { path: file, bytes: 10, lastUsedAt: OLD }),
       );
     }

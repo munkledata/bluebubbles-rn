@@ -65,7 +65,7 @@ describe('share intake receipt repository', () => {
     const original = identity('1');
 
     try {
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         discardShareIntakeItemWithinTransaction(context, {
           identity: original,
           itemKey: 'text',
@@ -78,7 +78,7 @@ describe('share intake receipt repository', () => {
       );
 
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           discardShareIntakeItemWithinTransaction(context, {
             identity: {
               ...original,
@@ -103,7 +103,7 @@ describe('share intake receipt repository', () => {
       raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(draftKey, 'Typed first');
 
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           admitShareIntakeTextDraftWithinTransaction(context, {
             identity: manifest,
             chatGuid: 'iMessage;-;+15550000001',
@@ -118,7 +118,7 @@ describe('share intake receipt repository', () => {
       });
 
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           admitShareIntakeTextDraftWithinTransaction(context, {
             identity: manifest,
             chatGuid: 'iMessage;-;+15550000001',
@@ -162,7 +162,7 @@ describe('share intake receipt repository', () => {
       raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(draftKey, 'Before');
 
       await expect(
-        withDbTransaction(db, async (context) => {
+        withDbTransaction(db, async (db, context) => {
           await admitShareIntakeTextDraftWithinTransaction(context, {
             identity: manifest,
             chatGuid: 'iMessage;-;+15550000002',
@@ -195,7 +195,7 @@ describe('share intake receipt repository', () => {
         prepareShareIntakeNewChatPlan(db, manifest, newChatPlan({ address: '+15550000009' })),
       ).rejects.toBeInstanceOf(ShareIntakeReceiptConflictError);
 
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         recordShareIntakeNewChatWithinTransaction(context, {
           identity: manifest,
           chatGuid: 'iMessage;-;+15550000001',
@@ -232,7 +232,7 @@ describe('share intake receipt repository', () => {
 
     try {
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           claimShareIntakeFileWithinTransaction(context, {
             identity: manifest,
             chatGuid: 'iMessage;-;+15550000001',
@@ -244,7 +244,7 @@ describe('share intake receipt repository', () => {
       ).resolves.toEqual({ claimed: true, ownerGuid: 'outgoing-first' });
 
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           claimShareIntakeFileWithinTransaction(context, {
             identity: manifest,
             chatGuid: 'iMessage;-;+15550000001',
@@ -256,7 +256,7 @@ describe('share intake receipt repository', () => {
       ).resolves.toEqual({ claimed: false, ownerGuid: 'outgoing-first' });
 
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           claimShareIntakeFileWithinTransaction(context, {
             identity: manifest,
             chatGuid: 'iMessage;-;+15550000002',
@@ -276,7 +276,7 @@ describe('share intake receipt repository', () => {
     const manifest = identity('6', { fileCount: 2 });
 
     try {
-      await withDbTransaction(db, async (context) => {
+      await withDbTransaction(db, async (db, context) => {
         await discardShareIntakeItemWithinTransaction(context, {
           identity: manifest,
           itemKey: 'text',
@@ -292,7 +292,7 @@ describe('share intake receipt repository', () => {
       const unbound = await getShareIntakeReceipt(db, manifest);
       expect(unbound && isShareIntakeReceiptComplete(unbound)).toBe(false);
 
-      await withDbTransaction(db, (context) =>
+      await withDbTransaction(db, (db, context) =>
         claimShareIntakeFileWithinTransaction(context, {
           identity: manifest,
           chatGuid: 'iMessage;-;+15550000001',
@@ -305,7 +305,7 @@ describe('share intake receipt repository', () => {
       const complete = await getShareIntakeReceipt(db, manifest);
       expect(complete && isShareIntakeReceiptComplete(complete)).toBe(true);
       await expect(
-        withDbTransaction(db, (context) =>
+        withDbTransaction(db, (db, context) =>
           discardShareIntakeItemWithinTransaction(context, {
             identity: manifest,
             itemKey: 'file:00',

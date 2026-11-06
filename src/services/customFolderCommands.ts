@@ -51,7 +51,7 @@ export function loadCustomFolders(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => listCustomFoldersWithinTransaction(context),
+      (db, context) => listCustomFoldersWithinTransaction(context),
       () => activeLease.isCurrent(),
     );
   });
@@ -66,7 +66,7 @@ export function loadCustomFolderSummaries(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => listCustomFolderSummariesWithinTransaction(context),
+      (db, context) => listCustomFolderSummariesWithinTransaction(context),
       () => activeLease.isCurrent(),
     );
   });
@@ -82,7 +82,7 @@ export function loadCustomFolderMembership(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => listCustomFolderChatGuidsWithinTransaction(context, folderId),
+      (db, context) => listCustomFolderChatGuidsWithinTransaction(context, folderId),
       () => activeLease.isCurrent(),
     );
   });
@@ -115,7 +115,7 @@ export async function loadCustomFolderInboxPage(
             (beforeRowid) =>
               withDbTransaction(
                 db,
-                (context) =>
+                (db, context) =>
                   readCustomFolderMessageMatchBatchWithinTransaction(
                     context,
                     folderId,
@@ -133,7 +133,7 @@ export async function loadCustomFolderInboxPage(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         listCustomFolderInboxPageWithinTransaction(
           context,
           folderId,
@@ -156,7 +156,7 @@ export function createCustomFolder(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => createCustomFolderWithinTransaction(context, name),
+      (db, context) => createCustomFolderWithinTransaction(context, name),
       () => activeLease.isCurrent(),
     );
   });
@@ -172,7 +172,7 @@ export function renameCustomFolder(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => renameCustomFolderWithinTransaction(context, folderId, name),
+      (db, context) => renameCustomFolderWithinTransaction(context, folderId, name),
       () => activeLease.isCurrent(),
     );
   });
@@ -189,7 +189,7 @@ export function setCustomFolderShowUnreadBadge(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         setCustomFolderShowUnreadBadgeWithinTransaction(context, folderId, showUnreadBadge),
       () => activeLease.isCurrent(),
     );
@@ -205,7 +205,7 @@ export function deleteCustomFolder(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => deleteCustomFolderWithinTransaction(context, folderId),
+      (db, context) => deleteCustomFolderWithinTransaction(context, folderId),
       () => activeLease.isCurrent(),
     );
   });
@@ -221,7 +221,7 @@ export function reorderCustomFolders(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => reorderCustomFoldersWithinTransaction(context, snapshot),
+      (db, context) => reorderCustomFoldersWithinTransaction(context, snapshot),
       () => activeLease.isCurrent(),
     );
   });
@@ -238,7 +238,7 @@ export function addChatToCustomFolder(
     assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) => addChatToCustomFolderWithinTransaction(context, folderId, chatGuid),
+      (db, context) => addChatToCustomFolderWithinTransaction(context, folderId, chatGuid),
       () => activeLease.isCurrent(),
     );
   });
@@ -257,7 +257,7 @@ export function replaceCustomFolderMembership(
     // join or leave a folder. A false result therefore means only that the folder no longer exists.
     return withDbTransaction(
       db,
-      (context) => replaceCustomFolderMembershipWithinTransaction(context, folderId, snapshot),
+      (db, context) => replaceCustomFolderMembershipWithinTransaction(context, folderId, snapshot),
       () => activeLease.isCurrent(),
     );
   });

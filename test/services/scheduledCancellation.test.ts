@@ -235,7 +235,7 @@ it('rechecks the exact repeat occurrence after a queued handoff wins the writer'
     read.resolve();
     return row;
   });
-  const blocker = withDbTransaction(fixture.db, async () => {
+  const blocker = withDbTransaction(fixture.db, async (db) => {
     entered.resolve();
     await release.promise;
   });
@@ -284,7 +284,7 @@ it.each(['serverId', 'scheduledFor', 'chatGuid'] as const)(
     const rejected = expect(operation).rejects.toBeInstanceOf(ScheduledCancellationChangedError);
     await entered.promise;
     if (field === 'chatGuid') {
-      await withDbTransaction(fixture.db, async () => {
+      await withDbTransaction(fixture.db, async (db) => {
         await fixture.db
           .update(scheduledMessages)
           .set({ chatGuid: 'c2' })

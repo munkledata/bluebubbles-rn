@@ -19,7 +19,7 @@ import {
 } from '@db/repositories';
 import { messageDeletionLedger, outgoingQueue } from '@db/schema';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import { buildGroupEventText } from '@utils';
 import { createTestDb } from '../support/testDb';
 import {
@@ -30,7 +30,7 @@ import {
 import { nextEventLoopTurn } from '../support/async';
 
 async function holdRollingBackTransaction(
-  db: AppDatabase,
+  db: ReadDb,
   beforeHold: () => void = () => undefined,
 ): Promise<{
   release: () => void;
@@ -44,7 +44,7 @@ async function holdRollingBackTransaction(
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const neighbour = withDbTransaction(db, async () => {
+  const neighbour = withDbTransaction(db, async (db) => {
     beforeHold();
     markStarted();
     await held;
@@ -170,7 +170,7 @@ async function finishAfterQueuedObservation<T>(
   return result;
 }
 
-async function seed(db: AppDatabase) {
+async function seed(db: ReadDb) {
   const handles = await upsertHandles(db, [
     { address: 'a@x.com', displayName: 'Alice' },
     { address: 'b@x.com', displayName: 'Bob' },

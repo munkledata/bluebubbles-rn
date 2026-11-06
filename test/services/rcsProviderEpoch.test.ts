@@ -7,7 +7,7 @@ import {
 } from '@/services/send/rcsAttemptCapability';
 import { sendTextMessage } from '@/services/send/sendService';
 import { upsertChats, upsertHandles } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import { createTestDb } from '../support/testDb';
 
@@ -37,7 +37,7 @@ function fakeHttp(post: jest.Mock): HttpClient {
   return client;
 }
 
-async function seedChat(db: AppDatabase, guid: string): Promise<void> {
+async function seedChat(db: ReadDb, guid: string): Promise<void> {
   const participants = [{ address: '+15550000001', service: 'RCS' }];
   const handles = await upsertHandles(db, participants);
   await upsertChats(db, [Chat.parse({ guid, participants })], handles);

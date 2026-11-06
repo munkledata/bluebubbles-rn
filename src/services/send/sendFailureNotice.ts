@@ -1,7 +1,7 @@
 import type { EventDeliveryContext } from '@core/realtime';
 import { logger } from '@core/secure';
 import type { DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable } from '@db/types';
 import {
   cancelSendFailureNotification,
   postSendFailureNotification,
@@ -13,7 +13,7 @@ function deliveryContext(commitGuard?: DbCommitGuard): EventDeliveryContext | un
 
 /** A native presentation failure must never roll back or disguise the durable send outcome. */
 export async function notifyFailedSend(
-  db: AppDatabase,
+  db: Queryable,
   chatGuid: string,
   messageGuid: string,
   commitGuard?: DbCommitGuard,
@@ -31,7 +31,7 @@ export async function notifyFailedSend(
 
 /** Withdraw stale failure state after the same durable row reconciles successfully. */
 export async function clearFailedSendNotice(
-  db: AppDatabase,
+  db: Queryable,
   messageGuid: string,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {

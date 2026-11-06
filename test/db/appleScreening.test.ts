@@ -12,7 +12,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 let capability = false;
@@ -26,14 +26,14 @@ afterAll(() => {
   setAppleScreeningCapabilityReader(() => false);
 });
 
-async function chatFlag(db: AppDatabase, guid: string): Promise<number | null> {
+async function chatFlag(db: Queryable, guid: string): Promise<number | null> {
   const rows = await db.all<{ flag: number | null }>(
     sql`SELECT apple_filtered AS flag FROM chats WHERE guid = ${guid}`,
   );
   return rows[0]?.flag ?? null;
 }
 
-async function messageFlag(db: AppDatabase, guid: string): Promise<number | null> {
+async function messageFlag(db: Queryable, guid: string): Promise<number | null> {
   const rows = await db.all<{ flag: number | null }>(
     sql`SELECT apple_spam AS flag FROM messages WHERE guid = ${guid}`,
   );
@@ -127,7 +127,7 @@ describe('Apple screening ingestion', () => {
 });
 
 describe('Apple screening in the Unknown Senders split', () => {
-  async function seed(): Promise<AppDatabase> {
+  async function seed(): Promise<TestDb> {
     const { db } = await createTestDb();
     capability = true;
     const handles = await upsertHandles(db, [

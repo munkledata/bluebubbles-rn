@@ -341,7 +341,7 @@ describe('DB-02C mixed runtime concurrency', () => {
       expect(await vault.get('dbEncryptionKeyPending')).toBeNull();
 
       await deadline(
-        withDbTransaction(db, async () => {
+        withDbTransaction(db, async (db) => {
           await db.run(sql`INSERT INTO kv (key, value) VALUES ('db02c-sentinel', 'committed')`);
         }),
         'final sentinel transaction',

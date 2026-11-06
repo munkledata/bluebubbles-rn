@@ -192,7 +192,7 @@ describe('incoming event drain', () => {
     const handler = {
       handleNormalized: jest.fn(async (_event, _source, context?: EventDeliveryContext) => {
         deliveredContext = context;
-        await withDbTransaction(db, async (transactionContext) => {
+        await withDbTransaction(db, async (db, transactionContext) => {
           await db.run(sql`INSERT INTO kv (key, value) VALUES ('drain-domain', 'committed')`);
           await context?.durableEvent?.markDbAppliedWithinTransaction(transactionContext);
         });
@@ -228,7 +228,7 @@ describe('incoming event drain', () => {
     if (!retainedContext?.durableEvent) throw new Error('durable context was not delivered');
     expect(retainedContext.isCurrent()).toBe(false);
     await expect(
-      withDbTransaction(db, async (transactionContext) => {
+      withDbTransaction(db, async (db, transactionContext) => {
         await db.run(sql`INSERT INTO kv (key, value) VALUES ('late-success', 'bad')`);
         await retainedContext.durableEvent?.markDbAppliedWithinTransaction(transactionContext);
       }),
@@ -250,7 +250,7 @@ describe('incoming event drain', () => {
         context?: EventDeliveryContext,
       ) {
         if (context?.durableEvent?.dbAppliedAt == null) {
-          await withDbTransaction(db, async (transactionContext) => {
+          await withDbTransaction(db, async (db, transactionContext) => {
             dbWrites += 1;
             await db.run(
               sql`INSERT INTO kv (key, value) VALUES ('retry-domain', ${String(dbWrites)})
@@ -602,7 +602,7 @@ describe('incoming event drain', () => {
         deliveredContext = context;
         await handlerGate;
         try {
-          await withDbTransaction(db, async (transactionContext) => {
+          await withDbTransaction(db, async (db, transactionContext) => {
             await db.run(sql`INSERT INTO kv (key, value) VALUES ('late-timeout', 'bad')`);
             await context?.durableEvent?.markDbAppliedWithinTransaction(transactionContext);
           });
@@ -685,7 +685,7 @@ describe('incoming event drain', () => {
           markFirstDeliveryStarted();
           await firstDeliveryGate;
           try {
-            await withDbTransaction(db, async (transactionContext) => {
+            await withDbTransaction(db, async (db, transactionContext) => {
               await db.run(sql`INSERT INTO kv (key, value) VALUES ('lock-race-blocked', 'bad')`);
               await context?.durableEvent?.markDbAppliedWithinTransaction(transactionContext);
             });
@@ -697,7 +697,7 @@ describe('incoming event drain', () => {
           return context?.isCurrent() ? ('processed' as const) : ('stale' as const);
         }
 
-        await withDbTransaction(db, async (transactionContext) => {
+        await withDbTransaction(db, async (db, transactionContext) => {
           await db.run(sql`INSERT INTO kv (key, value) VALUES ('lock-race-retry', 'committed')`);
           await context?.durableEvent?.markDbAppliedWithinTransaction(transactionContext);
         });

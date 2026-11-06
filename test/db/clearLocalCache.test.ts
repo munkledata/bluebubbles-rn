@@ -28,7 +28,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, ReadDb } from '@db/types';
 import { rebuildInboxSearchIndexBatch } from '@db/repositories/inboxSearchIndex';
 import { withDbTransaction } from '@db/transaction';
 import {
@@ -55,7 +55,7 @@ const SETTING_KEY = 'sync.messagesPerChat';
 const INCOMING_DIGEST = 'a'.repeat(64);
 
 /** A device with real history: chats, messages, attachments, queued work and user settings. */
-async function seed(db: AppDatabase): Promise<void> {
+async function seed(db: ReadDb): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@x.com', displayName: 'Alice' }]);
   const map = await upsertChats(
     db,
@@ -125,7 +125,7 @@ async function seed(db: AppDatabase): Promise<void> {
     () => true,
     () => 5000,
   );
-  await withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (db, context) =>
     recordAttachmentCacheEntry(context, {
       path: 'file:///documents/attachments/att-1/image.jpg',
       bytes: 1234,
@@ -442,7 +442,7 @@ describe('clearLocalCache', () => {
     const release = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async (context) => {
+    const neighbour = withDbTransaction(db, async (db, context) => {
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -552,7 +552,7 @@ describe('clearLocalCache', () => {
       expect(count(raw, 'message_deletion_ledger')).toBe(501);
       expect(count(raw, 'attachment_cache_entries')).toBe(1);
 
-      neighbourOutcome = withDbTransaction(db, async (context) => {
+      neighbourOutcome = withDbTransaction(db, async (db, context) => {
         raw
           .prepare("INSERT INTO kv (key, value) VALUES ('cache.ledger.phantom', 'rollback')")
           .run();
@@ -770,7 +770,7 @@ describe('clearLocalCache', () => {
         releaseNeighbour = resolve;
       });
       let neighbourDidStart = false;
-      const neighbourOutcome = withDbTransaction(db, async (context) => {
+      const neighbourOutcome = withDbTransaction(db, async (db, context) => {
         raw.prepare("DELETE FROM outgoing_queue WHERE temp_guid = 'temp-residue'").run();
         neighbourDidStart = true;
         await neighbourHeld;

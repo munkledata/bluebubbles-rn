@@ -13,13 +13,13 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { retireOutgoing } from '../support/repositoryWrappers';
 
 const CHAT_GUID = 'iMessage;-;+15550000003';
 
-async function seedAliasedSend(db: AppDatabase, raw: Database.Database, tempGuid: string) {
+async function seedAliasedSend(db: ReadDb, raw: Database.Database, tempGuid: string) {
   const handles = await upsertHandles(db, [{ address: '+15550000003' }]);
   const chats = await upsertChats(
     db,
@@ -99,7 +99,7 @@ describe('outgoing retirement lookups', () => {
       const canonical = await seedAliasedSend(db, raw, 'temp-uncertain');
       let marked: boolean | undefined;
       const statements = await captureStatements(raw, async () => {
-        marked = await withDbTransaction(db, (context) =>
+        marked = await withDbTransaction(db, (db, context) =>
           retireUncertainOutgoingWithinTransaction(context, 'temp-uncertain', 66, 'unknown'),
         );
       });

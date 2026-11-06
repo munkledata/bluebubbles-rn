@@ -2,7 +2,7 @@ import type { HttpClient } from '@core/api/http';
 import { sendContact, type ContactEmail, type ContactPhone } from '@core/api/endpoints/messages';
 import { getChatHeader, insertOutgoingContactWithinTransaction } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils';
 import {
   resolveRcsAttemptOwnership,
@@ -58,7 +58,7 @@ export function hasContactContent(c: ContactCard): boolean {
  * Native imports), so it runs in Node tests against better-sqlite3, mirroring sendTextMessage.
  */
 export async function sendContactMessage(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: {
     chatGuid: string;
@@ -108,7 +108,7 @@ export async function sendContactMessage(
   const displayName = contactDisplayName(args.contact);
   const { attemptOwnerToken } = await withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       insertOutgoingContactWithinTransaction(context, {
         tempGuid,
         chatGuid: args.chatGuid,

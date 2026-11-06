@@ -31,7 +31,7 @@ const mockJoinedDbAll = jest.fn(async (query: unknown) => {
 
 type CommitGuard = () => boolean;
 const mockTransactionContext = Object.freeze({ __transactionContext: true });
-type TransactionTask = (context: unknown) => Promise<unknown>;
+type TransactionTask = (tx: unknown, context: unknown) => Promise<unknown>;
 type ContextTask = (db: unknown) => Promise<unknown>;
 const mockRunInTransactionContext = jest.fn(
   async (context: unknown, task: ContextTask): Promise<unknown> => {
@@ -40,9 +40,9 @@ const mockRunInTransactionContext = jest.fn(
   },
 );
 const mockWithDbTransaction = jest.fn(
-  async (_db: unknown, task: TransactionTask, guard?: CommitGuard): Promise<unknown> => {
+  async (db: unknown, task: TransactionTask, guard?: CommitGuard): Promise<unknown> => {
     if (guard && !guard()) throw new Error('database commit guard rejected the transaction');
-    const result = await task(mockTransactionContext);
+    const result = await task(db, mockTransactionContext);
     if (guard && !guard()) throw new Error('database commit guard rejected the transaction');
     return result;
   },

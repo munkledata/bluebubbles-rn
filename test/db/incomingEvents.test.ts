@@ -37,7 +37,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { nextEventLoopTurn } from '../support/async';
 
@@ -122,7 +122,7 @@ function exactClaim(claim: ClaimedIncomingEvent): {
 }
 
 function enqueueIncomingEvent(
-  db: AppDatabase,
+  db: ReadDb,
   event: NewIncomingEvent,
   guard: DbCommitGuard,
   now: number,
@@ -131,7 +131,7 @@ function enqueueIncomingEvent(
 }
 
 function completeIncomingEvent(
-  db: AppDatabase,
+  db: ReadDb,
   claim: ReturnType<typeof exactClaim> & { now: number },
   guard: DbCommitGuard,
 ) {
@@ -140,7 +140,7 @@ function completeIncomingEvent(
 }
 
 function poisonIncomingEvent(
-  db: AppDatabase,
+  db: ReadDb,
   claim: ReturnType<typeof exactClaim> & { now: number; errorCode: string },
   guard: DbCommitGuard,
 ) {
@@ -149,7 +149,7 @@ function poisonIncomingEvent(
 }
 
 function failIncomingEvent(
-  db: AppDatabase,
+  db: ReadDb,
   claim: ReturnType<typeof exactClaim> & { now: number; errorCode: string },
   guard: DbCommitGuard,
 ) {
@@ -158,7 +158,7 @@ function failIncomingEvent(
 }
 
 function deferIncomingEventForDependency(
-  db: AppDatabase,
+  db: ReadDb,
   claim: ReturnType<typeof exactClaim> & { now: number },
   guard: DbCommitGuard,
 ) {
@@ -166,12 +166,12 @@ function deferIncomingEventForDependency(
   return deferIncomingEventForDependencyWithClock(db, identity, guard, clockAt(now));
 }
 
-function maintainIncomingEvents(db: AppDatabase, now: number, guard: DbCommitGuard) {
+function maintainIncomingEvents(db: ReadDb, now: number, guard: DbCommitGuard) {
   return maintainIncomingEventsWithClock(db, clockAt(now), guard);
 }
 
 async function prepareTerminalClaim(
-  db: AppDatabase,
+  db: ReadDb,
   raw: Database.Database,
   operation: TerminalOperation,
   eventKey: string,
@@ -198,7 +198,7 @@ async function prepareTerminalClaim(
 
 async function invokeTerminalOperation(
   operation: TerminalOperation,
-  db: AppDatabase,
+  db: ReadDb,
   claim: ClaimedIncomingEvent,
   now: number,
   guard: DbCommitGuard,
@@ -435,7 +435,7 @@ describe('incoming event queue repository', () => {
       releaseNeighbour = resolve;
     });
     const neighbourError = new Error('incoming intake neighbour rollback');
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw.prepare(`INSERT INTO kv (key, value) VALUES ('incoming.neighbour', 'phantom')`).run();
       markNeighbourStarted();
       await holdNeighbour;
@@ -518,7 +518,7 @@ describe('incoming event queue repository', () => {
     const neighbourHeld = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       markNeighbourStarted();
       await neighbourHeld;
     });
@@ -916,7 +916,7 @@ describe('incoming event queue repository', () => {
     });
     const neighbourKey = `claim.neighbour.${revoke ? 'revoked' : 'current'}`;
     const neighbourError = new Error('claim neighbour rollback');
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(neighbourKey, 'phantom');
       markNeighbourStarted();
       await neighbourHeld;
@@ -1015,7 +1015,7 @@ describe('incoming event queue repository', () => {
     });
     const neighbourKey = 'claim.post-lock-clock.neighbour';
     const neighbourError = new Error('post-lock clock neighbour rollback');
-    const neighbourOutcome = withDbTransaction(db, async () => {
+    const neighbourOutcome = withDbTransaction(db, async (db) => {
       raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(neighbourKey, 'phantom');
       markNeighbourStarted();
       await neighbourHeld;
@@ -1387,7 +1387,7 @@ describe('incoming event queue repository', () => {
     });
     const neighbourKey = 'dev-proof.post-lock.neighbour';
     const neighbourError = new Error('DEV proof clock neighbour rollback');
-    const neighbourOutcome = withDbTransaction(db, async () => {
+    const neighbourOutcome = withDbTransaction(db, async (db) => {
       raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(neighbourKey, 'phantom');
       markNeighbourStarted();
       await neighbourHeld;
@@ -1570,7 +1570,7 @@ describe('incoming event queue repository', () => {
     const old = onlyClaim(
       await claimIncomingEvents(db, { clock: () => NOW, leaseToken: 'phase-old-claim' }, ALLOW),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       markIncomingEventDbAppliedWithinTransaction(context, { ...exactClaim(old), now: NOW }, ALLOW),
     );
     const oldFailure = await failIncomingEvent(
@@ -1654,7 +1654,7 @@ describe('incoming event queue repository', () => {
     const old = onlyClaim(
       await claimIncomingEvents(db, { clock: () => NOW, leaseToken: 'wake-old' }, ALLOW),
     );
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       markIncomingEventDbAppliedWithinTransaction(context, { ...exactClaim(old), now: NOW }, ALLOW),
     );
     const oldFailure = await failIncomingEvent(
@@ -2096,7 +2096,7 @@ describe('incoming event queue repository', () => {
       });
       const neighbourKey = `terminal.neighbour.${operation}.${revoke ? 'revoked' : 'current'}`;
       const neighbourError = new Error('terminal helper neighbour rollback');
-      const neighbour = withDbTransaction(db, async () => {
+      const neighbour = withDbTransaction(db, async (db) => {
         raw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run(neighbourKey, 'phantom');
         markNeighbourStarted();
         await neighbourHeld;
@@ -2180,7 +2180,7 @@ describe('incoming event queue repository', () => {
     const neighbourHeld = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       markNeighbourStarted();
       await neighbourHeld;
     });
@@ -2383,7 +2383,7 @@ describe('incoming event queue repository', () => {
     );
 
     await expect(
-      withDbTransaction(db, async (context) => {
+      withDbTransaction(db, async (db, context) => {
         await db.run(sql`INSERT INTO kv (key, value) VALUES ('checkpoint-bad', 'must-roll-back')`);
         await markIncomingEventDbAppliedWithinTransaction(
           context,
@@ -2397,7 +2397,7 @@ describe('incoming event queue repository', () => {
       raw.prepare(`SELECT db_applied_at AS dbAppliedAt FROM incoming_event_queue`).get(),
     ).toEqual({ dbAppliedAt: null });
 
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       await db.run(sql`INSERT INTO kv (key, value) VALUES ('checkpoint-good', 'committed')`);
       await markIncomingEventDbAppliedWithinTransaction(
         context,
@@ -2424,7 +2424,7 @@ describe('incoming event queue repository', () => {
       ),
     );
     let staleContext!: DbTransactionContext;
-    await withDbTransaction(db, async (context) => {
+    await withDbTransaction(db, async (db, context) => {
       staleContext = context;
     });
 
@@ -2437,7 +2437,7 @@ describe('incoming event queue repository', () => {
     ).rejects.toBeInstanceOf(DbTransactionContextRejectedError);
 
     await expect(
-      withDbTransaction(db, async () => {
+      withDbTransaction(db, async (db) => {
         await db.run(
           sql`INSERT INTO kv (key, value) VALUES ('checkpoint-stale-owner', 'must-roll-back')`,
         );
@@ -2895,7 +2895,7 @@ describe('incoming event queue repository', () => {
     const retrying = claimAt(claims, 2);
     const completedTwo = claimAt(claims, 3);
 
-    await withDbTransaction(db, (context) =>
+    await withDbTransaction(db, (db, context) =>
       markIncomingEventDbAppliedWithinTransaction(
         context,
         { ...exactClaim(applied), now: NOW + 1 },

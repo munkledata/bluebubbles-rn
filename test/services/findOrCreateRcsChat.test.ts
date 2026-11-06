@@ -7,13 +7,13 @@ import type Database from 'better-sqlite3';
 import { chatsApi } from '@core/api';
 import { Chat } from '@core/models';
 import * as chatRepositories from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { findOrCreateRcsChat } from '@/services/chatActions';
 import { ensureDatabase } from '@/services/databaseControl';
 import { resumeRealtimeDeliveries } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 let mockRcsProviderEpoch: string | null;
 let mockFindSupported = true;
 

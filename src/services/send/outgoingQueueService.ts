@@ -32,7 +32,7 @@ import {
   type SendAttemptOwnerToken,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { ClientErrorCode, isRcsChatGuid } from '@utils';
 import {
   runTrackedRealtimeWork,
@@ -379,7 +379,7 @@ async function runAccountCommit(
  * terminal causes use this owner so missing-file and unknown-kind settlement cannot drift.
  */
 async function retireUnsendableOutgoing(
-  db: AppDatabase,
+  db: ReadDb,
   chatGuid: string,
   tempGuid: string,
   commitGuard?: DbCommitGuard,
@@ -387,7 +387,7 @@ async function retireUnsendableOutgoing(
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => retireOutgoingWithinTransaction(context, tempGuid, code),
+    (db, context) => retireOutgoingWithinTransaction(context, tempGuid, code),
     commitGuard,
   );
   await notifyFailedSend(db, chatGuid, tempGuid, commitGuard);
@@ -409,7 +409,7 @@ async function retireUnsendableOutgoing(
  * tick with no backoff at all.
  */
 export async function resendOutgoingRow(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   io: OutgoingQueueIO,
   row: RetryableOutgoing,
@@ -438,7 +438,7 @@ export async function resendOutgoingRow(
     return (await runAccountCommit(accountLease, (guard) =>
       withDbTransaction(
         db,
-        (context) =>
+        (db, context) =>
           retireUncertainOutgoingWithinTransaction(
             context,
             row.tempGuid,
@@ -508,7 +508,7 @@ export async function resendOutgoingRow(
       return (await runAccountCommit(accountLease, (guard) =>
         withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             retireUncertainOutgoingWithinTransaction(context, row.tempGuid, code, detail),
           guard,
         ),
@@ -763,7 +763,7 @@ export async function resendOutgoingRow(
  * orchestration (no RN imports — attachment I/O is injected) → runs in Node tests.
  */
 async function runOutgoingQueueBody(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   io: OutgoingQueueIO,
   now: number = Date.now(),
@@ -824,7 +824,7 @@ async function runOutgoingQueueBody(
       const retired = await runAccountCommit(accountLease, (guard) =>
         withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             retireUncertainOutgoingWithinTransaction(
               context,
               row.tempGuid,
@@ -881,7 +881,7 @@ async function runOutgoingQueueBody(
           (plainTextState !== 'retry-safe' || imessagePlainTextAvailable?.(row.chatGuid) === true);
         claim = await withDbTransaction(
           db,
-          (context) =>
+          (db, context) =>
             claimOutgoingForSendWithinTransaction(
               context,
               row.id,
@@ -926,7 +926,7 @@ async function runOutgoingQueueBody(
       const released = await runAccountCommit(accountLease, (guard) =>
         withDbTransaction(
           db,
-          (context) => deferOutgoingSendClaimWithinTransaction(context, claim.deferToken!),
+          (db, context) => deferOutgoingSendClaimWithinTransaction(context, claim.deferToken!),
           guard,
         ),
       );
@@ -945,7 +945,7 @@ async function runOutgoingQueueBody(
  * original standalone behavior.
  */
 export async function runOutgoingQueue(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   io: OutgoingQueueIO,
   now: number = Date.now(),

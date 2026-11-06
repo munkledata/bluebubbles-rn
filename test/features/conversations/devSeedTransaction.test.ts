@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { AppDatabase } from '@db/types';
+import type { Queryable } from '@db/types';
 import { getDatabase } from '@db/database';
 import { upsertMessages } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
@@ -15,11 +15,11 @@ jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
   getChatIdByGuid: jest.fn(async () => null),
   upsertHandles: jest.fn(
-    async (_db: AppDatabase, handles: { address: string }[]) =>
+    async (_db: Queryable, handles: { address: string }[]) =>
       new Map(handles.map((handle, index) => [handle.address, index + 1])),
   ),
   upsertChats: jest.fn(
-    async (_db: AppDatabase, chats: { guid: string }[]) =>
+    async (_db: Queryable, chats: { guid: string }[]) =>
       new Map(chats.map((chat) => [chat.guid, 1])),
   ),
   upsertMessages: jest.fn(async () => undefined),
@@ -77,7 +77,7 @@ describe('DEV fixture seed — transaction ownership', () => {
       releaseNeighbour = resolve;
     });
     const neighbourError = new Error('dev-seed neighbour rollback');
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw
         .prepare("UPDATE chats SET last_read_message_guid = 'phantom' WHERE guid = 'c-work'")
         .run();

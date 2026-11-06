@@ -20,7 +20,7 @@ export async function saveCameraCaptureChat(
     if (!activeLease.isCurrent()) return;
     await withDbTransaction(
       getDatabase(),
-      (context) => kvSetWithinTransaction(context, CAMERA_CAPTURE_CHAT_KV_KEY, chatGuid),
+      (db, context) => kvSetWithinTransaction(context, CAMERA_CAPTURE_CHAT_KV_KEY, chatGuid),
       () => activeLease.isCurrent(),
     );
   });

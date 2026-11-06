@@ -4,7 +4,7 @@ import {
   updateAttachmentLocalPathWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction, type DbTransactionContext } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { attachmentFileName, attachmentKind, AUTO_IMAGE_MAX_BYTES } from '@utils/attachment';
 import type {
   AttachmentCacheAdmission,
@@ -251,7 +251,7 @@ export function attachmentDownloadDestinationIdentity(
  * would otherwise write and promote the exact same `.part` file concurrently.
  */
 export async function ensureDownloadedOutcome(
-  db: AppDatabase,
+  db: ReadDb,
   fetcher: AttachmentFetcher,
   att: AttachmentDownloadTarget,
   onProgress?: (loaded: number, total: number) => void,
@@ -486,7 +486,10 @@ export async function ensureDownloadedOutcome(
         return { status: flight.cancelledAs ?? 'stale' };
       }
       const verifiedPath = completedPath;
-      const persistPathAndLedger = async (context: DbTransactionContext): Promise<boolean> => {
+      const persistPathAndLedger = async (
+        _tx: Queryable,
+        context: DbTransactionContext,
+      ): Promise<boolean> => {
         if (cacheReservation) {
           const recorded = await commitAttachmentCacheReservation(context, {
             path: verifiedPath,

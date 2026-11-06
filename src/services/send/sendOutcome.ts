@@ -18,7 +18,7 @@ import {
   type SendAttemptOwnerToken,
 } from '@db/repositories';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { clearFailedSendNotice, notifyFailedSend } from './sendFailureNotice';
 
 export interface SendOutcomeOptions {
@@ -216,13 +216,14 @@ export function isPreDispatchOneShotRejection(err: unknown): boolean {
  * This is a local policy refusal, not a transport failure: never feed it into the retry backoff.
  */
 export function retireUnavailableMessageTarget(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
   return withDbTransaction(
     db,
-    (context) => retireOutgoingWithinTransaction(context, tempGuid, ClientErrorCode.clientError),
+    (db, context) =>
+      retireOutgoingWithinTransaction(context, tempGuid, ClientErrorCode.clientError),
     commitGuard,
   );
 }
@@ -238,7 +239,7 @@ export function retireUnavailableMessageTarget(
  * case, treating it exactly like the guid-absent fallback.)
  */
 export async function reconcileSendOutcome(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   ack: SendAck,
   now: number,
@@ -270,7 +271,7 @@ export async function reconcileSendOutcome(
     }
     disposition = await withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         reconcileOutgoingAttemptAckWithinTransaction(context, tempGuid, {
           guid: ackGuid,
           attemptGuid: ack.attemptGuid!,
@@ -284,7 +285,7 @@ export async function reconcileSendOutcome(
   } else if (ackGuid && ackGuid !== tempGuid) {
     await withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         reconcileOutgoingSuccessWithinTransaction(
           context,
           tempGuid,
@@ -301,7 +302,7 @@ export async function reconcileSendOutcome(
   } else {
     disposition = await withDbTransaction(
       db,
-      (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid),
+      (db, context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid),
       commitGuard,
     );
   }
@@ -322,7 +323,7 @@ export async function reconcileSendOutcome(
  * sink. `now` seeds the retry backoff (defaults to Date.now() before writer-queue admission).
  */
 export async function handleSendFailure(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   err: unknown,
   logTag: string,
@@ -371,7 +372,7 @@ export async function handleSendFailure(
     : null;
   const reconciled = await withDbTransaction(
     db,
-    (context) =>
+    (db, context) =>
       oneShotRecord
         ? retireUncertainOutgoingWithinTransaction(
             context,

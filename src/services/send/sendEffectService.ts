@@ -10,7 +10,7 @@ import {
   insertOutgoingTextWithinTransaction,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { isProvenIMessageGroupChat, isProvenOneToOneIMessageChat } from '@utils';
 import { utf8Decode, utf8Encode } from '@utils/bytes';
 import {
@@ -44,9 +44,9 @@ export type SendEffectResult =
   | { readonly status: 'outcome-unknown'; readonly tempGuid: string };
 
 /** Effect sends are destructive one-shot work: never queue a second call behind an active one. */
-const activeEffects = new WeakMap<AppDatabase, Set<string>>();
+const activeEffects = new WeakMap<Queryable, Set<string>>();
 
-function claimEffect(db: AppDatabase, chatGuid: string): boolean {
+function claimEffect(db: Queryable, chatGuid: string): boolean {
   let active = activeEffects.get(db);
   if (!active) {
     active = new Set();
@@ -57,7 +57,7 @@ function claimEffect(db: AppDatabase, chatGuid: string): boolean {
   return true;
 }
 
-function releaseEffect(db: AppDatabase, chatGuid: string): void {
+function releaseEffect(db: Queryable, chatGuid: string): void {
   const active = activeEffects.get(db);
   active?.delete(chatGuid);
   if (active?.size === 0) activeEffects.delete(db);
@@ -115,14 +115,14 @@ function isDefiniteEffectFailure(error: unknown): boolean {
 }
 
 async function discardDefiniteAttempt(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   now: number,
   commitGuard: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => discardOutgoingMessageWithinTransaction(context, tempGuid, now),
+    (db, context) => discardOutgoingMessageWithinTransaction(context, tempGuid, now),
     commitGuard,
   );
 }
@@ -132,7 +132,7 @@ async function discardDefiniteAttempt(
  * it, remove a definitely-unsent attempt, or retain an unretryable delivery-unknown row.
  */
 export async function sendIMessageEffect(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendEffectArgs,
   now: number = Date.now(),
@@ -167,7 +167,7 @@ export async function sendIMessageEffect(
     const tempGuid = generateTempGuid();
     await withDbTransaction(
       db,
-      (context) =>
+      (db, context) =>
         insertOutgoingTextWithinTransaction(context, {
           tempGuid,
           chatGuid: args.chatGuid,

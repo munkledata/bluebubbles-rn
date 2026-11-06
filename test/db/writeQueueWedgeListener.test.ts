@@ -32,7 +32,7 @@ it('tells the listener once the queue stops moving, never while it is merely slo
   const first = holdRollingBackDbNeighbour(db, () => undefined);
   await first.entered;
   const second = holdRollingBackDbNeighbour(db, () => undefined);
-  const third = withDbTransaction(db, async () => 'third');
+  const third = withDbTransaction(db, async (db) => 'third');
   await jest.advanceTimersByTimeAsync(10_000);
   await first.cleanup();
   await second.entered;
@@ -45,12 +45,12 @@ it('tells the listener once the queue stops moving, never while it is merely slo
   // runs. Its failure is contained; the parked write still lands once the lock frees.
   const holder = holdRollingBackDbNeighbour(db, () => undefined);
   await holder.entered;
-  const parked = withDbTransaction(db, async () => 'parked');
+  const parked = withDbTransaction(db, async (db) => 'parked');
   await jest.advanceTimersByTimeAsync(20_000);
   expect(events).toEqual(['report:[db] write queue appears wedged', 'listener']);
 
   // Reported once per process: a later stuck caller does not tell the listener again.
-  const later = withDbTransaction(db, async () => 'later');
+  const later = withDbTransaction(db, async (db) => 'later');
   await jest.advanceTimersByTimeAsync(20_000);
   expect(events).toHaveLength(2);
 

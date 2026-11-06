@@ -7,7 +7,7 @@ import {
   insertOutgoingText,
   OUTGOING_MAX_ATTEMPTS,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import {
@@ -81,7 +81,7 @@ function one(raw: Database.Database, sql: string): Record<string, unknown> {
 }
 
 describe('sendIMessageMention', () => {
-  let db: AppDatabase;
+  let db: TestDb;
   let raw: Database.Database;
 
   beforeEach(async () => {

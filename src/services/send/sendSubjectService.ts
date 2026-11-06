@@ -17,7 +17,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { isProvenIMessageGroupChat, isProvenOneToOneIMessageChat } from '@utils';
 import {
   resolveRcsAttemptOwnership,
@@ -42,9 +42,9 @@ export type SendSubjectResult =
   | { readonly status: 'outcome-unknown'; readonly tempGuid: string };
 
 /** Subject sends are destructive one-shot work: never queue two attempts for one chat. */
-const activeSubjectSends = new WeakMap<AppDatabase, Set<string>>();
+const activeSubjectSends = new WeakMap<Queryable, Set<string>>();
 
-function claimSubjectSend(db: AppDatabase, chatGuid: string): boolean {
+function claimSubjectSend(db: Queryable, chatGuid: string): boolean {
   let active = activeSubjectSends.get(db);
   if (!active) {
     active = new Set();
@@ -55,7 +55,7 @@ function claimSubjectSend(db: AppDatabase, chatGuid: string): boolean {
   return true;
 }
 
-function releaseSubjectSend(db: AppDatabase, chatGuid: string): void {
+function releaseSubjectSend(db: Queryable, chatGuid: string): void {
   const active = activeSubjectSends.get(db);
   active?.delete(chatGuid);
   if (active?.size === 0) activeSubjectSends.delete(db);
@@ -79,14 +79,14 @@ function exactSubjectTargetWithinTransaction(
 }
 
 async function discardDefiniteAttempt(
-  db: AppDatabase,
+  db: ReadDb,
   tempGuid: string,
   now: number,
   commitGuard: DbCommitGuard,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => discardOutgoingMessageWithinTransaction(context, tempGuid, now),
+    (db, context) => discardOutgoingMessageWithinTransaction(context, tempGuid, now),
     commitGuard,
   );
 }
@@ -106,7 +106,7 @@ class SubjectTargetRejectedError extends Error {
  * removes the bubble; an unknown outcome keeps it as "may have been delivered".
  */
 export async function sendIMessageSubject(
-  db: AppDatabase,
+  db: ReadDb,
   http: HttpClient,
   args: SendSubjectArgs,
   now: number = Date.now(),
@@ -140,7 +140,7 @@ export async function sendIMessageSubject(
     try {
       await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           if (!(await exactSubjectTargetWithinTransaction(context, request.chatGuid))) {
             throw new SubjectTargetRejectedError();
           }
@@ -183,7 +183,7 @@ export async function sendIMessageSubject(
     try {
       const targetCurrent = await withDbTransaction(
         db,
-        async (context) => {
+        async (db, context) => {
           const current = await exactSubjectTargetWithinTransaction(context, request.chatGuid);
           if (!current) {
             await discardOutgoingMessageWithinTransaction(context, tempGuid, now);

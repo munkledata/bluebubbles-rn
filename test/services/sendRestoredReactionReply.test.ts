@@ -10,7 +10,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { Queryable, ReadDb } from '@db/types';
 import { sendIMessageReactionMessage } from '@/services/send/sendReactionService';
 import { sendRestoredIMessageReactionMessage } from '@/services/send/sendRestoredReactionService';
 import { sendTextMessage } from '@/services/send/sendService';
@@ -44,7 +44,7 @@ const one = (raw: Database.Database, sql: string) =>
 
 /** A proven any;+; iMessage group whose target's only remaining part is part 1. */
 async function seedGroupTarget(
-  db: AppDatabase,
+  db: ReadDb,
   chatGuid = GROUP,
   secondService = 'iMessage',
 ): Promise<void> {

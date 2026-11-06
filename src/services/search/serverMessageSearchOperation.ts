@@ -10,7 +10,7 @@ import {
   type SearchResultRow,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
@@ -22,7 +22,7 @@ const SERVER_SEARCH_RESULT_LIMIT = 50;
 
 export interface ServerMessageSearchDependencies {
   fetchMessages(query: string, signal: AbortSignal): Promise<Message[]>;
-  getDatabase(): AppDatabase;
+  getDatabase(): ReadDb;
 }
 
 function toAdoptableServerHit(message: Message): Message | null {
@@ -90,7 +90,7 @@ function dedupeAdoptableHits(messages: Message[]): Message[] {
  * runs while the process-wide DB writer lock is held.
  */
 export async function adoptServerMessageSearchHits(
-  db: AppDatabase,
+  db: ReadDb,
   messages: Message[],
   lease: RealtimeDeliveryLease,
   queryText = '',
@@ -113,7 +113,7 @@ export async function adoptServerMessageSearchHits(
       ];
       const stored = await withDbTransaction(
         db,
-        async (transactionContext) => {
+        async (db, transactionContext) => {
           const handleMap = await upsertHandlesWithinTransaction(transactionContext, sliceHandles);
           const chatMap = await upsertChatsWithinTransaction(
             transactionContext,

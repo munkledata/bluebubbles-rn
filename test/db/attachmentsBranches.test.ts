@@ -22,7 +22,7 @@ import {
 } from '@db/repositories';
 import { attachments, chats, messages, outgoingQueue } from '@db/schema';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { insertOutgoingAttachment, upsertAttachments } from '../support/repositoryWrappers';
 import { nextEventLoopTurn } from '../support/async';
@@ -180,7 +180,7 @@ async function waitForDriverGate(gate: DriverGate, label: string): Promise<void>
   if (!gate.didStart) throw new Error(`${label} did not start within 20 event-loop turns`);
 }
 
-async function holdRollingBackTransaction(db: AppDatabase): Promise<{
+async function holdRollingBackTransaction(db: ReadDb): Promise<{
   release: () => void;
   failure: Promise<unknown>;
 }> {
@@ -192,7 +192,7 @@ async function holdRollingBackTransaction(db: AppDatabase): Promise<{
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const neighbour = withDbTransaction(db, async () => {
+  const neighbour = withDbTransaction(db, async (db) => {
     markStarted();
     await held;
     throw new Error('neighbour rollback');
@@ -226,17 +226,13 @@ async function finishAfterQueuedObservation<T>(
   return result;
 }
 
-async function seedChat(db: AppDatabase, guid = 'c1'): Promise<number> {
+async function seedChat(db: ReadDb, guid = 'c1'): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
   return (await getChatIdByGuid(db, guid))!;
 }
 /** Upsert a message (optionally with attachments/text) and return its row id. */
-async function putMsg(
-  db: AppDatabase,
-  chatId: number,
-  m: Record<string, unknown>,
-): Promise<number> {
+async function putMsg(db: ReadDb, chatId: number, m: Record<string, unknown>): Promise<number> {
   const map = await upsertMessages(db, [Message.parse(m)], () => chatId, new Map());
   return map.get(m.guid as string)!;
 }
@@ -360,7 +356,7 @@ describe('insertOutgoingAttachment — transaction owner and async lifetime', ()
     const held = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbourOutcome = withDbTransaction(db, async () => {
+    const neighbourOutcome = withDbTransaction(db, async (db) => {
       raw.prepare('UPDATE chats SET latest_message_date = ? WHERE id = ?').run(newerDate, chatId);
       neighbourStarted();
       await held;
@@ -807,7 +803,7 @@ describe('updateAttachmentLocalPath', () => {
     await updateAttachmentLocalPath(db, 'att-replace-local-path', 'file:///documents/old.jpg');
 
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         replaceVisibleAttachmentLocalPathWithinTransaction(context, {
           attachmentGuid: 'att-replace-local-path',
           expectedLocalPath: 'file:///documents/old.jpg',
@@ -816,7 +812,7 @@ describe('updateAttachmentLocalPath', () => {
       ),
     ).resolves.toBe(true);
     await expect(
-      withDbTransaction(db, (context) =>
+      withDbTransaction(db, (db, context) =>
         replaceVisibleAttachmentLocalPathWithinTransaction(context, {
           attachmentGuid: 'att-replace-local-path',
           expectedLocalPath: 'file:///documents/old.jpg',
@@ -876,7 +872,7 @@ describe('updateAttachmentLocalPath', () => {
     const held = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       neighbourStarted();
       await held;
       throw new Error('neighbour rollback');

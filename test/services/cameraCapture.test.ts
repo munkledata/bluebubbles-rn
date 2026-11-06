@@ -5,7 +5,7 @@
  */
 import type Database from 'better-sqlite3';
 import { kvGet } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, TestDb } from '@db/types';
 import {
   CAMERA_CAPTURE_CHAT_KV_KEY,
   loadCameraCaptureChat,
@@ -18,7 +18,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 
-let mockDb: AppDatabase;
+let mockDb: TestDb;
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn(() => mockDb) }));
 

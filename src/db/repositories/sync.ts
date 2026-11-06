@@ -2,11 +2,11 @@ import { eq, sql } from 'drizzle-orm';
 import type { SyncMarker } from '@core/sync';
 import { syncMarkers } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
-import type { AppDatabase } from '../types';
+import type { Queryable } from '../types';
 
 // ---- Sync markers ----------------------------------------------------------
 
-export async function getSyncMarker(db: AppDatabase): Promise<SyncMarker> {
+export async function getSyncMarker(db: Queryable): Promise<SyncMarker> {
   const rows = await db.select().from(syncMarkers).where(eq(syncMarkers.id, 1)).limit(1);
   const row = rows[0];
   return {
@@ -31,7 +31,7 @@ export function setSyncMarkerWithinTransaction(
 }
 
 /** Derive a sync marker from the highest message rowid/date currently stored. */
-export async function maxMessageMarker(db: AppDatabase): Promise<SyncMarker> {
+export async function maxMessageMarker(db: Queryable): Promise<SyncMarker> {
   const rows = await db.all<{ r: number | null; t: number | null }>(
     sql`SELECT MAX(original_row_id) AS r, MAX(date_created) AS t FROM messages`,
   );

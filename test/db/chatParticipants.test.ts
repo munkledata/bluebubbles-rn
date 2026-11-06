@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { Chat, Message } from '@core/models';
 import { getChatParticipants, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 /**
@@ -43,7 +43,7 @@ function watchParticipantCount(raw: Database.Database, chatId: number): number[]
   return seen;
 }
 
-async function holdRollingBackTransaction(db: AppDatabase): Promise<{
+async function holdRollingBackTransaction(db: ReadDb): Promise<{
   release: () => void;
   failure: Promise<unknown>;
 }> {
@@ -55,7 +55,7 @@ async function holdRollingBackTransaction(db: AppDatabase): Promise<{
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const neighbour = withDbTransaction(db, async () => {
+  const neighbour = withDbTransaction(db, async (db) => {
     markStarted();
     await held;
     throw new Error('neighbour rollback');

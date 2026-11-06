@@ -9,11 +9,11 @@ import { buildMessageIntents } from '@/services/notifications/intents';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { NotifyingEventSink } from '@/services/realtime/notifyingEventSink';
 import { upsertContacts } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { setChatMute } from '../support/repositoryWrappers';
 
-function wire(db: AppDatabase) {
+function wire(db: ReadDb) {
   const intents: NotificationIntent[] = [];
   const sink = new NotifyingEventSink(new DbEventSink(db), db, buildMessageIntents, (i) => {
     intents.push(i);
@@ -31,7 +31,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
       return [{ kind: 'test' } as unknown as NotificationIntent];
     });
     const notify = jest.fn(async () => undefined);
-    const sink = new NotifyingEventSink(inner, {} as AppDatabase, build, notify);
+    const sink = new NotifyingEventSink(inner, {} as TestDb, build, notify);
 
     await sink.onEvent(
       { type: 'imessage-aliases-removed', payload: { aliases: [] } },

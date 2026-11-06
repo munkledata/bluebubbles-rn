@@ -192,7 +192,7 @@ describe('themeStore setters', () => {
     const held = new Promise<void>((resolve) => {
       releaseNeighbour = resolve;
     });
-    const neighbour = withDbTransaction(db, async () => {
+    const neighbour = withDbTransaction(db, async (db) => {
       raw.prepare('UPDATE kv SET value = ? WHERE key = ?').run('phantom', THEME_PREF_KEY);
       neighbourStarted();
       await held;

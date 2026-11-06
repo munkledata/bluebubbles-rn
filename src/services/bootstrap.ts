@@ -21,7 +21,7 @@ import {
   localCacheDirty,
   resumeChatPurges,
 } from '@db/repositories';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { areCriticalSettingsHydrated, hydrateAllStores } from '@state/hydrateStores';
 import { captureSessionTransportLease, useSessionStore } from '@state/sessionStore';
 import {
@@ -257,7 +257,7 @@ async function requirePriorForegroundDeliveryDrain(): Promise<void> {
 export interface ForegroundBootAttempt {
   readonly activationEpoch: number;
   readonly snapshot: ForegroundSessionSnapshot;
-  readonly resources: { db: AppDatabase | null };
+  readonly resources: { db: ReadDb | null };
 }
 
 export class ForegroundBootOperationalError extends Error {
@@ -350,7 +350,7 @@ function connectedForegroundAttempt(
  * completes recovery. A stale lease means Disconnect owns the transition and activation must stop.
  */
 async function recoverAttachmentCacheForActivation(
-  db: AppDatabase,
+  db: ReadDb,
   lease: RealtimeDeliveryLease,
   source: 'boot' | 'connect',
 ): Promise<'ready' | 'stale' | 'unavailable'> {
@@ -457,7 +457,7 @@ export async function openForegroundBootDatabase(
   attempt: ForegroundBootAttempt,
 ): Promise<void> {
   requireForegroundAttemptCurrent(attempt, context.stageSignal);
-  let db: AppDatabase;
+  let db: ReadDb;
   try {
     db = await ensureDatabase();
   } catch (error) {
@@ -526,7 +526,7 @@ async function requireMatchingForegroundSession(
 }
 
 async function recoverAttachmentCacheWithinDeadline(
-  db: AppDatabase,
+  db: ReadDb,
   deliveryLease: RealtimeDeliveryLease,
   isAuthorized: () => boolean,
   source: 'boot' | 'connect',
@@ -939,7 +939,7 @@ export async function connect(
       // A validated server is not enough to expose cached UI or start sync/socket work. On a fresh
       // process the kv-backed settings stores are still at module defaults until the encrypted DB is
       // open. Restore them under this candidate's ownership first; Disconnect invalidates the guard.
-      let db: AppDatabase;
+      let db: ReadDb;
       const databaseOperation = ensureDatabase();
       const databaseResult = await settleWithinDeadline(
         databaseOperation,
@@ -1880,7 +1880,7 @@ const WIPE_ATTEMPTS = 2;
  * idempotent. Anything still dirty after that makes the wipe fail closed: the tombstone stays in
  * place and a later boot/connect retries before it can authorize another account.
  */
-async function wipeLocalCache(db: AppDatabase): Promise<boolean> {
+async function wipeLocalCache(db: ReadDb): Promise<boolean> {
   for (let attempt = 1; attempt <= WIPE_ATTEMPTS; attempt++) {
     try {
       await clearLocalCache(db);
