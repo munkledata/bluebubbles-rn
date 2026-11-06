@@ -47,4 +47,10 @@ describe('App Lock and Secure Screen window policy', () => {
       expect(controller).toContain(`persist(activity, ${key}, enabled) apply(activity)`);
     }
   });
+
+  it('exposes the persisted App Lock mirror to JavaScript for a lost vault entry (F-12)', () => {
+    expect(controller).toContain(
+      'Function("getAppLockEnabled") { runOnMainThread { ScreenSecurityController.appLockEnabled(currentActivity()) } }',
+    );
+  });
 });

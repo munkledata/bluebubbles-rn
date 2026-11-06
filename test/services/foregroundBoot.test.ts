@@ -136,8 +136,19 @@ jest.mock('@/services/bootstrap', () => {
     }
   }
 
+  class ForegroundBootKeyLostError extends Error {
+    readonly code = 'database-key-lost';
+    readonly userMessage =
+      'Gator’s encrypted storage can’t be opened. Clear Gator’s app data in Android Settings and connect again.';
+    constructor() {
+      super('database key lost');
+      this.name = 'ForegroundBootKeyLostError';
+    }
+  }
+
   return {
     activateForegroundBootSession: mockActivateForegroundBootSession,
+    ForegroundBootKeyLostError,
     ForegroundBootOperationalError,
     ForegroundBootSupersededError,
     hydrateForegroundBootSettings: mockHydrateForegroundBootSettings,
@@ -594,6 +605,27 @@ describe('production foreground boot singleton', () => {
       runId: 2,
     });
     expect(mockOpenForegroundBootDatabase).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats a lost database key as fatal: the message tells the owner to clear app data (F-12)', async () => {
+    const { ForegroundBootKeyLostError } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('@/services/bootstrap') as typeof import('@/services/bootstrap');
+    mockOpenForegroundBootDatabase.mockRejectedValueOnce(new ForegroundBootKeyLostError(undefined));
+    const { foreground } = loadForegroundBoot();
+
+    await expect(foreground.startForegroundBoot()).resolves.toMatchObject({
+      status: 'failed',
+      runId: 1,
+      failure: {
+        stage: 'database',
+        kind: 'fatal',
+        failClosed: true,
+        code: 'database-key-lost',
+        userMessage: expect.stringContaining('Clear Gator’s app data in Android Settings'),
+      },
+    });
+    expect(mockOpenForegroundBootDatabase).toHaveBeenCalledTimes(1);
   });
 
   it('replays a delayed process-level degraded issue onto the retry generation', async () => {

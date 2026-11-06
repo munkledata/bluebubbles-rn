@@ -1,5 +1,6 @@
 import { InMemoryVault } from '@core/secure';
 import {
+  DatabaseKeyLostError,
   getOrCreateDbKey,
   isLegacyPassphraseKey,
   isRawKey,
@@ -243,6 +244,41 @@ describe('key form (F-4: raw key instead of a stretched passphrase)', () => {
     }
     expect(isRawKey(`x'${'AB'.repeat(32)}'`)).toBe(false);
     expect(isRawKey(`x'${'ab'.repeat(31)}'`)).toBe(false);
+  });
+});
+
+describe('a lost Keystore key with an existing database (F-12)', () => {
+  it('fails closed instead of minting a key the existing file cannot be read with', async () => {
+    const vault = new InMemoryVault();
+    const fileExists = jest.fn(async () => true);
+    await expect(getOrCreateDbKey(vault, fileExists)).rejects.toBeInstanceOf(DatabaseKeyLostError);
+    await expect(getOrCreateDbKey(vault, fileExists)).rejects.toMatchObject({
+      name: 'DatabaseKeyLostError',
+    });
+    expect(await vault.get('dbEncryptionKey')).toBeNull(); // nothing minted, nothing stored
+  });
+
+  it('mints a key on a true first run, and never consults the file when a key exists', async () => {
+    const vault = new InMemoryVault();
+    const fileExists = jest.fn(async () => false);
+    const key = await getOrCreateDbKey(vault, fileExists);
+    expect(isRawKey(key)).toBe(true);
+    expect(fileExists).toHaveBeenCalledTimes(1);
+    expect(await getOrCreateDbKey(vault, fileExists)).toBe(key);
+    expect(fileExists).toHaveBeenCalledTimes(1);
+  });
+
+  it('reaches the file check through resolveDbKey when no rotation is staged', async () => {
+    const vault = new InMemoryVault();
+    const probe = jest.fn(async () => true);
+    await expect(resolveDbKey(vault, probe, async () => true)).rejects.toBeInstanceOf(
+      DatabaseKeyLostError,
+    );
+    expect(probe).not.toHaveBeenCalled();
+    // A staged rotation means a key existed moments ago: recovery, not a lost key.
+    await vault.set('dbEncryptionKey', 'ab'.repeat(32));
+    await vault.set('dbEncryptionKeyPending', `x'${'cd'.repeat(32)}'`);
+    expect(await resolveDbKey(vault, probe, async () => true)).toBe('ab'.repeat(32));
   });
 });
 

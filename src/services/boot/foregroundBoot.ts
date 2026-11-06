@@ -7,6 +7,7 @@ import { startSyncedBackgroundCacheMaintenance } from '../backgrounds/syncedBack
 import { registerBackgroundSync } from '../background/backgroundSync';
 import {
   activateForegroundBootSession,
+  ForegroundBootKeyLostError,
   ForegroundBootOperationalError,
   ForegroundBootSupersededError,
   hydrateForegroundBootSettings,
@@ -70,6 +71,15 @@ function classifyForegroundBootFailure(
       code: 'invalid-app-lock-setting',
       userMessage:
         'Gator found an invalid App Lock setting. Reinstall or clear app data to continue.',
+    };
+  }
+  if (error instanceof ForegroundBootKeyLostError) {
+    // The encrypted file exists but its Keystore key is gone: no retry can open it (F-12).
+    return {
+      kind: 'fatal',
+      failClosed: true,
+      code: error.code,
+      userMessage: error.userMessage,
     };
   }
   if (error instanceof ForegroundBootOperationalError) {

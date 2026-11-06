@@ -21,6 +21,7 @@ import {
   localCacheDirty,
   resumeChatPurges,
 } from '@db/repositories';
+import { DatabaseKeyLostError } from '@db/key';
 import type { ReadDb } from '@db/types';
 import { areCriticalSettingsHydrated, hydrateAllStores } from '@state/hydrateStores';
 import { captureSessionTransportLease, useSessionStore } from '@state/sessionStore';
@@ -103,6 +104,9 @@ const SETTINGS_HYDRATION_FAILURE_MESSAGE =
   'Gator could not safely load local settings. Restart the app and try again.';
 const DATABASE_BOOT_FAILURE_MESSAGE =
   'Gator could not open your encrypted messages. Try again. If this keeps happening, restart the app.';
+/** F-12: the Keystore key is gone but the encrypted file remains; no retry can open it. */
+export const DATABASE_KEY_LOST_MESSAGE =
+  'Gator’s encrypted storage can’t be opened. Clear Gator’s app data in Android Settings and connect again.';
 const ATTACHMENT_CACHE_RECOVERY_DEADLINE_MS = 45_000;
 // Review item 888: a restart repeats the same failed check, so point to the repair instead.
 const ATTACHMENT_CACHE_PAUSED_MESSAGE =
@@ -268,6 +272,19 @@ export class ForegroundBootOperationalError extends Error {
   ) {
     super(userMessage, options);
     this.name = 'ForegroundBootOperationalError';
+  }
+}
+
+/**
+ * Terminal: the encrypted database exists but its Keystore key is gone (F-12). Retrying the stage
+ * cannot help; the owner has to clear app data and connect again.
+ */
+export class ForegroundBootKeyLostError extends Error {
+  readonly code = 'database-key-lost';
+  readonly userMessage = DATABASE_KEY_LOST_MESSAGE;
+  constructor(cause: unknown) {
+    super(DATABASE_KEY_LOST_MESSAGE, { cause });
+    this.name = 'ForegroundBootKeyLostError';
   }
 }
 
@@ -462,6 +479,9 @@ export async function openForegroundBootDatabase(
     db = await ensureDatabase();
   } catch (error) {
     logger.error('[db] initialization failed', 'syjo8z3ok4', error);
+    if (error instanceof DatabaseKeyLostError) {
+      throw new ForegroundBootKeyLostError(error);
+    }
     throw new ForegroundBootOperationalError(
       'database-open-failed',
       DATABASE_BOOT_FAILURE_MESSAGE,

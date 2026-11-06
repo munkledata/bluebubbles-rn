@@ -43,14 +43,46 @@ export function isRawKey(key: string): boolean {
   return RAW_KEY_RE.test(key);
 }
 
+/** Android cleared the Keystore-backed key while the encrypted database file still exists (F-12). */
+export class DatabaseKeyLostError extends Error {
+  constructor() {
+    super('The database key is gone but the encrypted database file still exists.');
+    this.name = 'DatabaseKeyLostError';
+  }
+}
+
+/** Whether the encrypted database file already exists on disk. */
+export type DatabaseFileExists = () => Promise<boolean>;
+
+/**
+ * Production check: `gator.db` under op-sqlite's Android database directory. Both modules are
+ * native and are loaded only when the vault really has no key, which keeps host tests pure.
+ */
+async function androidDatabaseFileExists(): Promise<boolean> {
+  const [{ ANDROID_DATABASE_PATH }, { File }] = await Promise.all([
+    import('@op-engineering/op-sqlite'),
+    import('expo-file-system'),
+  ]);
+  return new File(String(ANDROID_DATABASE_PATH), DB_NAME).exists;
+}
+
 /**
  * Get the SQLCipher key from the secure vault, generating a fresh 256-bit random
  * key on first run. The key never leaves the Keystore-backed vault; losing it
  * means the encrypted DB is unrecoverable (a full re-sync repopulates it).
+ *
+ * A missing key with an existing database file is NOT a first run: Android invalidated the
+ * Keystore entry (device credential change, backup restore, OS repair). Minting a new key there
+ * would leave every boot failing on the first query against a file the new key cannot read, so it
+ * fails closed with {@link DatabaseKeyLostError} and the boot shows what to do instead.
  */
-export async function getOrCreateDbKey(vault: SecureVault): Promise<string> {
+export async function getOrCreateDbKey(
+  vault: SecureVault,
+  databaseFileExists: DatabaseFileExists = async () => false,
+): Promise<string> {
   const existing = await vault.get('dbEncryptionKey');
   if (existing) return existing;
+  if (await databaseFileExists()) throw new DatabaseKeyLostError();
   const key = newRawKey();
   await vault.set('dbEncryptionKey', key);
   return key;
@@ -87,9 +119,10 @@ async function keyOpensDb(key: string): Promise<boolean> {
 export async function resolveDbKey(
   vault: SecureVault,
   probe: (key: string) => Promise<boolean> = keyOpensDb,
+  databaseFileExists: DatabaseFileExists = androidDatabaseFileExists,
 ): Promise<string> {
   const pending = await vault.get('dbEncryptionKeyPending');
-  if (!pending) return getOrCreateDbKey(vault);
+  if (!pending) return getOrCreateDbKey(vault, databaseFileExists);
 
   const primary = await vault.get('dbEncryptionKey');
   if (primary && (await probe(primary))) {

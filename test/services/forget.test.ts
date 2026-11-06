@@ -288,6 +288,7 @@ jest.mock('expo-file-system', () => ({
 
 // Jest needs these mock factories installed before the module under test is imported.
 /* eslint-disable import/first */
+import { DatabaseKeyLostError } from '@db/key';
 import { ApiError } from '@core/api/errors';
 import { useSessionStore } from '@state/sessionStore';
 import { useDownloadStore } from '@state/downloadStore';
@@ -319,6 +320,7 @@ import {
   previousServerRevocationPending,
   openForegroundBootDatabase,
   type ForegroundBootAttempt,
+  DATABASE_KEY_LOST_MESSAGE,
 } from '@/services/bootstrap';
 import type { BootStageContext } from '@/services/boot/bootCoordinator';
 import {
@@ -601,6 +603,26 @@ describe('foreground boot production adapters', () => {
     disposers[0]?.();
     expect(recoveryLease?.isCurrent()).toBe(false);
     expect(purgeIsCurrent?.()).toBe(false);
+  });
+
+  it('maps a lost database key to the terminal key-lost error, not a retryable open failure (F-12)', async () => {
+    const { context } = productionBootContext();
+    const attempt = await productionBootAttempt(context);
+    const lost = new DatabaseKeyLostError();
+    const errorLog = jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    ensureDatabase.mockRejectedValueOnce(lost);
+
+    await expect(openForegroundBootDatabase(context, attempt)).rejects.toMatchObject({
+      name: 'ForegroundBootKeyLostError',
+      code: 'database-key-lost',
+      userMessage: DATABASE_KEY_LOST_MESSAGE,
+      cause: lost,
+    });
+    expect(errorLog).toHaveBeenCalledWith(
+      '[db] initialization failed',
+      ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization,
+      lost,
+    );
   });
 
   it('maps real database and critical-settings failures to safe operational errors', async () => {

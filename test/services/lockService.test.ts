@@ -13,6 +13,7 @@ const isDevServer = jest.fn(() => false);
 const vaultGet = jest.fn(async () => null as string | null);
 const vaultSet = jest.fn<Promise<void>, [string, string]>(async () => undefined);
 const setNativeAppLockEnabled = jest.fn(() => true);
+const getNativeAppLockEnabled = jest.fn((): boolean | null => null);
 const hideShareShortcutsForAppLock = jest.fn(() => true);
 
 jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }));
@@ -29,6 +30,7 @@ jest.mock('@/services/clients', () => ({
   vault: { get: vaultGet, set: vaultSet },
 }));
 jest.mock('@native/screenSecurity', () => ({
+  getNativeAppLockEnabled,
   setNativeAppLockEnabled,
 }));
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
@@ -64,6 +66,7 @@ beforeEach(() => {
   vaultSet.mockReset().mockResolvedValue(undefined);
   vaultGet.mockReset().mockResolvedValue(null);
   setNativeAppLockEnabled.mockReset().mockReturnValue(true);
+  getNativeAppLockEnabled.mockReset().mockReturnValue(null);
   hideShareShortcutsForAppLock.mockReset().mockReturnValue(true);
   useLockStore.setState({
     enabled: true,
@@ -259,6 +262,33 @@ describe('setAppLockEnabled', () => {
 
     expect(commitAppLockNotificationPrivacy).toHaveBeenCalledTimes(1);
     expect(releaseAppLockNotificationPrivacyBarrier).not.toHaveBeenCalled();
+  });
+
+  it('restores App Lock from the native mirror when the vault entry is gone (F-12)', async () => {
+    useLockStore.setState({ enabled: false, locked: false, hydrated: false });
+    vaultGet.mockResolvedValueOnce(null);
+    getNativeAppLockEnabled.mockReturnValueOnce(true);
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await hydrateLock();
+
+    expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true, hydrated: true });
+    expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
+    expect(warn).toHaveBeenCalledWith(
+      '[lock] App Lock vault entry missing; restored from the native mirror',
+    );
+  });
+
+  it('keeps App Lock off for a missing vault entry when the native mirror is off or absent', async () => {
+    for (const mirror of [false, null]) {
+      useLockStore.setState({ enabled: true, locked: true, hydrated: false });
+      vaultGet.mockResolvedValueOnce(null);
+      getNativeAppLockEnabled.mockReturnValueOnce(mirror);
+
+      await hydrateLock();
+
+      expect(useLockStore.getState()).toMatchObject({ enabled: false, hydrated: true });
+    }
   });
 
   it('hydrates the native Recents owner before publishing the persisted App Lock choice', async () => {
