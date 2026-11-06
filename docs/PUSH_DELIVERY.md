@@ -495,6 +495,25 @@ background failure. The incoming-ingress certificate pins the loan around the un
 body and the post-store download hook. Exact Android killed-process execution remains device-only
 evidence.
 
+### 2.14 Cleartext origins: the posture, and why there is no key-less fallback (2026-11-06)
+
+A cleartext `http://` origin reaches `connect()` only with the explicit acknowledgement from the
+Manual setup switch (`app/(setup)/manual.tsx`; the gate is described in
+`src/core/config/serverDiscovery.ts`), and a rotation to another cleartext origin asks for that
+acknowledgement again (`ServerRotationApprovalHost`). Section 2.7 records the consequence:
+registration sends the push-encryption key through `HttpClient`, and only HTTPS hides it from a
+local-network observer, so an owner-approved cleartext connection carries no strong
+push-confidentiality claim. Since 2026-11-06 the setup switch says so in its own words.
+
+The 2026-11-05 architecture review (item F-11) proposed omitting `pushEncryption` from the
+registration body on cleartext origins, so that such a server would get generic notices only. That
+was rejected on 2026-11-06: the scoped-credential enrolment requires the key. `normalizeRegistration`
+in `src/core/secure/credentialUpgrade.ts` accepts only a registration with exactly `name`,
+`provider`, `token` and a V2/V3 `pushEncryption`, `registerDevice` posts that record in one body,
+and the app no longer has a plaintext push receive path (2.7). A key-less registration would
+therefore fail enrolment instead of degrading it. The choice stays with the user at setup: use
+HTTPS, or accept that the local network can read the key. No code change.
+
 ---
 
 ## 3. How to diagnose push next time

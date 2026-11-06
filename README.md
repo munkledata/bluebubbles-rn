@@ -166,7 +166,13 @@ the EAS profiles intentionally have no update-channel fields.
   writing the temporary share file, then deletes that temporary file after sharing.
 - **Transport TLS:** HTTPS uses Android’s hostname validation and built-in system certificate
   authorities. Certificate authorities added by the user in Android Settings are not trusted.
-  There is no application-level certificate pinning or bad-certificate bypass.
+  There is no application-level certificate pinning or bad-certificate bypass. A cleartext
+  `http://` origin is accepted only after the explicit "Allow insecure connection" switch during
+  setup, and a change to another cleartext origin asks again. On such a connection the server
+  password and the push-encryption key enrolment are readable by anyone on that network, so push
+  confidentiality then holds only against observers off that network. The app does not fall back
+  to key-less generic push notices on cleartext: the scoped-credential registration requires the
+  encrypted push key, so omitting it would fail enrolment rather than degrade it.
 - **Push/providers:** Firebase Cloud Messaging may carry push data. The visible, unlocked Find My
   screen uses the native Google Maps Android SDK for server-provided coordinates; Find My does not
   read the phone's own location. Google can receive those precise coordinates, the phone IP,

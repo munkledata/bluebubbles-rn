@@ -36,7 +36,8 @@ const ENGLISH_MESSAGES = {
   'manual.insecure.label': 'Allow insecure connection',
   'manual.insecure.warning.prefix': 'This server uses unencrypted ',
   'manual.insecure.warning.protocol': 'http://',
-  'manual.insecure.warning.suffix': '. Only enable for a server you trust.',
+  'manual.insecure.warning.suffix':
+    '. Your password and push-notification key also travel unencrypted on this network. Only enable for a server you trust.',
   'manual.subtitle':
     'Enter your {serverName} address and password. A password from the server’s Paired Clients list works too. https:// addresses need a standard certificate; ones you installed yourself in Android Settings won’t work.',
   'manual.title': 'Server details',
