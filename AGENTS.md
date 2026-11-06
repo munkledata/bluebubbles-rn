@@ -42,7 +42,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 | Session teardown barrier          | `docs/REL_005A_TEARDOWN_INVENTORY.md`                                                                   |
 | Authoritative remediation status  | `docs/WORK_PLAN_2026-08-03.md`                                                                          |
 | Authoritative release-task status | `docs/RELEASE_PLAN.md`                                                                                  |
-| Audit history                     | `AUDIT_REPORT.md`                                                                                       |
+| Audit history                     | `docs/history/AUDIT_REPORT.md`                                                                          |
 | Exact-candidate release gate      | `RELEASE_CHECKLIST.md`                                                                                  |
 | Phase/release dependencies        | `docs/PHASE-DEPENDENCIES.md`, `RELEASE_CHECKLIST.md`                                                    |
 | App/server event and API parity   | `docs/APP_SERVER_PARITY.md`                                                                             |

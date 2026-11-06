@@ -2,8 +2,8 @@
 
 > **RETIRED AS A STATUS TRACKER.** This cross-repository audit preserves its dated findings and remediation
 > rationale. Its risk verdict, “open” wording, SDK/source descriptions, and server state are not current. Current app
-> tasks and dispositions live in [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); current protocol
-> evidence lives in [`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md). Server-only status must be checked in
+> tasks and dispositions live in [`docs/WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md); current protocol
+> evidence lives in [`docs/APP_SERVER_PARITY.md`](../APP_SERVER_PARITY.md). Server-only status must be checked in
 > the server repository.
 
 > **HISTORICAL UPDATE RECORDED 2026-06-30:** Every APP-SIDE finding is remediated or a documented intentional
@@ -184,7 +184,7 @@ scheduler claim, and WebPush SSRF guard).
 
 **Deferred / decision items:** At the 2026-06-21 checkpoint these app items were recorded in the now-retired
 [REMAINING_WORK.md](./REMAINING_WORK.md); current app dispositions are in
-[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). Server-only follow-ups remain in the server
+[`docs/WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md). Server-only follow-ups remain in the server
 repository's `AUDIT_FOLLOWUPS.md`.
 
 - **F10 — Android `requireAuthentication`:** intentionally left OFF (would break headless-FCM-while-locked

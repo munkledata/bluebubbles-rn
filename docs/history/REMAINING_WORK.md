@@ -3,10 +3,10 @@
 > **RETIRED — NOT CURRENT STATUS.** This checklist and its 2026-06-30 update are retained as historical
 > rationale only. Do not use its checkboxes, build link, branch claim, priorities, or “still open” wording to
 > choose work. Current remediation status is in
-> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); release-task status is in
-> [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md); exact-candidate operations are in
-> [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md); device-only proof is in
-> [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md).
+> [`docs/WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md); release-task status is in
+> [`docs/RELEASE_PLAN.md`](../RELEASE_PLAN.md); exact-candidate operations are in
+> [`RELEASE_CHECKLIST.md`](../../RELEASE_CHECKLIST.md); device-only proof is in
+> [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](../DEVICE_VERIFICATION_CHECKLIST.md).
 
 > **HISTORICAL UPDATE RECORDED 2026-06-30:** Several items closed since this was written — **settings search,
 > download-concurrency config, seeded redacted avatars, and client error-code assignment on send

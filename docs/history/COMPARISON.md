@@ -2,8 +2,8 @@
 
 > **RETIRED AS A STATUS/GAP TRACKER.** This comparison preserves the dated source review that informed later
 > work; its “still open” claims, package names, line counts, upstream branch distance, and feature gaps are not
-> current. Use [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md) for current work and
-> [`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md) for current app/server protocol evidence.
+> current. Use [`docs/WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md) for current work and
+> [`docs/APP_SERVER_PARITY.md`](../APP_SERVER_PARITY.md) for current app/server protocol evidence.
 
 > **HISTORICAL UPDATE RECORDED 2026-06-30:** Many gaps flagged below are now CLOSED — socket backoff +
 > reconnect escalation, incremental per-page sync, reactive group membership, conversation-details

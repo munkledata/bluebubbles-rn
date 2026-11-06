@@ -4,9 +4,9 @@
 > implementation notes, and verification checkpoints. A later checkpoint does not make the whole file current, and
 > none of its suite counts, migration heads, inventory totals, branch descriptions, or “remains open” wording should
 > select present work. Current remediation status lives in
-> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); the four release-operation task
-> statuses live in [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md); exact-candidate operations live
-> in [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md).
+> [`docs/WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md); the four release-operation task
+> statuses live in [`docs/RELEASE_PLAN.md`](../RELEASE_PLAN.md); exact-candidate operations live
+> in [`RELEASE_CHECKLIST.md`](../../RELEASE_CHECKLIST.md).
 
 > **STATUS UPDATE (2026-07-17):** The tables below are a FROZEN 2026-06-20 snapshot — do not read
 > them as current status. Since then: **F-2 (group add/remove/rename UI, `chat-settings/[guid].tsx`),
@@ -2810,7 +2810,7 @@ their Android, process-death, hostile-input, privacy, or account-switch behavior
 unsafe. That is why this remediation keeps the architecture and hardens its edges.
 
 The authoritative, item-by-item implementation plan is
-[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). It includes acceptance criteria,
+[`docs/WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md). It includes acceptance criteria,
 release disposition, ordering, and verification for every current finding. The older tables below
 remain a historical Flutter-parity snapshot and must not be used as present status.
 
@@ -2957,7 +2957,7 @@ artifact rather than a rewrite or a package-fashion overhaul.
 >   hygiene (SEC-5/6). Test/file counts below are historical (as of 2026-06-30: **104 suites / 532 tests**).
 >   Everything below is the ORIGINAL 2026-06-20 snapshot.
 >
-> **Superseded for current feature/parity status by** [`docs/OLD_APP_PARITY_AUDIT_2026-07-15.md`](./docs/OLD_APP_PARITY_AUDIT_2026-07-15.md) **and** [`docs/GITHUB_ISSUES_FEATURE_AUDIT_2026-07-15.md`](./docs/GITHUB_ISSUES_FEATURE_AUDIT_2026-07-15.md) **(2026-07-15).** This file is retained as the 2026-06-20 baseline; where it disagrees with those, trust the newer audits and the code. (Note: SEC-1's `requireAuthentication: true` recommendation was later explicitly decided _against_ by design — see `src/native/secureVault.ts` — so it is closed, not open.)
+> **Superseded for current feature/parity status by** [`docs/OLD_APP_PARITY_AUDIT_2026-07-15.md`](../OLD_APP_PARITY_AUDIT_2026-07-15.md) **and** [`docs/GITHUB_ISSUES_FEATURE_AUDIT_2026-07-15.md`](../GITHUB_ISSUES_FEATURE_AUDIT_2026-07-15.md) **(2026-07-15).** This file is retained as the 2026-06-20 baseline; where it disagrees with those, trust the newer audits and the code. (Note: SEC-1's `requireAuthentication: true` recommendation was later explicitly decided _against_ by design — see `src/native/secureVault.ts` — so it is closed, not open.)
 
 _Generated 2026-06-20 from a 7-agent audit (635k tokens) of the React Native rebuild
 (`bluebubbles-rn`, 176 source files / 19 screens / **77 test files, 345 passing**) against the

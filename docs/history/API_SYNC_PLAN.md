@@ -3,8 +3,8 @@
 > **RETIRED AS A STATUS TRACKER.** This plan preserves the reasoning and wire-shape discoveries from its
 > June/July implementation passes; its phases, “still open” text, branch claims, paths, and test counts are not
 > current work selection. Current task status and ownership live in
-> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). Current app/server protocol evidence and
-> intentional nonalignments live in [`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md).
+> [`docs/WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md). Current app/server protocol evidence and
+> intentional nonalignments live in [`docs/APP_SERVER_PARITY.md`](../APP_SERVER_PARITY.md).
 
 > **HISTORICAL UPDATE RECORDED 2026-06-30:** The app-side Phase A + endpoint-shape reconciliation + outgoing
 > reconcile + contract fixtures/tests are DONE, and the server contacts endpoint (P2#12) IS wired
