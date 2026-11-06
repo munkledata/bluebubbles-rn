@@ -2183,7 +2183,9 @@ export function inspectPackagedAndroidBundle(
     throw new Error(
       [
         'packaged AAB contains forbidden absolute user-directory metadata:',
-        ...sensitiveMetadataFindings.map((finding) => `- ${finding.path}: ${finding.rule}`),
+        ...sensitiveMetadataFindings.map(
+          (finding) => `- ${finding.path}: ${finding.rule} (sha256 ${finding.sha256})`,
+        ),
       ].join('\n'),
     );
   }

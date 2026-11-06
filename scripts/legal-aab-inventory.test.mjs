@@ -183,7 +183,15 @@ test('sensitive metadata scan finds configured raw user-directory markers withou
   assert.equal(containsAbsoluteUserDirectory('/var/tmp/project'), false);
 
   const findings = scanZipArchiveForSensitiveMetadata(archive);
-  assert.deepEqual(findings, [{ path: 'base/assets/app.config', rule: 'absolute-user-directory' }]);
+  assert.deepEqual(findings, [
+    {
+      path: 'base/assets/app.config',
+      rule: 'absolute-user-directory',
+      sha256: createHash('sha256')
+        .update(`{"path":"/Users/${privateUsername}/${privateRemainder}"}`)
+        .digest('hex'),
+    },
+  ]);
   assert.equal(JSON.stringify(findings).includes(privateUsername), false);
   assert.equal(JSON.stringify(findings).includes(privateRemainder), false);
 });
@@ -200,7 +208,7 @@ test('sensitive metadata exceptions require an exact archive path and complete f
   const reviewedArchive = zip([[reviewedPath, reviewedContents]]);
 
   assert.deepEqual(scanZipArchiveForSensitiveMetadata(reviewedArchive), [
-    { path: reviewedPath, rule: 'absolute-user-directory' },
+    { path: reviewedPath, rule: 'absolute-user-directory', sha256: reviewedException.sha256 },
   ]);
   assert.deepEqual(
     classifyZipArchiveSensitiveMetadata(reviewedArchive, undefined, {
@@ -219,19 +227,32 @@ test('sensitive metadata exceptions require an exact archive path and complete f
     },
   );
 
-  const changedBytes = zip([[reviewedPath, Buffer.concat([reviewedContents, Buffer.from([0])])]]);
+  const changedContents = Buffer.concat([reviewedContents, Buffer.from([0])]);
+  const changedBytes = zip([[reviewedPath, changedContents]]);
   assert.deepEqual(
     scanZipArchiveForSensitiveMetadata(changedBytes, undefined, {
       reviewedExceptions: [reviewedException],
     }),
-    [{ path: reviewedPath, rule: 'absolute-user-directory' }],
+    [
+      {
+        path: reviewedPath,
+        rule: 'absolute-user-directory',
+        sha256: createHash('sha256').update(changedContents).digest('hex'),
+      },
+    ],
   );
   const renamedArchive = zip([['base/lib/arm64-v8a/librenamed.so', reviewedContents]]);
   assert.deepEqual(
     scanZipArchiveForSensitiveMetadata(renamedArchive, undefined, {
       reviewedExceptions: [reviewedException],
     }),
-    [{ path: 'base/lib/arm64-v8a/librenamed.so', rule: 'absolute-user-directory' }],
+    [
+      {
+        path: 'base/lib/arm64-v8a/librenamed.so',
+        rule: 'absolute-user-directory',
+        sha256: reviewedException.sha256,
+      },
+    ],
   );
   const additionalMarker = zip([
     [reviewedPath, reviewedContents],
@@ -241,7 +262,13 @@ test('sensitive metadata exceptions require an exact archive path and complete f
     scanZipArchiveForSensitiveMetadata(additionalMarker, undefined, {
       reviewedExceptions: [reviewedException],
     }),
-    [{ path: 'base/lib/arm64-v8a/libextra.so', rule: 'absolute-user-directory' }],
+    [
+      {
+        path: 'base/lib/arm64-v8a/libextra.so',
+        rule: 'absolute-user-directory',
+        sha256: createHash('sha256').update('/Users/builder/extra').digest('hex'),
+      },
+    ],
   );
 });
 

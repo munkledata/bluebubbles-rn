@@ -487,7 +487,10 @@ function reviewedSensitiveMetadataExceptionMap(reviewedExceptions) {
 function classifySensitiveMetadataEntry(entry, contents, reviewedExceptions) {
   if (!containsAbsoluteUserDirectory(contents)) return null;
   const exception = reviewedExceptions.get(entry.path);
-  const digest = exception ? sha256(contents) : null;
+  // Every flagged file reports its digest: that is what a reviewer pins in
+  // REVIEWED_ANDROID_ABSOLUTE_PATH_EXCEPTIONS after inspecting the file, and unlike the matched text
+  // it reveals nothing about the path itself.
+  const digest = sha256(contents);
   if (exception && digest === exception.sha256) {
     return {
       reviewed: true,
@@ -501,7 +504,7 @@ function classifySensitiveMetadataEntry(entry, contents, reviewedExceptions) {
   }
   return {
     reviewed: false,
-    finding: { path: entry.path, rule: 'absolute-user-directory' },
+    finding: { path: entry.path, rule: 'absolute-user-directory', sha256: digest },
   };
 }
 
