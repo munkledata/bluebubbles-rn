@@ -1,6 +1,5 @@
 import { FCM_ENABLED } from '@core/realtime';
 import { logger } from '@core/secure';
-import { DB_DRIVER_CONTRACT_INTERNAL_FAILURE, runDbDriverSelfTest } from '@db/database';
 import { checkDeviceIntegrity } from '@native/deviceIntegrity';
 import { useLockStore } from '@state/lockStore';
 import { startSyncedBackgroundCacheMaintenance } from '../backgrounds/syncedBackground';
@@ -15,7 +14,6 @@ import {
   openForegroundBootDatabase,
   type ForegroundBootAttempt,
 } from '../bootstrap';
-import { runCryptoSelfTest } from '../clients';
 import { initErrorReporting } from '../errors';
 import { InvalidAppLockSettingError, hydrateLock } from '../lock';
 import { fileLogSink, initPersistentLogs } from '../logging/fileLogSink';
@@ -33,7 +31,20 @@ import {
   installForegroundBootIssueReporter,
   installForegroundBootRestarter,
 } from './foregroundBootInvalidation';
-import { startDevDbRelaunchContractIfRequested } from './devDbRelaunchContract';
+
+/**
+ * The dev-only harness (self-tests and the DB relaunch contract). Metro inlines `__DEV__` as false in
+ * release bundles and strips this branch with its require(), so src/db/devHarness, the relaunch
+ * contract and the waves never ship. Evaluated per call, not at module load: the node Jest project
+ * sets `__DEV__` after importing this module.
+ */
+function devHarness(): typeof import('./devHarnessBoot') | null {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- dev-only; Metro drops this branch from release bundles
+    return require('./devHarnessBoot') as typeof import('./devHarnessBoot');
+  }
+  return null;
+}
 
 const LOCK_TIMEOUT_MS = 10_000;
 const SESSION_TIMEOUT_MS = 10_000;
@@ -305,27 +316,14 @@ function startProcessWork(): void {
         ),
       );
   }
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    void runCryptoSelfTest()
-      .then((result) => logger.info('[crypto] self-test', result))
-      .catch((error) =>
-        reportOptionalFailure('dev-self-tests', 'crypto-self-test-failed', undefined, error),
-      );
-    void runDbDriverSelfTest().then(
-      (result) => logger.info(`GATOR_DB_CONTRACT_V3 ${JSON.stringify(result)}`),
-      () =>
-        logger.info(`GATOR_DB_CONTRACT_V3 ${JSON.stringify(DB_DRIVER_CONTRACT_INTERNAL_FAILURE)}`),
-    );
-  }
+  devHarness()?.runDevSelfTests(reportOptionalFailure);
 }
 
 /** Start the one process-owned foreground run and return the coordinator's exact shared Promise. */
 export function startForegroundBoot(): Promise<BootState> {
   initializeForegroundBootComposition();
-  if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    const relaunchContract = startDevDbRelaunchContractIfRequested();
-    if (relaunchContract) return relaunchContract;
-  }
+  const relaunchContract = devHarness()?.startDevDbRelaunchContractIfRequested();
+  if (relaunchContract) return relaunchContract;
   const run = coordinator.start();
   startProcessWork();
   replayProcessIssues();

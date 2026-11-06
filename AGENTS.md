@@ -101,7 +101,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
   (works in both places); a helper that writes takes `WriteDb` and is only callable with a `tx`.
   Passing a `WriteDb` to a `ReadDb` helper is a compile error: that is the nesting rule, enforced.
 - `TestDb` (test seeding, the dev throwaway doorway) satisfies every parameter kind. Only
-  `src/db/transaction.ts`, `src/db/database.ts` and tests may assert a `WriteDb`/`TestDb`;
+  `src/db/transaction.ts`, `src/db/database.ts`, the dev harness and tests may assert a `WriteDb`/`TestDb`;
   `check:architecture` enforces that and the raw-driver, `getRawDatabase()`, `'gator.db'` and raw
   write-statement boundaries. In Node tests a nested claim rejects with `DbTransactionNestedError`
   within 1.5 s instead of hanging. Development builds throw the same error into any waiter whose
@@ -123,7 +123,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 
 ### op-sqlite/Drizzle behavior
 
-- Keep the `drizzleAdapter` Proxy in `src/db/database.ts`; Drizzle does not natively match
+- Keep the `drizzleAdapter` Proxy in `src/db/opSqliteAdapter.ts`; Drizzle does not natively match
   op-sqlite v17's method/result shapes.
 - Reactive queries need `flushPendingReactiveQueries()` after writes; the adapter owns this.
 - Migrations are additive and transactional. Append named migrations to `MIGRATIONS`; never edit an

@@ -1,6 +1,15 @@
-# Dev DB harness: moving it out of `database.ts` (design notes; stage 1 done)
+# Dev DB harness: moving it out of `database.ts` (design notes; done)
 
-Status: **stage 1 done** (2026-10-18, the PERF fixtures; see below). The rest is **paused**.
+Status: **done** (2026-11-06, fix plan B, after the DB-write scanner was retired). `src/db/database.ts` is
+~140 lines (open, adapter wiring, getters, the throwaway doorway); the op-sqlite bridge is
+`src/db/opSqliteAdapter.ts`; the six self-tests are `src/db/devHarness/dbSelfTests.ts`, reached only through
+the `__DEV__` require in `src/services/boot/foregroundBoot.ts` → `devHarnessBoot.ts` (with the relaunch
+contract and the waves, which stay under `src/services/boot/` because they drive services), and the PERF
+fixtures are reached through the same kind of require in `src/services/index.ts`. `check-core-boundaries.mjs`
+allows only those importers and forbids the harness from importing the secure barrel. The release bundle
+proof is the `expo export` marker count recorded in the fix plan's night log. Stage 1 history follows.
+
+Earlier status: **stage 1 done** (2026-10-18, the PERF fixtures; see below). The rest was **paused**.
 Phase 6 step 5 of the 2026-10-09 Codex-review remediation planned to move the dev-only device
 self-test harness out of `src/db/database.ts` (about 3,700 of its 4,117 lines) and replace the
 DB-write guard's call-by-call harness proofs with a few simpler rules. A read-only survey showed the
