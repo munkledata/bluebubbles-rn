@@ -274,6 +274,22 @@ function lockedNoticeIsDue(eventName: string, plaintext: string): boolean {
   );
 }
 
+/**
+ * A pre-cutoff V2 frame carries no replay protection of its own (V3 gets it from durable
+ * admission). While locked, an authentic frame posts the generic notice, so a re-sent copy of an
+ * old frame would ring the phone again. Remember the last few authenticated frames this process
+ * has seen and ignore a repeat. Checked only AFTER authentication, so an attacker cannot evict real
+ * entries with garbage; memory only, because a nuisance-level issue needs no persistence.
+ */
+const LOCKED_V2_REPLAY_WINDOW = 64;
+const recentLockedV2Frames: string[] = [];
+function lockedV2FrameSeenBefore(body: string): boolean {
+  if (recentLockedV2Frames.includes(body)) return true;
+  recentLockedV2Frames.push(body);
+  if (recentLockedV2Frames.length > LOCKED_V2_REPLAY_WINDOW) recentLockedV2Frames.shift();
+  return false;
+}
+
 /** A removal is any associated type with the `-` prefix, whatever kind it removes. */
 function isRemovedTapback(associatedMessageType: string | null | undefined): boolean {
   return typeof associatedMessageType === 'string' && associatedMessageType.startsWith('-');
@@ -484,6 +500,10 @@ async function deliver(
   }
   if (!lease.isCurrent()) return;
   if (lockedContext) {
+    if (lockedV2FrameSeenBefore(body)) {
+      logger.debug('[fcm] repeated V2 frame ignored while locked');
+      return;
+    }
     if (lockedContext.isCurrent() && lockedNoticeIsDue(eventName, plaintext)) {
       await postLockedNotification(lockedContext);
     }

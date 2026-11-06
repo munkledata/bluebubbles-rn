@@ -1337,6 +1337,37 @@ describe('FCM native callback ownership', () => {
     expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
   });
 
+  it('ignores a repeated authenticated V2 frame while locked instead of ringing again', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(FCM_V2_COMPATIBILITY_CUTOFF_MS - 1);
+    const state = activeFcmDeviceEncryptionState(V2_KEY, 'device-v2', 'https://gator.example');
+    mockVaultGet.mockImplementation(async (key: string) => {
+      if (key === 'appLockEnabled') return 'true';
+      if (key === 'fcmPushEncryptionV2') return serializeFcmDeviceEncryptionState(state);
+      return key === 'serverAddress' ? 'https://gator.example' : null;
+    });
+    mockEffectivelyLocked.mockImplementation(
+      (_lockState, storedAppLockEnabled) => storedAppLockEnabled,
+    );
+    const frame = (body: string) => ({
+      eventName: 'new-message',
+      body,
+      encrypted: true,
+      encryptionType: 'AEAD_GCM_V2_DEVICE',
+    });
+
+    mockParseFcmData.mockReturnValueOnce(frame('v2-frame-replayed'));
+    await mockBackgroundHandler!(message);
+    mockParseFcmData.mockReturnValueOnce(frame('v2-frame-replayed'));
+    await mockBackgroundHandler!(message);
+    expect(mockPostLockedNotification).toHaveBeenCalledTimes(1);
+
+    // A different (fresh) frame still rings.
+    mockParseFcmData.mockReturnValueOnce(frame('v2-frame-fresh'));
+    await mockBackgroundHandler!(message);
+    expect(mockPostLockedNotification).toHaveBeenCalledTimes(2);
+    expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['your own message', 'new-message', '{"guid":"v2-own","isFromMe":true}'],
     ['a read receipt', 'updated-message', '{"guid":"v2-message","dateRead":1700000000000}'],
