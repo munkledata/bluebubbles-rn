@@ -1,4 +1,4 @@
-import { decodeEnvelope, ENVELOPE_VERSION, SecretBox } from '@core/crypto';
+import { decodeEnvelope, encodeEnvelope, ENVELOPE_VERSION, SecretBox } from '@core/crypto';
 import { fromBase64 } from '@utils/bytes';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 
@@ -29,6 +29,31 @@ describe('SecretBox (XChaCha20-Poly1305 + Argon2id)', () => {
     raw[last] = (raw[last]! ^ 0xff) & 0xff; // flip a ciphertext/tag bit
     const tampered = Buffer.from(raw).toString('base64');
     await expect(box.open(tampered, 'pass')).rejects.toBeDefined();
+  });
+
+  it('rejects one flipped ciphertext byte, salt byte or nonce byte, and leaks nothing', async () => {
+    const box = new SecretBox(await createLibsodiumBackend(), cheapArgon);
+    const sealed = await box.seal('payload', 'pass');
+    const parts = decodeEnvelope(sealed);
+    const flipped = (mutate: (p: typeof parts) => void): string => {
+      const copy = {
+        salt: Uint8Array.from(parts.salt),
+        nonce: Uint8Array.from(parts.nonce),
+        body: Uint8Array.from(parts.body),
+      };
+      mutate(copy);
+      return encodeEnvelope(copy);
+    };
+    const cases = [
+      flipped((p) => void (p.body[0] = p.body[0]! ^ 0x01)), // first ciphertext byte, not the tag
+      flipped((p) => void (p.salt[0] = p.salt[0]! ^ 0x01)), // key derivation input
+      flipped((p) => void (p.nonce[0] = p.nonce[0]! ^ 0x01)), // AEAD nonce
+    ];
+    for (const tampered of cases) {
+      const error: unknown = await box.open(tampered, 'pass').catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect(String((error as Error).message)).not.toContain('payload');
+    }
   });
 
   it('produces distinct ciphertext each time (fresh salt + nonce)', async () => {

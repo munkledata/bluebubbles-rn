@@ -119,4 +119,29 @@ describe('FCM V3 identity-bound decryption', () => {
     tampered[tampered.length - 1] = tampered[tampered.length - 1]! ^ 1;
     await expect(decryptFcmV3Payload(toBase64(tampered), KEY, 'new-message')).rejects.toThrow();
   });
+
+  it('rejects one flipped tag, IV or identity (AAD) byte, and leaks nothing', async () => {
+    const frame = Uint8Array.from(Buffer.from(v3Frame(plaintext), 'base64'));
+    const aadLength = (frame[1]! << 8) | frame[2]!;
+    const ivStart = 3 + aadLength;
+    const tagStart = ivStart + 12;
+    const positions = {
+      'first tag byte': tagStart,
+      'last tag byte': tagStart + 15,
+      'first IV byte': ivStart,
+      'last identity byte': ivStart - 1,
+    };
+    for (const [label, index] of Object.entries(positions)) {
+      const tampered = Uint8Array.from(frame);
+      tampered[index] = tampered[index]! ^ 0x01;
+      const attempt = decryptFcmV3Payload(toBase64(tampered), KEY, 'new-message');
+      // Node's GCM error is created outside Jest's sandbox realm, so no instanceof here.
+      await expect(attempt).rejects.toThrow();
+      const message = await attempt.catch((e: unknown) =>
+        String((e as { message?: unknown }).message ?? e),
+      );
+      // The label rides inside the asserted value so a failure names the byte that leaked.
+      expect([label, message.includes('hello')]).toEqual([label, false]);
+    }
+  });
 });
