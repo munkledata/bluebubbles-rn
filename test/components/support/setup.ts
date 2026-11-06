@@ -12,7 +12,7 @@
  *
  * Keep this MINIMAL — later phases add their own mocks/resets as they need them.
  */
-import { cleanup } from '@testing-library/react-native';
+import { cleanup, configure } from '@testing-library/react-native';
 import { useThemeStore } from '@state/themeStore';
 import { DEFAULT_PRESET } from '@ui/theme/tokens';
 
@@ -21,6 +21,12 @@ import { DEFAULT_PRESET } from '@ui/theme/tokens';
 // subscription shape: omitting it made every otherwise-healthy mount log a fake
 // "getRawDatabase is not a function" failure. Individual hook tests replace this function with a
 // callback-capturing fake when they need to exercise re-runs.
+// Under a loaded machine (CI, or a full local run) RNTL's default 1 s `waitFor` and Jest's default
+// 5 s per-test budget were the only reason four suites ever failed: each passed alone. These are
+// ceilings, not sleeps: a healthy test finishes exactly as fast as before.
+configure({ asyncUtilTimeout: 4_000 });
+jest.setTimeout(15_000);
+
 jest.mock('@db/database', () => ({
   getDatabase: jest.fn(),
   getRawDatabase: jest.fn(() => ({ reactiveExecute: () => () => undefined })),
