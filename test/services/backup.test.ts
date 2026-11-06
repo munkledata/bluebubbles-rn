@@ -126,7 +126,7 @@ describe('backup export', () => {
     await setChatCustomization(t.db, guid, { customName: 'Best', customColor: '#34C759' });
 
     const b = await buildBackupWithCustomFolders(t.db, { exportedAt: 123, appVersion: '1.0.0' });
-    expect(b.version).toBe(4);
+    expect(b.version).toBe(5);
     expect(b.exportedAt).toBe(123);
     expect(b.kv).toContainEqual({ key: 'theme.preset', value: 'oledDark' });
     expect(b.themes).toContainEqual(

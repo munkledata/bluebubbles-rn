@@ -163,6 +163,11 @@ const PortableChatCustomizationSchema = z.object({
   ...ChatCustomizationShape,
 });
 
+/** v5 adds the per-chat "Bring back from Archived on new messages" switch (`chats.auto_unarchive`). */
+const PortableChatCustomizationV5Schema = PortableChatCustomizationSchema.extend({
+  autoUnarchive: z.number().int().min(0).max(1),
+});
+
 const CUSTOM_FOLDER_CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 
 const CustomFolderNameSchema = z.string().superRefine((value, context) => {
@@ -296,6 +301,28 @@ export const BackupV3Schema = z
     validateFolderBackup(backup, (issue) => context.addIssue({ code: 'custom', ...issue }));
   });
 
+/** v4/v5 checks: folder references resolve, and each handle-colour identity appears once. */
+function refineFoldersAndHandleColors(
+  backup: Parameters<typeof validateFolderBackup>[0] & {
+    handleColors: readonly { address: string; service: string }[];
+  },
+  context: z.RefinementCtx,
+): void {
+  validateFolderBackup(backup, (issue) => context.addIssue({ code: 'custom', ...issue }));
+  const identities = new Set<string>();
+  for (const [index, item] of backup.handleColors.entries()) {
+    const identity = JSON.stringify([item.address, item.service]);
+    if (identities.has(identity)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['handleColors', index],
+        message: 'Handle-color identities must be unique.',
+      });
+    }
+    identities.add(identity);
+  }
+}
+
 /**
  * Version 4 adds device-owned handle colors. A new outer version prevents older clients from
  * silently stripping the preference while reporting a successful restore.
@@ -313,28 +340,34 @@ export const BackupV4Schema = z
     customFolders: z.array(CustomFolderBackupSchema).max(BACKUP_LIMITS.customFolders),
     handleColors: z.array(HandleColorBackupSchema).max(BACKUP_LIMITS.handleColors),
   })
-  .superRefine((backup, context) => {
-    validateFolderBackup(backup, (issue) => context.addIssue({ code: 'custom', ...issue }));
-    const identities = new Set<string>();
-    for (const [index, item] of backup.handleColors.entries()) {
-      const identity = JSON.stringify([item.address, item.service]);
-      if (identities.has(identity)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['handleColors', index],
-          message: 'Handle-color identities must be unique.',
-        });
-      }
-      identities.add(identity);
-    }
-  });
+  .superRefine(refineFoldersAndHandleColors);
 
-/** New encrypted exports are v4; v1-v3 remain accepted unchanged. */
+/**
+ * Version 5 adds each chat's "Bring back from Archived on new messages" switch. Restoring v1-v4
+ * leaves a chat's local switch unchanged (on by default), exactly as before.
+ */
+export const BackupV5Schema = z
+  .object({
+    version: z.literal(5),
+    ...BackupCommonShape,
+    chatCustomizations: z
+      .array(PortableChatCustomizationV5Schema)
+      .max(BACKUP_LIMITS.chatCustomizations),
+    customFolderChatIdentities: z
+      .array(PortableChatIdentitySchema)
+      .max(BACKUP_LIMITS.customFolderChatIdentities),
+    customFolders: z.array(CustomFolderBackupSchema).max(BACKUP_LIMITS.customFolders),
+    handleColors: z.array(HandleColorBackupSchema).max(BACKUP_LIMITS.handleColors),
+  })
+  .superRefine(refineFoldersAndHandleColors);
+
+/** New encrypted exports are v5; v1-v4 remain accepted unchanged. */
 export const BackupSchema = z.discriminatedUnion('version', [
   BackupV1Schema,
   BackupV2Schema,
   BackupV3Schema,
   BackupV4Schema,
+  BackupV5Schema,
 ]);
 
 export type Backup = z.infer<typeof BackupSchema>;
@@ -342,6 +375,7 @@ export type BackupV1 = z.infer<typeof BackupV1Schema>;
 export type BackupV2 = z.infer<typeof BackupV2Schema>;
 export type BackupV3 = z.infer<typeof BackupV3Schema>;
 export type BackupV4 = z.infer<typeof BackupV4Schema>;
+export type BackupV5 = z.infer<typeof BackupV5Schema>;
 export type PortableChatIdentity = z.infer<typeof PortableChatIdentitySchema>;
 
 /**

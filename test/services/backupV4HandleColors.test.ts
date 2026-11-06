@@ -102,7 +102,7 @@ describe('backup v4 device-owned handle colors', () => {
 
     const backup = await buildBackupWithCustomFolders(source.db, { exportedAt: 42 });
 
-    expect(backup.version).toBe(4);
+    expect(backup.version).toBe(5);
     expect(backup.handleColors).toEqual([
       { address: ADDRESS, service: 'iMessage', color: '#ABCDEF' },
       { address: ADDRESS, service: 'SMS', color: '#123456' },

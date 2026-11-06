@@ -11,11 +11,11 @@ import { utf8Encode } from '@utils/bytes';
 import {
   BACKUP_LIMITS,
   BackupSchema,
-  BackupV4Schema,
+  BackupV5Schema,
   isBackupKey,
   listBackupKvKeys,
   type Backup,
-  type BackupV4,
+  type BackupV5,
 } from './backupSchema';
 
 export { BackupExportLimitError, type BackupEditableField } from '@db/repositories';
@@ -101,10 +101,10 @@ export async function buildBackupWithCustomFolders(
   db: AppDatabase,
   opts: { exportedAt: number; appVersion?: string },
   ownershipGuard?: DbCommitGuard,
-): Promise<BackupV4> {
+): Promise<BackupV5> {
   const snapshot = await getBackupV4ExportData(db, BACKUP_EXPORT_LIMITS, ownershipGuard);
-  return BackupV4Schema.parse({
-    version: 4,
+  return BackupV5Schema.parse({
+    version: 5,
     exportedAt: opts.exportedAt,
     appVersion: opts.appVersion,
     ...snapshot,
@@ -132,7 +132,8 @@ function assertRestoreOwned(ownershipGuard?: DbCommitGuard): void {
 /**
  * Apply a validated backup. Kv + themes are upserted; chat customizations and folder members are
  * applied only to uniquely matched local chats. V3+ folders merge non-destructively by name, and
- * v4 restores device-owned handle colors by exact address/service identity.
+ * v4+ restores device-owned handle colors by exact address/service identity, and v5 restores each
+ * chat's "Bring back from Archived" switch (v1-v4 leave the local switch unchanged).
  *
  * The kv allow-list runs again on IMPORT: a backup file is untrusted input (hand-edited, or made
  * by another install), and re-gating it here is what stops one from planting a composer draft or
@@ -176,10 +177,10 @@ export async function restoreBackup(
     ...customization,
     pinOrder: customization.isPinned === 1 ? (normalizedPinOrder.get(sourceIndex) ?? null) : null,
   }));
-  const hasCustomFolders = backup.version === 3 || backup.version === 4;
+  const hasCustomFolders = backup.version === 3 || backup.version === 4 || backup.version === 5;
   const customFolderChatIdentities = hasCustomFolders ? backup.customFolderChatIdentities : [];
   const customFolders = hasCustomFolders ? backup.customFolders : [];
-  const handleColors = backup.version === 4 ? backup.handleColors : [];
+  const handleColors = backup.version === 4 || backup.version === 5 ? backup.handleColors : [];
   const sourceFolderMembershipCount = customFolders.reduce(
     (total, folder) => total + folder.sourceMemberCount,
     0,

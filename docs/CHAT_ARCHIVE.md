@@ -42,7 +42,11 @@ An older app ignores the unknown `0060` row in `_migrations`. Its inserts omit t
 
 ## Known gap (owner: leave for now)
 
-Backups and Full Repair don't carry `auto_unarchive`, so a restore turns every switch back on.
+Backups carry `auto_unarchive` from format v5 (2026-11-05): each exported chat customization has
+`autoUnarchive`, and restore writes it back. Restoring a v1-v4 file leaves each chat's local switch
+as it is. Full Repair keeps an archived chat's row (archiving is local state it preserves), so the
+switch survives it; the switch only matters for archived chats. Tests:
+`test/services/backupAutoUnarchive.test.ts`.
 
 ## Tests
 

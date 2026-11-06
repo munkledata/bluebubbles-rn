@@ -749,7 +749,7 @@ describe('backup v3 custom folders', () => {
     await replaceCustomFolderMembership(source.db, family.id, ['source-guid-a', 'source-guid-b']);
 
     const backup = await buildBackupWithCustomFolders(source.db, { exportedAt: 42 });
-    expect(backup.version).toBe(4);
+    expect(backup.version).toBe(5);
     expect(backup.customFolders.map((folder) => folder.name)).toEqual(['Trips', 'Family']);
     expect(backup.customFolders.map((folder) => folder.showUnreadBadge)).toEqual([0, 1]);
     expect(backup.customFolders.map((folder) => folder.sourceMemberCount)).toEqual([3, 2]);

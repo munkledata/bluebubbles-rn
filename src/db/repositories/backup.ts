@@ -61,6 +61,8 @@ export interface PortableChatCustomizationRow {
   isPinned: number;
   pinOrder: number | null;
   isArchived: number;
+  /** v5: the "Bring back from Archived on new messages" switch. */
+  autoUnarchive: number;
 }
 export interface HandleColorBackupRow {
   address: string;
@@ -70,6 +72,8 @@ export interface HandleColorBackupRow {
 
 interface ChatCustomizationExportRow extends Omit<ChatCustomizationRow, 'guid'> {
   chatId: number;
+  /** `chats.auto_unarchive`: 1 brings the chat back from Archived on a new message. */
+  autoUnarchive: number;
   guid: string;
   chatIdentifier: string | null;
   style: number | null;
@@ -607,6 +611,7 @@ function buildBoundedPortableChatCustomizations(
         isPinned: row.isPinned,
         pinOrder: row.pinOrder ?? null,
         isArchived: row.isArchived,
+        autoUnarchive: row.autoUnarchive,
       },
     ];
   });
@@ -993,7 +998,7 @@ function readBackupBaseRowsWithinTransaction(
              substr(c.custom_name, 1, ${limits.chatNameCharacters}) AS customName,
              c.custom_color AS customColor,
              c.mute_type AS muteType, c.is_pinned AS isPinned, c.pin_order AS pinOrder,
-             c.is_archived AS isArchived,
+             c.is_archived AS isArchived, c.auto_unarchive AS autoUnarchive,
              COALESCE(
                (
                  SELECT json_group_array(
@@ -2117,7 +2122,9 @@ export function restorePreparedBackupWithinTransaction(
                json_extract(source_json, '$.muteType') AS mute_type,
                json_extract(source_json, '$.isPinned') AS is_pinned,
                json_extract(source_json, '$.pinOrder') AS pin_order,
-               json_extract(source_json, '$.isArchived') AS is_archived
+               json_extract(source_json, '$.isArchived') AS is_archived,
+               -- v5 only; NULL for v1-v4, which keeps the chat's local switch below.
+               json_extract(source_json, '$.autoUnarchive') AS auto_unarchive
             FROM source_input
       ),
       source_rows AS (
@@ -2574,7 +2581,11 @@ export function restorePreparedBackupWithinTransaction(
                  FROM source
                 WHERE source.chat_id = chats.id
              ),
-             is_archived = (SELECT source.is_archived FROM source WHERE source.chat_id = chats.id)
+             is_archived = (SELECT source.is_archived FROM source WHERE source.chat_id = chats.id),
+             auto_unarchive = COALESCE(
+               (SELECT source.auto_unarchive FROM source WHERE source.chat_id = chats.id),
+               auto_unarchive
+             )
        WHERE id IN (SELECT chat_id FROM source)
       RETURNING id
       `);

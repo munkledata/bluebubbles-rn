@@ -6400,7 +6400,7 @@
     {
       "id": "src/db/repositories/backup.ts#getBackupV4ExportData:mutator-call:a2d299dbf859",
       "path": "src/db/repositories/backup.ts",
-      "line": 1901,
+      "line": 1906,
       "symbol": "getBackupV4ExportData",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6413,7 +6413,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e",
       "path": "src/db/repositories/backup.ts",
-      "line": 1945,
+      "line": 1950,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "kv",
@@ -6426,7 +6426,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-delete:1baa5d376435",
       "path": "src/db/repositories/backup.ts",
-      "line": 1961,
+      "line": 1966,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -6439,7 +6439,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:1978156bf977",
       "path": "src/db/repositories/backup.ts",
-      "line": 1984,
+      "line": 1989,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "themes",
@@ -6452,7 +6452,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:d7e3e27b0ac0",
       "path": "src/db/repositories/backup.ts",
-      "line": 2023,
+      "line": 2028,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "themes",
@@ -6465,7 +6465,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:70056dfca126",
       "path": "src/db/repositories/backup.ts",
-      "line": 2059,
+      "line": 2064,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "handles",
@@ -6478,7 +6478,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff",
       "path": "src/db/repositories/backup.ts",
-      "line": 2070,
+      "line": 2075,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folder_members",
@@ -6491,7 +6491,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:eed6d14e46f6",
       "path": "src/db/repositories/backup.ts",
-      "line": 2071,
+      "line": 2076,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folders",
@@ -6504,7 +6504,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:dc051c6a8a1a",
       "path": "src/db/repositories/backup.ts",
-      "line": 2072,
+      "line": 2077,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_resolved_chats",
@@ -6515,9 +6515,9 @@
       "evidence": "docs/WORK_PLAN_2026-08-03.md (FEAT-04F); independent SQL/contract/integration review"
     },
     {
-      "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:44b85d35a964",
+      "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:44462ca9edf8",
       "path": "src/db/repositories/backup.ts",
-      "line": 2074,
+      "line": 2079,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -6525,12 +6525,12 @@
       "owner": "restorePreparedBackupWithinTransaction",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/rcsProviderEpochBackup.test.ts; docs/WORK_PLAN_2026-08-03.md (FEAT-04F; FEAT-06 provider-epoch hardening); docs/FEAT_06_IDENTITY_ADR.md (backup matching and provider-epoch completion); independent SQL/identity review GO"
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/rcsProviderEpochBackup.test.ts; docs/WORK_PLAN_2026-08-03.md (FEAT-04F; FEAT-06 provider-epoch hardening); docs/FEAT_06_IDENTITY_ADR.md (backup matching and provider-epoch completion); independent SQL/identity review GO; test/services/backupAutoUnarchive.test.ts"
     },
     {
-      "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:4a38fcfbd34e",
+      "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:388fe5566c69",
       "path": "src/db/repositories/backup.ts",
-      "line": 2539,
+      "line": 2546,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "chats",
@@ -6538,12 +6538,12 @@
       "owner": "restorePreparedBackupWithinTransaction",
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; docs/WORK_PLAN_2026-08-03.md (FEAT-04F); independent SQL review"
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts; docs/WORK_PLAN_2026-08-03.md (FEAT-04F); independent SQL review; test/services/backupAutoUnarchive.test.ts"
     },
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:a9908ef95877",
       "path": "src/db/repositories/backup.ts",
-      "line": 2589,
+      "line": 2600,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "custom_folders",
@@ -6556,7 +6556,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:9a38cb1ceb72",
       "path": "src/db/repositories/backup.ts",
-      "line": 2620,
+      "line": 2631,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -6569,7 +6569,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-update:ed07d6fd2e8d",
       "path": "src/db/repositories/backup.ts",
-      "line": 2637,
+      "line": 2648,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-update",
       "target": "custom_folders",
@@ -6582,7 +6582,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:0593854a2ac8",
       "path": "src/db/repositories/backup.ts",
-      "line": 2650,
+      "line": 2661,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "TEMP",
@@ -6595,7 +6595,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:42d5bf1453d2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2723,
+      "line": 2734,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-insert",
       "target": "custom_folder_members",
@@ -6608,7 +6608,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2765,
+      "line": 2776,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folder_members",
@@ -6621,7 +6621,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:eed6d14e46f6:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2766,
+      "line": 2777,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_restored_folders",
@@ -6634,7 +6634,7 @@
     {
       "id": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:dc051c6a8a1a:2",
       "path": "src/db/repositories/backup.ts",
-      "line": 2767,
+      "line": 2778,
       "symbol": "restorePreparedBackupWithinTransaction",
       "operation": "sql-schema",
       "target": "temp.gator_backup_resolved_chats",
@@ -14213,7 +14213,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:36cf4f4647c4",
       "path": "src/services/backup/backup.ts",
-      "line": 201,
+      "line": 202,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -14226,7 +14226,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:f6c5d92a4da2",
       "path": "src/services/backup/backup.ts",
-      "line": 201,
+      "line": 202,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/services/backup/backup.ts#restoreBackup.<callback:210239e086>",
@@ -14239,7 +14239,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup.<callback:210239e086>:mutator-call:a89d928180be",
       "path": "src/services/backup/backup.ts",
-      "line": 204,
+      "line": 205,
       "symbol": "restoreBackup.<callback:210239e086>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction",
