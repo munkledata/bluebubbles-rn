@@ -25,6 +25,8 @@ export const IMESSAGE_RESTORED_FEATURES = [
   'supports_imessage_attachments_v2',
   'supports_imessage_group_attachment_upload',
   'supports_imessage_subject',
+  'supports_imessage_group_name_clear',
+  'supports_imessage_group_create',
 ] as const;
 
 export type IMessageRestoredFeature = (typeof IMESSAGE_RESTORED_FEATURES)[number];

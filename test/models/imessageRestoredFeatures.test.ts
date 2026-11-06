@@ -23,7 +23,7 @@ const info = (fields: Record<string, unknown>) =>
 
 describe('FP-006 restored server-info flags', () => {
   it('parses all fourteen optional flags and keeps them absent on an older server', () => {
-    expect(IMESSAGE_RESTORED_FEATURES).toHaveLength(14);
+    expect(IMESSAGE_RESTORED_FEATURES).toHaveLength(16);
     const old = info({});
     for (const flag of IMESSAGE_RESTORED_FEATURES) expect(old[flag]).toBeUndefined();
     const all = info(Object.fromEntries(IMESSAGE_RESTORED_FEATURES.map((flag) => [flag, true])));

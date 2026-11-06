@@ -20,6 +20,7 @@ const mockAdaptiveTokensFromImage = jest.fn();
 const mockSafeOpenUrl = jest.fn();
 const mockStartChatRepair = jest.fn();
 const mockRenameAppleGroup = jest.fn();
+const mockClearAppleGroupName = jest.fn();
 const mockPrepareAppleGroupPhotoSet = jest.fn();
 const mockSubmitAppleGroupPhoto = jest.fn();
 const mockCancelAppleGroupPhoto = jest.fn();
@@ -454,6 +455,7 @@ jest.mock('@/services', () => {
   ) as typeof import('@/services/chatActions');
   return {
     addAppleGroupParticipant: (...args: unknown[]) => mockAddAppleGroupParticipant(...args),
+    clearAppleGroupName: (...args: unknown[]) => mockClearAppleGroupName(...args),
     computeBackgroundIsLight: (...args: unknown[]) => mockComputeBackgroundIsLight(...args),
     leaveAppleGroup: (...args: unknown[]) => mockLeaveAppleGroup(...args),
     prepareAppleGroupPhotoSet: (...args: unknown[]) => mockPrepareAppleGroupPhotoSet(...args),
@@ -687,6 +689,11 @@ beforeEach(() => {
     historyExhausted: false,
     restored: false,
   });
+  mockClearAppleGroupName.mockReset().mockResolvedValue({
+    status: 'accepted',
+    tempGuid: 'temp-clear1',
+    guid: GROUP_CHAT_GUID,
+  });
   mockRenameAppleGroup.mockReset().mockResolvedValue({
     status: 'accepted',
     tempGuid: 'temp-rename1',
@@ -883,6 +890,79 @@ describe('ChatSettingsScreen reduced motion', () => {
 
     await view.unmount();
     expect(removeReduceMotionListener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ChatSettingsScreen Apple group name removal', () => {
+  function configureGroup(flags: Record<string, boolean>): void {
+    mockGuid = GROUP_CHAT_GUID;
+    mockChatStyle = 43;
+    mockParticipantCount = 2;
+    mockHandleServices = 'iMessage,iMessage';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_group_rename: true,
+        ...flags,
+      } as any,
+    });
+  }
+
+  it('hides Remove Name without its own switch', async () => {
+    configureGroup({});
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    expect(screen.getByRole('button', { name: 'Rename in Apple Messages' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Remove Name' })).toBeNull();
+  });
+
+  it('hides Remove Name while the group has no Apple name', async () => {
+    configureGroup({ supports_imessage_group_name_clear: true });
+    mockDisplayNameOverride = '';
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    expect(screen.queryByRole('button', { name: 'Remove Name' })).toBeNull();
+  });
+
+  it('asks first, then sends one exact removal and nothing on Cancel', async () => {
+    configureGroup({ supports_imessage_group_name_clear: true });
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Remove Name' }));
+    expect(mockShowDialog).toHaveBeenLastCalledWith(
+      'Remove Group Name?',
+      expect.any(String),
+      expect.any(Array),
+    );
+    expect(mockClearAppleGroupName).not.toHaveBeenCalled();
+    expect(dialogAction('Cancel')).toBeUndefined();
+
+    await act(async () => dialogAction('Remove Name')?.());
+    await waitFor(() =>
+      expect(mockClearAppleGroupName).toHaveBeenCalledWith(
+        { chatGuid: GROUP_CHAT_GUID },
+        mockAccountLease,
+      ),
+    );
+    expect(mockClearAppleGroupName).toHaveBeenCalledTimes(1);
+    expect(mockRenameAppleGroup).not.toHaveBeenCalled();
+    expect(mockSetChatCustomizationWithinTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ status: 'rejected', tempGuid: 'temp-reject2' }, 'Group Name Not Removed'],
+    [{ status: 'outcome-unknown', tempGuid: 'temp-unknown2' }, 'Name Removal Not Confirmed'],
+  ])('reports %j and never removes it again automatically', async (result, title) => {
+    configureGroup({ supports_imessage_group_name_clear: true });
+    mockClearAppleGroupName.mockResolvedValue(result);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Remove Name' }));
+    await act(async () => dialogAction('Remove Name')?.());
+
+    await waitFor(() => expect(mockShowDialog).toHaveBeenCalledWith(title, expect.any(String)));
+    expect(mockClearAppleGroupName).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -33,6 +33,7 @@ import {
 import { isCanonicalIMessageParticipantAddress } from '@core/api/endpoints/chats';
 import {
   addAppleGroupParticipant,
+  clearAppleGroupName,
   computeBackgroundIsLight,
   leaveAppleGroup,
   prepareAppleGroupPhotoSet,
@@ -251,6 +252,9 @@ function ChatSettingsScreen({
   const appleGroupRenameSupported = useSessionStore(
     (state) => state.serverInfo?.supports_imessage_group_rename === true,
   );
+  const appleGroupNameClearSupported = useSessionStore(
+    (state) => state.serverInfo?.supports_imessage_group_name_clear === true,
+  );
   const appleGroupPhotoSupported = useSessionStore(
     (state) => state.serverInfo?.supports_imessage_group_photo === true,
   );
@@ -315,6 +319,7 @@ function ChatSettingsScreen({
   const [acceptedAppleGroupNameOverlay, setAcceptedAppleGroupNameOverlay] =
     useState<AcceptedAppleGroupNameOverlay | null>(null);
   const [renamingAppleGroup, setRenamingAppleGroup] = useState(false);
+  const [clearingAppleGroupName, setClearingAppleGroupName] = useState(false);
   const [changingAppleGroupPhoto, setChangingAppleGroupPhoto] = useState(false);
   const [appleGroupParticipantAddress, setAppleGroupParticipantAddress] = useState('');
   const [addingAppleGroupParticipant, setAddingAppleGroupParticipant] = useState(false);
@@ -335,6 +340,12 @@ function ChatSettingsScreen({
     appleGroupRenameSupported &&
     data?.guid === guid &&
     isProvenIMessageGroupChat(data, { allowAnyGroupPrefix });
+  // Offered only while the group has an Apple name to remove.
+  const appleGroupNameClearAvailable =
+    appleGroupNameClearSupported &&
+    data?.guid === guid &&
+    isProvenIMessageGroupChat(data, { allowAnyGroupPrefix }) &&
+    (data.displayName ?? '').trim().length > 0;
   const appleGroupPhotoAvailable =
     appleGroupPhotoSupported &&
     data?.guid === guid &&
@@ -579,7 +590,8 @@ function ChatSettingsScreen({
       !grantIsCurrent(operationGrant) ||
       !appleGroupRenameAvailable ||
       !appleGroupNameChanged ||
-      renamingAppleGroup
+      renamingAppleGroup ||
+      clearingAppleGroupName
     ) {
       return;
     }
@@ -622,6 +634,57 @@ function ChatSettingsScreen({
           'The Apple group name could not be changed. Your name is still here so you can correct it or try again later.',
         );
       });
+  };
+  const confirmClearAppleGroupName = (): void => {
+    const dialogGrant = renderGrant;
+    if (
+      !grantIsCurrent(dialogGrant) ||
+      !appleGroupNameClearAvailable ||
+      renamingAppleGroup ||
+      clearingAppleGroupName
+    ) {
+      return;
+    }
+    showDialog(
+      'Remove Group Name?',
+      'This removes the group name for everyone in Apple Messages. The group then shows its members’ names instead.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove Name',
+          style: 'destructive',
+          onPress: () => {
+            if (!grantIsCurrent(dialogGrant)) return;
+            setClearingAppleGroupName(true);
+            void clearAppleGroupName({ chatGuid: dialogGrant.chatGuid }, dialogGrant.accountLease)
+              .then((result) => {
+                if (!grantIsCurrent(dialogGrant)) return;
+                setClearingAppleGroupName(false);
+                if (!result || result.status === 'accepted') return;
+                if (result.status === 'outcome-unknown') {
+                  showDialog(
+                    'Name Removal Not Confirmed',
+                    'The request may have reached Messages. Check the group name in Messages on your Mac before trying again.',
+                  );
+                  return;
+                }
+                showDialog(
+                  'Group Name Not Removed',
+                  'Messages did not remove the group name. Let Gator sync, then try again later.',
+                );
+              })
+              .catch(() => {
+                if (!grantIsCurrent(dialogGrant)) return;
+                setClearingAppleGroupName(false);
+                showDialog(
+                  'Couldn’t Remove Group Name',
+                  'The group name could not be removed. Let Gator sync, then try again later.',
+                );
+              });
+          },
+        },
+      ],
+    );
   };
   const showAppleGroupPhotoResult = (
     operation: 'set' | 'remove',
@@ -1126,9 +1189,9 @@ function ChatSettingsScreen({
               accessibilityRole="button"
               accessibilityLabel="Rename in Apple Messages"
               accessibilityState={{
-                disabled: renamingAppleGroup || !appleGroupNameChanged,
+                disabled: renamingAppleGroup || clearingAppleGroupName || !appleGroupNameChanged,
               }}
-              disabled={renamingAppleGroup || !appleGroupNameChanged}
+              disabled={renamingAppleGroup || clearingAppleGroupName || !appleGroupNameChanged}
               onPress={renameAppleGroupName}
               style={styles.row}
             >
@@ -1136,6 +1199,20 @@ function ChatSettingsScreen({
                 {renamingAppleGroup ? 'Renaming in Apple Messages…' : 'Rename in Apple Messages'}
               </Text>
             </Pressable>
+            {appleGroupNameClearAvailable ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Remove Name"
+                accessibilityState={{ disabled: renamingAppleGroup || clearingAppleGroupName }}
+                disabled={renamingAppleGroup || clearingAppleGroupName}
+                onPress={confirmClearAppleGroupName}
+                style={styles.row}
+              >
+                <Text style={[styles.rowLabel, { color: theme.color.destructive }]}>
+                  {clearingAppleGroupName ? 'Removing Name…' : 'Remove Name'}
+                </Text>
+              </Pressable>
+            ) : null}
           </SettingsSection>
         ) : null}
 

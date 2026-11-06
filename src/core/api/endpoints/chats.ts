@@ -241,6 +241,24 @@ const IMessageGroupRenameAck = z
   })
   .strict();
 
+const IMessageGroupNameClearAck = z
+  .object({
+    cleared: z.literal(true),
+    guid: z.string(),
+  })
+  .strict();
+
+export interface ClearIMessageGroupNameParams {
+  chatGuid: string;
+  /** Stable idempotency identity for this one user-initiated attempt. */
+  tempGuid: string;
+}
+
+export interface ClearIMessageGroupNameAck {
+  cleared: true;
+  guid: string;
+}
+
 export interface RenameIMessageGroupParams {
   chatGuid: string;
   displayName: string;
@@ -355,6 +373,66 @@ export async function renameIMessageGroup(
 
   if (ack.guid !== params.chatGuid || ack.displayName !== params.displayName) {
     throw groupRenameOutcomeUnknown(new Error('Group rename acknowledgement did not match input.'));
+  }
+  return ack;
+}
+
+function groupNameClearOutcomeUnknown(cause: unknown): ApiError {
+  return new ApiError(
+    'parse_error',
+    'Server returned an invalid iMessage group name removal acknowledgement',
+    undefined,
+    cause,
+    undefined,
+    'imessage_group_name_clear_outcome_unknown',
+  );
+}
+
+/** POST one exact existing iMessage group's name removal with no automatic HTTP retry. */
+export async function clearIMessageGroupName(
+  http: HttpClient,
+  params: ClearIMessageGroupNameParams,
+): Promise<ClearIMessageGroupNameAck> {
+  if (!isValidIMessageGroupGuid(params.chatGuid)) {
+    throw new Error('Removing an Apple group name needs an exact existing iMessage group.');
+  }
+  if (
+    !params.tempGuid.startsWith('temp-') ||
+    params.tempGuid.trim() !== params.tempGuid ||
+    UNICODE_CONTROL_CHARACTER.test(params.tempGuid)
+  ) {
+    throw new Error('Removing an Apple group name needs a client-generated temporary GUID.');
+  }
+  requireRoundTripUtf8(
+    params.tempGuid,
+    IMESSAGE_GROUP_RENAME_TEMP_GUID_MAX_BYTES,
+    'name removal tempGuid',
+  );
+
+  let ack: ClearIMessageGroupNameAck;
+  try {
+    const raw = await http.post(
+      `/chat/${encodeURIComponent(params.chatGuid)}/rename/clear`,
+      IMessageGroupNameClearAck,
+      {
+        captureErrorDetail: true,
+        retry: false,
+        json: { tempGuid: params.tempGuid },
+      },
+    );
+    ack = IMessageGroupNameClearAck.parse(raw);
+  } catch (error) {
+    if (error instanceof ApiError && error.kind !== 'parse_error') throw error;
+    if (error instanceof ApiError || error instanceof z.ZodError) {
+      throw groupNameClearOutcomeUnknown(error);
+    }
+    throw error;
+  }
+
+  if (ack.guid !== params.chatGuid) {
+    throw groupNameClearOutcomeUnknown(
+      new Error('Group name removal acknowledgement did not match input.'),
+    );
   }
   return ack;
 }

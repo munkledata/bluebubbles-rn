@@ -20,6 +20,7 @@ jest.mock('@/services/send/rcsAttemptCapability', () => ({
   captureSessionRcsCapabilityLease: () => ({
     serverInfo: {
       supports_imessage_group_rename: true,
+      supports_imessage_group_name_clear: true,
       supports_imessage_group_participant_add: true,
       supports_imessage_group_participant_remove: true,
       supports_imessage_group_leave: true,
@@ -33,6 +34,7 @@ jest.mock('@/services/send/rcsAttemptCapability', () => ({
 }));
 jest.mock('@/services/groupRenameService', () => ({
   renameExactIMessageGroup: (...args: unknown[]) => mockService(...args),
+  clearExactIMessageGroupName: (...args: unknown[]) => mockService(...args),
 }));
 jest.mock('@/services/groupParticipantService', () => ({
   addExactIMessageGroupParticipant: (...args: unknown[]) => mockService(...args),
@@ -61,7 +63,7 @@ import {
   removeAppleGroupParticipant,
 } from '@/services/groupParticipantUiService';
 import { prepareAppleGroupPhotoSet, removeAppleGroupPhoto } from '@/services/groupPhotoUiService';
-import { renameAppleGroup } from '@/services/groupRenameUiService';
+import { clearAppleGroupName, renameAppleGroup } from '@/services/groupRenameUiService';
 import {
   captureRealtimeDeliveryLease,
   resumeRealtimeDeliveries,
@@ -71,6 +73,7 @@ import { deleteMessageFromMac } from '@/services/remoteMessageDeleteUiService';
 
 const actions: Array<[string, (lease: RealtimeDeliveryLease) => Promise<unknown>]> = [
   ['rename a group', (lease) => renameAppleGroup({} as never, lease)],
+  ['remove a group name', (lease) => clearAppleGroupName({} as never, lease)],
   ['add a group participant', (lease) => addAppleGroupParticipant({} as never, lease)],
   ['remove a group participant', (lease) => removeAppleGroupParticipant({} as never, lease)],
   ['leave a group', (lease) => leaveAppleGroup({} as never, lease)],

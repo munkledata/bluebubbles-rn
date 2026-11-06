@@ -211,6 +211,8 @@ export const ServerInfo = z
     supports_imessage_attachments_v2: z.boolean().nullish(),
     supports_imessage_group_attachment_upload: z.boolean().nullish(),
     supports_imessage_subject: z.boolean().nullish(),
+    supports_imessage_group_name_clear: z.boolean().nullish(),
+    supports_imessage_group_create: z.boolean().nullish(),
     /** Whether message payloads can carry bounded, exact Apple multipart topology. */
     supports_message_part_topology: z.boolean().nullish(),
     /** Retired broad iCloud account/alias-control flag; never enables the read-only status screen. */

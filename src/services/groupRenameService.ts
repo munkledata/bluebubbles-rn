@@ -1,4 +1,5 @@
 import {
+  clearIMessageGroupName as postIMessageGroupNameClear,
   isValidIMessageGroupGuid,
   isValidIMessageGroupName,
   renameIMessageGroup as postIMessageGroupRename,
@@ -24,6 +25,12 @@ const DEFINITE_GROUP_RENAME_FAILURES = new Set([
   'imessage_group_rename_rejected',
 ]);
 
+const DEFINITE_GROUP_NAME_CLEAR_FAILURES = new Set([
+  'imessage_group_name_clear_invalid_target',
+  'imessage_group_name_clear_unavailable',
+  'imessage_group_name_clear_rejected',
+]);
+
 export interface RenameAppleGroupArgs {
   chatGuid: string;
   displayName: string;
@@ -36,6 +43,15 @@ export type RenameAppleGroupResult =
       readonly guid: string;
       readonly displayName: string;
     }
+  | { readonly status: 'rejected'; readonly tempGuid?: string }
+  | { readonly status: 'outcome-unknown'; readonly tempGuid: string };
+
+export interface ClearAppleGroupNameArgs {
+  chatGuid: string;
+}
+
+export type ClearAppleGroupNameResult =
+  | { readonly status: 'accepted'; readonly tempGuid: string; readonly guid: string }
   | { readonly status: 'rejected'; readonly tempGuid?: string }
   | { readonly status: 'outcome-unknown'; readonly tempGuid: string };
 
@@ -72,6 +88,14 @@ function isDefiniteGroupRenameFailure(error: unknown): boolean {
     error instanceof ApiError &&
     error.serverErrorType != null &&
     DEFINITE_GROUP_RENAME_FAILURES.has(error.serverErrorType)
+  );
+}
+
+function isDefiniteGroupNameClearFailure(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.serverErrorType != null &&
+    DEFINITE_GROUP_NAME_CLEAR_FAILURES.has(error.serverErrorType)
   );
 }
 
@@ -156,6 +180,85 @@ export async function renameExactIMessageGroup(
       }
       if (isDefiniteGroupRenameFailure(error)) return { status: 'rejected', tempGuid };
       // Includes both explicit outcome-unknown types and transport/parse ambiguity after POST.
+      return { status: 'outcome-unknown', tempGuid };
+    }
+  } finally {
+    releaseGroupRename(db, args.chatGuid);
+  }
+}
+
+/**
+ * Remove one proven existing iMessage group's name (FP-006 `supports_imessage_group_name_clear`)
+ * with one stable idempotency key and one HTTP attempt. It shares the rename claim, so a rename
+ * and a removal for the same group never overlap. No local chat title is changed: sync remains
+ * the authority for Apple Messages' group name.
+ */
+export async function clearExactIMessageGroupName(
+  db: Queryable,
+  client: HttpClient,
+  args: ClearAppleGroupNameArgs,
+  accountGuard?: DbCommitGuard,
+  capabilitySource?: RcsCapabilitySource,
+): Promise<ClearAppleGroupNameResult> {
+  if (!isValidIMessageGroupGuid(args.chatGuid)) return { status: 'rejected' };
+  if (!claimGroupRename(db, args.chatGuid)) return { status: 'rejected' };
+
+  try {
+    const transport = pinSendTransport(client, accountGuard);
+    let capability: Awaited<ReturnType<typeof resolveRcsAttemptOwnership>>;
+    try {
+      capability = await resolveRcsAttemptOwnership(
+        transport.http,
+        args.chatGuid,
+        transport.admissionGuard,
+        capabilitySource,
+        { requireServerInfo: true },
+      );
+    } catch (error) {
+      if (error instanceof DbCommitGuardRejectedError) throw error;
+      return { status: 'rejected' };
+    }
+
+    const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
+    if (capability.serverInfo?.supports_imessage_group_name_clear !== true) {
+      return { status: 'rejected' };
+    }
+
+    let header: Awaited<ReturnType<typeof getChatHeader>>;
+    try {
+      header = await getChatHeader(db, args.chatGuid);
+    } catch {
+      if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
+      return { status: 'rejected' };
+    }
+    if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
+    const allowAnyGroupPrefix = restoredGroupCommandsAcceptAnyPrefix(capability.serverInfo);
+    if (!isExactEligibleGroup(header, args.chatGuid, allowAnyGroupPrefix)) {
+      return { status: 'rejected' };
+    }
+
+    const tempGuid = generateTempGuid();
+    try {
+      transport.assertNetworkCurrent();
+      if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
+    } catch (error) {
+      if (error instanceof DbCommitGuardRejectedError) throw error;
+      return { status: 'rejected', tempGuid };
+    }
+
+    try {
+      const ack = await postIMessageGroupNameClear(transport.http, {
+        chatGuid: args.chatGuid,
+        tempGuid,
+      });
+      // Past the one-shot dispatch boundary a retired admission proof means "maybe applied".
+      if (!capabilityGuard()) return { status: 'outcome-unknown', tempGuid };
+      return { status: 'accepted', tempGuid, guid: ack.guid };
+    } catch (error) {
+      if (!capabilityGuard() || error instanceof DbCommitGuardRejectedError) {
+        return { status: 'outcome-unknown', tempGuid };
+      }
+      if (isDefiniteGroupNameClearFailure(error)) return { status: 'rejected', tempGuid };
       return { status: 'outcome-unknown', tempGuid };
     }
   } finally {
