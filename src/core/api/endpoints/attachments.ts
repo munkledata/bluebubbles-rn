@@ -39,3 +39,12 @@ export function attachmentPosterUrl(http: HttpUrlBuilder, guid: string, width: n
   }
   return http.buildUrl(`/attachment/${encodeURIComponent(guid)}/poster?width=${String(width)}`);
 }
+
+/**
+ * Authed URL for a Live Photo's motion clip, by the STILL's attachment guid (behind the server's
+ * `supports_live_photo`). 200/206 is the QuickTime clip; 404 means this still has no clip. There
+ * is no RCS route.
+ */
+export function attachmentLivePhotoUrl(http: HttpUrlBuilder, guid: string): string {
+  return http.buildUrl(`/attachment/${encodeURIComponent(guid)}/live`);
+}

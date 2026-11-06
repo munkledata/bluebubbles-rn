@@ -101,6 +101,12 @@ export const ServerInfo = z
      */
     supports_video_poster: z.boolean().nullish(),
     /**
+     * Whether `GET /attachment/:guid/live` streams a Live Photo's motion clip (the still's guid)
+     * and attachments carry `hasLivePhoto`. Additive; absent/false on older servers, so the viewer
+     * offers no LIVE control until support is explicit. iMessage only: there is no RCS route.
+     */
+    supports_live_photo: z.boolean().nullish(),
+    /**
      * Whether the server exposes bounded text search over its live Messages database. Additive;
      * absent/false on older servers, so global search remains local-only until support is explicit.
      */

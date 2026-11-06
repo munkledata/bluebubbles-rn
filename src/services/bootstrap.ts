@@ -2068,6 +2068,7 @@ const WIPED_MEDIA_DIRS = [
   'synced-backgrounds', // syncedBackground
   'group-photos', // groupPhotos
   'video-posters', // videoPosters (Shared Media video stills)
+  'live-photo-clips', // livePhotoClips (Live Photo motion clips)
   'chat-bg', // the user's own per-chat wallpaper picks — their chat rows go with the wipe
 ] as const;
 
