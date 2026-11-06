@@ -305,6 +305,9 @@ export function MessageList({
   // of the window — it actively yanked the reader to the WRONG message half a second after landing.
   const focusIndexRef = useRef(focusIndex);
   focusIndexRef.current = focusIndex;
+  const rowCountRef = useRef(rows.length);
+  rowCountRef.current = rows.length;
+  const focusEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!focusReady || focusedRef.current === focusKey) return;
     focusedRef.current = focusKey;
@@ -312,6 +315,7 @@ export function MessageList({
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightGuid(null), 3000);
     if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
+    if (focusEndTimer.current) clearTimeout(focusEndTimer.current);
     focusScrollTimer.current = setTimeout(() => {
       // -1 = the target left the loaded window while the timer was pending; scrollToIndex(-1)
       // would be a scroll to nowhere.
@@ -322,6 +326,18 @@ export function MessageList({
       } catch {
         // initialScrollIndex already placed it; centering is best-effort.
       }
+      // FlashList stops that scroll with the LAST row flush against the bottom edge: it ignores
+      // the content padding below it, so the anchored FAB_CLEARANCE was unreachable and the jump
+      // button covered a match among the newest rows. Seen on the Galaxy S25; a probe app with
+      // this exact composition confirmed it (scrollToIndex stopped 60 dp short of the end, a
+      // footer spacer was ignored the same way, and a follow-up scrollToEnd reached the true end
+      // and cleared the button). Only the newest two rows need it, so an older match keeps its
+      // centered position.
+      if (index >= rowCountRef.current - 2) {
+        focusEndTimer.current = setTimeout(() => {
+          listRef.current?.scrollToEnd({ animated: false });
+        }, 50);
+      }
     }, 450);
   }, [focusKey, focusReady, focusedMessageGuid]);
 
@@ -330,6 +346,7 @@ export function MessageList({
     () => () => {
       if (highlightTimer.current) clearTimeout(highlightTimer.current);
       if (focusScrollTimer.current) clearTimeout(focusScrollTimer.current);
+      if (focusEndTimer.current) clearTimeout(focusEndTimer.current);
       if (appendRaf.current != null) cancelAnimationFrame(appendRaf.current);
     },
     [],

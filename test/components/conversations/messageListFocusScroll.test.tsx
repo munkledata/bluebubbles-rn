@@ -192,4 +192,78 @@ describe('MessageList — anchored focus scroll', () => {
     });
     expect(mockScrollToIndex).not.toHaveBeenCalled();
   });
+
+  // FlashList stops scrollToIndex with the last row flush against the bottom edge, ignoring the
+  // content padding (FAB_CLEARANCE) below it: on the device the jump button then covered the
+  // newest search match. A follow-up scrollToEnd reaches the true end (probe-verified on the S25).
+  const END_FOLLOW_UP_MS = 50;
+  const onExitAnchor = jest.fn();
+
+  it.each([
+    ['newest', 'e'],
+    ['second-newest', 'd'],
+  ])('scrolls to the true end after nudging the %s match', async (_label, focus) => {
+    await renderWithTheme(
+      <MessageList
+        chatGuid={GUID}
+        isGroup={false}
+        messages={STALE}
+        focusGuid={focus}
+        onExitAnchor={onExitAnchor}
+      />,
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(NUDGE_MS);
+    });
+    expect(mockScrollToIndex).toHaveBeenCalledTimes(1);
+    expect(mockScrollToEnd).not.toHaveBeenCalled(); // after the nudge, not with it
+    await act(async () => {
+      jest.advanceTimersByTime(END_FOLLOW_UP_MS);
+    });
+    expect(mockScrollToEnd).toHaveBeenCalledWith({ animated: false });
+    expect(mockScrollToIndex.mock.invocationCallOrder[0]).toBeLessThan(
+      mockScrollToEnd.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('keeps an older match centered instead of scrolling to the end', async () => {
+    await renderWithTheme(
+      <MessageList
+        chatGuid={GUID}
+        isGroup={false}
+        messages={ANCHORED}
+        focusGuid="a"
+        onExitAnchor={onExitAnchor}
+      />,
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(NUDGE_MS + END_FOLLOW_UP_MS + 100);
+    });
+    expect(mockScrollToIndex).toHaveBeenCalledWith({
+      index: 2,
+      animated: false,
+      viewPosition: 0.35,
+    });
+    expect(mockScrollToEnd).not.toHaveBeenCalled();
+  });
+
+  it('never scrolls a list that closed before the follow-up fired', async () => {
+    const view = await renderWithTheme(
+      <MessageList
+        chatGuid={GUID}
+        isGroup={false}
+        messages={STALE}
+        focusGuid="e"
+        onExitAnchor={onExitAnchor}
+      />,
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(NUDGE_MS);
+    });
+    await view.unmount();
+    await act(async () => {
+      jest.advanceTimersByTime(END_FOLLOW_UP_MS);
+    });
+    expect(mockScrollToEnd).not.toHaveBeenCalled();
+  });
 });
