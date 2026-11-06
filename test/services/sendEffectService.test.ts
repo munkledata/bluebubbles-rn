@@ -3,7 +3,7 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo } from '@core/models';
 import { claimFailedOutgoingForRetry, OUTGOING_MAX_ATTEMPTS } from '@db/repositories';
-import type { AppDatabase, TestDb } from '@db/types';
+import type { TestDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import {
   fixedRcsCapabilitySource,
@@ -11,6 +11,7 @@ import {
 } from '@/services/send/rcsAttemptCapability';
 import { sendIMessageEffect } from '@/services/send/sendEffectService';
 import { createTestDb } from '../support/testDb';
+import { fakeHttpPost } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;-;+15551234567';
 const SLAM = 'com.apple.MobileSMS.expressivesend.impact';
@@ -37,21 +38,7 @@ function fakeHttp(impl: (options: RequestOptions) => Promise<unknown>): {
   http: HttpClient;
   post: jest.Mock;
 } {
-  const post = jest.fn((_path: string, _schema: unknown, options: RequestOptions) => impl(options));
-  let http!: HttpClient;
-  http = {
-    post,
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    snapshotTransport: () => ({
-      origin: 'https://effect.test',
-      headers: {},
-      password: 'test',
-      transportRevision: 1,
-      buildUrl: (path: string) => `https://effect.test/api/v1${path}`,
-    }),
-  } as unknown as HttpClient;
-  return { http, post };
+  return fakeHttpPost(impl, 'https://effect.test');
 }
 
 function one(raw: Database.Database, sql: string): Record<string, unknown> {

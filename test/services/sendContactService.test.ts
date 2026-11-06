@@ -10,7 +10,7 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   contactDisplayName,
   hasContactContent,
@@ -27,6 +27,7 @@ import {
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const rcsChatGuid = (sourceId: string): string =>
@@ -76,12 +77,7 @@ function fakeHttp(impl: (path: string, json: unknown) => Promise<unknown>): {
 }
 
 async function seedChat(db: ReadDb, guid: string) {
-  const handles = await upsertHandles(db, [{ address: 'craig@apple.com' }]);
-  await upsertChats(
-    db,
-    [Chat.parse({ guid, participants: [{ address: 'craig@apple.com' }] })],
-    handles,
-  );
+  await seedChatFixture(db, guid, { participants: [{ address: 'craig@apple.com' }] });
 }
 
 async function seedProvenImessageChat(

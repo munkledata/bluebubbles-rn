@@ -40,6 +40,8 @@ import {
   insertOutgoingAttachment,
   insertOutgoingContact,
 } from '../support/repositoryWrappers';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
+import { fakeHttpJsonClient as fakeHttp } from '../support/fakeHttp';
 
 jest.mock('@/services/send/sendFailureNotice', () => ({
   clearFailedSendNotice: jest.fn(async () => undefined),
@@ -61,16 +63,6 @@ beforeEach(() => {
   mockNotifyFailedSend.mockClear();
 });
 
-function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
-  let client!: HttpClient;
-  client = {
-    post: (_path: string, _schema: unknown, opts: { json?: unknown }) => impl(opts?.json),
-    pinTransport: () => client,
-    assertTransportCurrent: () => undefined,
-    isTransportCurrent: () => true,
-  } as unknown as HttpClient;
-  return client;
-}
 const noRequestHttp = fakeHttp(async () => {
   throw new Error('unexpected HTTP request');
 });
@@ -116,8 +108,7 @@ function fakeIo(impl: {
 }
 
 async function seedChat(db: ReadDb, guid: string): Promise<void> {
-  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@b.com' }] })], handles);
+  await seedChatFixture(db, guid, { participants: [{ address: 'a@b.com' }] });
 }
 
 async function seedExactTextTarget(db: ReadDb, guid: string, partIndex: number): Promise<void> {

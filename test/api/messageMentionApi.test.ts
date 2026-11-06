@@ -1,6 +1,7 @@
 import { sendMention } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
+import type { HttpClient } from '@core/api/http';
+import { fakeHttpResolving as fakeHttp } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;+;chat-mention-1';
 const TEMP_GUID = 'temp-mention-1';
@@ -8,11 +9,6 @@ const MENTIONS = [
   { start: 6, length: 5, address: 'alice@example.test' },
   { start: 16, length: 3, address: '+15551234567' },
 ];
-
-function fakeHttp(result: unknown): { http: HttpClient; post: jest.Mock } {
-  const post = jest.fn<Promise<unknown>, [string, unknown, RequestOptions]>(async () => result);
-  return { http: { post } as unknown as HttpClient, post };
-}
 
 describe('message mention endpoint', () => {
   it('POSTs one exact non-retrying request and accepts a strict helper acknowledgement', async () => {

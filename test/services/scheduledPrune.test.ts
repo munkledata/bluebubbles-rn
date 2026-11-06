@@ -11,18 +11,15 @@
  * The barrel wires native modules at import time, so the native leaves are mocked (composition-root
  * clients / expo uploader / contacts picker); the DB and the reconcile itself are real.
  */
-import { Chat } from '@core/models';
 import {
   getScheduledById,
   listAllScheduled,
   listScheduledHistory,
   listServerScheduledPruneExposure,
   reconcileServerScheduled,
-  upsertChats,
-  upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { Queryable, ReadDb } from '@db/types';
+import type { Queryable } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
@@ -53,17 +50,9 @@ import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
 import { getScheduled } from '@core/api/endpoints/scheduled';
 import { insertScheduled, updateScheduled } from '../support/repositoryWrappers';
+import { seedChat } from '../support/chatFixtures';
 
 const mockGetScheduled = getScheduled as jest.Mock;
-
-async function seedChat(db: ReadDb): Promise<void> {
-  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
-  await upsertChats(
-    db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@b.com' }] })],
-    handles,
-  );
-}
 
 /** The shape `getScheduled` returns for one server-backed row. */
 const item = (id: string, text: string) => ({

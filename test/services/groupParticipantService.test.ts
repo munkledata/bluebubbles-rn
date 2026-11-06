@@ -1,8 +1,7 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo } from '@core/models';
-import type { AppDatabase, TestDb } from '@db/types';
+import type { TestDb } from '@db/types';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import {
   addExactIMessageGroupParticipant,
@@ -10,6 +9,7 @@ import {
   removeExactIMessageGroupParticipant,
 } from '@/services/groupParticipantService';
 import { createTestDb } from '../support/testDb';
+import { fakeHttpPost as fakeHttp } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;+;chat123456789';
 const NEW_ADDRESS = '+15559876543';
@@ -72,27 +72,6 @@ function seedThirdParticipant(raw: Database.Database): void {
   raw
     .prepare('INSERT INTO chat_handles(chat_id, handle_id) VALUES (?, ?)')
     .run(chat.id, Number(handle.lastInsertRowid));
-}
-
-function fakeHttp(impl: (options: RequestOptions) => Promise<unknown>): {
-  http: HttpClient;
-  post: jest.Mock;
-} {
-  const post = jest.fn((_path: string, _schema: unknown, options: RequestOptions) => impl(options));
-  let http!: HttpClient;
-  http = {
-    post,
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    snapshotTransport: () => ({
-      origin: 'https://participant.test',
-      headers: {},
-      password: 'test',
-      transportRevision: 1,
-      buildUrl: (path: string) => `https://participant.test/api/v1${path}`,
-    }),
-  } as unknown as HttpClient;
-  return { http, post };
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {

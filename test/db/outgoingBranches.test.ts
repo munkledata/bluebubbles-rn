@@ -4,13 +4,12 @@
  * asserts observable DB state (or a documented return value).
  */
 import type Database from 'better-sqlite3';
-import { Chat, Message } from '@core/models';
+import { Message } from '@core/models';
 import {
   cancelOutgoing,
   claimFailedOutgoingForRetry,
   deleteChatLocal,
   discardOutgoingMessage,
-  getChatIdByGuid,
   insertOutgoingReaction,
   insertOutgoingText,
   listAttachmentsByMessageIds,
@@ -21,13 +20,11 @@ import {
   reconcileOutgoingAttachmentByContent,
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
-  upsertChats,
-  upsertHandles,
   upsertMessages,
   upsertMessagesWithinTransaction,
 } from '@db/repositories';
 import { chats, messages, outgoingQueue } from '@db/schema';
-import type { AppDatabase, Queryable, ReadDb } from '@db/types';
+import type { AppDatabase, ReadDb } from '@db/types';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 import {
@@ -40,12 +37,8 @@ import {
   retireOutgoing,
 } from '../support/repositoryWrappers';
 import { nextEventLoopTurn } from '../support/async';
+import { seedChat } from '../support/chatFixtures';
 
-async function seedChat(db: ReadDb, guid: string): Promise<number> {
-  const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
-  return (await getChatIdByGuid(db, guid))!;
-}
 const msgState = (raw: Database.Database, guid: string) =>
   raw.prepare('SELECT send_state s, error e FROM messages WHERE guid = ?').get(guid) as
     { s: string; e: number } | undefined;

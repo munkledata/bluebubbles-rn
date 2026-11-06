@@ -21,7 +21,7 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { IncomingEventDependencyPendingError } from '@/services/realtime/incomingEventErrors';
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
@@ -31,6 +31,7 @@ import {
   insertOutgoingAttachment,
   reconcileExactOutgoingAttemptSuccess,
 } from '../support/repositoryWrappers';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const RCS_PROVIDER_INFO = {
@@ -73,21 +74,10 @@ function queueState(raw: Database.Database, tempGuid: string) {
 }
 
 async function seedChat(db: ReadDb): Promise<number> {
-  const handles = await upsertHandles(db, [
-    { address: 'attempt-owner@example.test', service: 'RCS' },
-  ]);
-  await upsertChats(
-    db,
-    [
-      Chat.parse({
-        guid: CHAT_GUID,
-        providerEpoch: RCS_PROVIDER_EPOCH,
-        participants: [{ address: 'attempt-owner@example.test', service: 'RCS' }],
-      }),
-    ],
-    handles,
-  );
-  return (await getChatIdByGuid(db, CHAT_GUID))!;
+  return seedChatFixture(db, CHAT_GUID, {
+    participants: [{ address: 'attempt-owner@example.test', service: 'RCS' }],
+    providerEpoch: RCS_PROVIDER_EPOCH,
+  });
 }
 
 describe('RCS active send-attempt ownership', () => {

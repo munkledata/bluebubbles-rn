@@ -29,7 +29,7 @@ import {
   upsertMessagesWithinTransaction,
 } from '@db/repositories';
 import { runInTransactionContext, withDbTransaction } from '@db/transaction';
-import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
+import type { ReadDb, TestDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
@@ -109,6 +109,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { setChatUnreadLocal } from '../support/repositoryWrappers';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -128,8 +129,7 @@ async function waitForCall(mock: jest.Mock): Promise<void> {
 }
 
 async function seedChat(db: ReadDb, guid: string): Promise<void> {
-  const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+  await seedChatFixture(db, guid);
   await setLastReadMessageGuid(db, guid, 'marker-1'); // start READ
 }
 

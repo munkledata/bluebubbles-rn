@@ -7,7 +7,6 @@
  * sendReaction wire body) against a regression that would drop the glyph on retry.
  */
 import type Database from 'better-sqlite3';
-import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
 import {
   insertOutgoingReaction,
@@ -15,20 +14,10 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
-
-function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
-  let http!: HttpClient;
-  http = {
-    post: (_p: string, _s: unknown, opts?: { json?: unknown }) => impl(opts?.json),
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    assertTransportCurrent: () => undefined,
-  } as unknown as HttpClient;
-  return http;
-}
+import { fakeHttpJsonClient as fakeHttp } from '../support/fakeHttp';
 
 /** Reaction-only tests: the attachment IO must never be touched. */
 const noIo = {

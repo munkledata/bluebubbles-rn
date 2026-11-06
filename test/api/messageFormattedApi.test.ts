@@ -1,6 +1,7 @@
 import { sendFormatted, type IMessageTextFormattingRange } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
+import type { HttpClient } from '@core/api/http';
+import { fakeHttpResolving as fakeHttp } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;-;+15551234567';
 const TEMP_GUID = 'temp-format-1';
@@ -8,11 +9,6 @@ const FORMATTING: IMessageTextFormattingRange[] = [
   { start: 0, length: 5, styles: ['bold'] },
   { start: 6, length: 5, styles: ['italic', 'underline'] },
 ];
-
-function fakeHttp(result: unknown): { http: HttpClient; post: jest.Mock } {
-  const post = jest.fn<Promise<unknown>, [string, unknown, RequestOptions]>(async () => result);
-  return { http: { post } as unknown as HttpClient, post };
-}
 
 describe('formatted message endpoint', () => {
   it('POSTs one strict non-retrying request and accepts an exact helper acknowledgement', async () => {

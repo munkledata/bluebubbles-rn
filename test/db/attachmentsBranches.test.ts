@@ -5,10 +5,9 @@
  * observable DB state.
  */
 import type Database from 'better-sqlite3';
-import { Attachment, Chat, Message } from '@core/models';
+import { Attachment, Message } from '@core/models';
 import {
   getAttachmentByGuid,
-  getChatIdByGuid,
   type InsertOutgoingAttachmentArgs,
   type OutgoingInsertResult,
   listAttachmentsByMessageIds,
@@ -16,16 +15,15 @@ import {
   listChatImageAttachmentsByAttachmentGuid,
   replaceVisibleAttachmentLocalPathWithinTransaction,
   updateAttachmentLocalPath,
-  upsertChats,
-  upsertHandles,
   upsertMessages,
 } from '@db/repositories';
 import { attachments, chats, messages, outgoingQueue } from '@db/schema';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase, Queryable, ReadDb } from '@db/types';
+import type { AppDatabase, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { insertOutgoingAttachment, upsertAttachments } from '../support/repositoryWrappers';
 import { nextEventLoopTurn } from '../support/async';
+import { seedChat } from '../support/chatFixtures';
 
 type OutgoingAttachmentArgs = InsertOutgoingAttachmentArgs & { chatId: number };
 
@@ -226,11 +224,6 @@ async function finishAfterQueuedObservation<T>(
   return result;
 }
 
-async function seedChat(db: ReadDb, guid = 'c1'): Promise<number> {
-  const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
-  return (await getChatIdByGuid(db, guid))!;
-}
 /** Upsert a message (optionally with attachments/text) and return its row id. */
 async function putMsg(db: ReadDb, chatId: number, m: Record<string, unknown>): Promise<number> {
   const map = await upsertMessages(db, [Message.parse(m)], () => chatId, new Map());

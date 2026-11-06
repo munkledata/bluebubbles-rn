@@ -1,26 +1,17 @@
-import { Chat } from '@core/models';
-import { upsertChats, upsertHandles } from '@db/repositories';
 import { buildBackupWithCustomFolders, restoreBackup } from '@/services/backup/backup';
 import { BackupSchema } from '@/services/backup/backupSchema';
 import { createTestDb } from '../support/testDb';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 const GUID = 'iMessage;-;a@b.com';
 
 async function seedChat(t: Db): Promise<void> {
-  const handles = await upsertHandles(t.db, [{ address: 'a@b.com', service: 'iMessage' }]);
-  await upsertChats(
-    t.db,
-    [
-      Chat.parse({
-        guid: GUID,
-        chatIdentifier: 'a@b.com',
-        style: 45,
-        participants: [{ address: 'a@b.com', service: 'iMessage' }],
-      }),
-    ],
-    handles,
-  );
+  await seedChatFixture(t.db, GUID, {
+    participants: [{ address: 'a@b.com', service: 'iMessage' }],
+    chatIdentifier: 'a@b.com',
+    style: 45,
+  });
 }
 
 function chatRow(t: Db): { isArchived: number; autoUnarchive: number } {

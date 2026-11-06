@@ -5,15 +5,11 @@ import {
   startFaceTimeCall,
 } from '@core/api/endpoints/facetime';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
+import type { HttpClient } from '@core/api/http';
+import { fakeHttpResolving as fakeHttp } from '../support/fakeHttp';
 
 const TEMP_GUID = 'temp-link1234';
 const FACE_TIME_LINK = `https://facetime.apple.com/join#v=1&p=${'A'.repeat(22)}&k=${'A'.repeat(43)}`;
-
-function fakeHttp(result: unknown): { http: HttpClient; post: jest.Mock } {
-  const post = jest.fn<Promise<unknown>, [string, unknown, RequestOptions]>(async () => result);
-  return { http: { post } as unknown as HttpClient, post };
-}
 
 describe('FaceTime link endpoint', () => {
   it('POSTs one exact non-retrying body and accepts an exact canonical Apple link', async () => {

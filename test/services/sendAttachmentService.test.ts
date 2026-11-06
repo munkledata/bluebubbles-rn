@@ -15,7 +15,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { MAX_RCS_ATTACHMENT_UPLOAD_BYTES } from '@core/models/serverInfo';
 import {
   RcsAttachmentTooLargeError,
@@ -37,6 +37,7 @@ import {
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { ClientErrorCode } from '@utils';
 import { createTestDb as createBaseTestDb } from '../support/testDb';
+import { seedChat } from '../support/chatFixtures';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const rcsChatGuid = (sourceId: string): string =>
@@ -100,11 +101,6 @@ const IMG = {
   width: 800,
   height: 600,
 };
-
-async function seedChat(db: ReadDb, guid: string) {
-  const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], handles);
-}
 
 async function seedProvenImessageChat(
   db: ReadDb,

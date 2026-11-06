@@ -1,15 +1,12 @@
 import { remoteDeleteMessage } from '@core/api/endpoints/messages';
-import type { HttpClient, RequestOptions } from '@core/api/http';
+import type { HttpClient } from '@core/api/http';
+import { fakeHttpResolving } from '../support/fakeHttp';
 
 const MESSAGE_GUID = 'message-delete-1';
 const ANY_GROUP_GUID = 'any;+;chat123456789';
 
 function fakeHttp(): { http: HttpClient; post: jest.Mock } {
-  const post = jest.fn<Promise<unknown>, [string, unknown, RequestOptions]>(async () => ({
-    deleted: true,
-    guid: MESSAGE_GUID,
-  }));
-  return { http: { post } as unknown as HttpClient, post };
+  return fakeHttpResolving({ deleted: true, guid: MESSAGE_GUID });
 }
 
 describe('remote delete endpoint addressing', () => {

@@ -4,16 +4,11 @@ import {
   removeIMessageGroupParticipant,
 } from '@core/api/endpoints/chats';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
+import { fakeHttpResolving as fakeHttp } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;+;chat123456789';
 const ADDRESS = '+15551234567';
 const TEMP_GUID = 'temp-participant1';
-
-function fakeHttp(result: unknown): { http: HttpClient; post: jest.Mock } {
-  const post = jest.fn<Promise<unknown>, [string, unknown, RequestOptions]>(async () => result);
-  return { http: { post } as unknown as HttpClient, post };
-}
 
 describe('iMessage group participant-add endpoint', () => {
   it('POSTs the exact non-retrying body and accepts only the matching acknowledgement', async () => {

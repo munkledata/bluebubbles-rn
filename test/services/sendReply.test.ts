@@ -9,11 +9,12 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { sendTextMessage } from '@/services/send/sendService';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { ClientErrorCode } from '@utils';
 import { createTestDb } from '../support/testDb';
+import { fakeHttpJson } from '../support/fakeHttp';
 
 const CHAT_GUID = 'any;-;+15551234567';
 
@@ -21,18 +22,7 @@ function fakeHttp(impl: (json?: unknown) => Promise<unknown>): {
   http: HttpClient;
   post: jest.Mock;
 } {
-  const post = jest.fn((_path: string, _schema: unknown, opts?: { json?: unknown }) =>
-    impl(opts?.json),
-  );
-  let http!: HttpClient;
-  http = {
-    get: async () => ({ version: 'test' }),
-    post,
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    assertTransportCurrent: () => undefined,
-  } as unknown as HttpClient;
-  return { http, post };
+  return fakeHttpJson(impl, { get: async () => ({ version: 'test' }) });
 }
 
 async function seedReplyTarget(
