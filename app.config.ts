@@ -253,10 +253,11 @@ const config: ExpoConfig = {
       'expo-build-properties',
       {
         android: {
-          // IPC-01 patches ReactEditText's API 31+ input connection so the app receives the exact
-          // temporary rich-content permission token and can release it deterministically. React
-          // Native's default prebuilt AAR would bypass that version-pinned source patch.
-          buildReactNativeFromSource: true,
+          // React Native is consumed prebuilt (D-6, 2026-11-06). The from-source build existed for a
+          // ReactEditText patch that handed modules/gator-paste-input the API 31+ IME permission
+          // token; the module now accepts token-less keyboard commits and lets the platform release
+          // that read grant, and the JS exception-privacy boundary in index.js owns release error
+          // containment, so no patched React Native source remains.
           // Cleartext HTTP is permitted at the OS level so the app CAN reach a direct-LAN
           // server over http:// (Android API 28+ blocks cleartext by default, which made
           // direct-LAN connections impossible). It is NOT used blindly: connect() default-DENIES

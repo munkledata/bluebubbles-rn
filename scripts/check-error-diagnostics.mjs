@@ -89,7 +89,7 @@ const OWNED_NATIVE_LOG_FILE =
   'modules/gator-paste-input/android/src/main/java/expo/modules/gatorpasteinput/GatorPasteInputModule.kt';
 const OWNED_NATIVE_LOG_TAG = 'GatorPasteInput';
 const OWNED_NATIVE_LOG_SOURCE_CONTRACT =
-  '547946ae6269d869a4a3036fc622faf67f5e967a88c3a8124343c10e08f95e97';
+  '3c5a9c9b2ee59a500b09f86cb0db9057f3c38c904e1f8a2356b351d8ac9c6420';
 const OWNED_NATIVE_RUNTIME_PRIVACY_FILE =
   'modules/gator-screen-security/android/src/main/java/expo/modules/gatorscreensecurity/GatorRuntimePrivacyPackage.kt';
 const OWNED_NATIVE_RUNTIME_PRIVACY_SOURCE_CONTRACT =
@@ -97,8 +97,6 @@ const OWNED_NATIVE_RUNTIME_PRIVACY_SOURCE_CONTRACT =
 const OWNED_STARTUP_PRIVACY_PLUGIN = 'plugins/withStartupPrivacy.js';
 const OWNED_STARTUP_PRIVACY_PLUGIN_CONTRACT =
   '11e51d99e71f1864c507164c00458baba2153812c96ffa8c9a1645005957293e';
-const RN_ERROR_ROOT = 'node_modules/react-native/ReactCommon/jserrorhandler/';
-const RN_ERROR_PATCH = 'patches/react-native+0.86.3.patch';
 const OPSQLITE_ERROR_SOURCE =
   'node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt';
 const OPSQLITE_ERROR_SOURCE_CONTRACT =
@@ -106,24 +104,6 @@ const OPSQLITE_ERROR_SOURCE_CONTRACT =
 const OPSQLITE_ERROR_PATCH = 'patches/@op-engineering+op-sqlite+19.0.5.patch';
 const OPSQLITE_ERROR_PATCH_CONTRACT =
   'f049572160392502d57ab295527bab79a09bd1be781f135989a5a0a2c1acd633';
-// Exact SDK 57 generated settings: marker strings inside disabled blocks or
-// quoted decoys are not proof that Gradle compiles the patched RN sources.
-const RN_SOURCE_BUILD_SETTINGS_CONTRACT =
-  '20bad4bf1cc8dd38b0699debf20d99b203c5489009c704a8d79858546bef43a2';
-// Pin both installed sources and their committed patch sections. An unpatched
-// dependency or an omitted postinstall hunk must not inherit this approval.
-const RN_ERROR_CONTRACTS = [
-  [
-    'CMakeLists.txt',
-    'feeeb718a55348fa05059929c9efdb2a4d50a37e67d829d7388674157e392f15',
-    '8f2bb5d8e90c60afbd37f13d473faa7406124539fa94e2e3afaee23351231f63',
-  ],
-  [
-    'JsErrorHandler.cpp',
-    'e109261e81b49787d76da452d91e57d3dab6a073c43c9b4841abe5da922d93dc',
-    '953e4a71c601db052e1670f8cfe8c5d3e16df43db312313726006e966bcd10d7',
-  ],
-];
 const NATIVE_LOG_METHODS = new Set(['d', 'e', 'i', 'println', 'v', 'w', 'wtf']);
 const JAVA_FORMAT_CHARACTER = /\p{Cf}/u;
 
@@ -2013,35 +1993,19 @@ export function findNativeErrorPrivacyFindings({ root = process.cwd() } = {}) {
     }
     return readFileSync(absolutePath, 'utf8').replace(/\r\n?/g, '\n');
   };
-  const patch = read(RN_ERROR_PATCH);
   if (
     normalizedSourceHash(read(OWNED_STARTUP_PRIVACY_PLUGIN)) !==
     OWNED_STARTUP_PRIVACY_PLUGIN_CONTRACT
   ) {
     errors.push('native startup privacy plugin contract changed');
   }
-  const sections = patch.split(/(?=^diff --git )/m);
-  for (const [file, sourceHash, patchHash] of RN_ERROR_CONTRACTS) {
-    const path = RN_ERROR_ROOT + file;
-    if (normalizedSourceHash(read(path)) !== sourceHash) {
-      errors.push(`native error privacy source contract changed: ${path}`);
-    }
-    const header = `diff --git a/${path} b/${path}\n`;
-    const matches = sections.filter((section) => section.startsWith(header));
-    if (matches.length !== 1 || normalizedSourceHash(matches[0]) !== patchHash) {
-      errors.push(`native error privacy patch contract changed: ${path}`);
-    }
-  }
+  // React Native itself is consumed prebuilt (D-6): release JS error containment is the JS boundary
+  // installed first by index.js (src/services/errors/reactNativeExceptionPrivacy.ts, host-tested),
+  // so no React Native source or patch is pinned here. The postinstall still has to fail loudly,
+  // or the op-sqlite patch below could silently stop applying.
   const packageJson = JSON.parse(read('package.json') || '{}');
-  const installedPackage = JSON.parse(read('node_modules/react-native/package.json') || '{}');
-  if (
-    packageJson.dependencies?.['react-native'] !== '0.86.3' ||
-    installedPackage.version !== '0.86.3' ||
-    packageJson.scripts?.postinstall !== 'patch-package --error-on-fail'
-  ) {
-    errors.push(
-      'native error privacy requires pinned RN 0.86.3 and patch-package --error-on-fail postinstall',
-    );
+  if (packageJson.scripts?.postinstall !== 'patch-package --error-on-fail') {
+    errors.push('native error privacy requires the patch-package --error-on-fail postinstall');
   }
 
   // The DB library writes directly to Android/RNLog, outside FLog containment. Pin both the
@@ -2098,18 +2062,6 @@ export function findNativeErrorPrivacyFindings({ root = process.cwd() } = {}) {
       'native startup privacy requires exactly one withStartupPrivacy plugin registration',
     );
   }
-  const buildPlugins =
-    plugins && ts.isArrayLiteralExpression(plugins)
-      ? plugins.elements.filter(
-          (item) =>
-            ts.isArrayLiteralExpression(item) &&
-            item.elements[0] &&
-            ts.isStringLiteral(item.elements[0]) &&
-            item.elements[0].text === 'expo-build-properties',
-        )
-      : [];
-  const options = buildPlugins.length === 1 ? buildPlugins[0].elements[1] : undefined;
-  const sourceBuild = property(property(options, 'android'), 'buildReactNativeFromSource');
   const exports = configSource.statements.filter(ts.isExportAssignment);
   const configDefinitions = configSource.statements.filter(
     (statement) =>
@@ -2118,9 +2070,10 @@ export function findNativeErrorPrivacyFindings({ root = process.cwd() } = {}) {
         (item) => ts.isIdentifier(item.name) && item.name.text === 'config',
       ),
   );
+  // The plugin check above inspected `config`; it only counts if that same static object is what the
+  // module exports, unmodified, as its default.
   if (
     configSource.parseDiagnostics.length ||
-    sourceBuild?.kind !== ts.SyntaxKind.TrueKeyword ||
     exports.length !== 1 ||
     exports[0].expression.getText(configSource) !== 'config' ||
     configDefinitions.length !== 1 ||
@@ -2129,17 +2082,8 @@ export function findNativeErrorPrivacyFindings({ root = process.cwd() } = {}) {
     configSource.statements.at(-1) !== exports[0]
   ) {
     errors.push(
-      'native error privacy requires expo-build-properties Android buildReactNativeFromSource: true',
+      'native startup privacy requires one static config object exported unchanged as default',
     );
-  }
-
-  // This file exists only after prebuild; CI reruns this guard after generation.
-  if (existsSync(resolve(root, 'android/settings.gradle'))) {
-    if (
-      normalizedSourceHash(read('android/settings.gradle')) !== RN_SOURCE_BUILD_SETTINGS_CONTRACT
-    ) {
-      errors.push('native error privacy requires generated ReactAndroid source substitution');
-    }
   }
   return errors;
 }

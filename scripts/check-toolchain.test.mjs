@@ -34,8 +34,8 @@ const EXPECTED_NATIVE_BOUNDARY_PINS = Object.freeze({
   'react-native-maps': '1.27.2',
   'react-native-notify-kit': '10.10.0',
 });
-// EAS's own default task for each profile (pinned eas-cli 21.5.0 build tools), plus the ABIs that
-// React Native's from-source included build compiles: it reads only -P, never gradle.properties.
+// EAS's own default task for each profile (pinned eas-cli 21.5.0 build tools), plus the ABIs the
+// app's native code compiles and packages, passed explicitly with -P.
 const EXPECTED_EAS_GRADLE_COMMANDS = Object.freeze({
   development: ':app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64',
   preview: ':app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64',
