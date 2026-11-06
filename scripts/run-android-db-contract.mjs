@@ -486,16 +486,20 @@ function currentPid(serial) {
   }
 }
 
-async function waitForPid(serial, timeoutMs = 5_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() <= deadline) {
-    const pid = currentPid(serial);
-    if (pid) return pid;
-    await delay(100);
+// Two bounded windows: a cold x86_64 emulator can take longer than one to show the launched process
+// (the relaunch harness's waitForProcess keeps the same shape and carries the unit test).
+async function waitForPid(serial, timeoutMs = 5_000, attempts = 2) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() <= deadline) {
+      const pid = currentPid(serial);
+      if (pid) return pid;
+      await delay(100);
+    }
   }
   throw new HarnessError(
     'app-process-missing',
-    'Gator did not create an app process after launch.',
+    `Gator did not create an app process within ${String(attempts)} windows of ${String(timeoutMs)} ms after launch.`,
   );
 }
 
