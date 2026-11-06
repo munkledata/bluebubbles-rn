@@ -47,4 +47,17 @@ describe('App Lock and Secure Screen window policy', () => {
       expect(controller).toContain(`persist(activity, ${key}, enabled) apply(activity)`);
     }
   });
+
+  it('applies the policy to every Activity in the process, not only the React host (F-3 step 2)', () => {
+    // expo-video's fullscreen player, the image cropper and the barcode scanner are separate
+    // Activities; only process-wide callbacks reach them.
+    expect(lifecycle).toContain('override fun createApplicationLifecycleListeners(');
+    expect(lifecycle).toContain('application.registerActivityLifecycleCallbacks(');
+    expect(lifecycle).toMatch(
+      /override fun onActivityCreated\(activity: Activity, savedInstanceState: Bundle\?\) \{ ScreenSecurityController\.refresh\(activity\) \}/,
+    );
+    expect(lifecycle).toMatch(
+      /override fun onActivityResumed\(activity: Activity\) \{ ScreenSecurityController\.refresh\(activity\) \}/,
+    );
+  });
 });
