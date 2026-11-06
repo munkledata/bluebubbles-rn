@@ -14,6 +14,7 @@ import {
   validateCoreImports,
   validateEmbeddedWebViewImports,
   validateServiceImports,
+  validateDbHandleEscape,
   validateSynchronousRuntimeCycles,
   validateUiDbCommands,
 } from './check-core-boundaries.mjs';
@@ -562,4 +563,82 @@ test('the repository satisfies UI DB, cycle, and static headless entry architect
   assert.ok(result.cycles.edges > 0);
   assert.ok(result.embeddedWebView.files > 0);
   assert.ok(result.headlessEntry.imports > 0);
+});
+
+test('database handle escape: raw driver, raw handle, file name and write-handle assertions stay in src/db', () => {
+  const root = fixture({
+    'src/db/database.ts': `
+      import { open } from '@op-engineering/op-sqlite';
+      import { drizzle } from 'drizzle-orm/op-sqlite';
+      const DB_NAME = 'gator.db';
+      export const db = drizzle(open({ name: DB_NAME })) as unknown as TestDb;
+      export function getRawDatabase() { return open({ name: DB_NAME }); }
+    `,
+    'src/db/useReactiveQuery.ts': `import { getRawDatabase } from './database'; export const raw = getRawDatabase();`,
+    'src/services/leak.ts': `
+      import { open } from '@op-engineering/op-sqlite';
+      import { getRawDatabase } from '@db/database';
+      export const name = 'gator.db';
+      export const raw = getRawDatabase();
+      export const forged = {} as unknown as WriteDb;
+      export async function lazy() { return import('drizzle-orm/better-sqlite3'); }
+    `,
+    'src/services/typesOnly.ts': `import type { open } from '@op-engineering/op-sqlite'; export type Open = typeof open;`,
+  });
+  const files = [
+    'src/db/database.ts',
+    'src/db/useReactiveQuery.ts',
+    'src/services/leak.ts',
+    'src/services/typesOnly.ts',
+  ].map((path) => resolve(root, path));
+
+  const errors = validateDbHandleEscape({ root, files });
+
+  assert.deepEqual(
+    errors.map((error) => error.replace(/:\d+ /, ' ')).sort(),
+    [
+      'src/services/leak.ts asserts a WriteDb; only withDbTransaction and the database module mint write handles',
+      'src/services/leak.ts calls getRawDatabase(); the raw handle stays inside src/db and databaseControl',
+      'src/services/leak.ts imports the raw database driver @op-engineering/op-sqlite; only src/db/database.ts and src/db/key.ts may',
+      'src/services/leak.ts loads the raw database driver drizzle-orm/better-sqlite3; only src/db/database.ts and src/db/key.ts may',
+      "src/services/leak.ts names the production database file 'gator.db'; only src/db/database.ts and src/db/key.ts may",
+    ].sort(),
+  );
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('database handle escape: a raw write statement needs an owner callback or a WriteDb-typed function', () => {
+  const root = fixture({
+    'src/db/repositories/example.ts': `
+      import { sql } from 'drizzle-orm';
+      import { runInTransactionContext, withDbTransaction, withDbWriteLock } from '@db/transaction';
+      import type { ReadDb, WriteDb } from '@db/types';
+      export function readOnly(db: ReadDb) { return db.all(sql\`SELECT 1\`); }
+      export function owned(db: ReadDb) {
+        return withDbTransaction(db, async (tx) => tx.run(sql\`UPDATE messages SET x = 1\`));
+      }
+      export function lockOwned(db: ReadDb) {
+        return withDbWriteLock(db, async (tx) => tx.all(sql\`DELETE FROM kv\`));
+      }
+      export function joined(context) {
+        return runInTransactionContext(context, async (db) => db.run(sql\`  insert into kv values (1)\`));
+      }
+      export function typed(db: WriteDb) { return db.run(sql\`PRAGMA user_version = 2\`); }
+      export function leaked(db: ReadDb) { return db.all(sql\`UPDATE messages SET x = 2 RETURNING id\`); }
+      const fragment = sql\`DELETE FROM messages WHERE id = 1\`;
+      export { fragment };
+    `,
+    'src/db/migrations.ts': `import { sql } from 'drizzle-orm'; export const m = sql\`CREATE TABLE t (id)\`;`,
+  });
+  const files = ['src/db/repositories/example.ts', 'src/db/migrations.ts'].map((path) =>
+    resolve(root, path),
+  );
+
+  const errors = validateDbHandleEscape({ root, files });
+
+  assert.deepEqual(errors, [
+    'src/db/repositories/example.ts:16 issues a raw write statement outside a transaction or write-lock owner and outside a WriteDb-typed function',
+    'src/db/repositories/example.ts:17 issues a raw write statement outside a transaction or write-lock owner and outside a WriteDb-typed function',
+  ]);
+  rmSync(root, { recursive: true, force: true });
 });

@@ -878,6 +878,190 @@ export function runEmbeddedWebViewBoundaryCheck({ root = process.cwd() } = {}) {
   return { files: files.length };
 }
 
+const DB_HANDLE_ESCAPE_OWNERS = new Set([
+  'withDbTransaction',
+  'withDbWriteLock',
+  'runInTransactionContext',
+]);
+// `REPLACE(` is also SQLite's string function, so only `REPLACE INTO` counts as a write.
+const DB_HANDLE_ESCAPE_WRITE_SQL =
+  /^\s*(?:(?:INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|PRAGMA|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|VACUUM|REINDEX)\b|REPLACE\s+INTO\b)/i;
+const DB_HANDLE_ESCAPE_RULES = {
+  rawDriverImport: {
+    specifiers: new Set([
+      '@op-engineering/op-sqlite',
+      'drizzle-orm/op-sqlite',
+      'drizzle-orm/better-sqlite3',
+    ]),
+    allowed: new Set(['src/db/database.ts', 'src/db/key.ts']),
+  },
+  rawHandleCall: {
+    allowed: new Set([
+      'src/db/database.ts',
+      'src/db/useReactiveQuery.ts',
+      'src/services/databaseControl.ts',
+    ]),
+  },
+  databaseFileName: {
+    literal: 'gator.db',
+    allowed: new Set(['src/db/database.ts', 'src/db/key.ts']),
+  },
+  writeHandleAssertion: { allowed: new Set(['src/db/transaction.ts', 'src/db/database.ts']) },
+  rawWriteSql: {
+    // transaction.ts is the owner implementation itself (BEGIN/COMMIT/ROLLBACK).
+    allowed: new Set([
+      'src/db/migrations.ts',
+      'src/db/migrate.ts',
+      'src/db/database.ts',
+      'src/db/transaction.ts',
+    ]),
+    allowedPrefixes: ['src/db/devHarness/', 'src/db/performance/', 'src/services/boot/db'],
+  },
+};
+
+function isFunctionLike(node) {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node)
+  );
+}
+
+/**
+ * The write-capable database handle must not escape its owners (src/db/types.ts). The ReadDb/WriteDb
+ * split makes the common case a compile error; these rules close what types cannot see: raw driver
+ * imports, the raw op-sqlite handle, the production file name, assertions that mint a WriteDb, and a
+ * raw write statement issued outside an owner callback (a ReadDb still has `all()`).
+ */
+export function validateDbHandleEscape({ root, files }) {
+  const errors = [];
+  const inTests = (path) => path.startsWith('test/');
+  for (const file of files) {
+    const path = relative(root, file).split(sep).join('/');
+    if (inTests(path)) continue;
+    const sourceFile = parseSource(readFileSync(file, 'utf8'), file);
+    const report = (node, message) =>
+      errors.push(`${sourceLocation(root, sourceFile, node)} ${message}`);
+    const visit = (node) => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+        const specifier = node.moduleSpecifier.text;
+        if (
+          DB_HANDLE_ESCAPE_RULES.rawDriverImport.specifiers.has(specifier) &&
+          createsRuntimeImport(node.importClause) &&
+          !DB_HANDLE_ESCAPE_RULES.rawDriverImport.allowed.has(path)
+        ) {
+          report(
+            node,
+            `imports the raw database driver ${specifier}; only src/db/database.ts and src/db/key.ts may`,
+          );
+        }
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isImportKeyword(node.expression) &&
+        node.arguments[0] &&
+        ts.isStringLiteral(node.arguments[0]) &&
+        DB_HANDLE_ESCAPE_RULES.rawDriverImport.specifiers.has(node.arguments[0].text) &&
+        !DB_HANDLE_ESCAPE_RULES.rawDriverImport.allowed.has(path)
+      ) {
+        report(
+          node,
+          `loads the raw database driver ${node.arguments[0].text}; only src/db/database.ts and src/db/key.ts may`,
+        );
+      }
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === 'getRawDatabase' &&
+        !DB_HANDLE_ESCAPE_RULES.rawHandleCall.allowed.has(path)
+      ) {
+        report(
+          node,
+          'calls getRawDatabase(); the raw handle stays inside src/db and databaseControl',
+        );
+      }
+      if (
+        (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+        node.text === DB_HANDLE_ESCAPE_RULES.databaseFileName.literal &&
+        !DB_HANDLE_ESCAPE_RULES.databaseFileName.allowed.has(path)
+      ) {
+        report(
+          node,
+          "names the production database file 'gator.db'; only src/db/database.ts and src/db/key.ts may",
+        );
+      }
+      if (
+        ts.isAsExpression(node) &&
+        ts.isTypeReferenceNode(node.type) &&
+        ['WriteDb', 'TestDb'].includes(node.type.typeName.getText(sourceFile)) &&
+        !DB_HANDLE_ESCAPE_RULES.writeHandleAssertion.allowed.has(path)
+      ) {
+        report(
+          node,
+          `asserts a ${node.type.typeName.getText(sourceFile)}; only withDbTransaction and the database module mint write handles`,
+        );
+      }
+      if (
+        ts.isTaggedTemplateExpression(node) &&
+        ts.isIdentifier(node.tag) &&
+        node.tag.text === 'sql' &&
+        !DB_HANDLE_ESCAPE_RULES.rawWriteSql.allowed.has(path) &&
+        !DB_HANDLE_ESCAPE_RULES.rawWriteSql.allowedPrefixes.some((prefix) =>
+          path.startsWith(prefix),
+        )
+      ) {
+        const head = ts.isNoSubstitutionTemplateLiteral(node.template)
+          ? node.template.text
+          : node.template.head.text;
+        if (DB_HANDLE_ESCAPE_WRITE_SQL.test(head) && !rawWriteIsOwned(node, sourceFile)) {
+          report(
+            node,
+            'issues a raw write statement outside a transaction or write-lock owner and outside a WriteDb-typed function',
+          );
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+  return errors.sort();
+}
+
+/** A raw write is owned when it sits inside an owner callback or inside a function that holds a WriteDb. */
+function rawWriteIsOwned(node, sourceFile) {
+  for (let current = node.parent; current; current = current.parent) {
+    if (
+      ts.isCallExpression(current) &&
+      ts.isIdentifier(current.expression) &&
+      DB_HANDLE_ESCAPE_OWNERS.has(current.expression.text)
+    ) {
+      return true;
+    }
+    if (
+      isFunctionLike(current) &&
+      current.parameters.some(
+        (parameter) =>
+          parameter.type && ['WriteDb', 'TestDb'].includes(parameter.type.getText(sourceFile)),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function runDbHandleEscapeBoundaryCheck({ root = process.cwd() } = {}) {
+  const files = [...sourceFiles(resolve(root, 'src')), ...sourceFiles(resolve(root, 'app'))];
+  const errors = validateDbHandleEscape({ root, files });
+  if (errors.length > 0) {
+    throw new Error(
+      `Database handle escape violations:\n${errors.map((e) => `- ${e}`).join('\n')}`,
+    );
+  }
+  return { files: files.length };
+}
+
 export function runArchitectureBoundaryCheck({ root = process.cwd() } = {}) {
   return {
     core: runCoreBoundaryCheck({ root }),
@@ -885,6 +1069,7 @@ export function runArchitectureBoundaryCheck({ root = process.cwd() } = {}) {
     uiDb: runUiDbCommandBoundaryCheck({ root }),
     cycles: runSynchronousRuntimeCycleCheck({ root }),
     embeddedWebView: runEmbeddedWebViewBoundaryCheck({ root }),
+    dbHandleEscape: runDbHandleEscapeBoundaryCheck({ root }),
     headlessEntry: runHeadlessEntryCheck({ root }),
   };
 }
@@ -895,7 +1080,7 @@ if (invokedDirectly) {
   try {
     const result = runArchitectureBoundaryCheck();
     console.log(
-      `Architecture boundary guard passed: ${result.core.files} core files, ${result.services.files} UI-free service files, ${result.uiDb.files} UI/app files with read-only DB ownership, ${result.cycles.files} production files / ${result.cycles.edges} synchronous runtime edges without cycles, ${result.embeddedWebView.files} production files without embedded WebView imports, and ${result.headlessEntry.imports} ordered entry imports.`,
+      `Architecture boundary guard passed: ${result.core.files} core files, ${result.services.files} UI-free service files, ${result.uiDb.files} UI/app files with read-only DB ownership, ${result.cycles.files} production files / ${result.cycles.edges} synchronous runtime edges without cycles, ${result.embeddedWebView.files} production files without embedded WebView imports, ${result.dbHandleEscape.files} production files without a database handle escape, and ${result.headlessEntry.imports} ordered entry imports.`,
     );
   } catch (error) {
     console.error(

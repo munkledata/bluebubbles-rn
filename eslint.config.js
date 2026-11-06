@@ -79,6 +79,25 @@ module.exports = [
             "CallExpression[callee.name='require'][arguments.0.value=/^react-native-notify-kit(?:\\/|$)/]",
           message: 'Require the owned nativeNotificationAdapter instead.',
         },
+        // Database ownership (see src/db/types.ts). The compiler already rejects a nested
+        // transaction through the ReadDb/WriteDb split; these three catch the shapes types cannot.
+        {
+          // `> :function` = inside the callback argument, not the handle argument before it.
+          selector:
+            'CallExpression[callee.name=/^withDb(Transaction|WriteLock)$/] > :function CallExpression[callee.name=/^withDb(Transaction|WriteLock)$/]',
+          message:
+            'A transaction or write lock opened inside another waits forever on its own caller. Call the *WithinTransaction twin with the context instead.',
+        },
+        {
+          selector:
+            'CallExpression[callee.name=/^withDb(Transaction|WriteLock)$/] > :function CallExpression[callee.name=/^(getDatabase|getRawDatabase|ensureDatabase)$/]',
+          message:
+            'Use the tx parameter inside a transaction or write-lock callback; do not fetch another handle.',
+        },
+        {
+          selector: "CallExpression[callee.property.name='transaction']",
+          message: "Drizzle's own transaction() nests BEGIN on the shared connection. Use withDbTransaction.",
+        },
       ],
     },
   },
