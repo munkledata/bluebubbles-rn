@@ -1,6 +1,11 @@
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useNavigation, useRoute, useRouter } from 'expo-router';
-import { usePreventRemove } from 'expo-router/react-navigation';
+import {
+  useLocalSearchParams,
+  useNavigation,
+  useRoute,
+  useRouter,
+  usePreventRemove,
+} from 'expo-router';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {

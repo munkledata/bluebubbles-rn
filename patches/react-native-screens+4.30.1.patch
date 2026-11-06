@@ -1,18 +1,19 @@
 diff --git a/node_modules/react-native-screens/android/build.gradle b/node_modules/react-native-screens/android/build.gradle
+index fb16bb0..8646d9d 100644
 --- a/node_modules/react-native-screens/android/build.gradle
 +++ b/node_modules/react-native-screens/android/build.gradle
-@@ -204,4 +204,6 @@
+@@ -230,4 +230,6 @@ dependencies {
      implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
      implementation 'com.google.android.material:material:1.13.0'
      implementation "androidx.core:core-ktx:1.17.0"
--}
 +    testImplementation 'junit:junit:4.13.2'
 +    testImplementation 'org.robolectric:robolectric:4.16'
-+}
+ }
 diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
+index 483ce36..43c9689 100644
 --- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
 +++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
-@@ -120,11 +120,63 @@
+@@ -120,11 +120,63 @@ internal class StackContainer(
      }
  
      private fun applyOperationsAndComputeFragmentManagerOperations() {
@@ -78,7 +79,7 @@ diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansi
  
          if (hasPendingOperations) {
              // Top fragment is the primary navigation fragment. If we're going to change anything
-@@ -146,21 +198,27 @@
+@@ -146,21 +198,27 @@ internal class StackContainer(
              )
          }
  
@@ -92,10 +93,6 @@ diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansi
 -            check(stackModel.size > 1) {
 -                "[RNScreens] Attempt to pop last screen from the stack"
 -            }
--
--            fragmentOps.add(PopBackStackOp(fragment))
--
--            check(stackModel.removeAt(stackModel.lastIndex) === fragment) {
 +            if (isRootReplacement) {
 +                // The sole root has no FragmentManager back-stack entry to pop.
 +                fragmentOps.add(RemoveOp(fragment))
@@ -103,10 +100,12 @@ diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansi
 +                check(stackModel.size > 1) {
 +                    "[RNScreens] Attempt to pop last screen from the stack"
 +                }
-+
+ 
+-            fragmentOps.add(PopBackStackOp(fragment))
 +                fragmentOps.add(PopBackStackOp(fragment))
 +            }
-+
+ 
+-            check(stackModel.removeAt(stackModel.lastIndex) === fragment) {
 +            check(stackModel.last() === fragment) {
                  "[RNScreens] Attempt to pop non-top screen"
              }
@@ -115,9 +114,10 @@ diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansi
  
          pendingPushOperations.forEach { operation ->
 diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt
+index f62545a..92ecc15 100644
 --- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt
 +++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt
-@@ -24,11 +24,9 @@
+@@ -24,11 +24,9 @@ internal class StackContainerUpdateCoordinator {
              return
          }
  
@@ -134,6 +134,7 @@ diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansi
              .map { Pair(renderedScreens.indexOf(it.screen), it) }
 diff --git a/node_modules/react-native-screens/android/src/test/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerPopOrderTest.kt b/node_modules/react-native-screens/android/src/test/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerPopOrderTest.kt
 new file mode 100644
+index 0000000..d94c160
 --- /dev/null
 +++ b/node_modules/react-native-screens/android/src/test/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerPopOrderTest.kt
 @@ -0,0 +1,292 @@

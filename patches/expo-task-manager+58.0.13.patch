@@ -1,5 +1,5 @@
 diff --git a/node_modules/expo-task-manager/android/build.gradle b/node_modules/expo-task-manager/android/build.gradle
-index 44ed4fd..00e6e20 100644
+index 69ac161..2e0267b 100644
 --- a/node_modules/expo-task-manager/android/build.gradle
 +++ b/node_modules/expo-task-manager/android/build.gradle
 @@ -19,6 +19,7 @@ dependencies {
@@ -10,10 +10,10 @@ index 44ed4fd..00e6e20 100644
    testImplementation 'junit:junit:4.13.2'
    testImplementation 'org.robolectric:robolectric:4.16'
  }
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt
-index fc42f02..8e71a22 100644
---- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt
-+++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerModule.kt b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerModule.kt
+index 1262377..fed2519 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerModule.kt
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerModule.kt
 @@ -60,6 +60,16 @@ class TaskManagerModule : Module() {
        taskService.notifyTaskFinished(taskName, appScopeKey, response)
      }
@@ -31,11 +31,11 @@ index fc42f02..8e71a22 100644
      AsyncFunction("isTaskRegisteredAsync") { taskName: String ->
        taskService.hasRegisteredTask(taskName, appScopeKey)
      }
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
-index 82bc0db..5c61a89 100644
---- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
-+++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
-@@ -15,6 +15,7 @@ import android.os.PersistableBundle;
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java
+index 29351d8..a9c0d14 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java
+@@ -17,6 +17,7 @@ import android.os.PersistableBundle;
  import android.util.Log;
  
  import java.util.ArrayList;
@@ -43,7 +43,7 @@ index 82bc0db..5c61a89 100644
  import java.util.List;
  import java.util.Map;
  
-@@ -73,7 +74,10 @@ public class TaskManagerUtils implements TaskManagerUtilsInterface {
+@@ -76,7 +77,10 @@ public class TaskManagerUtils implements TaskManagerUtilsInterface {
    @Override
    public void executeTask(TaskInterface task, Bundle data, @Nullable TaskExecutionCallback callback) {
      if (task == null) {
@@ -55,10 +55,10 @@ index 82bc0db..5c61a89 100644
      } else {
        task.execute(data, null, callback);
      }
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
-index 8416444..0e50a49 100644
---- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
-+++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java
+index 94e95b2..681343d 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java
 @@ -16,6 +16,7 @@ import org.json.JSONObject;
  import java.lang.ref.WeakReference;
  import java.lang.reflect.Constructor;
@@ -617,10 +617,10 @@ index 8416444..0e50a49 100644
        } catch (Exception e) {
          Log.w(TAG, "Failed to finish headless task: " + e.getMessage());
        }
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
-index 5d20b8a..581042d 100644
---- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
-+++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java
+index 206aae2..a20f3f8 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java
 @@ -48,6 +48,18 @@ public class BareTasksAndEventsRepository implements TasksAndEventsRepository {
      sEvents.get(appScopeKey).add(body);
    }
@@ -640,10 +640,10 @@ index 5d20b8a..581042d 100644
    @Override
    public boolean hasEvents(String appScopeKey) {
      return sEvents.containsKey(appScopeKey);
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java
-index df04404..b7f8a4f 100644
---- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java
-+++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java
+index 215d64f..bb403dd 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java
 @@ -39,6 +39,18 @@ public class ManagedTasksAndEventsRepository implements TasksAndEventsRepository
      sEvents.get(appScopeKey).add(body);
    }
@@ -663,10 +663,10 @@ index df04404..b7f8a4f 100644
    @Override
    public boolean hasEvents(String appScopeKey) {
      return sEvents.containsKey(appScopeKey);
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
-index 185a391..db4f67d 100644
---- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
-+++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java
+index b1a4ff8..dc90ab3 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java
 @@ -53,6 +53,7 @@ public interface TasksAndEventsRepository {
  
    void putEvents(String appScopeKey, List<Bundle> events);
@@ -675,13 +675,13 @@ index 185a391..db4f67d 100644
    boolean hasEvents(String appScopeKey);
    void removeEvents(String appScopeKey);
    List<Bundle> getEvents(String appScopeKey);
-diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
+diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java
 new file mode 100644
-index 0000000..1eef373
+index 0000000..a5f1f60
 --- /dev/null
-+++ b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
++++ b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java
 @@ -0,0 +1,384 @@
-+package expo.modules.taskManager;
++package expo.modules.taskmanager;
 +
 +import static org.junit.Assert.assertFalse;
 +import static org.junit.Assert.assertEquals;
@@ -725,7 +725,7 @@ index 0000000..1eef373
 +import expo.modules.core.interfaces.Consumer;
 +import expo.modules.interfaces.taskManager.TaskManagerInterface;
 +import expo.modules.interfaces.taskManager.TaskExecutionCallback;
-+import expo.modules.taskManager.repository.BareTasksAndEventsRepository;
++import expo.modules.taskmanager.repository.BareTasksAndEventsRepository;
 +
 +/** Exercises the real TaskService; only the app loader and JS managers are fakes. */
 +@RunWith(RobolectricTestRunner.class)
@@ -757,7 +757,7 @@ index 0000000..1eef373
 +    restorations.add(() -> applicationInfo.metaData = originalMetadata);
 +    applicationInfo.metaData = originalMetadata == null
 +        ? new Bundle() : new Bundle(originalMetadata);
-+    applicationInfo.metaData.putBoolean("expo.modules.taskManager.oneAppId", true);
++    applicationInfo.metaData.putBoolean("expo.modules.taskmanager.oneAppId", true);
 +
 +    foregroundManagers = isolateMap(TaskService.class, "sTaskManagers");
 +    headlessManagers = isolateMap(TaskService.class, "sHeadlessTaskManagers");
@@ -915,7 +915,7 @@ index 0000000..1eef373
 +    tasks.setAccessible(true);
 +    ((Set<Integer>) tasks.get(oldContext)).add(7);
 +    ((Set<Integer>) tasks.get(newContext)).add(7);
-+    Class<?> ownerClass = Class.forName("expo.modules.taskManager.TaskService$HeadlessTaskOwner");
++    Class<?> ownerClass = Class.forName("expo.modules.taskmanager.TaskService$HeadlessTaskOwner");
 +    java.lang.reflect.Constructor<?> constructor = ownerClass.getDeclaredConstructor(HeadlessJsTaskContext.class, int.class);
 +    constructor.setAccessible(true);
 +    Object generation = new Object();
@@ -1066,11 +1066,11 @@ index 0000000..1eef373
 +  }
 +}
 diff --git a/node_modules/expo-task-manager/build/TaskManager.js b/node_modules/expo-task-manager/build/TaskManager.js
-index 8c25150..9289652 100644
+index ec1f6fa..69ff1cb 100644
 --- a/node_modules/expo-task-manager/build/TaskManager.js
 +++ b/node_modules/expo-task-manager/build/TaskManager.js
-@@ -1,11 +1,11 @@
- import { LegacyEventEmitter, Platform, UnavailabilityError } from 'expo-modules-core';
+@@ -2,11 +2,11 @@ import { Platform, UnavailabilityError } from 'expo';
+ import { LegacyEventEmitter } from 'expo-modules-core';
  import { AppRegistry } from 'react-native';
  import ExpoTaskManager from './ExpoTaskManager';
 -// Register a no-op headless task so that HeadlessJsTaskContext.startTask()
@@ -1080,16 +1080,16 @@ index 8c25150..9289652 100644
 +// Resolving here makes React Native finish early and pause background retry/deadline timers.
 +// Keep this promise resource-free: no timers, listeners, or retained resolver are needed.
  if (Platform.OS === 'android') {
--    AppRegistry.registerHeadlessTask('expo-task-manager', () => async () => { });
-+    AppRegistry.registerHeadlessTask('expo-task-manager', () => () => new Promise(() => { }));
+-    AppRegistry.registerHeadlessTask('expo-task-manager', ()=>async ()=>{});
++    AppRegistry.registerHeadlessTask('expo-task-manager', () => () => new Promise(() => {}));
  }
  const tasks = new Map();
  function _validate(taskName) {
 diff --git a/node_modules/expo-task-manager/src/TaskManager.ts b/node_modules/expo-task-manager/src/TaskManager.ts
-index 7e77c18..c117ecb 100644
+index 8c1a7a8..d476613 100644
 --- a/node_modules/expo-task-manager/src/TaskManager.ts
 +++ b/node_modules/expo-task-manager/src/TaskManager.ts
-@@ -3,11 +3,11 @@ import { AppRegistry } from 'react-native';
+@@ -4,11 +4,11 @@ import { AppRegistry } from 'react-native';
  
  import ExpoTaskManager from './ExpoTaskManager';
  

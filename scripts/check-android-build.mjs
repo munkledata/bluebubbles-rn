@@ -58,16 +58,16 @@ const SHARE_ON_NEW_INTENT_CAPTURE =
 // These packages carry local patches, so their versions are pinned here and listed in
 // package.json `expo.install.exclude` (otherwise `expo install --check` fails CI on every upstream
 // patch release). Upgrade one by moving its version, its patches/ file and this constant together.
-const EXPO_BACKGROUND_TASK_VERSION = '57.0.21';
-const EXPO_TASK_MANAGER_VERSION = '57.0.21';
-const UNIMODULES_APP_LOADER_VERSION = '57.0.2';
-const EXPO_FILE_SYSTEM_VERSION = '57.0.7';
-const EXPO_ROUTER_VERSION = '57.0.30';
-const EXPO_SHARING_VERSION = '57.0.25';
-const REACT_NATIVE_SCREENS_VERSION = '4.26.2';
-const EXPO_MODULES_CORE_VERSION = '57.0.25';
-const EXPO_VERSION = '57.0.32';
-const REACT_NATIVE_SCREENS_RANGE = '~4.26.0';
+const EXPO_BACKGROUND_TASK_VERSION = '58.0.12';
+const EXPO_TASK_MANAGER_VERSION = '58.0.13';
+const UNIMODULES_APP_LOADER_VERSION = '58.0.2';
+const EXPO_FILE_SYSTEM_VERSION = '58.0.13';
+const EXPO_ROUTER_VERSION = '58.0.30';
+const EXPO_SHARING_VERSION = '58.0.22';
+const REACT_NATIVE_SCREENS_VERSION = '4.30.1';
+const EXPO_MODULES_CORE_VERSION = '58.0.30';
+const EXPO_VERSION = '58.0.23';
+const REACT_NATIVE_SCREENS_RANGE = '4.30.1';
 const PATCH_PACKAGE_VERSION = '8.0.1';
 const EXPO_BACKGROUND_TASK_PATCH_PATH = `patches/expo-background-task+${EXPO_BACKGROUND_TASK_VERSION}.patch`;
 const EXPO_BACKGROUND_TASK_SCHEDULER_PATH =
@@ -78,11 +78,11 @@ const EXPO_TASK_MANAGER_PATCH_PATH = `patches/expo-task-manager+${EXPO_TASK_MANA
 const EXPO_TASK_MANAGER_SOURCE_PATH = 'node_modules/expo-task-manager/src/TaskManager.ts';
 const EXPO_TASK_MANAGER_RUNTIME_PATH = 'node_modules/expo-task-manager/build/TaskManager.js';
 const EXPO_TASK_MANAGER_UTILS_PATH =
-  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java';
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java';
 const EXPO_TASK_SERVICE_PATH =
-  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java';
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java';
 const EXPO_TASK_MANAGER_MODULE_PATH =
-  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt';
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerModule.kt';
 export const BACKGROUND_EXECUTION_SOURCE_PATHS = {
   deadline:
     'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskDeadline.kt',
@@ -100,13 +100,13 @@ export const BACKGROUND_EXECUTION_SOURCE_PATHS = {
 };
 const EXPO_TASK_MANAGER_BUILD_PATH = 'node_modules/expo-task-manager/android/build.gradle';
 const EXPO_TASK_MANAGER_LIFETIME_TEST_PATH =
-  'node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java';
+  'node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java';
 const EXPO_TASKS_REPOSITORY_PATH =
-  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java';
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java';
 const EXPO_BARE_TASKS_REPOSITORY_PATH =
-  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java';
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java';
 const EXPO_MANAGED_TASKS_REPOSITORY_PATH =
-  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java';
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java';
 const EXPO_FILE_SYSTEM_PATCH_PATH = `patches/expo-file-system+${EXPO_FILE_SYSTEM_VERSION}.patch`;
 const EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH =
   'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt';
@@ -779,13 +779,15 @@ export function validateExpoTaskManagerPreJsSettlement({
 }
 
 /**
- * Keep SDK 57's experimental Router stack safe for Gator's predictive-Back contract.
+ * Keep SDK 58's experimental Router stack safe for Gator's predictive-Back contract.
  *
- * Upstream 57.0.30 still does not redispatch a native dismissal that usePreventRemove blocked, so
- * authored-work guards never receive the pending pop action. It also paints every scene white,
- * which flashes during the preview in this dark-only app. Every route layout must use the same
- * stack on Android; mixing the standard and experimental navigators disables the native preview
- * contract.
+ * Upstream 58.0.30 redispatches a native dismissal that usePreventRemove blocked itself (a real
+ * `pop(1, route.key)` under an active removal guard, so nested guards receive the pending action);
+ * this guard pins that upstream behaviour so a future release cannot drop it silently. The local
+ * patch keeps two repairs upstream still lacks: every scene is painted with the navigation theme
+ * instead of white, which flashes during the preview in this dark-only app, and a hidden header
+ * renders no native HeaderConfig at all. Every route layout must use the same stack on Android;
+ * mixing the standard and experimental navigators disables the native preview contract.
  */
 export function validateExpoRouterPredictiveBackBridge({
   packageJson,
@@ -855,18 +857,23 @@ export function validateExpoRouterPredictiveBackBridge({
   }
 
   const patchMarkers = [
-    '+                        navigation.dispatch({',
-    '+                            ...native_1.StackActions.pop(),',
-    '+                            source: route.key,',
-    '+                            target: state.key,',
-    '+    const { colors } = (0, native_1.useTheme)();',
-    '+    return ((0, jsx_runtime_1.jsxs)(experimental_1.Stack.Screen,',
-    'style: [styles.scene, { backgroundColor: colors.background }]',
-    'headerConfigProps.hidden === true ? null :',
-    "-        backgroundColor: 'white',",
+    '+function _useTheme() {',
+    '+    const data = require("../../react-navigation/core/theming/useTheme");',
+    '+    const { colors } = (0, _useTheme().useTheme)();',
+    '+                        backgroundColor: colors.background',
+    '+            headerConfigProps.hidden === true ? null : /*#__PURE__*/ (0, _jsxruntime().jsx)(_reactnativescreens.StackV5.HeaderConfig, {',
+    "-        backgroundColor: 'white'",
   ];
   if (patchMarkers.some((marker) => !patchSource?.includes(marker))) {
-    errors.push(`${EXPO_ROUTER_PATCH_PATH} must carry the reviewed pop and theme repairs`);
+    errors.push(`${EXPO_ROUTER_PATCH_PATH} must carry the reviewed theme and header repairs`);
+  }
+  if (
+    patchSource?.includes('StackActions.pop()') ||
+    patchSource?.includes('navigation.dispatch(')
+  ) {
+    errors.push(
+      `${EXPO_ROUTER_PATCH_PATH} must not reintroduce the SDK 57 pop redispatch; upstream 58 pops the prevented route itself`,
+    );
   }
 
   const screensPatchHeaders =
@@ -1060,36 +1067,34 @@ export function validateExpoRouterPredictiveBackBridge({
     }
   }
 
-  const preventedStart = experimentalStackSource?.indexOf('onNativeDismissPrevented: () => {');
+  // Upstream 58's prevented-dismiss handler: a real pop under an active removal guard, then the
+  // gesture-cancel emit. The block ends where the ScreenView element's key is applied.
+  const preventedStart = experimentalStackSource?.indexOf('onNativeDismissPrevented: ()=>{');
   const preventedEnd =
     preventedStart == null || preventedStart < 0
       ? -1
-      : experimentalStackSource.indexOf('} }, route.key)', preventedStart);
+      : experimentalStackSource.indexOf('}, route.key)', preventedStart);
   const preventedBlock =
     preventedStart != null && preventedStart >= 0 && preventedEnd > preventedStart
       ? experimentalStackSource.slice(preventedStart, preventedEnd)
       : '';
   if (
     !preventedBlock.includes("type: 'gestureCancel'") ||
-    !preventedBlock.includes('navigation.dispatch({') ||
-    !preventedBlock.includes('...native_1.StackActions.pop(),') ||
-    !preventedBlock.includes('source: route.key,') ||
-    !preventedBlock.includes('target: state.key,')
+    !preventedBlock.includes('if (routeIsRemovalPrevented) {') ||
+    !preventedBlock.includes('pop(1, route.key);')
   ) {
-    errors.push('installed experimental stack must redispatch the exact prevented pop action');
+    errors.push('installed experimental stack must pop the exact prevented route itself');
   }
   if (
-    !experimentalStackSource?.includes('const { colors } = (0, native_1.useTheme)();') ||
-    !experimentalStackSource.includes(
-      'style: [styles.scene, { backgroundColor: colors.background }]',
-    ) ||
+    !experimentalStackSource?.includes('const { colors } = (0, _useTheme().useTheme)();') ||
+    !experimentalStackSource.includes('backgroundColor: colors.background') ||
     experimentalStackSource.includes("backgroundColor: 'white'")
   ) {
     errors.push('installed experimental stack must use the navigation theme background');
   }
   if (
     !experimentalStackSource?.includes(
-      'headerConfigProps.hidden === true ? null : (0, jsx_runtime_1.jsx)(experimental_1.Stack.HeaderConfig',
+      'headerConfigProps.hidden === true ? null : /*#__PURE__*/ (0, _jsxruntime().jsx)(_reactnativescreens.StackV5.HeaderConfig',
     )
   ) {
     errors.push(

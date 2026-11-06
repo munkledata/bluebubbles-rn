@@ -104,8 +104,10 @@ async function emitAppState(state: AppStateStatus): Promise<void> {
 
 beforeAll(() => {
   jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type, handler) => {
-    appStateHandlers.add(handler);
-    return { remove: () => appStateHandlers.delete(handler) };
+    // React Native 0.88 types the listener by event tuple; this test registers only 'change'.
+    const changeHandler = handler as unknown as (state: AppStateStatus) => void;
+    appStateHandlers.add(changeHandler);
+    return { remove: () => appStateHandlers.delete(changeHandler) };
   }) as typeof AppState.addEventListener);
 });
 

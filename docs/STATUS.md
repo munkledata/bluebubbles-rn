@@ -236,7 +236,7 @@ Companion evidence and implementation research:
 - [`APP_SERVER_PARITY.md`](./APP_SERVER_PARITY.md) — app/server event and capability contract.
 - [`WORK_PLAN_2026-07-17.md`](./WORK_PLAN_2026-07-17.md) — historical evidence and blocked items.
 
-Current external references to re-check at implementation time: [Expo SDK 57](https://docs.expo.dev/versions/v57.0.0/),
+Current external references to re-check at implementation time: [Expo SDK 58](https://docs.expo.dev/versions/v58.0.0/),
 [Expo dependency validation](https://docs.expo.dev/more/expo-cli/),
 [Android unsafe URI loading](https://developer.android.com/privacy-and-security/risks/unsafe-uri-loading),
 [Android network security](https://developer.android.com/privacy-and-security/security-config),

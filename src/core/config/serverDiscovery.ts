@@ -30,14 +30,19 @@ export function sanitizeServerAddress(input: string | null | undefined): string 
   const hasHttpScheme = /^https?:\/\//i.test(addr);
   if (hasHttpScheme) {
     // Require a raw authority so WHATWG URL repair cannot turn `https:///host` into another URL.
-    if (!/^https?:\/\/[^/?#]+/i.test(addr)) return null;
+    const authority = /^https?:\/\/([^/?#]+)/i.exec(addr)?.[1];
+    // A percent-encoded host is never a server address a person typed; refusing it here keeps the
+    // look-alike check below independent of how the URL parser decodes the host (review M114).
+    if (!authority || authority.includes('%')) return null;
   } else {
     const delimiterIndex = addr.search(/[/?#]/);
     const authority = delimiterIndex === -1 ? addr : addr.slice(0, delimiterIndex);
     const isBracketedIpv6 = /^\[[^\]]+\](?::\d+)?$/.test(authority);
     const isHostWithOptionalPort = /^[^:]+(?::\d+)?$/.test(authority);
     // Positive schemeless grammar prevents URL repair from turning `/scheme:/host` into a new host.
-    if (!authority || (!isBracketedIpv6 && !isHostWithOptionalPort)) return null;
+    if (!authority || authority.includes('%') || (!isBracketedIpv6 && !isHostWithOptionalPort)) {
+      return null;
+    }
     addr = `https://${addr}`;
   }
   try {
@@ -50,7 +55,7 @@ export function sanitizeServerAddress(input: string | null | undefined): string 
     ) {
       return null;
     }
-    // Drop any path/query/hash — we only want the origin. The phone's URL parser percent-decodes
+    // Drop any path/query/hash — we only want the origin. Older phone URL parsers percent-decoded
     // the host without punycoding it, so the result must be visible ASCII too (review M114).
     const origin = `${url.protocol}//${url.host}`;
     return /[^\u0021-\u007e]/.test(origin) ? null : origin;
@@ -86,8 +91,11 @@ export function strictServerOrigin(input: string | null | undefined): string | n
   // Accept exactly an http(s) authority and an optional single trailing slash. Checking the raw
   // form first also rejects empty `?` / `#` delimiters that URL.search/hash normalize away.
   if (!/^https?:\/\/[^/?#]+\/?$/i.test(input)) return null;
-  // The phone's URL parser percent-decodes the host without punycoding it (`g%D0%B0tor` becomes a
-  // Cyrillic look-alike), so the parsed origin must be visible ASCII too (review M114).
+  // A rotation origin has no business carrying percent-encoding at all. Refusing it up front also
+  // keeps the look-alike defence independent of the phone's URL parser: whatwg-url-minimum 0.1.2
+  // percent-decoded `g%D0%B0tor` into a Cyrillic host (caught by the ASCII check below), 0.2.0
+  // punycodes it to `xn--gtor-53d`, which that check would wave through (review M114).
+  if (input.includes('%')) return null;
   try {
     const url = new URL(input);
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;

@@ -1,0 +1,58 @@
+diff --git a/node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js b/node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js
+index 675bd55..a9004ed 100644
+--- a/node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js
++++ b/node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js
+@@ -30,6 +30,13 @@ function _reactnative() {
+     };
+     return data;
+ }
++function _useTheme() {
++    const data = require("../../react-navigation/core/theming/useTheme");
++    _useTheme = function() {
++        return data;
++    };
++    return data;
++}
+ const _reactnativescreens = require("../../optional-libraries/react-native-screens");
+ const _useDismissedRouteError = require("../../react-navigation/native-stack/utils/useDismissedRouteError");
+ function _getRequireWildcardCache(nodeInterop) {
+@@ -160,6 +167,9 @@ function ExperimentalStackView({ state, emit, pop, descriptors, isPreloaded, isR
+ }
+ function ScreenView({ routeKey, routeName, descriptor, options, isPreloaded, preventNativeDismiss, ...lifecycle }) {
+     useUnsupportedOptionsWarning(options, routeName);
++    // Gator: paint the scene with the navigation theme instead of upstream's hard-coded white, which
++    // flashes during the predictive-Back preview in this dark-only app.
++    const { colors } = (0, _useTheme().useTheme)();
+     const headerConfigProps = {
+         title: options.title,
+         hidden: options.headerShown === undefined ? undefined : !options.headerShown,
+@@ -173,10 +183,17 @@ function ScreenView({ routeKey, routeName, descriptor, options, isPreloaded, pre
+         ...lifecycle,
+         children: [
+             /*#__PURE__*/ (0, _jsxruntime().jsx)(_reactnative().View, {
+-                style: styles.scene,
++                style: [
++                    styles.scene,
++                    {
++                        backgroundColor: colors.background
++                    }
++                ],
+                 children: descriptor.render()
+             }),
+-            /*#__PURE__*/ (0, _jsxruntime().jsx)(_reactnativescreens.StackV5.HeaderConfig, {
++            // Gator: a hidden header gets no native HeaderConfig at all, so the screen keeps its full
++            // height instead of reserving an invisible header area.
++            headerConfigProps.hidden === true ? null : /*#__PURE__*/ (0, _jsxruntime().jsx)(_reactnativescreens.StackV5.HeaderConfig, {
+                 ...headerConfigProps
+             })
+         ]
+@@ -216,8 +233,7 @@ const styles = _reactnative().StyleSheet.create({
+         flex: 1
+     },
+     scene: {
+-        flex: 1,
+-        backgroundColor: 'white'
++        flex: 1
+     }
+ });
+ 

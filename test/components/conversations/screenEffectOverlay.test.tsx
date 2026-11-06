@@ -355,9 +355,13 @@ describe('ScreenEffectOverlay', () => {
     const overlay = rootOf(r);
     expect(overlay.props.pointerEvents).toBe('none');
     // absoluteFill = position:absolute, left/right/top/bottom 0 — floats over the whole chat.
-    expect(StyleSheet.flatten(overlay.props.style)).toMatchObject(
-      StyleSheet.flatten(StyleSheet.absoluteFill),
-    );
+    expect(StyleSheet.flatten(overlay.props.style)).toMatchObject({
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+    });
   });
 
   it.each<[ScreenEffect, number]>([

@@ -3,7 +3,7 @@ type ErrorDiagnosticApi = Pick<
   'ERROR_DIAGNOSTIC_SITES' | 'projectCapturedErrorDiagnostic'
 >;
 
-/** The exact fields React Native 0.86 passes to its native ExceptionsManager module. */
+/** The exact fields React Native 0.88 passes to its native ExceptionsManager module. */
 export interface ReactNativeExceptionData {
   message?: unknown;
   originalMessage?: unknown;
@@ -28,7 +28,7 @@ interface MutableRuntimeConsole {
 }
 
 interface InstallOptions {
-  /** Tests inject the exact RN seam; production resolves the pinned RN 0.86 implementation. */
+  /** Tests inject the exact RN seam; production resolves the pinned RN 0.88 implementation. */
   exceptionsManager?: ReactNativeExceptionsManager;
   runtimeConsole?: MutableRuntimeConsole;
   release?: boolean;
@@ -220,7 +220,7 @@ function installReleaseConsoleBoundary(runtimeConsole: MutableRuntimeConsole): v
 
 function loadExceptionsManager(): ReactNativeExceptionsManager {
   try {
-    // RN 0.86 exposes this internal seam and the exact version is pinned in package.json. The
+    // RN 0.88 exposes this internal seam and the exact version is pinned in package.json. The
     // source/build guard fails upgrades if the seam or its pre-native placement moves.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const loaded = require('react-native/Libraries/Core/ExceptionsManager') as {

@@ -27,11 +27,11 @@ export const REQUIRED_EAS_GRADLE_COMMANDS = Object.freeze({
 });
 export const REQUIRED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@op-engineering/op-sqlite': '19.0.5',
-  '@react-native-firebase/app': '25.1.0',
-  '@react-native-firebase/messaging': '25.1.0',
-  '@shopify/flash-list': '2.3.2',
+  '@react-native-firebase/app': '27.1.0',
+  '@react-native-firebase/messaging': '27.1.0',
+  '@shopify/flash-list': '2.3.3',
   'drizzle-orm': '0.45.2',
-  'react-native-maps': '1.27.2',
+  'react-native-maps': '1.29.11',
   'react-native-notify-kit': '10.10.0',
 });
 export const FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze([

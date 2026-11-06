@@ -214,7 +214,7 @@ describe('React Native exception privacy boundary', () => {
     expect(decorator).not.toHaveBeenCalled();
   });
 
-  it('pins the RN 0.86 seam and installs it as the first bundle side effect', () => {
+  it('pins the RN 0.88 seam and installs it as the first bundle side effect', () => {
     const root = path.resolve(__dirname, '../..');
     const packageJson = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>;
@@ -233,7 +233,7 @@ describe('React Native exception privacy boundary', () => {
       ),
     ].map((match) => match[1]);
 
-    expect(packageJson.dependencies?.['react-native']).toBe('0.86.3');
+    expect(packageJson.dependencies?.['react-native']).toBe('0.88.1');
     expect(exceptionsSource).toContain('return userExceptionDecorator(data);');
     expect(exceptionsSource.indexOf('const data = preprocessException({')).toBeLessThan(
       exceptionsSource.indexOf('NativeExceptionsManager.reportException(data);'),

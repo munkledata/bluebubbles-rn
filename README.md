@@ -1,6 +1,6 @@
 # Gator RN
 
-Gator is an Android-only, iOS-styled messaging client built with React Native, Expo SDK 57,
+Gator is an Android-only, iOS-styled messaging client built with React Native, Expo SDK 58,
 TypeScript, and a compatible self-hosted Mac server.
 
 > **Release status:** active hardening; not yet release-ready. Remediation status and acceptance

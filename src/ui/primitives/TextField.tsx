@@ -1,12 +1,19 @@
 import React from 'react';
-import { StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type TextInputInstance,
+  type TextInputProps,
+} from 'react-native';
 import { useTheme } from '../theme';
 import { textInputAccentProps } from '../theme/controlColors';
 
 interface TextFieldProps extends TextInputProps {
   label?: string;
   /** The underlying input, so a form can move focus to it (e.g. the keyboard's Next key). */
-  ref?: React.Ref<TextInput>;
+  ref?: React.Ref<TextInputInstance>;
 }
 
 /** Labeled iOS-style text input bound to the theme. */

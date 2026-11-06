@@ -36,14 +36,14 @@ on package-manager layout instead of this app's manifest.
 | `expo-linking`         | Expo Router deep-link and scheme runtime for the `gator://` and `imessage://` schemes                                    | `expo-router` declares `expo-linking` as a peer, so Gator owns the peer rather than relying on incidental hoisting                      |
 | `react-native-screens` | Expo Router/React Navigation native screen hosts used by every `Stack` route                                             | Router declares it as both a dependency and peer; keeping the SDK-bundled root version makes autolinking and native navigation explicit |
 
-All five remain required at the root and within Expo SDK 57 compatibility ranges. `npm explain` confirms the owner edges
+All five remain required at the root and within Expo SDK 58 compatibility ranges. `npm explain` confirms the owner edges
 above. The 2026-08-27 `SDK-01` host milestone aligned the newer SDK 57 patches for `expo-asset`, `expo-linking`, and
 `expo-system-ui` (along with the rest of Expo's expected patch set); dependency ownership did not change. No package was
 removed in `DEPS-02`, so no removal-specific prebuild/rebuild gate was triggered; any future removal must be isolated
 and run through Expo Doctor, Metro export, clean prebuild/build, and the directly affected runtime flow.
 
 The later `PKG-01-WEBVIEW-REMOVAL` slice removes the app's direct community
-`react-native-webview` declaration and resolution. Expo SDK 57 still brings its separate
+`react-native-webview` declaration and resolution. Expo SDK 58 still brings its separate
 `@expo/dom-webview` module transitively; that framework dependency does not authorize an embedded
 product surface, and current production source imports neither package. Host install/autolinking
 checks prove the direct package absent, while a clean replacement native candidate remains the

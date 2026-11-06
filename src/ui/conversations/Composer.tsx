@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { attachPasteListener } from '@/services/paste';
@@ -476,7 +477,7 @@ export const Composer = React.memo(function Composer({
    * through the UIManager's mounting layer, so asking before the Fabric mount has landed on the
    * UI thread simply finds nothing and the listener is never registered.
    */
-  const inputRef = useRef<TextInput | null>(null);
+  const inputRef = useRef<TextInputInstance | null>(null);
   const [inputTag, setInputTag] = useState<number | null>(null);
   const captureInputTag = useCallback((): void => {
     const tag = findNodeHandle(inputRef.current);

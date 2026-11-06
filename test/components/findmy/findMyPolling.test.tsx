@@ -35,7 +35,8 @@ describe('useFindMyPolling', () => {
     focusEffect = undefined;
     setCurrentState('active');
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_event, handler) => {
-      appStateHandler = handler;
+      // React Native 0.88 types the listener by event tuple; this test registers only 'change'.
+      appStateHandler = handler as unknown as (state: AppStateStatus) => void;
       return { remove: jest.fn(() => (appStateHandler = undefined)) };
     }) as typeof AppState.addEventListener);
   });

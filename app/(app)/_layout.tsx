@@ -78,8 +78,8 @@ function createAccountOwnedAppState(
 ): Pick<typeof NativeAppState, 'addEventListener'> {
   return {
     addEventListener: (type, listener) =>
-      NativeAppState.addEventListener(type, (state) => {
-        if (accountLease.isCurrent()) listener(state);
+      NativeAppState.addEventListener(type, (...args) => {
+        if (accountLease.isCurrent()) listener(...args);
       }),
   };
 }

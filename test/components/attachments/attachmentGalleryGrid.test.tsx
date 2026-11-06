@@ -95,7 +95,7 @@ describe('AttachmentGalleryGrid', () => {
   it('aligns to the right for own messages', async () => {
     const view = await renderWithTheme(<AttachmentGalleryGrid atts={[att('a')]} isFromMe />);
     const root = view.toJSON() as unknown as { props: { style: StyleProp<ViewStyle> } };
-    expect(StyleSheet.flatten(root.props.style).alignSelf).toBe('flex-end');
+    expect(StyleSheet.flatten(root.props.style)?.alignSelf).toBe('flex-end');
   });
 
   it('aligns to the left for received messages', async () => {
@@ -103,7 +103,7 @@ describe('AttachmentGalleryGrid', () => {
       <AttachmentGalleryGrid atts={[att('a')]} isFromMe={false} />,
     );
     const root = view.toJSON() as unknown as { props: { style: StyleProp<ViewStyle> } };
-    expect(StyleSheet.flatten(root.props.style).alignSelf).toBe('flex-start');
+    expect(StyleSheet.flatten(root.props.style)?.alignSelf).toBe('flex-start');
   });
 
   it('gives every mounted cell its own pin and withholds a path whose pin is refused', async () => {

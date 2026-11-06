@@ -121,8 +121,10 @@ describe('look-alike Unicode server addresses', () => {
   });
 
   it('rejects a percent-encoded look-alike under the phone URL parser', () => {
-    // The phone's parser (whatwg-url-minimum, installed by Expo) percent-decodes the host without
-    // punycoding it, so `g%D0%B0tor` comes back as Cyrillic 'gаtor' unless the result is checked.
+    // The phone's parser (whatwg-url-minimum, installed by Expo) used to percent-decode the host
+    // without punycoding it (`g%D0%B0tor` came back as Cyrillic 'gаtor'); since 0.2.0 it punycodes
+    // the decoded host to `xn--gtor-53d`. Both forms must be refused: a percent-encoded authority is
+    // rejected before parsing, whichever parser is installed.
     const runtime = globalThis as unknown as { URL: unknown };
     const original = runtime.URL;
     runtime.URL = DeviceURL;

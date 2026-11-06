@@ -22,6 +22,7 @@ import {
   type MapFocusRequest,
   type MapMarker,
 } from '@ui/findmy/FindMyMap';
+import { readAppStateStatus } from '@ui/hooks/appStateStatus';
 import { showExternalOpenFailure } from '@ui/toast/external-open-feedback';
 import {
   contactNameForHandle,
@@ -62,7 +63,7 @@ export default function FindMyScreen(): React.JSX.Element {
   const [tab, setTab] = useState<'devices' | 'items' | 'people'>('devices');
   const [mapFocusRequest, setMapFocusRequest] = useState<MapFocusRequest | null>(null);
   const [routeFocused, setRouteFocused] = useState(false);
-  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+  const [appState, setAppState] = useState<AppStateStatus>(readAppStateStatus());
   const focusRevisionRef = useRef(0);
   const accountLease = useScreenAccountLease();
   const mountedRef = useRef(true);

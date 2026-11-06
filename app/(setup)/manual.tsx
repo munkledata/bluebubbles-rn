@@ -6,8 +6,8 @@ import {
   StyleSheet,
   Switch,
   Text,
-  type TextInput,
   View,
+  type TextInputInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -31,7 +31,7 @@ export default function Manual(): React.JSX.Element {
   const kbVisible = useKeyboardVisible();
   const [url, setUrl] = useState('');
   const [password, setPassword] = useState('');
-  const passwordRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInputInstance>(null);
   const [allowInsecure, setAllowInsecure] = useState(false);
   const status = useSessionStore((s) => s.status);
   const error = useSessionStore((s) => s.error);

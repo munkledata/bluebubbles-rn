@@ -1526,9 +1526,13 @@ authoritative candidate procedure.
 
 ---
 
-## (j) SDK 57 general smoke test
+## (j) SDK general smoke test (SDK 57 / RN 0.86, re-run for SDK 58 / RN 0.88)
 
-A quick pass over the screens most likely to be disturbed by the RN 0.86 upgrade:
+A quick pass over the screens most likely to be disturbed by an Expo SDK or React Native upgrade.
+The SDK 58 / React Native 0.88 move (2026-11-06) needs a fresh pass of every item below plus:
+predictive Back on a screen with unsaved changes (Expo Router 58 now pops the prevented route
+itself), a camera capture that survives process death, a backup export, the Disconnect log wipe,
+a background-task wake, a share-out, and the map screen (react-native-maps 1.29.11):
 
 - [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** Open a chat and scroll — messages scroll smoothly
       and, when you tap the composer, the

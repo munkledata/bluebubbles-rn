@@ -1,4 +1,4 @@
-import { FlashList, type FlashListRef } from '@shopify/flash-list';
+import { FlashList, type FlashListRef, type ViewToken } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -11,7 +11,6 @@ import {
   Text,
   TextInput,
   View,
-  type ViewToken,
 } from 'react-native';
 import { activeInboxFilterCount, DEFAULT_INBOX_FILTERS, type InboxFilters } from '@core/models';
 import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';

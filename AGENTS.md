@@ -49,7 +49,7 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 
 ## Architecture contracts
 
-- Expo SDK 57, React Native 0.86, React 19, strict TypeScript with
+- Expo SDK 58, React Native 0.88, React 19, strict TypeScript with
   `noUncheckedIndexedAccess`.
 - `src/core/` is platform-free: no React, React Native, Expo, Zustand, native DB, feature, state,
   or UI imports. `npm run check:architecture` enforces this.
@@ -61,10 +61,16 @@ in the relevant document under `docs/`, then link to it here if future agents mu
   constant, normalized variant, normalization case, and the appropriate injected sink.
 - Path aliases are `@core`, `@db`, `@ui`, `@utils`, and their subpaths.
 
-## Expo SDK 57 and native-module traps
+## Expo SDK 58 and native-module traps
 
-- Use the exact SDK 57 docs: <https://docs.expo.dev/versions/v57.0.0/>.
-- Root imperative APIs in `expo-contacts` and `expo-media-library` throw in SDK 57. Use their
+- Use the exact SDK 58 docs: <https://docs.expo.dev/versions/v58.0.0/>.
+- `File.write()` is async since SDK 58; a synchronous caller (log sink, backup writer) must use
+  `File.writeSync()`, or it reports success before the bytes land.
+- SDK 58 enables R8 for release builds by default; `app.config.ts` keeps it off
+  (`enableMinifyInReleaseBuilds: false`) until keep rules and a device pass are reviewed.
+- RN 0.87+ strict TypeScript API: type refs as `TextInputInstance`/`HostInstance`, not component
+  names; `AppState.currentState` is a nullable string, read it via `readAppStateStatus()`.
+- Root imperative APIs in `expo-contacts` and `expo-media-library` throw since SDK 57. Use their
   `/legacy` entry points where the app still uses imperative APIs.
 - Metro cannot bundle `import(variable)`. Optional native modules must be dependency-injected so
   the bundle contains no reference until the native dependency exists.
@@ -157,7 +163,7 @@ but its affected-row count is not portable. Use`RETURNING` or a builder when own
 ## Files, uploads, cache, and sharing
 
 - Download progress is presentation-only. The DB `localPath` write remains authoritative.
-- Upload progress uses the legacy filesystem `createUploadTask`, not `uploadAsync` or the SDK 57
+- Upload progress uses the legacy filesystem `createUploadTask`, not `uploadAsync` or the newer
   `File` API. Cancellation can resolve `null`; release listeners/registry entries on every
   terminal path. See `docs/UPLOAD_PROGRESS.md`.
 - Native stat/download/delete work stays outside DB transactions. Attachment-cache claims and

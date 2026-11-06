@@ -101,6 +101,9 @@ jest.mock('expo-router', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
   return {
+    // SDK 58 exports usePreventRemove from the main entry point.
+    usePreventRemove: (enabled: boolean, callback: (options: unknown) => void) =>
+      mockUsePreventRemove(enabled, callback),
     useFocusEffect: (callback: () => void | (() => void)) =>
       R.useEffect(() => {
         if (!mockScreenFocused) return;
@@ -138,11 +141,6 @@ jest.mock('react-native/Libraries/AppState/AppState', () => ({
 jest.mock('@/services/location/expoLocationAdapter', () => ({
   getExpoLocationAdapter: () => mockLocationAdapter,
 }));
-jest.mock('expo-router/react-navigation', () => ({
-  usePreventRemove: (enabled: boolean, callback: (options: unknown) => void) =>
-    mockUsePreventRemove(enabled, callback),
-}));
-
 // Zero by default (what the rest of the suite wants); mutable so the keyboard-inset test can hand
 // the selection bar a realistic navigation bar.
 let mockInsetBottom = 0;

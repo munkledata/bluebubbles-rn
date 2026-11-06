@@ -10,8 +10,7 @@ let navigateWithoutPrompt: ((navigate: () => void) => void) | null = null;
 
 jest.mock('expo-router', () => ({
   useNavigation: () => ({ dispatch: mockDispatch }),
-}));
-jest.mock('expo-router/react-navigation', () => ({
+  // SDK 58 exports usePreventRemove from the main entry point.
   usePreventRemove: (enabled: boolean, callback: (options: unknown) => void) =>
     mockUsePreventRemove(enabled, callback),
 }));

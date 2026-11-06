@@ -15,6 +15,7 @@ import {
   serverRotationCoordinator,
   type ServerRotationRequest,
 } from '@/services/realtime/serverRotationCoordinator';
+import { readAppStateStatus } from '@ui/hooks/appStateStatus';
 import { showToast } from '@ui/toast/toastStore';
 import { Button, TextField } from '../primitives';
 import { useTheme } from '../theme';
@@ -28,7 +29,7 @@ export function ServerRotationApprovalHost(): React.JSX.Element | null {
     serverRotationCoordinator.getSnapshot,
     serverRotationCoordinator.getSnapshot,
   );
-  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+  const [appState, setAppState] = useState<AppStateStatus>(readAppStateStatus());
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {

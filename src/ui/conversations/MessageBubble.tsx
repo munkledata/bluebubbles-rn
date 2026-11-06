@@ -1,5 +1,12 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type AccessibilityActionEvent } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type AccessibilityActionEvent,
+  type HostInstance,
+} from 'react-native';
 import { isUrlPreviewRequestUrl } from '@core/api/endpoints/urlPreviews';
 import { bubbleEffectOf } from '@core/effects';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
@@ -120,7 +127,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   // Measure the bubble on long-press so the reaction/action menu can float around its actual
   // on-screen position (iMessage-style), rather than sit in a bottom sheet. measureInWindow is
   // async (one frame) — fine for a long-press.
-  const bubbleRef = useRef<View>(null);
+  const bubbleRef = useRef<HostInstance>(null);
   const openActions = useCallback(
     (target?: MessagePressTarget) => {
       if (!onLongPress) return;

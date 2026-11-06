@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
+import { readAppStateStatus } from '@ui/hooks/appStateStatus';
 
 export const FIND_MY_REFRESH_INTERVAL_MS = 60_000;
 
@@ -19,7 +20,7 @@ export function useFindMyPolling(refresh: () => Promise<void>): void {
   useFocusEffect(
     useCallback(() => {
       let focused = true;
-      let appState: AppStateStatus = AppState.currentState;
+      let appState: AppStateStatus = readAppStateStatus();
       let interval: ReturnType<typeof setInterval> | null = null;
 
       const stop = (): void => {

@@ -1,8 +1,8 @@
 diff --git a/node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt b/node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt
-index a5b971e..15b9147 100644
+index 4955e93..7c6c724 100644
 --- a/node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt
 +++ b/node_modules/expo-modules-core/android/src/main/java/expo/modules/kotlin/activityresult/AppContextActivityResultRegistry.kt
-@@ -86,6 +86,9 @@ class AppContextActivityResultRegistry(
+@@ -87,6 +87,9 @@ class AppContextActivityResultRegistry(
  
    private val pendingResults = Bundle/*<String, ActivityResult>*/()
  
@@ -12,7 +12,7 @@ index a5b971e..15b9147 100644
    private val activity: AppCompatActivity
      get() = requireNotNull(currentActivityProvider.currentActivity as? AppCompatActivity) { "Current Activity is not available at the moment" }
  
-@@ -227,6 +230,10 @@ class AppContextActivityResultRegistry(
+@@ -229,6 +232,10 @@ class AppContextActivityResultRegistry(
          keyToCallbacksAndContract[key] = CallbacksAndContract(fallbackCallback, callback, contract)
          keyToInputParam[key] = input
          launchedKeys.add(key)
@@ -23,7 +23,7 @@ index a5b971e..15b9147 100644
  
          try {
            onLaunch(requestCode, contract, input)
-@@ -240,6 +247,17 @@ class AppContextActivityResultRegistry(
+@@ -242,6 +249,17 @@ class AppContextActivityResultRegistry(
      }
    }
  
@@ -39,9 +39,9 @@ index a5b971e..15b9147 100644
 +  }
 +
    /**
-    * Persist the state of the registry.
-    */
-@@ -298,7 +316,20 @@ class AppContextActivityResultRegistry(
+    * A registration is bound to one Activity's lifecycle and dropped by its ON_DESTROY,
+    * while launchers outlive the Activity inside the AppContext. Registers [key] again
+@@ -333,7 +351,20 @@ class AppContextActivityResultRegistry(
     */
    @MainThread
    fun dispatchResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {

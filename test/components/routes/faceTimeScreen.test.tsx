@@ -62,7 +62,9 @@ it('hides both mutations without either narrow capability', async () => {
 it('creates once, then exposes the in-memory bearer link through Copy and native Share', async () => {
   setCapabilities(true);
   mockCreateAppleFaceTimeLink.mockResolvedValue({ status: 'accepted', link: FACE_TIME_LINK });
-  const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+  const share = jest
+    .spyOn(Share, 'share')
+    .mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
   await renderWithTheme(<FaceTimeScreen />);
 
   await act(async () => {

@@ -176,8 +176,10 @@ describe('RootLayout — foreground boot presentation', () => {
       get: () => currentAppState,
     });
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type, handler) => {
-      appStateHandlers.add(handler);
-      return { remove: () => appStateHandlers.delete(handler) };
+      // React Native 0.88 types the listener by event tuple; this test registers only 'change'.
+      const changeHandler = handler as unknown as AppStateHandler;
+      appStateHandlers.add(changeHandler);
+      return { remove: () => appStateHandlers.delete(changeHandler) };
     }) as typeof AppState.addEventListener);
 
     useLockStore.setState({

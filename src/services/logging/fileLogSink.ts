@@ -48,7 +48,7 @@ const FILE_LOG_OPERATION_TIMEOUT_ERROR = 'persistent-log-operation-timed-out';
 interface LogFileHandle {
   delete(): void;
   info(): { exists: boolean; size?: number };
-  write(contents: string): void;
+  writeSync(contents: string): void;
   text(): Promise<string>;
 }
 
@@ -269,7 +269,7 @@ function replaceOrDeleteLogFile(
   try {
     // The modern File API truncates by default and creates an absent file. Avoid a delete/create
     // gap that could lose the prior safe log merely because a replacement write then fails.
-    file.write(contents);
+    file.writeSync(contents);
     return 'written';
   } catch {
     if (!isActive()) return 'failed';

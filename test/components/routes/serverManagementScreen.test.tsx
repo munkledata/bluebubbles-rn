@@ -893,7 +893,9 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
   it('renders exact sensitive host/a11y data and preserves Share, Health, Deleted, Sync, and QR actions', async () => {
     arrangePrivateServer();
     useSyncStore.setState({ status: 'done', chats: 23, messages: 456, error: null });
-    const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+    const share = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
     const payload = buildSetupQr(PRIVATE_ORIGIN, PRIVATE_PASSWORD);
     const { view } = await renderScreen();
 
@@ -963,7 +965,9 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
       messages: 864_209_753,
       error: null,
     });
-    const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction });
+    const share = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
     const { view } = await renderScreen();
     expect(await screen.findByText(PRIVATE_INFO.server_version)).toBeTruthy();
     expect(await screen.findByText(PRIVATE_TOTALS.messages.toLocaleString())).toBeTruthy();

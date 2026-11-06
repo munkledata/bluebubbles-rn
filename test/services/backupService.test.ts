@@ -42,7 +42,7 @@ class MockFile {
   create(): void {
     this.exists = true;
   }
-  write(text: string): void {
+  writeSync(text: string): void {
     this.content = text;
   }
   async text(): Promise<string> {

@@ -340,12 +340,12 @@ const redirectContainmentPackageJson = {
   main: 'index.js',
   scripts: { postinstall: 'patch-package --error-on-fail' },
   dependencies: {
-    'expo-background-task': '57.0.21',
-    'expo-file-system': '57.0.7',
-    'expo-router': '~57.0.30',
-    'expo-sharing': '~57.0.25',
-    'expo-task-manager': '57.0.21',
-    'react-native-screens': '~4.26.0',
+    'expo-background-task': '58.0.12',
+    'expo-file-system': '58.0.13',
+    'expo-router': '~58.0.30',
+    'expo-sharing': '~58.0.22',
+    'expo-task-manager': '58.0.13',
+    'react-native-screens': '4.30.1',
   },
   devDependencies: { 'patch-package': '8.0.1' },
   expo: {
@@ -366,24 +366,24 @@ const redirectContainmentPackageLock = {
   packages: {
     '': {
       dependencies: {
-        'expo-background-task': '57.0.21',
-        'expo-file-system': '57.0.7',
-        'expo-router': '~57.0.30',
-        'expo-sharing': '~57.0.25',
-        'expo-task-manager': '57.0.21',
-        'react-native-screens': '~4.26.0',
+        'expo-background-task': '58.0.12',
+        'expo-file-system': '58.0.13',
+        'expo-router': '~58.0.30',
+        'expo-sharing': '~58.0.22',
+        'expo-task-manager': '58.0.13',
+        'react-native-screens': '4.30.1',
       },
       devDependencies: { 'patch-package': '8.0.1' },
     },
-    'node_modules/expo-background-task': { version: '57.0.21' },
-    'node_modules/expo-file-system': { version: '57.0.7' },
-    'node_modules/expo-router': { version: '57.0.30' },
-    'node_modules/expo-sharing': { version: '57.0.25' },
-    'node_modules/expo': { version: '57.0.32' },
-    'node_modules/expo-modules-core': { version: '57.0.25' },
-    'node_modules/expo-task-manager': { version: '57.0.21' },
-    'node_modules/react-native-screens': { version: '4.26.2' },
-    'node_modules/unimodules-app-loader': { version: '57.0.2' },
+    'node_modules/expo-background-task': { version: '58.0.12' },
+    'node_modules/expo-file-system': { version: '58.0.13' },
+    'node_modules/expo-router': { version: '58.0.30' },
+    'node_modules/expo-sharing': { version: '58.0.22' },
+    'node_modules/expo': { version: '58.0.23' },
+    'node_modules/expo-modules-core': { version: '58.0.30' },
+    'node_modules/expo-task-manager': { version: '58.0.13' },
+    'node_modules/react-native-screens': { version: '4.30.1' },
+    'node_modules/unimodules-app-loader': { version: '58.0.2' },
     'node_modules/patch-package': { version: '8.0.1' },
   },
 };
@@ -497,11 +497,11 @@ if (Platform.OS === 'android') {
 const taskManagerKeeperRuntimeSource = taskManagerKeeperSource.replace('<void>', '');
 const taskManagerSettlementPatchSource = `
 diff --git a/node_modules/expo-task-manager/android/build.gradle b/node_modules/expo-task-manager/android/build.gradle
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt
-diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerModule.kt b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerModule.kt
+diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java
 +        callback.onFinished(Collections.emptyMap());
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java
 +  private static final Object sTaskExecutionLock = new Object();
 +      // Publishing the manager and detaching its queue under one lock assigns every event to
 +            finishClaimedTaskExecutionWithFailure(appScopeKey, eventId);
@@ -511,10 +511,10 @@ diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/t
 +        sHeadlessTaskOwners.put(headlessStartToken, new HeadlessTaskOwner(headlessContext, taskId));
 +      HeadlessTaskOwner owner = sHeadlessTaskOwners.remove(headlessStartToken);
 -          unregisterAllTasksForAppScopeKey(appScopeKey);
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java
 +  boolean removeEventForAppScopeKey(String appScopeKey, Bundle body);
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
-diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java
 diff --git a/node_modules/expo-task-manager/src/TaskManager.ts b/node_modules/expo-task-manager/src/TaskManager.ts
 ${taskManagerKeeperSource
   .trim()
@@ -666,7 +666,7 @@ function redirectContainmentInput(overrides = {}) {
 
 function uploadFilenameInput() {
   return {
-    patchSource: readFileSync(join(ROOT, 'patches/expo-file-system+57.0.7.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-file-system+58.0.13.patch'), 'utf8'),
     ...Object.fromEntries(
       Object.entries(UPLOAD_FILENAME_SOURCE_PATHS).map(([key, path]) => [
         key,
@@ -678,7 +678,7 @@ function uploadFilenameInput() {
 
 function uploadAdditionalFilesInput() {
   return {
-    patchSource: readFileSync(join(ROOT, 'patches/expo-file-system+57.0.7.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-file-system+58.0.13.patch'), 'utf8'),
     ...Object.fromEntries(
       Object.entries(UPLOAD_ADDITIONAL_FILES_SOURCE_PATHS).map(([key, path]) => [
         key,
@@ -704,7 +704,7 @@ const PATCHED_REGISTRY_EXCERPT = `
 function launchStateInput() {
   return {
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-    patchSource: readFileSync(join(ROOT, 'patches/expo-modules-core+57.0.25.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-modules-core+58.0.30.patch'), 'utf8'),
     registrySource: PATCHED_REGISTRY_EXCERPT,
   };
 }
@@ -724,7 +724,7 @@ test('camera launch-state guard requires the reviewed expo-modules-core patch', 
 
   const upgraded = launchStateInput();
   upgraded.packageLock = {
-    packages: { 'node_modules/expo-modules-core': { version: '57.0.99' } },
+    packages: { 'node_modules/expo-modules-core': { version: '58.0.99' } },
   };
   assert.ok(validateExpoModulesCoreLaunchState(upgraded).some((m) => m.includes('must resolve')));
 });
@@ -745,7 +745,7 @@ const PATCHED_WRAPPER_EXCERPT = `
 function resultWaitInput() {
   return {
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-    patchSource: readFileSync(join(ROOT, 'patches/expo+57.0.32.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo+58.0.23.patch'), 'utf8'),
     wrapperSource: PATCHED_WRAPPER_EXCERPT,
   };
 }
@@ -771,7 +771,7 @@ test('camera result-wait guard requires the reviewed expo patch', () => {
   );
 
   const upgraded = resultWaitInput();
-  upgraded.packageLock = { packages: { 'node_modules/expo': { version: '57.0.99' } } };
+  upgraded.packageLock = { packages: { 'node_modules/expo': { version: '58.0.99' } } };
   assert.ok(validateExpoActivityResultWait(upgraded).some((m) => m.includes('must resolve')));
 });
 
@@ -903,8 +903,8 @@ function backgroundExecutionInput() {
         readFileSync(join(ROOT, path), 'utf8'),
       ]),
     ),
-    backgroundPatch: readFileSync(join(ROOT, 'patches/expo-background-task+57.0.21.patch'), 'utf8'),
-    taskManagerPatch: readFileSync(join(ROOT, 'patches/expo-task-manager+57.0.21.patch'), 'utf8'),
+    backgroundPatch: readFileSync(join(ROOT, 'patches/expo-background-task+58.0.12.patch'), 'utf8'),
+    taskManagerPatch: readFileSync(join(ROOT, 'patches/expo-task-manager+58.0.13.patch'), 'utf8'),
   };
 }
 
@@ -957,7 +957,7 @@ function writeRedirectContainmentFixture(root) {
   mkdirSync(
     join(
       root,
-      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository',
+      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository',
     ),
     { recursive: true },
   );
@@ -987,7 +987,7 @@ function writeRedirectContainmentFixture(root) {
     shareMainActivitySource,
   );
   writeFileSync(
-    join(root, 'patches/expo-file-system+57.0.7.patch'),
+    join(root, 'patches/expo-file-system+58.0.13.patch'),
     uploadFilenameInput().patchSource,
   );
   for (const path of new Set([
@@ -998,11 +998,11 @@ function writeRedirectContainmentFixture(root) {
     writeFileSync(join(root, path), readFileSync(join(ROOT, path), 'utf8'));
   }
   writeFileSync(
-    join(root, 'patches/expo-background-task+57.0.21.patch'),
+    join(root, 'patches/expo-background-task+58.0.12.patch'),
     backgroundTaskRetryPatchSource,
   );
   writeFileSync(
-    join(root, 'patches/expo-task-manager+57.0.21.patch'),
+    join(root, 'patches/expo-task-manager+58.0.13.patch'),
     taskManagerSettlementPatchSource,
   );
   writeFileSync(
@@ -1014,12 +1014,12 @@ function writeRedirectContainmentFixture(root) {
     taskManagerKeeperRuntimeSource,
   );
   writeFileSync(
-    join(root, 'patches/expo-router+57.0.30.patch'),
-    readFileSync(join(ROOT, 'patches/expo-router+57.0.30.patch'), 'utf8'),
+    join(root, 'patches/expo-router+58.0.30.patch'),
+    readFileSync(join(ROOT, 'patches/expo-router+58.0.30.patch'), 'utf8'),
   );
   writeFileSync(
-    join(root, 'patches/expo-sharing+57.0.25.patch'),
-    readFileSync(join(ROOT, 'patches/expo-sharing+57.0.25.patch'), 'utf8'),
+    join(root, 'patches/expo-sharing+58.0.22.patch'),
+    readFileSync(join(ROOT, 'patches/expo-sharing+58.0.22.patch'), 'utf8'),
   );
   mkdirSync(dirname(join(root, EXPO_SHARING_MODULE_FIXTURE_PATH)), { recursive: true });
   writeFileSync(
@@ -1027,20 +1027,20 @@ function writeRedirectContainmentFixture(root) {
     readFileSync(join(ROOT, EXPO_SHARING_MODULE_FIXTURE_PATH), 'utf8'),
   );
   writeFileSync(
-    join(root, 'patches/expo-modules-core+57.0.25.patch'),
-    readFileSync(join(ROOT, 'patches/expo-modules-core+57.0.25.patch'), 'utf8'),
+    join(root, 'patches/expo-modules-core+58.0.30.patch'),
+    readFileSync(join(ROOT, 'patches/expo-modules-core+58.0.30.patch'), 'utf8'),
   );
   mkdirSync(dirname(join(root, EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH)), { recursive: true });
   writeFileSync(join(root, EXPO_MODULES_CORE_REGISTRY_FIXTURE_PATH), PATCHED_REGISTRY_EXCERPT);
   writeFileSync(
-    join(root, 'patches/expo+57.0.32.patch'),
-    readFileSync(join(ROOT, 'patches/expo+57.0.32.patch'), 'utf8'),
+    join(root, 'patches/expo+58.0.23.patch'),
+    readFileSync(join(ROOT, 'patches/expo+58.0.23.patch'), 'utf8'),
   );
   mkdirSync(dirname(join(root, EXPO_DELEGATE_WRAPPER_FIXTURE_PATH)), { recursive: true });
   writeFileSync(join(root, EXPO_DELEGATE_WRAPPER_FIXTURE_PATH), PATCHED_WRAPPER_EXCERPT);
   writeFileSync(
-    join(root, 'patches/react-native-screens+4.26.2.patch'),
-    readFileSync(join(ROOT, 'patches/react-native-screens+4.26.2.patch'), 'utf8'),
+    join(root, 'patches/react-native-screens+4.30.1.patch'),
+    readFileSync(join(ROOT, 'patches/react-native-screens+4.30.1.patch'), 'utf8'),
   );
   writeFileSync(
     join(
@@ -1066,43 +1066,43 @@ function writeRedirectContainmentFixture(root) {
   writeFileSync(
     join(
       root,
-      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java',
+      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java',
     ),
     taskManagerUtilsSource,
   );
   writeFileSync(
     join(
       root,
-      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java',
+      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java',
     ),
     taskManagerServiceSource,
   );
   writeFileSync(
     join(
       root,
-      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java',
+      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java',
     ),
     taskManagerRepositorySource,
   );
   writeFileSync(
     join(
       root,
-      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java',
+      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java',
     ),
     taskManagerBareRepositorySource,
   );
   writeFileSync(
     join(
       root,
-      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java',
+      'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java',
     ),
     taskManagerManagedRepositorySource,
   );
   // Lifetime guards inspect installed production code and its corresponding durable patch.
   for (const path of [
     ...Object.values(BACKGROUND_EXECUTION_SOURCE_PATHS),
-    'patches/expo-background-task+57.0.21.patch',
-    'patches/expo-task-manager+57.0.21.patch',
+    'patches/expo-background-task+58.0.12.patch',
+    'patches/expo-task-manager+58.0.13.patch',
   ]) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), readFileSync(join(ROOT, path), 'utf8'));
@@ -1314,7 +1314,7 @@ test('guards the expo-sharing self-share settlement against drift', () => {
   const currentInput = () => ({
     packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-    patchSource: readFileSync(join(ROOT, 'patches/expo-sharing+57.0.25.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-sharing+58.0.22.patch'), 'utf8'),
     moduleSource: readFileSync(join(ROOT, EXPO_SHARING_MODULE_FIXTURE_PATH), 'utf8'),
   });
 
@@ -1324,23 +1324,23 @@ test('guards the expo-sharing self-share settlement against drift', () => {
     {
       label: 'loose version range',
       mutate(input) {
-        input.packageJson.dependencies['expo-sharing'] = '^57.0.25';
+        input.packageJson.dependencies['expo-sharing'] = '^58.0.22';
       },
-      error: /expo-sharing must remain pinned to ~57\.0\.25/,
+      error: /expo-sharing must remain pinned to ~58\.0\.22/,
     },
     {
       label: 'lock root range',
       mutate(input) {
-        input.packageLock.packages[''].dependencies['expo-sharing'] = '~57.0.26';
+        input.packageLock.packages[''].dependencies['expo-sharing'] = '~58.0.23';
       },
       error: /package-lock root must pin expo-sharing/,
     },
     {
       label: 'resolved version moved past the patch',
       mutate(input) {
-        input.packageLock.packages['node_modules/expo-sharing'].version = '57.0.26';
+        input.packageLock.packages['node_modules/expo-sharing'].version = '58.0.23';
       },
-      error: /package-lock must resolve expo-sharing 57\.0\.25/,
+      error: /package-lock must resolve expo-sharing 58\.0\.22/,
     },
     {
       label: 'prebuilt AAR instead of the patched source',
@@ -1403,7 +1403,7 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
     packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
     appConfigSource: readFileSync(join(ROOT, 'app.config.ts'), 'utf8'),
-    patchSource: readFileSync(join(ROOT, 'patches/expo-router+57.0.30.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-router+58.0.30.patch'), 'utf8'),
     experimentalStackSource: readFileSync(
       join(
         ROOT,
@@ -1412,7 +1412,7 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
       'utf8',
     ),
     screensPatchSource: readFileSync(
-      join(ROOT, 'patches/react-native-screens+4.26.2.patch'),
+      join(ROOT, 'patches/react-native-screens+4.30.1.patch'),
       'utf8',
     ),
     ...Object.fromEntries(
@@ -1562,21 +1562,21 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
     {
       label: 'dependency pin',
       mutate(input) {
-        input.packageJson.dependencies['expo-router'] = '~57.0.21';
+        input.packageJson.dependencies['expo-router'] = '~58.0.21';
       },
       error: 'must remain pinned',
     },
     {
       label: 'lockfile resolution',
       mutate(input) {
-        input.packageLock.packages['node_modules/expo-router'].version = '57.0.21';
+        input.packageLock.packages['node_modules/expo-router'].version = '58.0.21';
       },
       error: 'package-lock must resolve',
     },
     {
       label: 'native dependency resolution',
       mutate(input) {
-        input.packageLock.packages['node_modules/react-native-screens'].version = '4.26.3';
+        input.packageLock.packages['node_modules/react-native-screens'].version = '4.30.2';
       },
       error: 'package-lock must resolve react-native-screens',
     },
@@ -1589,31 +1589,39 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
       error: 'must patch only the reviewed experimental stack file',
     },
     {
-      label: 'durable pop patch',
+      label: 'durable theme patch',
       mutate(input) {
         input.patchSource = input.patchSource.replace(
-          '+                            ...native_1.StackActions.pop(),\n',
+          '+    const { colors } = (0, _useTheme().useTheme)();\n',
           '',
         );
       },
-      error: 'must carry the reviewed pop and theme repairs',
+      error: 'must carry the reviewed theme and header repairs',
+    },
+    {
+      label: 'SDK 57 pop redispatch reintroduced',
+      mutate(input) {
+        input.patchSource +=
+          '\n+                        navigation.dispatch(StackActions.pop());\n';
+      },
+      error: 'must not reintroduce the SDK 57 pop redispatch',
     },
     {
       label: 'installed pop bridge',
       mutate(input) {
         input.experimentalStackSource = input.experimentalStackSource.replaceAll(
-          '...native_1.StackActions.pop(),',
-          '...native_1.StackActions.push(),',
+          'pop(1, route.key);',
+          'push(1, route.key);',
         );
       },
-      error: 'must redispatch the exact prevented pop action',
+      error: 'must pop the exact prevented route itself',
     },
     {
       label: 'installed theme bridge',
       mutate(input) {
         input.experimentalStackSource = input.experimentalStackSource.replace(
-          'style: [styles.scene, { backgroundColor: colors.background }]',
-          "style: [styles.scene, { backgroundColor: 'white' }]",
+          'backgroundColor: colors.background',
+          "backgroundColor: 'white'",
         );
       },
       error: 'must use the navigation theme background',
@@ -1809,7 +1817,7 @@ test('guards the source-built Expo background-task retry bridge against drift', 
     validateExpoBackgroundTaskRetryBridge({
       packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
       packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-      patchSource: readFileSync(join(ROOT, 'patches/expo-background-task+57.0.21.patch'), 'utf8'),
+      patchSource: readFileSync(join(ROOT, 'patches/expo-background-task+58.0.12.patch'), 'utf8'),
       schedulerSource: readFileSync(
         join(
           ROOT,
@@ -1832,14 +1840,14 @@ test('guards the source-built Expo background-task retry bridge against drift', 
     {
       label: 'dependency pin',
       mutate(input) {
-        input.packageJson.dependencies['expo-background-task'] = '~57.0.21';
+        input.packageJson.dependencies['expo-background-task'] = '~58.0.12';
       },
       error: 'must be pinned exactly',
     },
     {
       label: 'lockfile resolution',
       mutate(input) {
-        input.packageLock.packages['node_modules/expo-background-task'].version = '57.0.17';
+        input.packageLock.packages['node_modules/expo-background-task'].version = '58.0.11';
       },
       error: 'package-lock must resolve',
     },
@@ -2027,7 +2035,16 @@ test('Expo task-manager keeper waits for native completion without allocating ti
       runInNewContext(outputText, {
         exports: {},
         require(name) {
-          if (name === 'expo-modules-core') return { Platform: { OS: os } };
+          // SDK 58 imports Platform and UnavailabilityError from `expo`; the emitter stays in core.
+          if (name === 'expo') {
+            return {
+              Platform: { OS: os },
+              UnavailabilityError: class UnavailabilityError extends Error {},
+            };
+          }
+          if (name === 'expo-modules-core') {
+            return { Platform: { OS: os }, LegacyEventEmitter: class LegacyEventEmitter {} };
+          }
           if (name === './ExpoTaskManager') return { __esModule: true, default: null };
           if (name === 'react-native') {
             return {
@@ -2064,39 +2081,39 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
     validateExpoTaskManagerPreJsSettlement({
       packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
       packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-      patchSource: readFileSync(join(ROOT, 'patches/expo-task-manager+57.0.21.patch'), 'utf8'),
+      patchSource: readFileSync(join(ROOT, 'patches/expo-task-manager+58.0.13.patch'), 'utf8'),
       utilsSource: readFileSync(
         join(
           ROOT,
-          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java',
+          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskManagerUtils.java',
         ),
         'utf8',
       ),
       serviceSource: readFileSync(
         join(
           ROOT,
-          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java',
+          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/TaskService.java',
         ),
         'utf8',
       ),
       repositorySource: readFileSync(
         join(
           ROOT,
-          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java',
+          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/TasksAndEventsRepository.java',
         ),
         'utf8',
       ),
       bareRepositorySource: readFileSync(
         join(
           ROOT,
-          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java',
+          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/BareTasksAndEventsRepository.java',
         ),
         'utf8',
       ),
       managedRepositorySource: readFileSync(
         join(
           ROOT,
-          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java',
+          'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskmanager/repository/ManagedTasksAndEventsRepository.java',
         ),
         'utf8',
       ),
@@ -2116,7 +2133,7 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
     {
       label: 'dependency pin',
       mutate(input) {
-        input.packageJson.dependencies['expo-task-manager'] = '~57.0.21';
+        input.packageJson.dependencies['expo-task-manager'] = '~58.0.13';
       },
       error: 'must be pinned exactly',
     },
@@ -2143,9 +2160,9 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
     {
       label: 'loader resolution pin',
       mutate(input) {
-        input.packageLock.packages['node_modules/unimodules-app-loader'].version = '57.0.0';
+        input.packageLock.packages['node_modules/unimodules-app-loader'].version = '58.0.0';
       },
-      error: 'must resolve unimodules-app-loader 57.0.2',
+      error: 'must resolve unimodules-app-loader 58.0.2',
     },
     {
       label: 'headless manager retained after context destruction',
@@ -2394,21 +2411,21 @@ test('rejects drift anywhere in the Expo file-system redirect containment chain'
     {
       label: 'dependency pin',
       mutate(input) {
-        input.packageJson.dependencies['expo-file-system'] = '~57.0.7';
+        input.packageJson.dependencies['expo-file-system'] = '~58.0.13';
       },
       error: 'expo-file-system must be pinned exactly',
     },
     {
       label: 'lockfile resolution',
       mutate(input) {
-        input.packageLock.packages['node_modules/expo-file-system'].version = '57.0.6';
+        input.packageLock.packages['node_modules/expo-file-system'].version = '58.0.12';
       },
       error: 'package-lock must resolve expo-file-system',
     },
     {
       label: 'lockfile root dependency pin',
       mutate(input) {
-        input.packageLock.packages[''].dependencies['expo-file-system'] = '~57.0.7';
+        input.packageLock.packages[''].dependencies['expo-file-system'] = '~58.0.13';
       },
       error: 'package-lock root must pin expo-file-system exactly',
     },
@@ -3239,16 +3256,16 @@ test('artifact runner inspects both variants and the final release AAB contents'
       'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js',
     );
     const experimentalStackSource = readFileSync(experimentalStackPath, 'utf8');
-    writeFileSync(
-      experimentalStackPath,
-      experimentalStackSource.replaceAll(
-        '...native_1.StackActions.pop(),',
-        '...native_1.StackActions.push(),',
-      ),
+    // Upstream 58 pops the prevented route itself; the runner must notice when that pop is gone.
+    const withoutPreventedPop = experimentalStackSource.replaceAll(
+      'pop(1, route.key);',
+      'push(1, route.key);',
     );
+    assert.notEqual(withoutPreventedPop, experimentalStackSource);
+    writeFileSync(experimentalStackPath, withoutPreventedPop);
     assert.throws(
       () => runAndroidBuildCheck(options),
-      /predictive Back bridge:.*exact prevented pop action/s,
+      /predictive Back bridge:.*exact prevented route itself/s,
     );
     writeFileSync(experimentalStackPath, experimentalStackSource);
 

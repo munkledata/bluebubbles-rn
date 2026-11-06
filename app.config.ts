@@ -268,6 +268,11 @@ const config: ExpoConfig = {
           // Product policy: support the current Android major and the immediately previous one.
           // Android 17 is current as of 2026-09-17, so Android 16 / API 36 is the floor.
           minSdkVersion: 36,
+          // SDK 58 turns R8 minification on for release builds by default. It stays off for the
+          // SDK 58 move itself so the release artifact changes one thing at a time; turning it on
+          // is its own reviewed change (Firebase, op-sqlite and libsodium use reflection and
+          // would need keep rules plus a device pass).
+          enableMinifyInReleaseBuilds: false,
           // react-native-notify-kit needs no extraMavenRepos: since 9.2.0 the native
           // core compiles from source (autolinked), so the old notifee local-AAR maven
           // repo workaround is gone.

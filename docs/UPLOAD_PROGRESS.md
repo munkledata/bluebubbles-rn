@@ -45,7 +45,7 @@ native bits injected, so most of it is tested directly without any mock: the sam
   `uploadKind: 'imessage_voice'`). A caption must be non-blank and at most 64 KiB. The form stays
   minimal: no `name` field and no attempt generation. A stale queue row can never infer this mode.
 - **Filename (`gatorFileName`):** the picker often caches a file under a random UUID. The patched
-  `createUploadTask` (`patches/expo-file-system+57.0.7.patch`) takes `gatorFileName` and sends it as
+  `createUploadTask` (`patches/expo-file-system+58.0.13.patch`) takes `gatorFileName` and sends it as
   the multipart filename, so the server sees the original name on both routes.
 - **Several files in one request (`gatorAdditionalFiles`):** the server's restored route takes 1-10
   files as one iMessage, but the stock task carries one file. The same patch adds
@@ -80,7 +80,7 @@ Two details that matter:
 - **Events are throttled natively** to one per 100 ms (`MIN_EVENT_DT_MS`), plus a guaranteed final
   event at 100%.
 
-### Do not "modernize" this to SDK 57's `File.createUploadTask`
+### Do not "modernize" this to the `File.createUploadTask` added in SDK 57
 
 The new object API exists and looks tidier next to `expoFetcher`'s `File.createDownloadTask`. It is
 the wrong choice here:

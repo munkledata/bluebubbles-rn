@@ -185,7 +185,7 @@ function SharedDocumentsAttempt({
               <Text style={[styles.retryText, { color: theme.color.tint }]}>Try Again</Text>
             </Pressable>
           </View>
-        ) : null
+        ) : undefined
       }
     />
   );

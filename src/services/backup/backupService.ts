@@ -220,7 +220,7 @@ export async function exportEncryptedBackup(
     assertCurrent(lease);
     if (file.exists) file.delete();
     file.create();
-    file.write(sealed);
+    file.writeSync(sealed);
     assertCurrent(lease);
     await shareGeneratedFile(
       file,

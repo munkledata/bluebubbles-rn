@@ -40,7 +40,7 @@ jest.mock('expo-file-system', () => ({
     create(): void {
       mockFileExists = true;
     }
-    write(contents: string): void {
+    writeSync(contents: string): void {
       mockFileWrite(contents);
       if (mockFileWriteFailuresRemaining > 0) {
         mockFileWriteFailuresRemaining -= 1;

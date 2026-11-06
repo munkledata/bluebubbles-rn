@@ -449,7 +449,7 @@ function PagedList<T>({
               <Text style={[styles.retryText, { color: theme.color.tint }]}>Try Again</Text>
             </Pressable>
           </View>
-        ) : null
+        ) : undefined
       }
     />
   );

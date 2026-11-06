@@ -38,6 +38,8 @@ jest.mock('expo-router', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
   return {
+    // SDK 58 exports usePreventRemove from the main entry point.
+    usePreventRemove: jest.fn(),
     useFocusEffect: (callback: () => void | (() => void)) =>
       R.useEffect(() => (mockRouteFocused ? callback() : undefined), [callback, mockRouteFocused]),
     // The chat screen opens other chats through useChatNavigator, which reads the path.
@@ -48,7 +50,6 @@ jest.mock('expo-router', () => {
     useRouter: () => ({ push: jest.fn(), setParams: jest.fn() }),
   };
 });
-jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }));
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
