@@ -8,6 +8,8 @@ import { MIGRATIONS } from './migrations';
 import { handles } from './schema';
 import type {
   AppDatabase,
+  ReadDb,
+  TestDb,
   DbBackupRestoreWaveChecks,
   DbBackupRestoreWaveRunner,
   DbRuntimeConcurrencyWaveChecks,
@@ -126,8 +128,8 @@ function drizzleAdapter(db: RawDb): RawDb {
  * return the Drizzle handle. SQLCipher transparently AES-encrypts the file using
  * `encryptionKey` (op-sqlite is built with the sqlcipher flag in package.json).
  */
-export async function initDatabase(encryptionKey: string): Promise<AppDatabase> {
-  if (dbInstance) return dbInstance;
+export async function initDatabase(encryptionKey: string): Promise<ReadDb> {
+  if (dbInstance) return dbInstance as unknown as ReadDb;
   const opened = open({ name: DB_NAME, encryptionKey });
   try {
     await opened.execute('PRAGMA foreign_keys = ON');
@@ -139,7 +141,7 @@ export async function initDatabase(encryptionKey: string): Promise<AppDatabase> 
     // later retry must be free to open the file normally.
     rawDb = opened;
     dbInstance = database;
-    return database;
+    return database as unknown as ReadDb;
   } catch (error) {
     try {
       opened.close();
@@ -150,9 +152,13 @@ export async function initDatabase(encryptionKey: string): Promise<AppDatabase> 
   }
 }
 
-export function getDatabase(): AppDatabase {
+/**
+ * The shared handle, as a {@link ReadDb}: reads anywhere, writes only inside a `withDbTransaction`
+ * callback (which receives the same object as a WriteDb).
+ */
+export function getDatabase(): ReadDb {
   if (!dbInstance) throw new Error('Database not initialized — call initDatabase() first.');
-  return dbInstance;
+  return dbInstance as unknown as ReadDb;
 }
 
 /** Raw op-sqlite handle, for low-level checks (e.g. the on-device SQLCipher test). */
@@ -228,10 +234,12 @@ export async function migrateThrowawayDatabase(db: ThrowawayDatabase): Promise<v
 export function throwawayDrizzle(
   db: ThrowawayDatabase,
   queryLogger?: { logQuery(query: string, params: unknown[]): void },
-): AppDatabase {
+): TestDb {
+  // The harness owns this disposable file outright, so its handle satisfies reads, writes and
+  // own-transaction helpers alike, exactly like a test database.
   return drizzle(drizzleAdapter(openThrowawayHandle(db)), {
     logger: queryLogger,
-  }) as unknown as AppDatabase;
+  }) as unknown as TestDb;
 }
 
 const DRIVER_SELF_TEST_DB_NAME = 'driver-selftest.db';
@@ -1619,7 +1627,7 @@ export async function runDbDriverSelfTest(): Promise<DbDriverContractResult> {
         );
         requireDriverContract(seed[0]?.id === 1 && seed[0]?.display_name === 'seed');
 
-        const database = drizzle(drizzleAdapter(reopened)) as unknown as AppDatabase;
+        const database = drizzle(drizzleAdapter(reopened)) as unknown as TestDb;
 
         phase = 'rollback';
         let transactionOpen = false;
@@ -1994,7 +2002,7 @@ export async function runDbRuntimeConcurrencySelfTest(
     );
     checks.migrationLedger = true;
 
-    const database = drizzle(drizzleAdapter(activeHandle)) as unknown as AppDatabase;
+    const database = drizzle(drizzleAdapter(activeHandle)) as unknown as TestDb;
     phase = 'internal';
     const waveChecks = await runWave(database, {
       rawRekey: async () => {
@@ -2255,9 +2263,7 @@ export async function runDbBackupRestoreSelfTest(
     checks.migrationLedger = true;
 
     phase = 'internal';
-    const waveChecks = await runWave(
-      drizzle(drizzleAdapter(activeHandle)) as unknown as AppDatabase,
-    );
+    const waveChecks = await runWave(drizzle(drizzleAdapter(activeHandle)) as unknown as TestDb);
     checks.plaintextNearLimit = waveChecks.plaintextNearLimit === true;
     checks.bb2Envelope = waveChecks.bb2Envelope === true;
     checks.nativeSeal = waveChecks.nativeSeal === true;

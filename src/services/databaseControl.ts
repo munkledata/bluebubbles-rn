@@ -10,7 +10,7 @@ import {
   withDbTransaction,
   type DbTransactionContext,
 } from '@db/transaction';
-import type { AppDatabase } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { sessionAccessors } from '@state/sessionStore';
 import { vault } from './clients';
 import { runTrackedRealtimeWork, type RealtimeDeliveryLease } from './realtime/deliveryCoordinator';
@@ -36,7 +36,7 @@ setAppleScreeningCapabilityReader(
  * left wrapping a connection nothing else uses. The race is reachable on a killed-app wake with
  * two back-to-back FCM pushes, and on boot racing the first push.
  */
-let openInFlight: Promise<AppDatabase> | null = null;
+let openInFlight: Promise<ReadDb> | null = null;
 
 /**
  * The one key rotation allowed in this process at a time.
@@ -47,8 +47,8 @@ let openInFlight: Promise<AppDatabase> | null = null;
  */
 let keyRotationInFlight: Promise<void> | null = null;
 
-function startDatabaseOpen(): Promise<AppDatabase> {
-  const attempt = (async (): Promise<AppDatabase> => {
+function startDatabaseOpen(): Promise<ReadDb> {
+  const attempt = (async (): Promise<ReadDb> => {
     // resolveDbKey (not getOrCreateDbKey) so a key rotation interrupted by a crash is finished
     // here before the DB is opened. Only runs on the true first open.
     const key = await resolveDbKey(vault);
@@ -68,7 +68,7 @@ function startDatabaseOpen(): Promise<AppDatabase> {
 }
 
 /** Open the encrypted DB (once), generating the SQLCipher key on first run. */
-export async function ensureDatabase(): Promise<AppDatabase> {
+export async function ensureDatabase(): Promise<ReadDb> {
   // Fast path: if the DB is already open, return the cached handle without touching the vault.
   // getDatabase() throws when the DB isn't open yet, so falling through is the genuine first-open
   // path. This matters because ensureDatabase runs on EVERY FCM event, and resolveDbKey does two
@@ -191,7 +191,7 @@ async function updateSearchTextBatch(
 }
 
 async function tryFinishSearchTextBackfill(
-  db: AppDatabase,
+  db: ReadDb,
   raw: ReturnType<typeof getRawDatabase>,
   lease: RealtimeDeliveryLease,
   afterId: number,
@@ -201,7 +201,7 @@ async function tryFinishSearchTextBackfill(
   const completion = await runTrackedRealtimeWork(lease, async (activeLease) => {
     await withDbTransaction(
       db,
-      async (context) => {
+      async (db, context) => {
         // Check and flag under the same short write lock. A sync page that appended an eligible
         // row after our last SELECT therefore wins either before this check or after the flag;
         // newly ingested rows compute text during upsert, so only the former needs another page.
@@ -262,7 +262,7 @@ async function runSearchTextBackfillPass(lease: RealtimeDeliveryLease): Promise<
       const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
         await withDbTransaction(
           db,
-          async (transactionContext) => {
+          async (db, transactionContext) => {
             // The prepared SELECT runs outside the mutex so decoding cannot hold the shared write
             // queue. Re-read the exact bounded page after acquiring it: an unrelated transaction
             // may have temporarily changed `text` on this shared connection and then rolled back.

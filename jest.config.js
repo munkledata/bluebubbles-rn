@@ -51,6 +51,7 @@ module.exports = {
       transform: {
         '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.test.json' }],
       },
+      setupFilesAfterEnv: ['<rootDir>/test/support/setupNode.ts'],
       moduleNameMapper,
       clearMocks: true,
     },

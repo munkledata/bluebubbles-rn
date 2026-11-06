@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { DurableEventTransactionContext } from '@core/realtime';
 import { logger } from '@core/secure';
-import type { AppDatabase } from './types';
+import type { ReadDb, WriteDb } from './types';
 
 /**
  * Serializes {@link withDbTransaction} callers: the tail of the queue, which every new caller
@@ -33,6 +33,41 @@ let wedgeReported = false;
  * record outside SQLite for the next launch (review M045).
  */
 let writeQueueWedgeListener: (() => void) | null = null;
+
+/**
+ * Optional async-context tracker for the nesting rule. Tests install one backed by
+ * AsyncLocalStorage (test/support/transactionNesting.ts), so a `withDbTransaction` or
+ * `withDbWriteLock` call made anywhere inside an owner callback, however many helpers deep, rejects
+ * at once with {@link DbTransactionNestedError} instead of waiting forever. The app never installs
+ * one: Hermes has no async-context propagation, so there it is the type system (a transaction
+ * callback holds a WriteDb, which no own-transaction helper accepts) plus the watchdog below.
+ */
+export interface TransactionNestingDetector {
+  /** Run `fn` as an owner frame: the marker is visible to everything the callback awaits. */
+  runInside<T>(fn: () => Promise<T>): Promise<T>;
+  /**
+   * Called by every lock claim. Inside an active owner frame, return a promise that REJECTS with
+   * {@link DbTransactionNestedError} if that frame is still active after a short grace: the owner
+   * is waiting on this claim, which is the deadlock. A claim started from inside an owner but not
+   * awaited by it (a queued follow-up) sees the frame settle first and is never rejected. Null when
+   * the caller is not inside any owner.
+   */
+  nestedClaimDeadline(): Promise<never> | null;
+}
+let nestingDetector: TransactionNestingDetector | null = null;
+export function setTransactionNestingDetector(detector: TransactionNestingDetector | null): void {
+  nestingDetector = detector;
+}
+
+/** A transaction or write-lock claim was made from inside an open owner callback. */
+export class DbTransactionNestedError extends Error {
+  constructor(
+    message = 'withDbTransaction/withDbWriteLock called inside an open transaction or write lock',
+  ) {
+    super(message);
+    this.name = 'DbTransactionNestedError';
+  }
+}
 
 /**
  * Optional last-moment ownership check for account-scoped transactions. Returning `false` aborts
@@ -191,16 +226,52 @@ function armLockWatchdog(): () => void {
  * below synchronous with the call.
  */
 async function claimWriteLock(): Promise<() => void> {
+  // Ask before touching the queue, so the frame lookup sees the caller's own async context.
+  const nestedDeadline = nestingDetector?.nestedClaimDeadline() ?? null;
   const prev = txQueue;
   let release: () => void = () => {};
   txQueue = new Promise<void>((resolve) => {
     release = resolve;
   });
+  const releasesAtEntry = lockReleases;
   const disarm = armLockWatchdog();
+  const deadlines: Promise<never>[] = [];
+  if (nestedDeadline) deadlines.push(nestedDeadline);
+  let devDeadline: ReturnType<typeof setTimeout> | undefined;
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    // Development builds turn a wait during which NOTHING released into a thrown error: that is the
+    // signature of a nested claim (the holder is this caller's own ancestor), and throwing into the
+    // inner caller fails the outer callback, which rolls back and frees the queue. Release builds
+    // keep the never-cancel policy and only report (see armLockWatchdog).
+    deadlines.push(
+      new Promise<never>((_, reject) => {
+        devDeadline = setTimeout(() => {
+          if (lockReleases === releasesAtEntry) {
+            reject(
+              new DbTransactionNestedError(
+                `possible nested transaction: the write queue did not move for ${LOCK_WAIT_WARN_MS}ms`,
+              ),
+            );
+          }
+        }, LOCK_WAIT_WARN_MS);
+      }),
+    );
+  }
   try {
-    await prev;
+    if (deadlines.length === 0) {
+      await prev;
+    } else {
+      try {
+        await Promise.race([prev, ...deadlines]);
+      } catch (error) {
+        // Hand the slot on so the queue keeps moving once the holder finishes.
+        void prev.then(() => release());
+        throw error;
+      }
+    }
   } finally {
     disarm();
+    if (devDeadline !== undefined) clearTimeout(devDeadline);
   }
   return () => {
     lockReleases += 1;
@@ -254,20 +325,38 @@ function admitDbWriteFence(commitGuard?: DbCommitGuard): DbWriteFenceState | und
  *
  * Same nesting rule as {@link withDbTransaction}, and the same queue — `fn` must never call either.
  */
-export async function withDbWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+export async function withDbWriteLock<T>(
+  dbOrFn: ReadDb | (() => Promise<T>),
+  fn?: (tx: WriteDb) => Promise<T>,
+): Promise<T> {
+  // Two call shapes, one declaration (the write scanner identifies this function by its single
+  // declaration). `withDbWriteLock(fn)`: `fn` runs its own raw work (PRAGMA rekey) and never touches
+  // the shared Drizzle handle. `withDbWriteLock(db, fn)`: `fn` receives the write-capable view of
+  // `db` for exactly the lock's lifetime (autocommit statements, serialized against every
+  // transaction).
+  if (typeof dbOrFn !== 'function' && typeof fn !== 'function') {
+    throw new TypeError(
+      'withDbWriteLock(db, fn) needs the callback that receives the write handle',
+    );
+  }
   const release = await claimWriteLock();
   try {
-    return await fn();
+    const run = (): Promise<T> =>
+      typeof dbOrFn === 'function' ? dbOrFn() : fn!(dbOrFn as unknown as WriteDb);
+    return nestingDetector ? await nestingDetector.runInside(run) : await run();
   } finally {
     release();
   }
 }
 
 export async function withDbTransaction<T>(
-  db: AppDatabase,
-  fn: (context: DbTransactionContext) => Promise<T>,
+  db: ReadDb,
+  fn: (tx: WriteDb, context: DbTransactionContext) => Promise<T>,
   commitGuard?: DbCommitGuard,
 ): Promise<T> {
+  // The same object: the ReadDb/WriteDb split is compile-time only. The callback receives the
+  // write-capable view for exactly the lifetime of BEGIN..COMMIT.
+  const tx = db as unknown as WriteDb;
   const release = await claimWriteLock();
   let admittedFence: DbWriteFenceState | undefined;
   // The release lives in a finally that also wraps the BEGIN: if BEGIN itself throws (or the
@@ -277,19 +366,21 @@ export async function withDbTransaction<T>(
     // The caller may have waited behind another transaction longer than account teardown's bounded
     // drain. Re-check immediately after acquiring the mutex, before touching the shared database.
     assertCommitAllowed(commitGuard);
-    await db.run(sql`BEGIN IMMEDIATE`);
+    await tx.run(sql`BEGIN IMMEDIATE`);
     try {
       // BEGIN itself is asynchronous on-device. Catch a revocation that landed while it opened.
       assertCommitAllowed(commitGuard);
-      const result = await runTransactionOwner(db, fn);
+      const result = nestingDetector
+        ? await nestingDetector.runInside(() => runTransactionOwner(tx, fn))
+        : await runTransactionOwner(tx, fn);
       // This is deliberately inside the rollback scope: if ownership changed during any statement,
       // reject here so every partial write is rolled back instead of leaking into the next account.
       assertCommitAllowed(commitGuard);
-      await db.run(sql`COMMIT`);
+      await tx.run(sql`COMMIT`);
       return result;
     } catch (err) {
       try {
-        await db.run(sql`ROLLBACK`);
+        await tx.run(sql`ROLLBACK`);
       } catch {
         // The failure may have already aborted the transaction — nothing left to roll back.
       }
@@ -318,7 +409,7 @@ export class DbTransactionContextRejectedError extends Error {
 
 type DbTransactionContextState = {
   accepting: boolean;
-  db: AppDatabase;
+  db: WriteDb;
   tasks: Array<Promise<unknown>>;
   violation?: DbTransactionContextRejectedError;
 };
@@ -343,7 +434,7 @@ function observedRejection<T>(error: unknown): Promise<T> {
  */
 export function runInTransactionContext<T>(
   context: DbTransactionContext,
-  fn: (db: AppDatabase) => Promise<T>,
+  fn: (db: WriteDb) => Promise<T>,
 ): Promise<T> {
   const state =
     typeof context === 'object' && context !== null
@@ -386,8 +477,8 @@ async function settleRegisteredTasks(
 }
 
 async function runTransactionOwner<T>(
-  db: AppDatabase,
-  fn: (context: DbTransactionContext) => Promise<T>,
+  db: WriteDb,
+  fn: (tx: WriteDb, context: DbTransactionContext) => Promise<T>,
 ): Promise<T> {
   const context = Object.freeze({}) as DbTransactionContext;
   const state: DbTransactionContextState = { accepting: true, db, tasks: [] };
@@ -395,7 +486,7 @@ async function runTransactionOwner<T>(
 
   let ownerOutcome: { ok: true; value: T } | { ok: false; reason: unknown };
   try {
-    ownerOutcome = { ok: true, value: await fn(context) };
+    ownerOutcome = { ok: true, value: await fn(db, context) };
   } catch (reason) {
     ownerOutcome = { ok: false, reason };
   }

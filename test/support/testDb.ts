@@ -1,14 +1,14 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
-import type { AppDatabase } from '@db/types';
+import type { TestDb } from '@db/types';
 
 /**
  * Creates an in-memory SQLite DB (better-sqlite3) with the same migrations the
- * app runs on op-sqlite, and returns a Drizzle handle typed as AppDatabase.
+ * app runs on op-sqlite, and returns a Drizzle handle typed as TestDb.
  * This lets the repositories + sync engine be exercised for real in Node.
  */
-export async function createTestDb(): Promise<{ db: AppDatabase; raw: Database.Database }> {
+export async function createTestDb(): Promise<{ db: TestDb; raw: Database.Database }> {
   const raw = new Database(':memory:');
   raw.pragma('foreign_keys = ON');
 
@@ -22,6 +22,7 @@ export async function createTestDb(): Promise<{ db: AppDatabase; raw: Database.D
   };
   await runMigrations(runner);
 
-  const db = drizzle(raw) as unknown as AppDatabase;
+  // TestDb satisfies every parameter kind, so seeding and own-transaction helpers both accept it.
+  const db = drizzle(raw) as unknown as TestDb;
   return { db, raw };
 }

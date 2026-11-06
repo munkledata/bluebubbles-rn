@@ -9,6 +9,39 @@ import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core';
  */
 export type AppDatabase = BaseSQLiteDatabase<any, any, Record<string, unknown>>;
 
+/**
+ * Read-only query surface. Structural: both {@link ReadDb} and {@link WriteDb} satisfy it, so a
+ * pure read helper typed `db: Queryable` works inside and outside a transaction. `run`, `insert`,
+ * `update`, `delete` and `transaction` are deliberately absent: every write goes through a
+ * `withDbTransaction` callback's {@link WriteDb}.
+ */
+export type Queryable = Pick<
+  AppDatabase,
+  'select' | 'selectDistinct' | 'with' | '$with' | '$count' | 'all' | 'get' | 'values' | 'query'
+>;
+
+declare const outsideTransactionBrand: unique symbol;
+
+/**
+ * What `getDatabase()` and `ensureDatabase()` hand out: reads only, plus a brand that proves the
+ * holder is OUTSIDE any transaction. A helper that opens its own transaction takes this type, so
+ * the compiler refuses to let a transaction callback (which holds a {@link WriteDb}, no brand)
+ * call it: that nested call would wait forever on the write lock its own caller holds.
+ */
+export type ReadDb = Queryable & { readonly [outsideTransactionBrand]: true };
+
+/**
+ * The full handle, including writes. Only `withDbTransaction` (its callback's first argument) and
+ * `runInTransactionContext` hand one out; migrations and the dev throwaway doorway hold their own.
+ */
+export type WriteDb = AppDatabase;
+
+/**
+ * A handle whose owner holds the whole file: test seeding and the dev throwaway doorway. It
+ * satisfies every parameter kind (reads, writes, and own-transaction helpers).
+ */
+export type TestDb = WriteDb & { readonly [outsideTransactionBrand]: true };
+
 /** Finite, privacy-safe results produced by the disposable DB-02C runtime wave. */
 export interface DbRuntimeConcurrencyWaveChecks {
   readonly rollbackIsolation: boolean;
@@ -32,7 +65,7 @@ export interface DbRuntimeConcurrencyWaveOptions {
 }
 
 export type DbRuntimeConcurrencyWaveRunner = (
-  db: AppDatabase,
+  db: TestDb,
   options: DbRuntimeConcurrencyWaveOptions,
 ) => Promise<DbRuntimeConcurrencyWaveChecks>;
 
@@ -53,4 +86,4 @@ export interface DbBackupRestoreWaveChecks {
 }
 
 /** The service wave receives only the already-migrated disposable database. */
-export type DbBackupRestoreWaveRunner = (db: AppDatabase) => Promise<DbBackupRestoreWaveChecks>;
+export type DbBackupRestoreWaveRunner = (db: TestDb) => Promise<DbBackupRestoreWaveChecks>;
