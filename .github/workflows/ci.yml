@@ -107,7 +107,10 @@ jobs:
           fi
 
       - name: Unit tests and UI coverage gate
-        run: npm run coverage:ui -- --ci --runInBand
+        # C-5 experiment: two workers instead of a single band. Keep only if three consecutive runs
+        # print the same coverage totals; the config warns that dual instrumentation of files both
+        # Jest projects load can make merged numbers order-dependent.
+        run: npm run coverage:ui -- --ci --maxWorkers=2
 
       # Runs last so a newly published advisory cannot stop the code checks above from running,
       # while a high or critical advisory without a reviewed, unexpired exception still fails CI.
