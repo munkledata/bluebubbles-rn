@@ -92,6 +92,45 @@ async function waitForCondition(label: string, condition: () => boolean): Promis
 }
 
 describe('incoming event drain', () => {
+  it('dispose() cancels an armed wake and refuses later kicks without re-arming (runtime retirement)', async () => {
+    const { db, raw } = await createTestDb();
+    await enqueue(db, message('retire-me'));
+    // Not due yet: a kick finds nothing claimable and arms a wake for the row's next attempt.
+    raw.prepare(`UPDATE incoming_event_queue SET next_attempt_at = ?`).run(START + 30_000);
+    const handler = { handleNormalized: jest.fn(async () => 'processed' as const) };
+    const scheduleWake = jest.fn(() => 2 as unknown as ReturnType<typeof setTimeout>);
+    const cancelWake = jest.fn();
+    const drain = new IncomingEventDrain(db, handler, digest, {
+      now: () => START,
+      makeLeaseToken: () => 'retire-lease',
+      scheduleContinuation: jest.fn(),
+      scheduleWake,
+      cancelWake,
+    });
+
+    await drain.kick(lease());
+    expect(handler.handleNormalized).not.toHaveBeenCalled();
+    expect(scheduleWake).toHaveBeenCalledTimes(1);
+    expect(scheduleWake).toHaveBeenCalledWith(expect.any(Function), 30_000);
+
+    // Runtime retirement (realtimeControl's resetRealtimeRuntime) ends in this call.
+    drain.dispose();
+    expect(cancelWake).toHaveBeenCalledWith(2);
+
+    // The row comes due, but a retired drain neither claims it nor arms another wake, and the
+    // already-armed wake's own task cannot revive it either.
+    raw.prepare(`UPDATE incoming_event_queue SET next_attempt_at = ?`).run(START);
+    await drain.kick(lease());
+    const [[armedWake]] = scheduleWake.mock.calls as unknown as [[() => void]];
+    armedWake();
+    await Promise.resolve();
+    expect(handler.handleNormalized).not.toHaveBeenCalled();
+    expect(scheduleWake).toHaveBeenCalledTimes(1);
+    expect(raw.prepare(`SELECT state FROM incoming_event_queue`).get()).toEqual({
+      state: 'pending',
+    });
+  });
+
   it('retains a lean RCS receipt until recovery supplies its owner, then applies it once', async () => {
     const { db, raw } = await createTestDb();
     const epoch = `gpe1_${'A'.repeat(43)}`;

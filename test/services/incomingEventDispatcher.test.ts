@@ -95,10 +95,32 @@ function wire(
     canPersist: options.canPersist,
     requestRecovery: recoveries,
   });
-  return { dispatcher, effects, recoveries };
+  return { dispatcher, drain, effects, recoveries };
 }
 
 describe('durable realtime dispatcher', () => {
+  it('a disposed dispatcher refuses admission and resume, and retires its drain', async () => {
+    const { db, raw } = await createTestDb();
+    const { dispatcher, drain, effects } = wire(db, raw);
+    const drainDispose = jest.spyOn(drain, 'dispose');
+
+    dispatcher.dispose();
+    expect(drainDispose).toHaveBeenCalledTimes(1);
+
+    await dispatcher.handle(
+      'new-message',
+      rawMessage('after-retirement'),
+      'socket',
+      currentLease(),
+    );
+    await dispatcher.resume(currentLease());
+    expect(effects).toEqual([]);
+    expect(
+      (raw.prepare(`SELECT COUNT(*) AS count FROM incoming_event_queue`).get() as { count: number })
+        .count,
+    ).toBe(0);
+  });
+
   it('keeps locked V3 persistence closed unless composition explicitly opts in', async () => {
     const { db, raw } = await createTestDb();
     const { dispatcher, effects } = wire(db, raw);
