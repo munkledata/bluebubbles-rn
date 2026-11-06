@@ -29,7 +29,7 @@ export const REQUIRED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@op-engineering/op-sqlite': '17.1.2',
   '@react-native-firebase/app': '25.1.0',
   '@react-native-firebase/messaging': '25.1.0',
-  '@shopify/flash-list': '2.0.2',
+  '@shopify/flash-list': '2.3.2',
   'drizzle-orm': '0.45.2',
   'react-native-maps': '1.27.2',
   'react-native-notify-kit': '10.4.8',
