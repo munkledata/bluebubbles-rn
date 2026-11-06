@@ -319,7 +319,7 @@ describe('native attachment upload account scope', () => {
       'file:///cache/clip.mov',
     ]);
     expect(mockUploadStart).toHaveBeenCalledTimes(1);
-    expect(mockUploadStart.mock.calls[0]![1]).toMatchObject({ total: 14_000 });
+    expect(mockUploadStart.mock.calls[0]![1]).toMatchObject({ total: 14_000, files: 3 });
   });
 
   it('refuses extra files outside one bounded restored iMessage before any native work', async () => {

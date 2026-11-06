@@ -102,16 +102,16 @@ export interface UploadBarLabels {
  * Pure so the wording is node-testable and the component stays a thin shell around it.
  */
 export function uploadBarLabels(
-  entries: readonly { name: string; sent: number; total: number }[],
+  entries: readonly { name: string; sent: number; total: number; files?: number }[],
   opts?: { stalled?: boolean },
 ): UploadBarLabels | null {
   if (entries.length === 0) return null;
   const roll = rollupTransfers(entries);
   const first = entries[0];
+  // Several files sent as one iMessage share one entry, so count files, not entries.
+  const files = entries.reduce((count, entry) => count + Math.max(1, entry.files ?? 1), 0);
   const title =
-    entries.length === 1
-      ? `Sending ${first?.name?.trim() || 'attachment'}`
-      : `Sending ${entries.length} files`;
+    files === 1 ? `Sending ${first?.name?.trim() || 'attachment'}` : `Sending ${files} files`;
   if (opts?.stalled) {
     // Replaces the numbers rather than joining them: the byte count is what is NOT moving, so
     // repeating it next to a stall warning reads as though progress is still being made.
@@ -120,6 +120,16 @@ export function uploadBarLabels(
   const percent = formatPercent(roll.ratio);
   const transferred = formatTransferred(roll.sent, roll.total);
   return { title, detail: percent ? `${transferred} · ${percent}` : transferred };
+}
+
+/**
+ * The upload-progress key an attachment tile reads. Several files sent as one iMessage publish
+ * one entry under the first file's guid (`temp-<id>-att`); the draft's other files
+ * (`temp-<id>-<n>-att`, n 1-9) show that same entry. Every other guid is its own key.
+ */
+export function uploadProgressKey(attachmentGuid: string): string {
+  const extra = /^(temp-[0-9a-f]{16})-[1-9]-att$/.exec(attachmentGuid);
+  return extra ? `${extra[1]}-att` : attachmentGuid;
 }
 
 export function rollupTransfers(

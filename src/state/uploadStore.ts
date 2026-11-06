@@ -24,6 +24,8 @@ export interface UploadEntry {
   sent: number;
   /** 0 until the native uploader reports the content length on its first progress event. */
   total: number;
+  /** Files this entry carries (several files sent as one iMessage share one entry); 1 if absent. */
+  files?: number;
   /** Wall clock of the last progress event; stall detection derives from it. */
   updatedAt: number;
 }
@@ -49,6 +51,7 @@ export const useUploadStore = create<UploadState>((set) => ({
           name: info.name,
           sent: 0,
           total: Number.isFinite(info.total) && info.total > 0 ? info.total : 0,
+          files: Number.isSafeInteger(info.files) && info.files! > 1 ? info.files! : 1,
           updatedAt: Date.now(),
         },
       },

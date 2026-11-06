@@ -13,6 +13,7 @@ import {
   friendlySize,
   isLocalFileUri,
   transferRatio,
+  uploadProgressKey,
 } from '@utils';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
@@ -34,7 +35,8 @@ export function FileChip({ att, isFromMe, onLongPress }: FileChipProps): React.J
   const status = useDownloadStore((s) => s.status[att.guid]);
   const failure = useDownloadStore((s) => s.failure[att.guid]);
   // Present only while this file is being SENT — the entry is removed once the attempt settles.
-  const upload = useUploadStore((s) => s.byGuid[att.guid]);
+  // Several files sent as one message share the first file's entry (see uploadProgressKey).
+  const upload = useUploadStore((s) => s.byGuid[uploadProgressKey(att.guid)]);
   const label = fileTypeLabel(att.mimeType, att.transferName);
   const baseSub = att.totalBytes ? `${label} • ${friendlySize(att.totalBytes)}` : label;
   // A chip has a subtitle line already, so the upload readout goes there rather than as an overlay:

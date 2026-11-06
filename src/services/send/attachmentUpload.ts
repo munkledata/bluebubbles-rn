@@ -377,6 +377,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
             extraFiles.length > 0
               ? (totalBytes ?? 0) + extraFiles.reduce((sum, file) => sum + file.totalBytes, 0)
               : (totalBytes ?? 0),
+          ...(extraFiles.length > 0 ? { files: extraFiles.length + 1 } : {}),
         },
         async (onProgress) => {
           const transfer = uploadGate.run(async () => {

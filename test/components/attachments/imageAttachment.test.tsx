@@ -144,6 +144,36 @@ describe('photo tap versus message-menu hold', () => {
     },
   );
 
+  const DRAFT = 'temp-0123456789abcdef';
+  const startSeveralFileUpload = () =>
+    useUploadStore
+      .getState()
+      .start(`${DRAFT}-att`, { chatGuid: 'c1', name: 'IMG_0001.heic', total: 500_000, files: 3 });
+
+  it('shows the shared upload on every photo of a several-file draft', async () => {
+    startSeveralFileUpload();
+    await renderWithTheme(
+      <ImageAttachment
+        att={makeImg({ guid: `${DRAFT}-2-att`, localPath: 'file:///cache/c.jpg' })}
+        isFromMe
+        showTail
+      />,
+    );
+    expect(screen.getByRole('imagebutton', { name: 'Photo, uploading' })).toBeTruthy();
+  });
+
+  it('does not show it on a photo of another draft', async () => {
+    startSeveralFileUpload();
+    await renderWithTheme(
+      <ImageAttachment
+        att={makeImg({ guid: 'temp-fedcba9876543210-1-att', localPath: 'file:///cache/d.jpg' })}
+        isFromMe
+        showTail
+      />,
+    );
+    expect(screen.getByRole('imagebutton', { name: 'Photo' })).toBeTruthy();
+  });
+
   it('keeps the measured message actions reachable through an upload overlay', async () => {
     const onLongPress = jest.fn();
     useUploadStore.getState().start('img-1', { chatGuid: 'c1', name: 'photo.jpg', total: 500_000 });

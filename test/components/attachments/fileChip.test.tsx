@@ -222,6 +222,25 @@ describe('FileChip — upload progress', () => {
     ).toEqual({ busy: true });
   });
 
+  it('shows the shared upload on a file of a several-file draft', async () => {
+    useUploadStore.setState({
+      byGuid: {
+        'temp-0123456789abcdef-att': {
+          chatGuid: 'c1',
+          name: 'IMG_0001.heic',
+          sent: 512 * 1024,
+          total: 2_621_440,
+          files: 2,
+          updatedAt: 0,
+        },
+      },
+    });
+    await renderWithTheme(
+      <FileChip att={makeAtt({ guid: 'temp-0123456789abcdef-1-att' })} isFromMe />,
+    );
+    expect(screen.getByRole('button', { name: 'Uploading report.pdf' })).toBeTruthy();
+  });
+
   it('omits the percentage until the total is known, keeping the size readout', async () => {
     uploading({ total: 0 });
     await renderWithTheme(<FileChip att={makeAtt()} isFromMe />);

@@ -9,7 +9,7 @@ import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useUploadStore } from '@state/uploadStore';
-import { shouldAutoDownload } from '@utils';
+import { shouldAutoDownload, uploadProgressKey } from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 import { downloadFailureText } from './downloadFailureText';
@@ -48,7 +48,8 @@ export function ImageAttachment({
   const progress = useDownloadStore((s) => s.progress[att.guid]);
   // Present only while this file is being SENT. An entry exists for the duration of one upload
   // attempt and is removed when it settles, so its presence is the whole condition.
-  const upload = useUploadStore((s) => s.byGuid[att.guid]);
+  // Several files sent as one message share the first file's entry (see uploadProgressKey).
+  const upload = useUploadStore((s) => s.byGuid[uploadProgressKey(att.guid)]);
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
   const wifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
   const netType = Network.useNetworkState().type;

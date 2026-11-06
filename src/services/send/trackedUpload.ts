@@ -17,6 +17,8 @@ export interface UploadStartInfo {
   name: string;
   /** Byte size if known up front, else 0 — the native uploader reports the real one shortly. */
   total: number;
+  /** Files carried by this one upload (several files sent as one iMessage); 1 when omitted. */
+  files?: number;
 }
 
 export interface UploadProgressSink {

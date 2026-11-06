@@ -7,6 +7,20 @@ beforeEach(() => {
   useUploadStore.setState({ byGuid: {} });
 });
 
+describe('useUploadStore file counts', () => {
+  it('records how many files one upload carries, defaulting to one, and keeps it on progress', () => {
+    const store = useUploadStore.getState();
+    store.start('several', { ...INFO, files: 3 });
+    store.start('one', INFO);
+    for (const files of [0, -2, 1.5, Number.NaN]) store.start(`bad-${files}`, { ...INFO, files });
+    expect(entries().several?.files).toBe(3);
+    expect(entries().one?.files).toBe(1);
+    for (const files of [0, -2, 1.5, Number.NaN]) expect(entries()[`bad-${files}`]?.files).toBe(1);
+    store.progress('several', 500, 1000);
+    expect(entries().several?.files).toBe(3);
+  });
+});
+
 describe('useUploadStore', () => {
   it('opens an entry at zero bytes with the size it was told up front', () => {
     useUploadStore.getState().start('att-1', INFO);

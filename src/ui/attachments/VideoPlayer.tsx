@@ -7,6 +7,7 @@ import { download } from '@/services/download';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
+import { uploadProgressKey } from '@utils';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { downloadFailureText } from './downloadFailureText';
@@ -41,8 +42,9 @@ export function VideoPlayer({
   const failure = useDownloadStore((s) => s.failure[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
   // Present only while this file is being SENT. An entry exists for the duration of one upload
-  // attempt and is removed when it settles, so its presence is the whole condition.
-  const upload = useUploadStore((s) => s.byGuid[att.guid]);
+  // attempt and is removed when it settles, so its presence is the whole condition. Several files
+  // sent as one message share the first file's entry (see uploadProgressKey).
+  const upload = useUploadStore((s) => s.byGuid[uploadProgressKey(att.guid)]);
   const [playing, setPlaying] = useState(false);
   const [thumb, setThumb] = useState<VideoThumbnail | null>(
     () => cachedVideoPoster(att.guid) ?? null,

@@ -5,6 +5,7 @@ import {
   rollupTransfers,
   transferRatio,
   uploadBarLabels,
+  uploadProgressKey,
   UPLOAD_STALL_MS,
 } from '@utils/uploadProgress';
 
@@ -103,6 +104,44 @@ describe('uploadBarLabels', () => {
 
   it('returns null for an empty set — the signal to render no bar at all', () => {
     expect(uploadBarLabels([])).toBeNull();
+  });
+});
+
+describe('uploadBarLabels for several files sent as one message', () => {
+  it('counts the files of one upload, not its entries', () => {
+    expect(uploadBarLabels([{ name: 'IMG_0001.heic', sent: 0, total: MB, files: 3 }])?.title).toBe(
+      'Sending 3 files',
+    );
+    expect(
+      uploadBarLabels([
+        { name: 'a.jpg', sent: 0, total: MB, files: 3 },
+        { name: 'b.jpg', sent: 0, total: MB },
+      ])?.title,
+    ).toBe('Sending 4 files');
+    expect(uploadBarLabels([{ name: 'a.jpg', sent: 0, total: MB, files: 1 }])?.title).toBe(
+      'Sending a.jpg',
+    );
+  });
+});
+
+describe('uploadProgressKey', () => {
+  const draft = 'temp-0123456789abcdef';
+  it('points every extra file of a several-file draft at its first file', () => {
+    for (const n of [1, 2, 9]) expect(uploadProgressKey(`${draft}-${n}-att`)).toBe(`${draft}-att`);
+  });
+  it('leaves every other guid as its own key', () => {
+    for (const guid of [
+      `${draft}-att`,
+      'real-attachment-guid',
+      `${draft}-0-att`,
+      `${draft}-10-att`,
+      'temp-0123456789abcde-1-att',
+      'temp-0123456789ABCDEF-1-att',
+      `${draft}-1-attx`,
+      `x${draft}-1-att`,
+    ]) {
+      expect(uploadProgressKey(guid)).toBe(guid);
+    }
   });
 });
 
