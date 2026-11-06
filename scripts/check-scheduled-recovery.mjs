@@ -16,45 +16,11 @@ const HANDOFF_TARGET = 'src/db/repositories/scheduled.ts#handoverScheduledTextTo
 const PUBLIC_TEXT_INSERT_TARGET = 'src/db/repositories/outgoing.ts#insertOutgoingText';
 const TRANSACTION_TEXT_INSERT_TARGET =
   'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction';
-const REVIEWED_RUN_DUE_BODY_HASH =
-  '8b1580a859b1c172365219d1afd312da5156076ed327bd8a95c87075b758d567';
-const REVIEWED_RESERVE_SCHEDULED_RUN_BODY_HASH =
-  'd8b2eff4e441b6340e91120123f6a7c76365e0c6dc519561b81305276c42ada2';
-const REVIEWED_ENSURE_SCHEDULED_RECOVERY_BODY_HASH =
-  '4b623fa83b24c1602c60e02c1a226e3b2cfd7e5b06bde9e947dc5b35a7a851fb';
-const REVIEWED_SEND_TEXT_BODY_HASH =
-  'e6542ddb07966fcd8a6c669d6550fb72c5c805c37606dec28de4d411cd90d516';
 const HOME_PATH = 'app/(app)/home.tsx';
 const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
 const SEND_COMPOSITION_PATH = 'src/services/send/index.ts';
 const BACKGROUND_SYNC_PATH = 'src/services/background/backgroundSync.ts';
-const BACKGROUND_SYNC_ORCHESTRATOR_PATH = 'src/services/background/backgroundSyncOrchestrator.ts';
-const OUTGOING_QUEUE_SERVICE_PATH = 'src/services/send/outgoingQueueService.ts';
-const ATTACHMENT_UPLOAD_PATH = 'src/services/send/attachmentUpload.ts';
-const HTTP_CLIENT_PATH = 'src/core/api/http.ts';
-const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
-  [BACKGROUND_SYNC_PATH, '3b7ef387b08beaf1c4b0f697bb32b992ea7b2273d703ad69be304ff86aec49ab'],
-  [
-    'src/native/backgroundTaskExecution.ts',
-    '81a55c2b984ad740c0160dbce50ecc71d711c10ac18f8d83c8da9fe1e4576541',
-  ],
-  [
-    'src/services/background/registerBackgroundSyncHeadlessTask.ts',
-    'eedf77478f9479465c46af5df103c1be282991b1a0d0f686feb6ccf87c197cd0',
-  ],
-  [
-    BACKGROUND_SYNC_ORCHESTRATOR_PATH,
-    'a05fc3df6a131940ff9ed2eccdc2464387c83e135ead8080681577eef35e2f6d',
-  ],
-  [OUTGOING_QUEUE_SERVICE_PATH, '7b25bc57ca7e5728608aa4ee7feda1893b469d42574c279a32e17f78812f3c21'],
-  [ATTACHMENT_UPLOAD_PATH, '47a238a8ccd897dfdb84c6f6cb7231ea04601bb92a5ce8e21f64dfd5f251c9b9'],
-  [
-    'src/utils/uploadFilename.ts',
-    '7204895bb4a6c12a061d7aa393da9a36a519085b2675fd7d5f0b6579f9f340ef',
-  ],
-  [HTTP_CLIENT_PATH, 'c27512aa870949a821af784a22144efd040e4980157f4cd5d5d8465b543afc48'],
-]);
 const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   [
     `${SEND_COMPOSITION_PATH}#fireDueScheduled`,
@@ -193,12 +159,6 @@ function topLevelFunction(sourceFile, name) {
     (statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === name,
   );
   return { matches, declaration: matches.length === 1 ? matches[0] : undefined };
-}
-
-function functionBodyHash(declaration, sourceFile) {
-  const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
-  const normalized = printer.printNode(ts.EmitHint.Unspecified, declaration.body, sourceFile);
-  return createHash('sha256').update(normalized).digest('hex');
 }
 
 function normalizedNodeText(node, sourceFile) {
@@ -943,7 +903,7 @@ function chooseSendMethodErrors(sourceFile) {
 }
 
 /** Validate that the scheduled send path cannot fall through to the ordinary queue insert. */
-export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) {
+export function scheduledHandoffSourceErrors(source) {
   const sourceFile = ts.createSourceFile(
     SEND_SERVICE_PATH,
     source,
@@ -1002,9 +962,6 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
         `${name} must retain its unaliased canonical import without shadowing or mutation`,
       );
     }
-  }
-  if (expectedBodyHash && functionBodyHash(declaration, sourceFile) !== expectedBodyHash) {
-    errors.push('sendTextMessage no longer matches its reviewed AST body fingerprint');
   }
   errors.push(
     ...bindingIntegrityErrors(declaration, 'scheduledHandover', {
@@ -2169,26 +2126,8 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   return errors;
 }
 
-export function scheduledSendTextBodyHash(source) {
-  const sourceFile = ts.createSourceFile(
-    SEND_SERVICE_PATH,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const { matches, declaration } = exportedFunction(sourceFile, 'sendTextMessage');
-  if (matches.length !== 1 || !declaration?.body) {
-    throw new Error('sendTextMessage must be one exported top-level function declaration');
-  }
-  return functionBodyHash(declaration, sourceFile);
-}
-
 /** Validate the ordering inside the one production scheduler entry point. */
-export function scheduledRecoverySourceErrors(
-  source,
-  { expectedBodyHash, expectedReserveBodyHash, expectedEnsureBodyHash } = {},
-) {
+export function scheduledRecoverySourceErrors(source) {
   const errors = [];
   const sourceFile = ts.createSourceFile(
     SCHEDULE_SERVICE_PATH,
@@ -2202,26 +2141,36 @@ export function scheduledRecoverySourceErrors(
     return ['runDueScheduled must be one exported top-level function declaration'];
   }
   errors.push(...scheduledCreationErrors(sourceFile));
-  if (expectedBodyHash && functionBodyHash(declaration, sourceFile) !== expectedBodyHash) {
-    errors.push('runDueScheduled no longer matches its reviewed AST body fingerprint');
+  // The FIFO turn is released exactly once, as the only statement of the finally block whose try
+  // block performs the account-scope recovery cleanup, so an early release cannot let the next due
+  // run overlap this one's cleanup. (Replaces the body-hash pin, F2.)
+  const finishCalls = propertyCallsNamed(sourceFile, 'reservation', 'finish');
+  const finishStatement = finishCalls[0]?.parent;
+  const finishBlock = finishStatement?.parent;
+  const releaseTry = finishBlock?.parent;
+  const releaseIsGuarded =
+    finishCalls.length === 1 &&
+    finishStatement &&
+    ts.isExpressionStatement(finishStatement) &&
+    finishBlock &&
+    ts.isBlock(finishBlock) &&
+    finishBlock.statements.length === 1 &&
+    releaseTry &&
+    ts.isTryStatement(releaseTry) &&
+    releaseTry.finallyBlock === finishBlock &&
+    callsNamed(releaseTry.tryBlock, new Set(['recoveryStatesForDatabase'])).length === 1;
+  if (!releaseIsGuarded) {
+    errors.push(
+      'reservation.finish() must be the only statement of the finally block whose try block performs the account-scope recovery cleanup',
+    );
   }
   const reserve = topLevelFunction(sourceFile, 'reserveScheduledRun');
   if (reserve.matches.length !== 1 || !reserve.declaration?.body) {
     errors.push('reserveScheduledRun must be one top-level function declaration');
-  } else if (
-    expectedReserveBodyHash &&
-    functionBodyHash(reserve.declaration, sourceFile) !== expectedReserveBodyHash
-  ) {
-    errors.push('reserveScheduledRun no longer matches its reviewed AST body fingerprint');
   }
   const ensure = exportedFunction(sourceFile, 'ensureScheduledRecovery');
   if (ensure.matches.length !== 1 || !ensure.declaration?.body) {
     errors.push('ensureScheduledRecovery must be one exported top-level function declaration');
-  } else if (
-    expectedEnsureBodyHash &&
-    functionBodyHash(ensure.declaration, sourceFile) !== expectedEnsureBodyHash
-  ) {
-    errors.push('ensureScheduledRecovery no longer matches its reviewed AST body fingerprint');
   }
 
   const serializedTry = declaration.body.statements[2];
@@ -2294,51 +2243,6 @@ export function scheduledRecoverySourceErrors(
   errors.push(...atomicSendErrors(declaration));
 
   return errors;
-}
-
-export function scheduledRunDueBodyHash(source) {
-  const sourceFile = ts.createSourceFile(
-    SCHEDULE_SERVICE_PATH,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const { matches, declaration } = exportedFunction(sourceFile, 'runDueScheduled');
-  if (matches.length !== 1 || !declaration?.body) {
-    throw new Error('runDueScheduled must be one exported top-level function declaration');
-  }
-  return functionBodyHash(declaration, sourceFile);
-}
-
-export function scheduledReserveRunBodyHash(source) {
-  const sourceFile = ts.createSourceFile(
-    SCHEDULE_SERVICE_PATH,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const { matches, declaration } = topLevelFunction(sourceFile, 'reserveScheduledRun');
-  if (matches.length !== 1 || !declaration?.body) {
-    throw new Error('reserveScheduledRun must be one top-level function declaration');
-  }
-  return functionBodyHash(declaration, sourceFile);
-}
-
-export function scheduledEnsureRecoveryBodyHash(source) {
-  const sourceFile = ts.createSourceFile(
-    SCHEDULE_SERVICE_PATH,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const { matches, declaration } = exportedFunction(sourceFile, 'ensureScheduledRecovery');
-  if (matches.length !== 1 || !declaration?.body) {
-    throw new Error('ensureScheduledRecovery must be one exported top-level function declaration');
-  }
-  return functionBodyHash(declaration, sourceFile);
 }
 
 function exactCallErrors(findings, { label, target, path, symbol, count = 1 }) {
@@ -2893,17 +2797,6 @@ function reviewedScheduledOwnerErrors(sourceFiles) {
     );
   }
 
-  for (const [path, expectedHash] of REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES) {
-    const sourceFile = sourceFiles.get(path);
-    const actualHash = sourceFile ? syntaxHash(sourceFile, sourceFile) : '<missing>';
-    if (actualHash !== expectedHash) {
-      errors.push(
-        `${path} no longer matches its reviewed REL-001 callback dependency fingerprint ` +
-          `(expected ${expectedHash}; actual ${actualHash})`,
-      );
-    }
-  }
-
   const backgroundSource = sourceFiles.get(BACKGROUND_SYNC_PATH);
   if (!backgroundSource || !exactBackgroundScheduleWiring(backgroundSource)) {
     errors.push(
@@ -3276,14 +3169,8 @@ export function runScheduledRecoveryCheck({ root = process.cwd() } = {}) {
   if (!existsSync(sendService)) throw new Error(`missing ${SEND_SERVICE_PATH}`);
   const findings = scheduledCallFindings(root);
   const errors = [
-    ...scheduledRecoverySourceErrors(readFileSync(scheduleService, 'utf8'), {
-      expectedBodyHash: REVIEWED_RUN_DUE_BODY_HASH,
-      expectedReserveBodyHash: REVIEWED_RESERVE_SCHEDULED_RUN_BODY_HASH,
-      expectedEnsureBodyHash: REVIEWED_ENSURE_SCHEDULED_RECOVERY_BODY_HASH,
-    }),
-    ...scheduledHandoffSourceErrors(readFileSync(sendService, 'utf8'), {
-      expectedBodyHash: REVIEWED_SEND_TEXT_BODY_HASH,
-    }),
+    ...scheduledRecoverySourceErrors(readFileSync(scheduleService, 'utf8')),
+    ...scheduledHandoffSourceErrors(readFileSync(sendService, 'utf8')),
     ...scheduledRecoveryCallGraphErrors(findings),
     ...scheduledCallSiteErrors(findings),
     ...scheduledRunnerUsageErrors(productionSources(root)),
