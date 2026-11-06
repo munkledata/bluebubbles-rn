@@ -5,18 +5,18 @@
     "exactAab": false
   },
   "inputs": {
-    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
+    "dependencyLockSha256": "230d54d8e8fc632846fa35ab2e6adb2f648fa4eeaee28ab9f73c7e9ad5bbe67a",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "8b71ef2c2c8b2cd4b120753c70a8db5312bd9ef63c010fd3d87f2b37adc9b630"
   },
   "summary": {
-    "productionPackageRecords": 1020,
+    "productionPackageRecords": 1021,
     "uniquePackageVersions": 926,
     "assetFiles": 13,
     "pendingAssetProvenance": 13,
     "localComponents": 15,
-    "dependencyLockSha256": "979f7c6b265bd8288d2208ff32d797420c8430f005d334c277c52827e9298abd",
+    "dependencyLockSha256": "230d54d8e8fc632846fa35ab2e6adb2f648fa4eeaee28ab9f73c7e9ad5bbe67a",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },
@@ -13982,16 +13982,60 @@
     {
       "installPath": "node_modules/react-native-notify-kit",
       "name": "react-native-notify-kit",
-      "version": "10.4.8",
+      "version": "10.10.0",
       "spdx": "Apache-2.0",
-      "resolved": "https://registry.npmjs.org/react-native-notify-kit/-/react-native-notify-kit-10.4.8.tgz",
-      "integrity": "sha512-+fya6BiPQnk1eicfQVwDvgWicUnUJgeHajT2EiJ6GyJdFhX2ELo6jIHwnWdn32PfvYXZ/FV0PU6Pb4USqeXPrQ==",
+      "resolved": "https://registry.npmjs.org/react-native-notify-kit/-/react-native-notify-kit-10.10.0.tgz",
+      "integrity": "sha512-JFGFK49TMKbRJMCdiDMlYpc1YEDgUgBJK2tujO220ubdYvCn2YSoLzfkWyGce3zDUSJ9cS7uhIt7InLu09oQ6w==",
       "optional": false,
       "legalDocuments": [
+        {
+          "path": "cli/vendor/xcode/LICENSE",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "path": "cli/vendor/xcode/NOTICE",
+          "bytes": 168,
+          "sha256": "0e5b0fe8d11e1627336bc6361de610ba8acf9a035fd73e07b5b4a0909a48371f"
+        },
         {
           "path": "LICENSE",
           "bytes": 11713,
           "sha256": "6da058a052e0700887d012271ef92a7fb34fbaddff78fdb321c8a5ae2d01e69e"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/react-native-notify-kit/node_modules/@expo/image-utils",
+      "name": "@expo/image-utils",
+      "version": "0.8.17",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@expo/image-utils/-/image-utils-0.8.17.tgz",
+      "integrity": "sha512-1eVrX6FFkPNl9DJNiw3Gjsf6PtG7HttbapEVvcROVrA9PCMikujOJWWHDYKGptmKoVIIVajFZE8UHGHUb3mPug==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1106,
+          "sha256": "fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/react-native-notify-kit/node_modules/@expo/require-utils",
+      "name": "@expo/require-utils",
+      "version": "55.0.8",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@expo/require-utils/-/require-utils-55.0.8.tgz",
+      "integrity": "sha512-DDS5R67iz2SJwncbpcUMHtnsq31dSfllhaEncKxGlK0/ewgc2CaXUCkDA2AumfT7ubnSXiPkU9Gn8v2xCrvj+A==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1106,
+          "sha256": "49c5f9c7097c9a940ff663a54c27a4c60e379df6cc2b3052df0d37a09a85df93"
         }
       ],
       "issues": []
@@ -14009,6 +14053,23 @@
           "path": "LICENSE",
           "bytes": 1098,
           "sha256": "04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/react-native-notify-kit/node_modules/semver",
+      "name": "semver",
+      "version": "7.8.6",
+      "spdx": "ISC",
+      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.6.tgz",
+      "integrity": "sha512-9lpSSU4Mly3mrtruwLs1eLK6+gzbzqeBFwRNjIjE+9LuDpWdYctrQlQ3ej1Ilgi7gknpsTRnPoLP8DpCHqHIJw==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 765,
+          "sha256": "4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b"
         }
       ],
       "issues": []
@@ -16328,23 +16389,6 @@
       "issues": []
     },
     {
-      "installPath": "node_modules/uuid",
-      "name": "uuid",
-      "version": "11.1.1",
-      "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/uuid/-/uuid-11.1.1.tgz",
-      "integrity": "sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==",
-      "optional": true,
-      "legalDocuments": [
-        {
-          "path": "LICENSE.md",
-          "bytes": 1109,
-          "sha256": "beaa6b04fb82e41dd2ad679e19e27953afb5999b1abbb455b6564e78ebfeb332"
-        }
-      ],
-      "issues": []
-    },
-    {
       "installPath": "node_modules/v8-to-istanbul",
       "name": "v8-to-istanbul",
       "version": "9.3.0",
@@ -16736,28 +16780,6 @@
       "issues": []
     },
     {
-      "installPath": "node_modules/xcode",
-      "name": "xcode",
-      "version": "3.0.1",
-      "spdx": "Apache-2.0",
-      "resolved": "https://registry.npmjs.org/xcode/-/xcode-3.0.1.tgz",
-      "integrity": "sha512-kCz5k7J7XbJtjABOvkc5lJmkiDh8VhjVCGNiqdKCscmVpdVUpEAyXv1xmCLkQJ5dsHqx3IPO4XW+NTDhU/fatA==",
-      "optional": true,
-      "legalDocuments": [
-        {
-          "path": "LICENSE",
-          "bytes": 11358,
-          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-        },
-        {
-          "path": "NOTICE",
-          "bytes": 168,
-          "sha256": "0e5b0fe8d11e1627336bc6361de610ba8acf9a035fd73e07b5b4a0909a48371f"
-        }
-      ],
-      "issues": []
-    },
-    {
       "installPath": "node_modules/xml2js",
       "name": "xml2js",
       "version": "0.6.0",
@@ -17127,7 +17149,7 @@
       "text": "Apache Cordova\nCopyright 2012-2020 The Apache Software Foundation\n\nThis product includes software developed at\nThe Apache Software Foundation (http://www.apache.org/).\n",
       "sources": [
         "node_modules/@expo/config-plugins/node_modules/xcode/NOTICE",
-        "node_modules/xcode/NOTICE"
+        "node_modules/react-native-notify-kit/cli/vendor/xcode/NOTICE"
       ]
     },
     {
@@ -17967,7 +17989,8 @@
       "sources": [
         "node_modules/@expo/require-utils/LICENSE",
         "node_modules/@expo/schema-utils/LICENSE",
-        "node_modules/@expo/ws-tunnel/LICENSE"
+        "node_modules/@expo/ws-tunnel/LICENSE",
+        "node_modules/react-native-notify-kit/node_modules/@expo/require-utils/LICENSE"
       ]
     },
     {
@@ -18059,6 +18082,7 @@
         "node_modules/node-abi/node_modules/semver/LICENSE",
         "node_modules/npm-package-arg/node_modules/semver/LICENSE",
         "node_modules/once/LICENSE",
+        "node_modules/react-native-notify-kit/node_modules/semver/LICENSE",
         "node_modules/react-native-reanimated/node_modules/semver/LICENSE",
         "node_modules/react-native-worklets/node_modules/semver/LICENSE",
         "node_modules/react-native/node_modules/semver/LICENSE",
@@ -19505,14 +19529,6 @@
       ]
     },
     {
-      "sha256": "beaa6b04fb82e41dd2ad679e19e27953afb5999b1abbb455b6564e78ebfeb332",
-      "bytes": 1109,
-      "text": "The MIT License (MIT)\n\nCopyright (c) 2010-2020 Robert Kieffer and other contributors\n\nPermission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.\n",
-      "sources": [
-        "node_modules/uuid/LICENSE.md"
-      ]
-    },
-    {
       "sha256": "bf9b0d665be2a689851eea667ca9f42066ea1d903b38349c51e6a44b2577680a",
       "bytes": 1083,
       "text": "MIT License\n\nCopyright (c) Jordan Harband and contributors\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
@@ -19745,7 +19761,7 @@
       "sources": [
         "node_modules/@expo/config-plugins/node_modules/xcode/LICENSE",
         "node_modules/long/LICENSE",
-        "node_modules/xcode/LICENSE"
+        "node_modules/react-native-notify-kit/cli/vendor/xcode/LICENSE"
       ]
     },
     {
@@ -20376,6 +20392,7 @@
         "node_modules/expo/LICENSE",
         "node_modules/expo/node_modules/@expo/cli/LICENSE",
         "node_modules/expo/node_modules/@expo/cli/node_modules/@expo/router-server/LICENSE",
+        "node_modules/react-native-notify-kit/node_modules/@expo/image-utils/LICENSE",
         "node_modules/unimodules-app-loader/LICENSE"
       ]
     },

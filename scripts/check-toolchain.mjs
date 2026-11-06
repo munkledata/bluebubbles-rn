@@ -32,7 +32,7 @@ export const REQUIRED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@shopify/flash-list': '2.0.2',
   'drizzle-orm': '0.45.2',
   'react-native-maps': '1.27.2',
-  'react-native-notify-kit': '10.4.8',
+  'react-native-notify-kit': '10.10.0',
 });
 export const FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze([
   'expo-share-intent',

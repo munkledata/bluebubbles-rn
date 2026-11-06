@@ -619,7 +619,7 @@ Related: `AGENTS.md` ("Every headless registration must be imported from `index.
 ## 5. Native notification package ownership
 
 `src/services/notifications/nativeNotificationAdapter.ts` is the only production module allowed to import
-`react-native-notify-kit` (currently pinned to `10.4.8`). It owns the small native surface Gator uses: channel and
+`react-native-notify-kit` (currently pinned to `10.10.0`). It owns the small native surface Gator uses: channel and
 permission calls, display/trigger/cancel operations, foreground/background event registration, and the cold-start
 notification lookup. `notifeeService.ts` continues to own Gator's domain policy and serialized mutation queue; UI,
 features, and headless handlers consume the owned adapter instead of the package singleton. The ESLint boundary covers
@@ -631,7 +631,7 @@ not make route-time registration safe: the background callback must still reach 
 evaluation.
 
 **Body-tap occurrence ownership (2026-09-30 source fix):** the pinned
-`patches/react-native-notify-kit+10.4.8.patch` mints one `pressOccurrenceId` at native body-press
+`patches/react-native-notify-kit+10.10.0.patch` mints one `pressOccurrenceId` at native body-press
 receipt, outside `notification.data`. A process UUID plus atomic increasing sequence is shared by
 the PRESS event and sticky initial event; Kotlin explicitly forwards it to foreground/headless
 JavaScript. The Activity-intent fallback stays tokenless. A second real press on an identical
@@ -659,6 +659,17 @@ Replace the package behind the adapter when it becomes incompatible with the pin
 maintained release path, develops an unresolved security/licensing problem, or cannot meet the lifecycle/cancellation
 matrix above. Host mocks and the import boundary prove ownership, not Android delivery or cancellation timing; those
 remain exact-device evidence.
+
+**Upgrade log.** 2026-11-06: `10.4.8` → `10.10.0` (branch `review/day-4-notify-kit`). The seven-hunk Gator
+patch (`pressOccurrenceId` minting and forwarding; the `shortcutId` type and validator) re-applied without a
+content change. The package now declares `@expo/image-utils` for its config plugin and adds two non-exported
+components to its manifest, `FullScreenNotificationActivity` and `ForegroundServiceRunLimitReceiver`; the library
+still declares no `USE_FULL_SCREEN_INTENT` permission, so the merged manifest of the next Android build must be
+checked for its continued absence. Host proof: the three notification suites, the toolchain guard, the import
+boundary and the type gate. Device matrix owed before that release ships: a killed-app push shows a
+`MessagingStyle` notice with the sender; Reply and Mark-as-read from the killed state act on the right thread
+(two chats' notices first, act on the second); a stale notice tapped after relaunch opens the chat once; App
+Lock on keeps the notice generic.
 
 ## 6. Bounded per-chat message history
 

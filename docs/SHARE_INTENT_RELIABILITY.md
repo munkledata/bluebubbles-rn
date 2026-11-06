@@ -298,7 +298,7 @@ Plus two correctness items:
 - **Conversation notifications (2026-11, Phase 2 of the upstream-gaps plan).** Message notices now
   carry their chat's shortcut id as `android.shortcutId`, so Android files them under Conversations
   and lets the user mark a chat Priority. notify-kit's JS validator used to drop the field; it passes
-  a bounded string through via `patches/react-native-notify-kit+10.4.8.patch` (native already
+  a bounded string through via `patches/react-native-notify-kit+10.10.0.patch` (native already
   supported it). The id is the same opaque per-account token Direct Share uses, and is added only
   while App Lock is proven off (a hydrated OFF, or a headless persisted OFF read). The notification
   path **never publishes**: only the inbox does. It uses the id the inbox last published, or, in a
