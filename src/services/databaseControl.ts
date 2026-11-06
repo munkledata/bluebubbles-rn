@@ -3,7 +3,7 @@ import { logger } from '@core/secure';
 import { plainTextFromAttributedBody } from '@core/richtext';
 import { setAppleScreeningCapabilityReader } from '@db/appleScreeningCapability';
 import { getDatabase, getRawDatabase, initDatabase } from '@db/database';
-import { resolveDbKey, rotateDbKey } from '@db/key';
+import { isLegacyPassphraseKey, resolveDbKey, rotateDbKey } from '@db/key';
 import { kvGet, kvSetWithinTransaction } from '@db/repositories';
 import {
   runInTransactionContext,
@@ -52,7 +52,18 @@ function startDatabaseOpen(): Promise<ReadDb> {
     // resolveDbKey (not getOrCreateDbKey) so a key rotation interrupted by a crash is finished
     // here before the DB is opened. Only runs on the true first open.
     const key = await resolveDbKey(vault);
-    return initDatabase(key);
+    const db = await initDatabase(key);
+    // F-4: a bare-hex passphrase key costs a PBKDF2 stretch on every open. Move the install to the
+    // raw-key form with one ordinary crash-safe rotation, once per process; a failure is logged and
+    // the next launch (still on the legacy key) tries again.
+    if (isLegacyPassphraseKey(key)) {
+      void rotateDatabaseKey().catch((error: unknown) => {
+        logger.warn('[db] legacy key upgrade did not complete', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+      });
+    }
+    return db;
   })();
   // Clear the memo once it settles, either way: on success the getDatabase() fast path takes over,
   // and on FAILURE (vault unavailable, corrupt file, a migration throw) the next caller must get a

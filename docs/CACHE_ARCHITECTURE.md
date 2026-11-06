@@ -46,9 +46,13 @@ FTS5 search index.
   _before_ the DB opens): the SQLCipher `dbEncryptionKey` (+ pending-rotation slot),
   `serverAddress`/`serverPassword`, iCloud account, automation token, and `appLockEnabled`.
 - `ExpoSecureVault` wraps expo-secure-store (Keystore + EncryptedSharedPrefs).
-  `getOrCreateDbKey` generates 32 random bytes hex-encoded to 64 chars on first run.
-  `resolveDbKey` completes an interrupted rotation; `rotateDbKey` is a 4-step crash-safe
-  `PRAGMA rekey` sequence.
+  `getOrCreateDbKey` generates 32 random bytes on first run and stores them in SQLCipher's raw-key
+  form `x'<64 hex>'`, which the driver uses directly; the earlier bare-hex form was a passphrase that
+  SQLCipher stretched with PBKDF2 (256,000 rounds) on every open, including every push wake. An install
+  still holding that form is moved over by one ordinary rotation scheduled on its first open
+  (`databaseControl.startDatabaseOpen`, guarded by the single in-flight rotation). `resolveDbKey`
+  completes an interrupted rotation; `rotateDbKey` is a 4-step crash-safe `PRAGMA rekey` sequence
+  (double-quoted value, because the raw key carries single quotes).
 - `requireAuthentication` is intentionally **OFF** so an authenticated, active-bound V3 headless push
   can enqueue into SQLCipher while App Lock is active. It cannot read, claim, route, or apply content
   until unlock. `keychainAccessible: WHEN_UNLOCKED` is iOS-only and **inert on Android** (not an

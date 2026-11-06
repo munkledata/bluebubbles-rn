@@ -17,7 +17,8 @@ import {
 } from '../support/dbOwnershipProof';
 import { createTestDb } from '../support/testDb';
 
-const NEW_KEY = '09'.repeat(32);
+// The rotation mints SQLCipher's raw-key form from the mocked CSPRNG bytes below.
+const NEW_KEY = `x'${'09'.repeat(32)}'`;
 
 jest.mock('expo-crypto', () => ({
   getRandomBytes: (length: number) => new Uint8Array(length).fill(9),
@@ -336,7 +337,7 @@ describe('DB-02C mixed runtime concurrency', () => {
         ),
       ).toBe(1);
       expect(count(raw, `SELECT COUNT(*) count FROM outgoing_queue`)).toBe(0);
-      expect(pragmas).toEqual([`PRAGMA rekey = '${NEW_KEY}'`]);
+      expect(pragmas).toEqual([`PRAGMA rekey = "${NEW_KEY}"`]);
       expect(await vault.get('dbEncryptionKey')).toBe(NEW_KEY);
       expect(await vault.get('dbEncryptionKeyPending')).toBeNull();
 

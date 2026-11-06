@@ -53,7 +53,11 @@ jest.mock('@db/database', () => ({
   getRawDatabase: (...a: unknown[]) => mockGetRawDatabase(...a) as unknown,
   initDatabase: jest.fn(),
 }));
-jest.mock('@db/key', () => ({ resolveDbKey: jest.fn(), rotateDbKey: jest.fn() }));
+jest.mock('@db/key', () => ({
+  isLegacyPassphraseKey: () => false,
+  resolveDbKey: jest.fn(),
+  rotateDbKey: jest.fn(),
+}));
 jest.mock('@db/repositories', () => ({
   kvGet: (...a: unknown[]) => mockKvGet(...a) as unknown,
   kvSet: (...a: unknown[]) => mockKvSet(...a) as unknown,
