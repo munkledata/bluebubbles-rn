@@ -1,7 +1,13 @@
 # Deferred file splits: `bootstrap.ts` and `send/index.ts` (design notes)
 
-Status: **deferred** (2026-10-14) by owner decision at the end of Phase 6 step 6 of the 2026-10-09
-Codex-review remediation. Step 6 split the chat screen (`app/(app)/chat/[guid].tsx`, 2,501 → 1,030
+Status: `bootstrap.ts` **split on 2026-11-06** (fix plan round 4): Connect lives in `connect.ts`, the
+Disconnect cleanup and the forget entry points in `accountCleanup.ts`, and the ten shared module
+variables on the `lifecycle` object in `accountLifecycleState.ts` together with the small guards every
+area used; `bootstrap.ts` keeps the foreground boot stages and re-exports the public entry points, so
+no consumer changed. The move used an exact-block generator (every statement block byte-identical
+apart from added `export` keywords and the `lifecycle.` field prefix) and the forget and boot suites
+as the net. The `send/index.ts` split below is still pending. The original deferral: **deferred**
+(2026-10-14) by owner decision at the end of Phase 6 step 6 of the 2026-10-09 Codex-review remediation. Step 6 split the chat screen (`app/(app)/chat/[guid].tsx`, 2,501 → 1,030
 lines) and the media viewer (1,400 → 966) and retired the legacy `hydrateSession` boot from
 `src/services/bootstrap.ts` (2,188 → 2,026). The two remaining splits turned out to be mostly
 DB-write-guard bookkeeping rather than clearer code, so they wait for their own planned change.
