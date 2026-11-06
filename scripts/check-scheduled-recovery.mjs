@@ -25,7 +25,7 @@ const REVIEWED_RESERVE_SCHEDULED_RUN_BODY_HASH =
 const REVIEWED_ENSURE_SCHEDULED_RECOVERY_BODY_HASH =
   '4b623fa83b24c1602c60e02c1a226e3b2cfd7e5b06bde9e947dc5b35a7a851fb';
 const REVIEWED_SEND_TEXT_BODY_HASH =
-  '2e75145ba086aee399f2792e0abb61e96d48b1345141949d08b5691ee17c41db';
+  'e6542ddb07966fcd8a6c669d6550fb72c5c805c37606dec28de4d411cd90d516';
 const HOME_PATH = 'app/(app)/home.tsx';
 const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
@@ -36,7 +36,7 @@ const OUTGOING_QUEUE_SERVICE_PATH = 'src/services/send/outgoingQueueService.ts';
 const ATTACHMENT_UPLOAD_PATH = 'src/services/send/attachmentUpload.ts';
 const HTTP_CLIENT_PATH = 'src/core/api/http.ts';
 const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
-  [BACKGROUND_SYNC_PATH, '71b48504c85cf9ddd65f476e25fb1d0033541501b4be41dd9ace6cb2ffa4dbdd'],
+  [BACKGROUND_SYNC_PATH, '3b7ef387b08beaf1c4b0f697bb32b992ea7b2273d703ad69be304ff86aec49ab'],
   [
     'src/native/backgroundTaskExecution.ts',
     '81a55c2b984ad740c0160dbce50ecc71d711c10ac18f8d83c8da9fe1e4576541',
@@ -49,7 +49,7 @@ const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
     BACKGROUND_SYNC_ORCHESTRATOR_PATH,
     'a05fc3df6a131940ff9ed2eccdc2464387c83e135ead8080681577eef35e2f6d',
   ],
-  [OUTGOING_QUEUE_SERVICE_PATH, '410592d75c75e167dde642d32bbe3449bbbd239ea157dddd44bda738b41a962e'],
+  [OUTGOING_QUEUE_SERVICE_PATH, '7b25bc57ca7e5728608aa4ee7feda1893b469d42574c279a32e17f78812f3c21'],
   [ATTACHMENT_UPLOAD_PATH, '47a238a8ccd897dfdb84c6f6cb7231ea04601bb92a5ce8e21f64dfd5f251c9b9'],
   [
     'src/utils/uploadFilename.ts',
@@ -72,7 +72,7 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${BACKGROUND_SYNC_PATH}#recoverAndDrainBackgroundSchedules`,
-    '2069af4b037851a86bc475cf38aadc579093c93ebf763d305f1e5251fd554330',
+    'cff65cba4756e2316f7c24ddde4c6ab4dc33e76ecd91f9bd56ae3bcdd794a1e8',
   ],
   [
     `${BACKGROUND_SYNC_PATH}#asRealtimeLease`,
@@ -1737,17 +1737,22 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !ownerCallback ||
     !ts.isArrowFunction(ownerCallback) ||
     !ownerCallback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
-    ownerCallback.parameters.length !== 1 ||
+    // The owner callback receives the write handle first (unused here: every write goes through
+    // the transaction context) and the context second.
+    ownerCallback.parameters.length !== 2 ||
     !ownerCallback.parameters[0] ||
     !ts.isIdentifier(ownerCallback.parameters[0].name) ||
-    ownerCallback.parameters[0].name.text !== 'context' ||
+    ownerCallback.parameters[0].name.text !== 'db' ||
+    !ownerCallback.parameters[1] ||
+    !ts.isIdentifier(ownerCallback.parameters[1].name) ||
+    ownerCallback.parameters[1].name.text !== 'context' ||
     !transactionInsertCall ||
     transactionInsertCalls.length !== 1 ||
     admissionTargetCalls.length !== 1 ||
     !hasExactCompactText(
       ownerCallback,
       sourceFile,
-      `async (context) => {
+      `async (db, context) => {
         const resolvedTarget = authorizedTarget
           ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
           : null;

@@ -541,7 +541,11 @@ function detectedContext(node, fileName, symbol, bindings) {
     const localName = calledIdentifier(current.expression);
     const coordinator = localName ? bindings.coordinators.get(localName) : undefined;
     if (!coordinator) continue;
-    const callback = current.arguments[coordinator === 'withDbTransaction' ? 1 : 0];
+    const callback = coordinatorCallbackArgument(
+      current,
+      coordinator,
+      coordinator === 'withDbTransaction' ? 1 : 0,
+    );
     if (
       callback &&
       (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback)) &&
@@ -1724,13 +1728,13 @@ function dbProcessRelaunchCertificateCandidate({
   if (
     createHash('sha256')
       .update(normalizedSnippet(runtimeWaveFile, runtimeWaveFile))
-      .digest('hex') !== '086d176a5c9d7063b188d7b6082e98330a247d5d07cd088f49c61f73e8db804d'
+      .digest('hex') !== '5ba9994fe451aa1c2e60fca1eec6ed1fd109a7276758fb6576062a11d6458af1'
   ) {
     return undefined;
   }
   if (
     createHash('sha256').update(normalizedSnippet(backupWaveFile, backupWaveFile)).digest('hex') !==
-    '97fad9baebf188c972e538b21edb389dbd65d7bc00767ff41ca9f4d79324076a'
+    'c204e1230c5e5e99e1f5f8f5ad0216ca0bbde1c62ce0aa6082eaa77eeab1d9e5'
   ) {
     return undefined;
   }
@@ -1800,7 +1804,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runDbRuntimeConcurrencySelfTest',
-      'fa80d5b3f51604fc400c64c3d0eb75c8ca91c0ff2dbc13814905109f1ffc10e8',
+      '3647603b28c2ac511aa912625bd209f5a13aed33a49cac5982366455bb7813bc',
     ],
     [
       'emptyDbBackupRestoreDatabaseChecks',
@@ -1820,7 +1824,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runDbBackupRestoreSelfTest',
-      '90191254d8ece5ffb112610d5286d61e9cddab24442c43f77697fd66b7d91bdd',
+      '5f36e721746aaf0436cb19200002979d39c1bb1efbc28c851d936c9bbc7c1559',
     ],
     [
       'emptyDbProcessRelaunchPrepareChecks',
@@ -1973,14 +1977,14 @@ function dbProcessRelaunchCertificateCandidate({
     ['syncChat', '6438f8d7da356f50db890f6e7baa72959966b6c7e345c0fe51bdc2bf5ee01e57'],
     ['liveMessage', '4cccfc43e183566a82228df3a9689f8b217d78cfed297c6f523a6485fa05b4a6'],
     ['syncApi', 'bc4e46fa51e2e97b812b7cd1b9473812c2edc49cde9ae414c33b3b54fe080284'],
-    ['count', '04da8112837e41f975bb09ef7205ea81050dd24c1c167eba8914b3ba69a54ef1'],
+    ['count', '89f2b28d61bd4e53e41ab488bfafef6bef8265638a0e24fa1f44466e108288bc'],
     [
       'submitOrderedCoordinatorWave',
-      'f64872e86e4f858884ae75ec6a19e9f9480e087fd79871ab77c57b81b9a329cf',
+      '67d3f931b67b7eb29b53cb3f40ec39c2e76492c7b544e5e9dab938714ec924e5',
     ],
     [
       'runDbRuntimeConcurrencyWave',
-      'd45fd337f7d54d2d651887d1587ef160ff6f05ce01e3d0503d8ae73efe85b396',
+      '4de47535944d34a5c2c822ee47c200b1c256fa5f93a95179002f4f01d3a368ce',
     ],
   ]);
   for (const [name, expected] of expectedRuntimeWaveFingerprints) {
@@ -2016,14 +2020,14 @@ function dbProcessRelaunchCertificateCandidate({
       'buildNearLimitBackupRestoreFixture',
       '574d15afed9cfdec8391a6ba13e46085768829e94ac718b4fb1d62ca7a09a4bc',
     ],
-    ['count', '04da8112837e41f975bb09ef7205ea81050dd24c1c167eba8914b3ba69a54ef1'],
+    ['count', '89f2b28d61bd4e53e41ab488bfafef6bef8265638a0e24fa1f44466e108288bc'],
     ['containsFault', 'ddd95d69fa471dc9ff53b9bc7248aac8d2e997b9c3921c775048027817567f2b'],
-    ['dropFaultTrigger', 'a1dfa7c4ea273f1ccce805db6db58cb9d33c0958e5a9a32210e9b69fa764c516'],
+    ['dropFaultTrigger', 'ee6c015e9b33b423cd152a1742323af4060c33ed3a90eea34d8825a68f5d4dd4'],
     [
       'temporaryRestoreTablesAreAbsent',
-      'dbb5fa061227e478ca7117930b6413e1ff5e48a86155bc11e188fb9b332d7100',
+      'e763284a3c58d21a0b8b6f0e5da54e6dd039894ad7085abe7db3af4483384090',
     ],
-    ['runDbBackupRestoreWave', 'fec59aee2ac8b3a5f784ed022141adc5835c5f8d686fdbe9800e1ca253c0782f'],
+    ['runDbBackupRestoreWave', '770d5bf51624b36b75c7388cd9fbe4e7fcddd1cb9c6568612b4c42c260e02ef9'],
   ]);
   for (const [name, expected] of expectedBackupWaveFingerprints) {
     const callable = backupWaveCallables.get(name);
@@ -2612,32 +2616,32 @@ function dbProcessRelaunchCertificateCandidate({
   // reviewed entry bodies plus the exact contact-link bypass and send-attempt ownership closure, so
   // internal DB/native work cannot become detached while an outer inventory id stays unchanged.
   const runtimeProductionCalleeFingerprints = new Map([
-    [syncAllChats, 'c020fac074e1490f98ec8d53ae0ccde29ba6c827abbdb302ead4a5990fc5beda'],
-    [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
-    [sendImageMessage, '1d070c83dd2294fe779d0f1da8cc8662080d8f4b992dbef4c68303ccf0135567'],
+    [syncAllChats, '35ead71757ecc3aae7a2fdcbb92f23338633d03d44ec430d38a3ec416faf18e3'],
+    [linkHandlesAfterCommit, '47e08a557bd8935c1102e3d2d73e6d9378191fb0fe94c3a6ac6a6ce26dc34051'],
+    [sendImageMessage, 'fdd185e06283ed92e95c84deeb0f19f03735a09e5528a63e3f7034846082be0c'],
     [sendVoice, 'c94cf97a65429ce60798d506291cc654f46685aad419e8f9c19b1cbe8d9781ce'],
     [
       sendCurrentLocationMessage,
-      'f160a0844999ab354cb68ff35f1a2de1d06f34c78edb39b197c423313e3b9985',
+      '44c56423ca7c2d80382a7c0c1330b87c7b176ad085aca87bb27801e3da26354f',
     ],
-    [sendIMessageEffect, '6fcc4a5d714b4696464d6f924e887584d39a6721ff33a4a5bca586e49c67519b'],
-    [sendIMessageMention, '8b826ea5df538b8230e006779358bf8bed44322f3007956340b20ee7fd104843'],
-    [sendIMessageFormatted, 'cf64954748fc0a92dd4a00fd8d72f8111062fbead8fbcf575434513d428e4a54'],
-    [sendIMessageSubject, 'd95b45e6751ca9173af28c0ff0b6f13ce5dc7caa7c339ff83a5ca807b47c2828'],
-    [reconcileSendOutcome, 'aedfc0bb25afbf331d39a1eb1e425b726dee99a5878b04a4fbb9bdca5f9636b1'],
-    [handleSendFailure, 'f15ed881134c6a2b31fee3d185b6811708f4d913ccfd2ecad327915eb84a1178'],
+    [sendIMessageEffect, 'bfb9c9b8285c8b9980a4349f70cc5bc74272bc113fea87198af13d66ae4bcd75'],
+    [sendIMessageMention, 'ebb1ab730377f7dee148d92e6475baa4cec2fd1097d726aa7ff86b589550cfff'],
+    [sendIMessageFormatted, '4b6716c4d5efb97d933bcf982c063a052e89595651002437a43c2b219fc0582c'],
+    [sendIMessageSubject, '6c233dc3abdeb3994e4852bc086ff3d96ae895988005e15edf9cf239db4306d4'],
+    [reconcileSendOutcome, '6dfb34380666c1fbdba82e93d295e9bf5f370cace0d1dd4008fcb59ee2acacf6'],
+    [handleSendFailure, '115e6294ab7c84025340a475364361c4e7b4791de20361df73b0e46d4616c054'],
     [
       isTerminalLocationSendError,
       'c4476403a6dd9484f45fbb35fa032c97e2f48d81d058482f880c3dd1a163a2d5',
     ],
     [
       withCurrentDeliveryTransaction,
-      '89571d272f5cd53c5d70cc98412afbb3ba505b2b6705982475a1400aa38dbf89',
+      'c96e0c25f54fd1b940719c665fa50ccc0d37f9ddd786b9ce663b0068b926d1b6',
     ],
-    [dbEventSinkConstructor, '194b0d05967ba18c5ace5fd07e48cd743452714b2adcb212d2612330bf880fb7'],
+    [dbEventSinkConstructor, 'd8da5bf51e0961f71b960faa88c06dd8f9e364ab39a3be5eaff7f0f9cec0cc45'],
     [dbEventSinkLinkContacts, '0815eb9769042c9b5d8be504720e727f05cdde857fd255d692afdb391b3e3e2d'],
     [dbEventSinkOnEvent, '9ab6536edce087fef3d94ea8214387025db134bbb7aec71e9e50438722d3f2fb'],
-    [restoreBackup, 'b07b2ac9d782912f23ecc74117b7759911686da4f93c762e0daf3fa821fd477e'],
+    [restoreBackup, '22b1f41e797669f7be5e5c8d44256d9fe6ae70bcb89902d164a74e769214479a'],
     [
       restorePreparedBackupWithinTransaction,
       '08518d96b669e8a05ea541f78055441f4c540ba2285efc5adb592a94c398ad35',
@@ -4962,7 +4966,7 @@ function throwawayDatabaseDoorwayCandidate({
       'migrateThrowawayDatabase',
       'e070b9b2df62454aa77ccd80a9912ab146548d998c9db1c654d14fb65ba2e59e',
     ],
-    ['throwawayDrizzle', '306ac57fc68302765410cd532d701ed020eea903558d79d7c1de4977dc9e96a9'],
+    ['throwawayDrizzle', '18c11e6ddb3154dd478bdcc67bda1e6bd63cd0868d9646f69f065ba7295cc1c5'],
   ]);
   const exported = (node) =>
     Boolean(node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword));
@@ -5227,7 +5231,7 @@ function perf01ColdBenchmarkCertificateCandidate({
     sha(prepare, harnessFile) !==
       '0bd00b009baee41566bda4e7ed0622b17c2a47b16b9889b419c7ec4fa2311da7' ||
     sha(measure, harnessFile) !==
-      '9f9fac77dd9d34f2b754e02eb9f47efb2ce0e393b75ad2a06fe41410dbb888a0' ||
+      'b0d7f9a7c3f6280dd4bdf4ac2146949b54c8079f0ce9f0843eba591412ee97ae' ||
     sha(rowsOf, harnessFile) !==
       '29efcb6ece48829d67813ad6961319796b71349be1bc4081f9703bece755b9aa' ||
     sha(screenFile, screenFile) !==
@@ -5401,7 +5405,7 @@ function perf02InboxBenchmarkCertificateCandidate({
     sha(runner, harnessFile) !==
       '9fb18aab84f583e316b7e82333ba02ffe2c268e3c99cf31a64b395cff26f8bf8' ||
     sha(benchmarkFile, benchmarkFile) !==
-      'd3490c2697828a9406d9615b7eed5ccc9a8046107539bb365ba2c3106d7f7405' ||
+      'ee430d2bd97091a63ee62da81c62bdfb00c0b70a1cd964707433703943aee3a5' ||
     sha(service, serviceFile) !==
       'f2499c347c59626735128bed19f5e5375e43a5b5a211dc26b5b95bddf04f60ae' ||
     sha(home, homeFile) !== '951339054464f21c63b03ff73de75d689d254cf466fba406ce98ff8876364de4' ||
@@ -9575,10 +9579,10 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      'b989b7365fe47ec23f987118fbc0d458e9655aaaa56bc0fc1eddf8462a92edd3' ||
+      '7be50684ddbaf53297229310bb2ea7e6d4fbc10d27ad20a0065502454b97af43' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
-      .digest('hex') !== '55909d52f17e7e73d7ec600c9f18b9ab4dea322963e84ecf1e4700971ef42ff0' ||
+      .digest('hex') !== '93ea5054898fd919f24e965959011ef6495f8ed082e4da75b342efeaa612c9fd' ||
     createHash('sha256')
       .update(normalizedSnippet(claimRealtimeForegroundIntent, controlFile))
       .digest('hex') !== 'd51eec3879f0a2cdd48c51cb63e6787d848420b80430e3d25e716c841a107fdb' ||
@@ -9595,15 +9599,15 @@ function incomingIngressCertifiedNodes({
       .digest('hex') !== '98cc5f5d5f2ba3b3de00d13bd7054b12d2198aa36d945506f0eeb035adaf9325' ||
     createHash('sha256')
       .update(normalizedSnippet(requestRealtimeRecovery, controlFile))
-      .digest('hex') !== '64ef0ee4c27ead97edc14f2ca49d638de4c08666c7867036c77e1f15f1287468' ||
+      .digest('hex') !== '9dcf8c97f568d9bd876a5b49ab67ef6c6de2245bb8ab69c38c11aaea82ab2d67' ||
     createHash('sha256')
       .update(normalizedSnippet(prerequisiteRecoveryFile, prerequisiteRecoveryFile))
-      .digest('hex') !== '78970ac88201e6664e7c35b25ba6e613da5f9af1f6cb91aa796658053fe76471' ||
+      .digest('hex') !== '59330e36b548bb4317940ea18ce92afea01fea0cb0faa6ed6c323bbf7482c4e7' ||
     createHash('sha256').update(normalizedSnippet(fileLogFile, fileLogFile)).digest('hex') !==
       '58120b0f2dd9cd52685c83894333ee06db8e32b69569fb76ddcafd8cc13fbdbe' ||
     createHash('sha256')
       .update(normalizedSnippet(beginRealtimeRecoveryCollector, controlFile))
-      .digest('hex') !== '08d0f5b0739532b8e1a3706a8cbdcc00b44ef87beeab7d4738a48686f600070c' ||
+      .digest('hex') !== '44ae9620c97ec1f38bab257363cbbc56bbe932aa1656c7931265bfad8065ec21' ||
     createHash('sha256')
       .update(normalizedSnippet(durableRequestRecovery, dispatcherFile))
       .digest('hex') !== 'd953bea5ef97facc07f14205747adc5a9d52fd5016e8b9524042f4034407ed6f' ||
@@ -15421,6 +15425,16 @@ function callableNodeForFinding(finding, file) {
   return best;
 }
 
+/**
+ * The owner callback of a coordinator call. `withDbTransaction(db, fn, guard?)` keeps it second;
+ * `withDbWriteLock` accepts both `withDbWriteLock(fn)` and `withDbWriteLock(db, fn)`, so its callback
+ * is the last argument.
+ */
+function coordinatorCallbackArgument(call, context, callbackParameterIndex) {
+  if (context === 'withDbWriteLock') return call.arguments[call.arguments.length - 1];
+  return call.arguments[callbackParameterIndex];
+}
+
 function directCoordinatorInfoForCallable(callable, root) {
   const path = normalizePath(relative(root, callable.getSourceFile().fileName));
   const name = declarationName(callable);
@@ -15665,7 +15679,9 @@ function forwardedCoordinatorInfos(files, checker, root) {
       if (ts.isCallExpression(node)) {
         const callee = callableNodeForExpression(node.expression, checker);
         const info = callee ? directCoordinatorInfoForCallable(callee, root) : undefined;
-        const expression = info ? node.arguments[info.callbackParameterIndex] : undefined;
+        const expression = info
+          ? coordinatorCallbackArgument(node, info.context, info.callbackParameterIndex)
+          : undefined;
         const callback = expression ? callableNodeForExpression(expression, checker) : undefined;
         const inlineCallback = expression ? unwrapExpression(expression) : undefined;
         if (
@@ -15773,7 +15789,9 @@ function forwardedCoordinatorInfos(files, checker, root) {
             isDirectCallReference(expression) && ts.isCallExpression(expression.parent)
               ? expression.parent
               : undefined;
-          const callbackExpression = call?.arguments[info.callbackParameterIndex];
+          const callbackExpression = call
+            ? coordinatorCallbackArgument(call, info.context, info.callbackParameterIndex)
+            : undefined;
           const callbackResolution = callbackExpression
             ? stableCallableResolutionForExpression(callbackExpression, checker)
             : undefined;
@@ -15829,7 +15847,7 @@ function coordinatorCallback(call, checker, root, forwardedCoordinators = new Ma
   if (!callee) return undefined;
   const info = coordinatorInfoForCallable(callee, root, forwardedCoordinators);
   if (!info) return undefined;
-  const expression = call.arguments[info.callbackParameterIndex];
+  const expression = coordinatorCallbackArgument(call, info.context, info.callbackParameterIndex);
   if (!expression) return undefined;
   const callback = callableNodeForExpression(expression, checker);
   return {
@@ -16719,9 +16737,36 @@ export function reconcileDbWriteInventory({ findings, inventory }) {
 
     if (oldEntries.length > 1) {
       const liveById = new Map(liveFindings.map((finding) => [finding.id, finding]));
+      const unmatchedLive = new Set(liveFindings);
       for (const entry of oldEntries) {
-        const finding = liveById.get(entry.id);
-        if (!finding) throw new Error(`ambiguous many-to-many rekey for ${key}`);
+        let finding = liveById.get(entry.id);
+        if (!finding) {
+          // Several writes under one renamed callback: the same proof as the single-entry rekey
+          // below, per entry. The old id must be exactly what the live write expression would have
+          // produced under the old anonymous callback name, so only the fingerprint changed.
+          const candidates = [...unmatchedLive].filter(
+            (live) =>
+              typeof live.snippet === 'string' &&
+              entry.id ===
+                findingId(entry.path, entry.symbol, entry.operation, entry.target, live.snippet),
+          );
+          if (candidates.length !== 1) throw new Error(`ambiguous many-to-many rekey for ${key}`);
+          finding = candidates[0];
+          reconciledById.set(finding.id, {
+            ...entry,
+            id: finding.id,
+            path: finding.path,
+            line: finding.line,
+            symbol: finding.symbol,
+            operation: finding.operation,
+            target: finding.target,
+            detectedContext: finding.detectedContext,
+          });
+          rekeys.push({ from: entry.id, to: finding.id, line: finding.line });
+          unmatchedLive.delete(finding);
+          continue;
+        }
+        unmatchedLive.delete(finding);
         const reconciled = { ...entry, line: finding.line };
         reconciledById.set(finding.id, reconciled);
         if (entry.line !== finding.line) {

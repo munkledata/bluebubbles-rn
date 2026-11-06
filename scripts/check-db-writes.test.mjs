@@ -1796,7 +1796,7 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
       'src/services/errors/index.ts#flushErrorReports:mutator-call:4c82a62c3bba',
       'src/services/errors/index.ts#flushErrorReports:mutator-call:a82e15453f42',
       'src/services/errors/index.ts#initErrorReporting:mutator-call:e859266a73cf',
-      'src/services/errors/index.ts#revokeErrorReporting:mutator-call:df9a116f1f15',
+      'src/services/errors/index.ts#revokeErrorReporting:mutator-call:63b8d9b269b9',
     ].sort(),
   );
   assert.deepEqual(
@@ -1813,18 +1813,18 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
   assert.deepEqual(
     queueTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:0a89819f93>.<callback:c04c1aca31>:mutator-call:4c8e5e7f7a7a',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:0a89819f93>:mutator-call:d14964c68db3',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:0a89819f93>:mutator-call:e8da34c8d417',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:1c51f3e183>.<callback:46d8afbc49>:mutator-call:d889281ba3b1',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:1c51f3e183>:mutator-call:06c0f41534b8',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:1c51f3e183>:mutator-call:c1ba7ef65fda',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:5d7016c73c>.<callback:e0e11b4c8c>:mutator-call:fa0394c809cc',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:5d7016c73c>:mutator-call:819af640a00c',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:5d7016c73c>:mutator-call:a360ea2bc00f',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:3beb70afb0>:mutator-call:42846afff5c3',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody:mutator-call:4d7d77b3c92a',
-      'src/services/errors/errorReportQueueService.ts#runQueueBody:mutator-call:9aa37e5faf01',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:08cf835636>.<callback:59a2a48474>:mutator-call:35195d482c0b',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:08cf835636>:mutator-call:1c09c3d996ec',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:08cf835636>:mutator-call:b23239f5e88b',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:473314354f>.<callback:c69dc1e4f0>:mutator-call:885f74fbd7cd',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:473314354f>:mutator-call:5aa4a1adcd23',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:473314354f>:mutator-call:6ad35585e40e',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:4933f918e0>.<callback:e459b1f8f2>:mutator-call:c3c899b87f20',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:4933f918e0>:mutator-call:15d6aaa9d0ac',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:4933f918e0>:mutator-call:eabcf1f81bbb',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody.<callback:b09ff70f9a>:mutator-call:2e601537bc41',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody:mutator-call:1f5755284b6c',
+      'src/services/errors/errorReportQueueService.ts#runQueueBody:mutator-call:bbcfff2560d5',
     ].sort(),
   );
   assert.equal(queueTransactions.length, 12);
@@ -1837,9 +1837,9 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
   assert.deepEqual(
     revokeTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>:mutator-call:00b329553e04',
-      'src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>:mutator-call:3cd60f103698',
-      'src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>.<callback:df5455005c>:mutator-call:0af467bde68f',
+      'src/services/errors/index.ts#revokeErrorReporting.<callback:1311742457>.<callback:f5b15136fe>:mutator-call:250be3191e99',
+      'src/services/errors/index.ts#revokeErrorReporting.<callback:1311742457>:mutator-call:1b47bc58028c',
+      'src/services/errors/index.ts#revokeErrorReporting.<callback:1311742457>:mutator-call:1f5fd1574422',
     ].sort(),
   );
   assert.equal(outer.length, 7);
@@ -2063,25 +2063,25 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
   assert.deepEqual(
     createReminderTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:04f4d3fd8d>:mutator-call:7a70fb282b9a',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:2b84b1873777',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:fe436ced4e32',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:f30803c5f7>.<callback:90e2788dbc>:mutator-call:6cd9cf9f8561',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:f30803c5f7>:mutator-call:b7c892cbb135',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:f30803c5f7>:mutator-call:bd879b8b77ca',
     ].sort(),
   );
   assert.deepEqual(
     scheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>.<callback:63ddd06ef2>:mutator-call:abe03326536b',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:6351e1f44e1c',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:bf4fe406d2>:mutator-call:2dd3b79ed6d7',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:f30803c5f7>.<callback:350a28589b>:mutator-call:3e2f3191a976',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:f30803c5f7>:mutator-call:71488b853bd6',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:f30803c5f7>:mutator-call:db1440944221',
     ].sort(),
   );
   assert.deepEqual(
     rescheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>.<callback:e57c656026>:mutator-call:79b8466b9ed4',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:cbb0784d6576',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:6fa89ed6b038',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:36168e6e49>.<callback:73ff7bb80f>:mutator-call:625e70a00eb0',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:36168e6e49>:mutator-call:5d433261ea24',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:36168e6e49>:mutator-call:bd55f53a264e',
     ].sort(),
   );
   assert.deepEqual(
@@ -2094,9 +2094,9 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
   assert.deepEqual(
     cancelReminderTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>.<callback:e767effe3c>:mutator-call:4f3fa0734c19',
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>:mutator-call:bcbf7e23e475',
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>:mutator-call:d0cd941932cd',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:a5765c1906>.<callback:a29628d7f0>:mutator-call:774c8615b72d',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:a5765c1906>:mutator-call:04063d1d0c73',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:a5765c1906>:mutator-call:8f3040da7ae8',
     ].sort(),
   );
 });
@@ -2201,55 +2201,55 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     chatAppearanceTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#updateChatAppearance.<callback:a52e69008e>.<callback:a4a4f489ab>:mutator-call:a3e90d5b284c',
-      'src/services/chatActions.ts#updateChatAppearance.<callback:a52e69008e>:mutator-call:a9658d09049c',
-      'src/services/chatActions.ts#updateChatAppearance.<callback:a52e69008e>:mutator-call:e718c205d92d',
+      'src/services/chatActions.ts#updateChatAppearance.<callback:f34be9333d>.<callback:fe24223aa4>:mutator-call:18042748e6d5',
+      'src/services/chatActions.ts#updateChatAppearance.<callback:f34be9333d>:mutator-call:46f3ed2ea32f',
+      'src/services/chatActions.ts#updateChatAppearance.<callback:f34be9333d>:mutator-call:dd085e1f74e4',
     ].sort(),
   );
   assert.deepEqual(
     chatSettingsPreferenceTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>.<callback:693295bb81>:mutator-call:15e7b55171b6',
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>.<callback:693295bb81>:mutator-call:d3a2361706b9',
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>:mutator-call:0afdf4eccb0c',
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>:mutator-call:9744dce787b8',
-      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:19a3f84326>.<callback:693295bb81>:mutator-call:89d8c9dc78f8',
-      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:9934960d51>.<callback:ab7078ec6b>:mutator-call:b006f0e24dae',
-      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:9934960d51>:mutator-call:2dbf66d292ea',
-      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:9934960d51>:mutator-call:75672233abd0',
-      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>.<callback:df7eb4dfd5>:mutator-call:fff2c3df103d',
-      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:45188afd5c9d',
-      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:ff21837237be',
-      'src/services/chatActions.ts#updateChatCustomization.<callback:f581c08ebb>.<callback:1b5bbbd65e>:mutator-call:730a44cfe2b8',
-      'src/services/chatActions.ts#updateChatCustomization.<callback:f581c08ebb>:mutator-call:d10f1cc01664',
-      'src/services/chatActions.ts#updateChatCustomization.<callback:f581c08ebb>:mutator-call:fcfcd294d82a',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:2f45883fdc>.<callback:313670eb74>:mutator-call:423a45157c1b',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:2f45883fdc>.<callback:313670eb74>:mutator-call:866b2386605e',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:2f45883fdc>.<callback:313670eb74>:mutator-call:c7183de8987b',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:2f45883fdc>:mutator-call:d7ce3e4ada0c',
+      'src/services/chatActions.ts#resetChatLocalPreferences.<callback:2f45883fdc>:mutator-call:eaffed45868d',
+      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:11a2a8bf72>.<callback:771d31547e>:mutator-call:539e2cc4e5c7',
+      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:11a2a8bf72>:mutator-call:6b3860a17c32',
+      'src/services/chatActions.ts#setChatAutoUnarchive.<callback:11a2a8bf72>:mutator-call:cd59089cda78',
+      'src/services/chatActions.ts#setChatMuted.<callback:d5edc5aa4f>.<callback:d4561d624a>:mutator-call:4696320d7d11',
+      'src/services/chatActions.ts#setChatMuted.<callback:d5edc5aa4f>:mutator-call:4a83f5794205',
+      'src/services/chatActions.ts#setChatMuted.<callback:d5edc5aa4f>:mutator-call:f3c0e217613e',
+      'src/services/chatActions.ts#updateChatCustomization.<callback:976063b2f8>.<callback:e8fec8b2ca>:mutator-call:700e9c63ea0e',
+      'src/services/chatActions.ts#updateChatCustomization.<callback:976063b2f8>:mutator-call:196b1b85d0e1',
+      'src/services/chatActions.ts#updateChatCustomization.<callback:976063b2f8>:mutator-call:9baad9933148',
     ].sort(),
   );
   assert.deepEqual(
     featureSettingTransactions.map((finding) => finding.id).sort(),
     [
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:52cbcfae2e94',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:b52aca1e6954',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination:mutator-call:5d15d91011b1',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setAutoDownloadDestination:mutator-call:6318e75d997f',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag.<callback:2f7b5f0583>:mutator-call:e5dd46f18290',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag.<callback:2f7b5f0583>:mutator-call:960ae11d171e',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag:mutator-call:d3a54932e680',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setFlag:mutator-call:edab26b4fc19',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setInboxFilters.<callback:fc105905b5>:mutator-call:0d9a536d6af5',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setInboxFilters:mutator-call:fb8093562541',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setInboxFilters:mutator-call:be6de51b3a45',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:7d80be3cc2ee',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setMaxConcurrentDownloads:mutator-call:50b127b5ba11',
-      'src/state/featureSettingsStore.ts#<callback:65f7c154e6>.setMaxConcurrentDownloads:mutator-call:d60f88f0efe1',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setAutoDownloadDestination.<callback:b3c1bfe71d>:mutator-call:0ac84c251884',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setAutoDownloadDestination.<callback:b3c1bfe71d>:mutator-call:255a81715ab6',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setAutoDownloadDestination:mutator-call:45c9c3aa2e81',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setAutoDownloadDestination:mutator-call:78bc2a91faae',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setFlag.<callback:1d2802c46c>:mutator-call:168656585eb7',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setFlag.<callback:1d2802c46c>:mutator-call:1cfa22df5a2b',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setFlag:mutator-call:580908c3b4db',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setFlag:mutator-call:e872155e400f',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setInboxFilters.<callback:a5abb66d29>:mutator-call:e1f043a27d8d',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setInboxFilters:mutator-call:5c755c473486',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setInboxFilters:mutator-call:a1fa32757192',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setMaxConcurrentDownloads.<callback:890fbeb997>:mutator-call:0f8f7cf0b221',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setMaxConcurrentDownloads:mutator-call:0c159f8421cb',
+      'src/state/featureSettingsStore.ts#<callback:7130ab5560>.setMaxConcurrentDownloads:mutator-call:308f83c81d39',
     ].sort(),
   );
   assert.deepEqual(
     permissionOnboardingTransactions.map((finding) => finding.id).sort(),
     [
-      'src/state/featureSettingsStore.ts#completePermissionOnboarding.<callback:4c0b01ae7f>:mutator-call:b1453f9eca38',
-      'src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:163756f4a357',
-      'src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:a81286d61932',
+      'src/state/featureSettingsStore.ts#completePermissionOnboarding.<callback:44d3e3c012>:mutator-call:549da5fc2d93',
+      'src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:590f6b6ad13a',
+      'src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:76830f13b5d9',
     ].sort(),
   );
   // The store's custom-theme setters were deleted (review M251); custom themes are written through
@@ -2261,31 +2261,31 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     scheduledHistoryTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>.<callback:be2a685944>:mutator-call:3ce6a7d97594',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>:mutator-call:3a9bf17ff09e',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>:mutator-call:fb8283bcf50f',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:fdbe2c3ba0>.<callback:8bfcc24ed8>:mutator-call:97bd05d265af',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:fdbe2c3ba0>:mutator-call:97602029487b',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:fdbe2c3ba0>:mutator-call:9795cf0d2bd8',
     ].sort(),
   );
   assert.deepEqual(
     markAllReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>.<callback:ce8558bae3>:mutator-call:06b61d4ce067',
-      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>:mutator-call:b2a54e1ab9af',
-      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>:mutator-call:f44a034cf669',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:7de82aa008>.<callback:fc1acf18f9>:mutator-call:b2a484cb7c94',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:7de82aa008>:mutator-call:02ffff7ca4af',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:7de82aa008>:mutator-call:de7352c9192a',
     ].sort(),
   );
   assert.deepEqual(
     inboxPreferenceTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#setChatArchived.<callback:addd45115f>.<callback:c406ab49dc>:mutator-call:c5b362dfbac5',
-      'src/services/chatActions.ts#setChatArchived.<callback:addd45115f>:mutator-call:11e8006fa75c',
-      'src/services/chatActions.ts#setChatArchived.<callback:addd45115f>:mutator-call:f55d0850873e',
-      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>.<callback:df7eb4dfd5>:mutator-call:fff2c3df103d',
-      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:45188afd5c9d',
-      'src/services/chatActions.ts#setChatMuted.<callback:f5111910d0>:mutator-call:ff21837237be',
-      'src/services/chatActions.ts#setChatPinned.<callback:292474dbe8>.<callback:610d973b6a>:mutator-call:d069f0ae2e74',
-      'src/services/chatActions.ts#setChatPinned.<callback:292474dbe8>:mutator-call:ee9a99c798bf',
-      'src/services/chatActions.ts#setChatPinned.<callback:292474dbe8>:mutator-call:f67fba6bccda',
+      'src/services/chatActions.ts#setChatArchived.<callback:cf50a76225>.<callback:acef66bb1f>:mutator-call:bba6dd067894',
+      'src/services/chatActions.ts#setChatArchived.<callback:cf50a76225>:mutator-call:c88eb6a03941',
+      'src/services/chatActions.ts#setChatArchived.<callback:cf50a76225>:mutator-call:f2dc9f1d4b1e',
+      'src/services/chatActions.ts#setChatMuted.<callback:d5edc5aa4f>.<callback:d4561d624a>:mutator-call:4696320d7d11',
+      'src/services/chatActions.ts#setChatMuted.<callback:d5edc5aa4f>:mutator-call:4a83f5794205',
+      'src/services/chatActions.ts#setChatMuted.<callback:d5edc5aa4f>:mutator-call:f3c0e217613e',
+      'src/services/chatActions.ts#setChatPinned.<callback:91fd0f1815>.<callback:8e2f61d222>:mutator-call:066aa9decb7d',
+      'src/services/chatActions.ts#setChatPinned.<callback:91fd0f1815>:mutator-call:6d35e7300763',
+      'src/services/chatActions.ts#setChatPinned.<callback:91fd0f1815>:mutator-call:c0974404ff3b',
     ].sort(),
   );
 });
@@ -2376,7 +2376,7 @@ test('certifies exactly the reviewed migration, handle-color, retry, backup, and
         detectedContext: 'startup-migration',
       },
       {
-        id: 'src/db/repositories/backup.ts#getBackupV4ExportData:mutator-call:a2d299dbf859',
+        id: 'src/db/repositories/backup.ts#getBackupV4ExportData:mutator-call:785be0239bb9',
         target: 'src/db/transaction.ts#withDbTransaction',
         detectedContext: 'transaction-coordinator',
       },
@@ -2391,25 +2391,25 @@ test('certifies exactly the reviewed migration, handle-color, retry, backup, and
         detectedContext: 'withDbTransaction',
       },
       {
-        id: 'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>.<callback:8b6dee697b>:mutator-call:2362719bd988',
-        target: 'src/db/repositories/handles.ts#setHandleColorWithinTransaction',
-        detectedContext: 'withDbTransaction',
-      },
-      {
-        id: 'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>:mutator-call:47230c9cafef',
-        target:
-          'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>.<callback:8b6dee697b>',
-        detectedContext: 'withDbTransaction',
-      },
-      {
-        id: 'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>:mutator-call:4e245b552619',
+        id: 'src/services/chatActions.ts#updateHandleColor.<callback:66c5f8ed9c>:mutator-call:459b32bd52ab',
         target: 'src/services/databaseControl.ts#ensureDatabase',
         detectedContext: 'startup-single-flight-delegation',
       },
       {
-        id: 'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>:mutator-call:b5b8de464ab3',
+        id: 'src/services/chatActions.ts#updateHandleColor.<callback:66c5f8ed9c>:mutator-call:b0f5afbc42d3',
         target: 'src/db/transaction.ts#withDbTransaction',
         detectedContext: 'transaction-coordinator',
+      },
+      {
+        id: 'src/services/chatActions.ts#updateHandleColor.<callback:66c5f8ed9c>:mutator-call:db4386665f62',
+        target:
+          'src/services/chatActions.ts#updateHandleColor.<callback:66c5f8ed9c>.<callback:ed47ccb3f3>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/chatActions.ts#updateHandleColor.<callback:66c5f8ed9c>.<callback:ed47ccb3f3>:mutator-call:0f6ed82cb595',
+        target: 'src/db/repositories/handles.ts#setHandleColorWithinTransaction',
+        detectedContext: 'withDbTransaction',
       },
       {
         id: 'src/services/send/index.ts#sendMention.<callback:5b64ad267f>:mutator-call:4312bcd22a52',
@@ -2431,15 +2431,20 @@ test('certifies exactly the reviewed location-send service write path', () => {
       .sort((a, b) => a.id.localeCompare(b.id)),
     [
       {
+        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:1afc37c42204',
+        target:
+          'src/services/send/sendLocationService.ts#sendCurrentLocationMessage.<callback:ae79872b46>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
         id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:5558cf02c486',
         target: 'src/services/send/sendOutcome.ts#reconcileSendOutcome',
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:a5842121fab1',
-        target:
-          'src/services/send/sendLocationService.ts#sendCurrentLocationMessage.<callback:804453d5cb>',
-        detectedContext: 'withDbTransaction',
+        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:ad49c7a42720',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
       },
       {
         id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:be2eaeaa64da',
@@ -2447,12 +2452,7 @@ test('certifies exactly the reviewed location-send service write path', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:c1d16314e7f5',
-        target: 'src/db/transaction.ts#withDbTransaction',
-        detectedContext: 'transaction-coordinator',
-      },
-      {
-        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage.<callback:804453d5cb>:mutator-call:cabbb413bf10',
+        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage.<callback:ae79872b46>:mutator-call:9f1d8f324b97',
         target: 'src/db/repositories/outgoing.ts#insertOutgoingLocationWithinTransaction',
         detectedContext: 'withDbTransaction',
       },
@@ -2481,30 +2481,20 @@ test('certifies exactly the reviewed one-shot effect service boundary', () => {
     selected,
     [
       {
-        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt.<callback:39c4631cbf>:mutator-call:ea08b021a8e8',
-        target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
-        detectedContext: 'withDbTransaction',
-      },
-      {
-        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt:mutator-call:52096c60e5ac',
-        target:
-          'src/services/send/sendEffectService.ts#discardDefiniteAttempt.<callback:39c4631cbf>',
-        detectedContext: 'withDbTransaction',
-      },
-      {
-        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt:mutator-call:7fb4759d70ff',
+        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt:mutator-call:927803f8eaa1',
         target: 'src/db/transaction.ts#withDbTransaction',
         detectedContext: 'transaction-coordinator',
       },
       {
-        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect.<callback:5e7fa751cc>:mutator-call:f1e6127504df',
-        target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
+        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt:mutator-call:eb22416fc831',
+        target:
+          'src/services/send/sendEffectService.ts#discardDefiniteAttempt.<callback:d7787d0d3c>',
         detectedContext: 'withDbTransaction',
       },
       {
-        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect.retireOutcomeUnknown:mutator-call:414f53740674',
-        target: 'src/services/send/sendOutcome.ts#handleSendFailure',
-        detectedContext: 'coordinated-delegation',
+        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt.<callback:d7787d0d3c>:mutator-call:6b156a08c5b4',
+        target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
+        detectedContext: 'withDbTransaction',
       },
       {
         id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:39cf94b1f8fe',
@@ -2515,6 +2505,16 @@ test('certifies exactly the reviewed one-shot effect service boundary', () => {
         id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:39cf94b1f8fe:2',
         target: 'src/services/send/sendEffectService.ts#sendIMessageEffect.retireOutcomeUnknown',
         detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:56aafa38c92f',
+        target: 'src/services/send/sendEffectService.ts#sendIMessageEffect.<callback:beaec7d9ef>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:7cea350c5988',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
       },
       {
         id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:a224e42be3da',
@@ -2547,14 +2547,14 @@ test('certifies exactly the reviewed one-shot effect service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:b0502b578ab3',
-        target: 'src/services/send/sendEffectService.ts#sendIMessageEffect.<callback:5e7fa751cc>',
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect.<callback:beaec7d9ef>:mutator-call:9cb1816dab3c',
+        target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
         detectedContext: 'withDbTransaction',
       },
       {
-        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:d5a26507d810',
-        target: 'src/db/transaction.ts#withDbTransaction',
-        detectedContext: 'transaction-coordinator',
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect.retireOutcomeUnknown:mutator-call:414f53740674',
+        target: 'src/services/send/sendOutcome.ts#handleSendFailure',
+        detectedContext: 'coordinated-delegation',
       },
     ].sort(byId),
   );
@@ -2571,35 +2571,25 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
     findings,
     [
       {
-        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt.<callback:39c4631cbf>:mutator-call:a475496c7eb0',
-        target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
-        detectedContext: 'withDbTransaction',
-      },
-      {
-        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt:mutator-call:138fd801c2bc',
-        target:
-          'src/services/send/sendMentionService.ts#discardDefiniteAttempt.<callback:39c4631cbf>',
-        detectedContext: 'withDbTransaction',
-      },
-      {
-        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt:mutator-call:382af2306f89',
+        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt:mutator-call:0179fe00a10e',
         target: 'src/db/transaction.ts#withDbTransaction',
         detectedContext: 'transaction-coordinator',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:1cc5dfde5a>:mutator-call:8cbe4561f624',
-        target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
+        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt:mutator-call:75e840b66b42',
+        target:
+          'src/services/send/sendMentionService.ts#discardDefiniteAttempt.<callback:d7787d0d3c>',
         detectedContext: 'withDbTransaction',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:71afdbec2f>:mutator-call:f38d8e900c40',
+        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt.<callback:d7787d0d3c>:mutator-call:21443faac82c',
         target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
         detectedContext: 'withDbTransaction',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown:mutator-call:a174fd88cd88',
-        target: 'src/services/send/sendOutcome.ts#handleSendFailure',
-        detectedContext: 'coordinated-delegation',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:04c26cbcc132',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
       },
       {
         id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b',
@@ -2612,12 +2602,12 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:71516607433d',
-        target: 'src/db/transaction.ts#withDbTransaction',
-        detectedContext: 'transaction-coordinator',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:2b7f2253165b',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:c610be8e12>',
+        detectedContext: 'withDbTransaction',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:5c4cc5335124',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:4c912af31d55',
         target: 'src/db/transaction.ts#withDbTransaction',
         detectedContext: 'transaction-coordinator',
       },
@@ -2627,9 +2617,9 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:bc32ca46eaa2',
-        target: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt',
-        detectedContext: 'coordinated-delegation',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:68cd0893f3d8',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:60cbafd2dd>',
+        detectedContext: 'withDbTransaction',
       },
       {
         id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c8548c9139f',
@@ -2637,9 +2627,9 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c2133193a7b',
-        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:71afdbec2f>',
-        detectedContext: 'withDbTransaction',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:bc32ca46eaa2',
+        target: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt',
+        detectedContext: 'coordinated-delegation',
       },
       {
         id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:df3cb27d8c35',
@@ -2647,9 +2637,19 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:638e0fa45f4a',
-        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:1cc5dfde5a>',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:60cbafd2dd>:mutator-call:f981515cf4a1',
+        target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
         detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:c610be8e12>:mutator-call:4947c7df5330',
+        target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown:mutator-call:a174fd88cd88',
+        target: 'src/services/send/sendOutcome.ts#handleSendFailure',
+        detectedContext: 'coordinated-delegation',
       },
     ].sort(byId),
   );
@@ -2841,99 +2841,99 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     outgoingAttachmentInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:218fa7a8a023',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:9bce367171d2',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:fcf1a0b94dee',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:deaa886e3e28',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:fe1d164cbb31',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:5e05142529>:mutator-call:192cce8c8d33',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:5e05142529>:mutator-call:7254ee6ccd11',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:5e05142529>:mutator-call:74dc81aabe26',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:bb797fb5ed3b',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:d92bec01a29a',
     ].sort(),
   );
   assert.deepEqual(
     outgoingContactInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendContactService.ts#sendContactMessage.<callback:33999fe2ba>:mutator-call:0c0a900a2a27',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:62fcea64c1d4',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:7065ae2ebeb0',
+      'src/services/send/sendContactService.ts#sendContactMessage.<callback:29153e1adc>:mutator-call:681b7dcb23a0',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:21be6cf0c6d4',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:b5c534293d76',
     ].sort(),
   );
   assert.deepEqual(
     outgoingQueueClaimDeferralAndTerminalRetirementTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>.<callback:e4bd60ecf9>:mutator-call:bea18d75eb96',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>:mutator-call:3b94f9081bcc',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>:mutator-call:41c2a6fb6561',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:c5dc8d4ea4>.<callback:c9e9c88d98>:mutator-call:a710f6b71717',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:c5dc8d4ea4>:mutator-call:ad9b3dfbe480',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:c5dc8d4ea4>:mutator-call:5106267cb572',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>.<callback:58de47bad3>:mutator-call:3998f044069d',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>:mutator-call:a49bb208b031',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>:mutator-call:ced5adb9083e',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:631ae5b57c>.<callback:ba87be25c0>:mutator-call:7e5dc131f4c4',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:631ae5b57c>:mutator-call:50682f500e20',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:631ae5b57c>:mutator-call:6f6391b70239',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:77ac63dab6>.<callback:cb5eff938a>:mutator-call:bdf0a142b291',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:77ac63dab6>:mutator-call:33c1ed63e4bf',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:77ac63dab6>:mutator-call:fc7e5017b3ef',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:9511a52e50>.<callback:e41ff4eb86>:mutator-call:ece9280318fa',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:9511a52e50>:mutator-call:58d1b7ad555e',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:9511a52e50>:mutator-call:d37ddc438ddc',
     ].sort(),
   );
   assert.deepEqual(
     outgoingQueueRetirementTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing.<callback:b572d225ff>:mutator-call:949953d6feac',
-      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing:mutator-call:e16d41ae5263',
-      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing:mutator-call:30bc41f5e8ac',
+      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing.<callback:47f4492c10>:mutator-call:fb5774943fc4',
+      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing:mutator-call:ee2c2f653e7e',
+      'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing:mutator-call:f831e0cff272',
     ].sort(),
   );
   assert.deepEqual(
     outgoingQueueResendTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>.<callback:e4bd60ecf9>:mutator-call:d12b1c3b98a4',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>:mutator-call:100c6aed4262',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>:mutator-call:482f67ad8ac7',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e7429091ad>.<callback:26e1d0be0d>:mutator-call:b9a5d9f33f46',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e7429091ad>:mutator-call:3f3cf6bcaf4c',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e7429091ad>:mutator-call:5132ce72c5d7',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:631ae5b57c>.<callback:ba87be25c0>:mutator-call:e63b310e39ce',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:631ae5b57c>:mutator-call:bdf4422a173d',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:631ae5b57c>:mutator-call:c444418c6dfa',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:6a834ed8a1>.<callback:487f49e2a7>:mutator-call:0440ab0edfb2',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:6a834ed8a1>:mutator-call:4b40262aca80',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:6a834ed8a1>:mutator-call:bec681d6ac2d',
     ].sort(),
   );
   assert.deepEqual(
     outgoingReactionInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendReactionService.ts#sendReactionMessage.<callback:a98676016c>:mutator-call:398d81c9b1cc',
-      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:ada2234d31e0',
-      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:e0fb0f4943f8',
+      'src/services/send/sendReactionService.ts#sendReactionMessage.<callback:9bf02ccbde>:mutator-call:bb341d5107be',
+      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:18b99f5c6178',
+      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:207806002b0c',
     ].sort(),
   );
   assert.deepEqual(
     outgoingTextInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendService.ts#sendTextMessage.<callback:737ff5c650>:mutator-call:6d9769953a27',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:8592261ca87e',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:e3c2a8db0c93',
+      'src/services/send/sendService.ts#sendTextMessage.<callback:ccfc716f52>:mutator-call:4b704760b601',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:4f552c3c8fba',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:791130c0cfb5',
     ].sort(),
   );
   assert.deepEqual(
     successTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:6c7fde92e0>:mutator-call:a542211f86f4',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:a142c06cb1>:mutator-call:83fb7347f21a',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:c197b89327>:mutator-call:955c597d7cd5',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:337ad594df75',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:28acf1761550',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:898de1af1bad',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c6a829231b06',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c1122a9108a5',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:fd4bf486ed0c',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:6bcc70416a>:mutator-call:e3e13e3a5357',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:c09d2c04a5>:mutator-call:e9c6ed628da3',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:d0290dfade>:mutator-call:a7dbb9f7f3b0',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:2342c70f6938',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:499759bf1fdd',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:a633dd7f5ee2',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:b8cb10e69d98',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:dc61e6973c43',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:fb3a11dd7cbb',
     ].sort(),
   );
   assert.deepEqual(
     failureTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:3ed81732b5>:mutator-call:668eaaf4df49',
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:3ed81732b5>:mutator-call:07a7f0f0afe0',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:7b62f333993f',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:30e7fe128762',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:02d41d26b3>:mutator-call:9b635e31aef0',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:02d41d26b3>:mutator-call:ab3e57ac483c',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:6fcea765cfbf',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:78aeaf0e1ad6',
     ].sort(),
   );
   assert.deepEqual(
     unavailableTargetRetirementTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget.<callback:593c789d89>:mutator-call:4804567ad3f6',
-      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget:mutator-call:11809b34a662',
-      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget:mutator-call:8a99473da7bd',
+      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget.<callback:293b844346>:mutator-call:b148e3b606a9',
+      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget:mutator-call:3f60b30376dc',
+      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget:mutator-call:5484c1804b78',
     ].sort(),
   );
 });
@@ -3047,34 +3047,34 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
     ].sort(),
   );
   assert.deepEqual(editApplyTransaction.map((finding) => finding.id).sort(), [
-    'src/services/send/sendEditService.ts#sendEditOnce.<callback:8b116289ce>:mutator-call:c0224c5abc09',
-    'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:133a8e36936e',
-    'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:da23f2c7488f',
+    'src/services/send/sendEditService.ts#sendEditOnce.<callback:1493e27f4f>:mutator-call:13944feb0c72',
+    'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:1fc2f69c9ce7',
+    'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:2397935cf25f',
   ]);
   assert.deepEqual(editRevertTransaction.map((finding) => finding.id).sort(), [
-    'src/services/send/sendEditService.ts#revertOptimisticEdit.<callback:bcbc86276a>:mutator-call:3a035e3ce559',
-    'src/services/send/sendEditService.ts#revertOptimisticEdit:mutator-call:536da85cdca4',
-    'src/services/send/sendEditService.ts#revertOptimisticEdit:mutator-call:bea2b441da12',
+    'src/services/send/sendEditService.ts#revertOptimisticEdit.<callback:31875da123>:mutator-call:9303f0097ca2',
+    'src/services/send/sendEditService.ts#revertOptimisticEdit:mutator-call:5a1a18b0ce57',
+    'src/services/send/sendEditService.ts#revertOptimisticEdit:mutator-call:a0030a790188',
   ]);
   assert.deepEqual(unsendApplyTransaction.map((finding) => finding.id).sort(), [
-    'src/services/send/sendEditService.ts#sendUnsendOnce.<callback:b5ac380791>:mutator-call:d8925d23fcae',
-    'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:2720dc2e3b4e',
-    'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:9012df5d7cf5',
+    'src/services/send/sendEditService.ts#sendUnsendOnce.<callback:937f924053>:mutator-call:4aa9cf130ff6',
+    'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:af1fc7987513',
+    'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:e36017aad0d4',
   ]);
   assert.deepEqual(unsendRevertTransaction.map((finding) => finding.id).sort(), [
-    'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:c0dd9a9a7b>:mutator-call:34c201dc99ff',
-    'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:18a5f375d42f',
-    'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:3fd2e7fe20a8',
+    'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:40c1a7b96b>:mutator-call:4161c8d09f09',
+    'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:006aed037b77',
+    'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:f73b22843afb',
   ]);
   assert.deepEqual(
     scheduledInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/scheduleService.ts#scheduleAttachmentMessage.<callback:4fb59ebbe3>:mutator-call:227bf75f2417',
-      'src/services/send/scheduleService.ts#scheduleAttachmentMessage:mutator-call:6f036b81ff0a',
-      'src/services/send/scheduleService.ts#scheduleAttachmentMessage:mutator-call:e6017b2d0fc4',
-      'src/services/send/scheduleService.ts#scheduleTextMessage.<callback:bcbf452138>:mutator-call:ef3b92e88431',
-      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:31eb04a40935',
-      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:c6c6102cb4ec',
+      'src/services/send/scheduleService.ts#scheduleAttachmentMessage.<callback:b84f65d6b5>:mutator-call:bc2c33ef6740',
+      'src/services/send/scheduleService.ts#scheduleAttachmentMessage:mutator-call:55fafa670d4e',
+      'src/services/send/scheduleService.ts#scheduleAttachmentMessage:mutator-call:e45a28d68f1e',
+      'src/services/send/scheduleService.ts#scheduleTextMessage.<callback:a81f5c8746>:mutator-call:9ed9d6738619',
+      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:10f985fe67fc',
+      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:a31bb6f74dde',
     ].sort(),
   );
 });
@@ -3109,6 +3109,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:9e5da82015da',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:5111af2df56f',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:e64441bf4d7f',
+      'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
       'src/features/conversations/devSeed.ts#devSendFake.<callback:aa9d83c161>:mutator-call:bccc7d8e3937',
       'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:191d06baf6>:mutator-call:d7f94c27bd01',
@@ -3127,9 +3128,9 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/bootstrap.ts#activateForegroundBootSession:mutator-call:8f03db7d6c0e',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
-      'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:207621cba542',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:5e3ebbd49e5d',
+      'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
       'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:1f330c870a01',
       'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:af7f6f6a32a5',
       'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:c9b7c4b08447',
@@ -3147,34 +3148,33 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:f36bbcf61ec1',
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:f725f16b321a',
       'src/services/realtime/incomingEventDrain.ts#durableContext.markDbAppliedWithinTransaction:mutator-call:737d7a3d436b',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:b57de385513f',
+      'src/services/search/inboxSearchIndexRebuild.ts#runInboxSearchIndexRebuildPass.<callback:c1fe751ccd>:mutator-call:225fd9b8cc41',
+      'src/services/send/index.ts#retry.<callback:0dce411b6a>:mutator-call:f4a6f05550be',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:5c5f52df3aab',
-      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:092d6ec9e2b2',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:b57de385513f',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
       'src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:934d3ba3156d',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:ae2537472d84',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:3dac61ecbedb',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:d03c79eca4a4',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:3f22a481036f',
       'src/services/send/sendReactionService.ts#sendIMessageReactionMessage:mutator-call:c5ee7e399fbe',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
       'src/services/send/sendRestoredReactionService.ts#sendRestoredIMessageReactionMessage:mutator-call:60af848d3d1a',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:3f22a481036f',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:c05517b0fccc',
-      'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
-      'src/services/search/inboxSearchIndexRebuild.ts#runInboxSearchIndexRebuildPass.<callback:c1fe751ccd>:mutator-call:225fd9b8cc41',
       'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1',
       'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:faef10ff18f3',
       'src/services/share/shareIntake.ts#discardAccountBoundShareIntake:mutator-call:9abbc352b6da',
       'src/services/share/shareIntake.ts#discardShareIntakeBatch.<callback:49cb1846bc>:mutator-call:9283adeb4a6d',
       'src/services/share/shareIntake.ts#readShareIntakeReceipt:mutator-call:0194b9ad5aaf',
-      'src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:c642780c7d08',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
       'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
+      'src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:c642780c7d08',
       'src/services/syncControl.ts#runSync:mutator-call:535bd795208b',
       'src/services/syncControl.ts#runSync:mutator-call:d8dbede56cd8',
     ].sort(),
@@ -3217,11 +3217,11 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/db/repositories/messageTargets.ts#resolveMessageTarget:mutator-call:58d44bbb756a',
+        'src/db/repositories/messageTargets.ts#resolveMessageTarget:mutator-call:df6db1ff92a2',
         'transaction-coordinator',
       ],
       [
-        'src/db/repositories/messageTargets.ts#resolvePendingUnsendTarget:mutator-call:cb624232ade0',
+        'src/db/repositories/messageTargets.ts#resolvePendingUnsendTarget:mutator-call:a3c34844d2a7',
         'transaction-coordinator',
       ],
       [
@@ -3245,14 +3245,6 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:186b633262>:mutator-call:fbfafbd452d7',
-        'coordinated-delegation',
-      ],
-      [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:186b633262>:mutator-call:ae517c466278',
-        'coordinated-delegation',
-      ],
-      [
         'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:186b633262>:mutator-call:6c002c2eedb3',
         'coordinated-delegation',
       ],
@@ -3261,11 +3253,19 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade:mutator-call:9eca083a6ce1',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:186b633262>:mutator-call:ae517c466278',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:186b633262>:mutator-call:fbfafbd452d7',
         'coordinated-delegation',
       ],
       [
         'src/services/credentialUpgrade.ts#beginScopedCredentialReplacement:mutator-call:ec167bc062b1',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade:mutator-call:9eca083a6ce1',
         'coordinated-delegation',
       ],
       [
@@ -3339,11 +3339,6 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
         'coordinated-delegation',
       ],
       [
-        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:ec3cc25fd6>.<callback:f613d3ead3>:mutator-call:ffe2eca9b54b',
-        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
-        'coordinated-delegation',
-      ],
-      [
         'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:08da8e75312d',
         'src/services/share/shareIntake.ts#discardShareIntakeItem',
         'coordinated-delegation',
@@ -3354,19 +3349,24 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
         'coordinated-delegation',
       ],
       [
-        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft.<callback:cb922ac992>:mutator-call:e2f680a53388',
+        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:ec3cc25fd6>.<callback:f613d3ead3>:mutator-call:ffe2eca9b54b',
+        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft.<callback:b239d5c8d2>:mutator-call:c07fe4145153',
         'src/db/repositories/shareIntakeReceipts.ts#admitShareIntakeTextDraftWithinTransaction',
         'withDbTransaction',
       ],
       [
-        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:22bf7194136e',
-        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft.<callback:cb922ac992>',
-        'withDbTransaction',
-      ],
-      [
-        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:c840fba1e912',
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:572fda638291',
         'src/db/transaction.ts#withDbTransaction',
         'transaction-coordinator',
+      ],
+      [
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:a5724e5fcb9f',
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft.<callback:b239d5c8d2>',
+        'withDbTransaction',
       ],
       [
         'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1',
@@ -3389,33 +3389,33 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
         'coordinated-delegation',
       ],
       [
-        'src/services/share/shareIntake.ts#discardShareIntakeItem.<callback:9777bdb4a6>:mutator-call:90282e904d8f',
+        'src/services/share/shareIntake.ts#discardShareIntakeItem.<callback:ae24e91be4>:mutator-call:35aa285cd912',
         'src/db/repositories/shareIntakeReceipts.ts#discardShareIntakeItemWithinTransaction',
         'withDbTransaction',
       ],
       [
-        'src/services/share/shareIntake.ts#discardShareIntakeItem:mutator-call:35f793108f79',
-        'src/services/share/shareIntake.ts#discardShareIntakeItem.<callback:9777bdb4a6>',
-        'withDbTransaction',
-      ],
-      [
-        'src/services/share/shareIntake.ts#discardShareIntakeItem:mutator-call:e15b7c40f12d',
+        'src/services/share/shareIntake.ts#discardShareIntakeItem:mutator-call:a31c2973ab19',
         'src/db/transaction.ts#withDbTransaction',
         'transaction-coordinator',
       ],
       [
-        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan.<callback:f45ff1fde5>:mutator-call:bd2ced2cf645',
+        'src/services/share/shareIntake.ts#discardShareIntakeItem:mutator-call:b5305119e030',
+        'src/services/share/shareIntake.ts#discardShareIntakeItem.<callback:ae24e91be4>',
+        'withDbTransaction',
+      ],
+      [
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan.<callback:982e3df046>:mutator-call:5b076c785ee8',
         'src/db/repositories/shareIntakeReceipts.ts#prepareShareIntakeNewChatPlanWithinTransaction',
         'withDbTransaction',
       ],
       [
-        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan:mutator-call:3389a46ba1af',
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan:mutator-call:0846c20fd2fd',
         'src/db/transaction.ts#withDbTransaction',
         'transaction-coordinator',
       ],
       [
-        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan:mutator-call:b70d0164d34f',
-        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan.<callback:f45ff1fde5>',
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan:mutator-call:d789fd109490',
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan.<callback:982e3df046>',
         'withDbTransaction',
       ],
       [
@@ -3500,12 +3500,12 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
     delegated.map((finding) => finding.id).sort(),
     [
       'src/services/send/index.ts#acquireAndSendCurrentLocation.<callback:12318eb957>:mutator-call:c17deda5e81e',
-      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:711fed55d46c',
-      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:e01b25cdb9f1',
-      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:11b6a5ed1c2d',
-      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:11b6a5ed1c2d:2',
-      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:8396188e7ac0',
-      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:0eac966d5fef',
+      'src/services/send/index.ts#discardMessage.<callback:351209af36>:mutator-call:264f9d45c235',
+      'src/services/send/index.ts#discardMessage.<callback:351209af36>:mutator-call:656f60cc7239',
+      'src/services/send/index.ts#editScheduled.<callback:91c303ca9a>:mutator-call:240b4d601b45',
+      'src/services/send/index.ts#editScheduled.<callback:91c303ca9a>:mutator-call:a2c9564b2669',
+      'src/services/send/index.ts#editScheduled.<callback:91c303ca9a>:mutator-call:a2c9564b2669:2',
+      'src/services/send/index.ts#editScheduled.<callback:91c303ca9a>:mutator-call:eecf51783832',
       'src/services/send/index.ts#fireDueScheduled.<callback:e7099757f6>:mutator-call:26c372898fda',
       'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:9f76132482>:mutator-call:cec9577e2e0d',
       'src/services/send/index.ts#react.<callback:239e5e7be1>:mutator-call:459dc9edf3de',
@@ -3513,65 +3513,65 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#react.<callback:239e5e7be1>:mutator-call:bd2cc4471de1',
       'src/services/send/index.ts#recoverOutgoing:mutator-call:4536e59c3756',
       'src/services/send/index.ts#reply.<callback:f38f2a6876>:mutator-call:4d3abd6da46d',
-      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:0f717475dd2f',
-      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:092d6ec9e2b2',
+      'src/services/send/index.ts#retry.<callback:0dce411b6a>:mutator-call:859f17fa3a60',
+      'src/services/send/index.ts#retry.<callback:0dce411b6a>:mutator-call:f4a6f05550be',
       'src/services/send/index.ts#schedule.<callback:dd8870d856>:mutator-call:dce9e26a3293',
       'src/services/send/index.ts#scheduleAttachment.<callback:3ea104aebd>:mutator-call:9aabf7e999d8',
       'src/services/send/index.ts#send.<callback:e0a63c8c1b>:mutator-call:2c41f7ab3722',
       'src/services/send/index.ts#sendContactCard.<callback:a504472eb8>:mutator-call:a3ad7cbe350d',
       'src/services/send/index.ts#sendEffect.<callback:43c2d94e39>:mutator-call:50b814953b01',
-      'src/services/send/index.ts#sendImage.<callback:ba5c0362fc>:mutator-call:efc3756a201f',
       'src/services/send/index.ts#sendFormatted.<callback:a6fdee4f2c>:mutator-call:63a9ed12033f',
+      'src/services/send/index.ts#sendImage.<callback:ba5c0362fc>:mutator-call:efc3756a201f',
       'src/services/send/index.ts#sendImages.<callback:84ef35880b>.<callback:e4983ee008>:mutator-call:8bd9a889f487',
       'src/services/send/index.ts#sendMention.<callback:5b64ad267f>:mutator-call:4312bcd22a52',
       'src/services/send/index.ts#sendSubject.<callback:190bd17327>:mutator-call:ff8cf4941041',
       'src/services/send/index.ts#sendTextAttachment.<callback:528e229137>:mutator-call:ccc84ddd3899',
       'src/services/send/index.ts#sendVoice.<callback:2b1d4eb2d6>:mutator-call:b8b4b25f8b41',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:b57de385513f',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:5c5f52df3aab',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:b57de385513f',
     ].sort(),
   );
 
   assert.deepEqual(
     cancelScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#cancelScheduled.<callback:475ead4a80>.<callback:86b1cd18b6>:mutator-call:edfb7d1fefd2',
-      'src/services/send/index.ts#cancelScheduled.<callback:475ead4a80>:mutator-call:77551a58e683',
-      'src/services/send/index.ts#cancelScheduled.<callback:475ead4a80>:mutator-call:f0cd4c694619',
+      'src/services/send/index.ts#cancelScheduled.<callback:d4521d90cf>.<callback:975213a4e9>:mutator-call:68820e64e36e',
+      'src/services/send/index.ts#cancelScheduled.<callback:d4521d90cf>:mutator-call:34ca24492e64',
+      'src/services/send/index.ts#cancelScheduled.<callback:d4521d90cf>:mutator-call:983a86e9acd6',
     ].sort(),
   );
   assert.deepEqual(
     retryClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#retry.<callback:6de70f50b5>.<callback:d0fc418541>:mutator-call:4ded97c52ac4',
-      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:ee19fafc2f74',
-      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:9ccfed42f269',
+      'src/services/send/index.ts#retry.<callback:0dce411b6a>.<callback:47dd836e24>:mutator-call:41fa4dd953e6',
+      'src/services/send/index.ts#retry.<callback:0dce411b6a>:mutator-call:5f853c08e47e',
+      'src/services/send/index.ts#retry.<callback:0dce411b6a>:mutator-call:fb6741ad647e',
     ].sort(),
   );
   assert.deepEqual(
     discardMessageTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#discardMessage.<callback:d56992311f>.<callback:2f2bd8964d>:mutator-call:49877dc8889e',
-      'src/services/send/index.ts#discardMessage.<callback:d56992311f>.<callback:2f2bd8964d>:mutator-call:e7cdb3981cb4',
-      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:48f2ef26a5f0',
-      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:7eee8f497f7f',
-      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:c7545b1ceff6',
+      'src/services/send/index.ts#discardMessage.<callback:351209af36>.<callback:4ad3c57a74>:mutator-call:14b7e37bf7a2',
+      'src/services/send/index.ts#discardMessage.<callback:351209af36>.<callback:4ad3c57a74>:mutator-call:8badc62bc618',
+      'src/services/send/index.ts#discardMessage.<callback:351209af36>:mutator-call:4c2c950c4999',
+      'src/services/send/index.ts#discardMessage.<callback:351209af36>:mutator-call:7e79b927ccbd',
+      'src/services/send/index.ts#discardMessage.<callback:351209af36>:mutator-call:dee2a9566e5d',
     ].sort(),
   );
   assert.deepEqual(
     clearScheduledHistoryTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>.<callback:be2a685944>:mutator-call:3ce6a7d97594',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>:mutator-call:3a9bf17ff09e',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>:mutator-call:fb8283bcf50f',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:fdbe2c3ba0>.<callback:8bfcc24ed8>:mutator-call:97bd05d265af',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:fdbe2c3ba0>:mutator-call:97602029487b',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:fdbe2c3ba0>:mutator-call:9795cf0d2bd8',
     ].sort(),
   );
   assert.deepEqual(
     editScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch.<callback:ba4fa574cc>:mutator-call:66cf1a402f02',
-      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch:mutator-call:714c77a32744',
-      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch:mutator-call:9caef164c0df',
+      'src/services/send/index.ts#editScheduled.<callback:91c303ca9a>.persistPatch.<callback:1941e66b3c>:mutator-call:7e53ad49d58d',
+      'src/services/send/index.ts#editScheduled.<callback:91c303ca9a>.persistPatch:mutator-call:b946c471a941',
+      'src/services/send/index.ts#editScheduled.<callback:91c303ca9a>.persistPatch:mutator-call:f9feb5dda901',
     ].sort(),
   );
   assert.equal(sendFrontDoorFindings.length, 47);
@@ -3658,33 +3658,33 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     markReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markRead.<callback:ad9f8e5a8a>.<callback:dc5434bf32>:mutator-call:e3539954c7b6',
-      'src/services/chatActions.ts#markRead.<callback:ad9f8e5a8a>:mutator-call:66f722ed95e4',
-      'src/services/chatActions.ts#markRead.<callback:ad9f8e5a8a>:mutator-call:f75bcff950ae',
+      'src/services/chatActions.ts#markRead.<callback:58bbeb4f62>.<callback:53a43f694b>:mutator-call:56752b5587f2',
+      'src/services/chatActions.ts#markRead.<callback:58bbeb4f62>:mutator-call:ac0a2d33ef4a',
+      'src/services/chatActions.ts#markRead.<callback:58bbeb4f62>:mutator-call:dc53678d3716',
     ].sort(),
   );
   assert.deepEqual(
     markUnreadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>.<callback:add0a7f05b>:mutator-call:bf11a78356d7',
-      'src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:c24df9ca0ed3',
-      'src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:5cc87e2cca05',
+      'src/services/chatActions.ts#markUnread.<callback:fe53b24d32>.<callback:ad757ca9f8>:mutator-call:102c191bc01d',
+      'src/services/chatActions.ts#markUnread.<callback:fe53b24d32>:mutator-call:24f5d03f3e08',
+      'src/services/chatActions.ts#markUnread.<callback:fe53b24d32>:mutator-call:d7a579a0faa8',
     ].sort(),
   );
   assert.deepEqual(
     cancelServerScheduledTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>:mutator-call:0d29d38fd70c',
-      'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:1837e71127eb',
-      'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:716a5525b26b',
+      'src/services/chatActions.ts#cancelServerScheduledForChat.<callback:75dc5df21e>:mutator-call:3a0e9a3393ff',
+      'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:71a0f552efa2',
+      'src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:d8bd24458cb6',
     ].sort(),
   );
   assert.deepEqual(
     cancelReminderCleanupTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#cancelRemindersForChat.<callback:9d59a41411>:mutator-call:4d7918588245',
-      'src/services/chatActions.ts#cancelRemindersForChat:mutator-call:10e5ab4c9101',
-      'src/services/chatActions.ts#cancelRemindersForChat:mutator-call:f4f2756f3147',
+      'src/services/chatActions.ts#cancelRemindersForChat.<callback:09ed835921>:mutator-call:90292a7e1bd3',
+      'src/services/chatActions.ts#cancelRemindersForChat:mutator-call:5db69f4acf46',
+      'src/services/chatActions.ts#cancelRemindersForChat:mutator-call:983fd4fa2241',
     ].sort(),
   );
 });
@@ -3731,50 +3731,50 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:2',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:3',
-      'src/services/syncControl.ts#runSync:mutator-call:3d1b923ea415',
       'src/services/syncControl.ts#runSync:mutator-call:1c0aa0474d53',
-      'src/services/syncControl.ts#runSync:mutator-call:9b62b1f54ff6',
+      'src/services/syncControl.ts#runSync:mutator-call:3d1b923ea415',
       'src/services/syncControl.ts#runSync:mutator-call:535bd795208b',
       'src/services/syncControl.ts#runSync:mutator-call:5e67ff4f7781',
-      'src/services/syncControl.ts#runSync:mutator-call:a4f724183115',
       'src/services/syncControl.ts#runSync:mutator-call:62e252e57364',
       'src/services/syncControl.ts#runSync:mutator-call:969f8e9b7657',
+      'src/services/syncControl.ts#runSync:mutator-call:9b62b1f54ff6',
+      'src/services/syncControl.ts#runSync:mutator-call:a4f724183115',
       'src/services/syncControl.ts#runSync:mutator-call:cad4b657fd83',
       'src/services/syncControl.ts#runSync:mutator-call:d8dbede56cd8',
-      'src/services/syncControl.ts#runSync:mutator-call:ffab15f3700f',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:2',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:3',
+      'src/services/syncControl.ts#runSync:mutator-call:ffab15f3700f',
       'src/services/syncControl.ts#startFullRepair.<callback:a019ed9cf6>:mutator-call:7349d6139eeb',
       'src/services/syncControl.ts#startSync.<callback:4c2f340da4>:mutator-call:7042cc5b18c2',
-      'src/services/syncControl.ts#startTargetedChatRepair.<callback:c48daef785>:mutator-call:ae3955d4e857',
-      'src/services/syncControl.ts#startTargetedChatRepair.<callback:c48daef785>:mutator-call:9ecaec128997',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:cb52118955>:mutator-call:00895af604e6',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:cb52118955>:mutator-call:d36dee816472',
     ].sort(),
   );
   assert.deepEqual(
     finalSnapshotMarkerTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/syncControl.ts#runSync:mutator-call:1211c3e0c6bc',
-      'src/services/syncControl.ts#runSync:mutator-call:489e43b1e357',
-      'src/services/syncControl.ts#runSync:mutator-call:4a42bc61cca8',
-      'src/services/syncControl.ts#runSync:mutator-call:fc259ece4940',
+      'src/services/syncControl.ts#runSync:mutator-call:924446d8539a',
+      'src/services/syncControl.ts#runSync:mutator-call:9e5a02f923e6',
+      'src/services/syncControl.ts#runSync:mutator-call:abd07722d03c',
+      'src/services/syncControl.ts#runSync:mutator-call:c62a6ca1faa1',
     ].sort(),
   );
   assert.deepEqual(
     syncedBackgroundTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>.<callback:7387e3781d>:mutator-call:6bcf163c0bcb',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>:mutator-call:7428789aa7d4',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6ea5277294>:mutator-call:e6f6b158199c',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>.<callback:bcb5586cc8>:mutator-call:b6873ce22c57',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:17a5f7a01d73',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:399e3e6480>:mutator-call:e796b0707ded',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>.<callback:668ab24076>:mutator-call:b1c4bd00d1c9',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>:mutator-call:65c8511e514c',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:80d8fc6d66>:mutator-call:bc9bdf219775',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>.<callback:4f9ac2820f>:mutator-call:4c9290858373',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>:mutator-call:331132e4ce88',
-      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:ad4898f757>:mutator-call:fcfa941fe19e',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6c03166fc8>.<callback:9682f48486>:mutator-call:6ad55ad5b99d',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6c03166fc8>:mutator-call:27c09aefab0a',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:6c03166fc8>:mutator-call:95d3f32fc594',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:9cef8638ed>.<callback:4f15c3af12>:mutator-call:03e09909c1ab',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:9cef8638ed>:mutator-call:27bf4e3fd4bf',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:9cef8638ed>:mutator-call:f316e37b19df',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:bacaee1be7>.<callback:9a7d942f6c>:mutator-call:8d9118b81ee9',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:bacaee1be7>:mutator-call:5848d653f750',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:bacaee1be7>:mutator-call:cc12fd0df6c3',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:beeaca696e>.<callback:01016dc4ba>:mutator-call:bffdbd77703e',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:beeaca696e>:mutator-call:452c6cda724b',
+      'src/services/backgrounds/syncedBackground.ts#runSyncedBackgroundRequest.<callback:beeaca696e>:mutator-call:92e05ac12435',
     ].sort(),
   );
 });
@@ -3820,13 +3820,13 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-delete:045962bd8b71',
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-insert:99e2263a1304',
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-update:9609800f7a37',
+      'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-delete:ff6e109326d8',
       'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:0fd63f0dd34a',
       'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:300d170b9271',
-      'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-delete:ff6e109326d8',
       'src/db/repositories/attachmentCache.ts#commitAttachmentCacheReservation:sql-update:8061a1433826',
       'src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted:sql-delete:f009e63ebbd9',
       'src/db/repositories/attachmentCache.ts#createAttachmentCacheReservation:sql-insert:23906c8fe812',
-      'src/db/repositories/attachmentCache.ts#listPastedAttachmentProtectionPaths:mutator-call:543990b98095',
+      'src/db/repositories/attachmentCache.ts#listPastedAttachmentProtectionPaths:mutator-call:9109a622745e',
       'src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess:sql-update:3ca8ab1b4190',
       'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:b9564831e666',
       'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:c78a3766ee18',
@@ -3844,14 +3844,14 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireChatEntries:mutator-call:3033603a5021',
       'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries:mutator-call:e1c200479b26',
       'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting:mutator-call:38f52c5bccc4',
+      'src/services/download/attachmentCacheRecovery.ts#cleanUpRepairLedger:mutator-call:28e99257dfe1',
+      'src/services/download/attachmentCacheRecovery.ts#cleanUpRepairLedger:mutator-call:2fbc2502f98b',
       'src/services/download/attachmentCacheRecovery.ts#drainCrashOwners:mutator-call:25bf144af248',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:12f416335881',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:5c4827eec261',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:bbf16113995b',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:d137fff87abf',
-      'src/services/download/attachmentCacheRecovery.ts#cleanUpRepairLedger:mutator-call:28e99257dfe1',
-      'src/services/download/attachmentCacheRecovery.ts#cleanUpRepairLedger:mutator-call:2fbc2502f98b',
-      'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:f13a3630bf>:mutator-call:c8f396b127e0',
+      'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:c9511805ad>:mutator-call:a0485f2646b4',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.cleanUp:mutator-call:d5b260b289e2',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair:mutator-call:31df304867f8',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair:mutator-call:31df304867f8:2',
@@ -3905,7 +3905,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'app/(app)/media/[guid].tsx#MediaViewer.requestDownload:mutator-call:dded74882e63',
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:d9da1c4d8c72',
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:f2d99eef8eea',
-      'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:c1f5c32eff7f',
+      'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:effd93f6018e',
       'src/services/download/index.ts#download:mutator-call:31f3d4057a6a',
       'src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094',
       'src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4',
@@ -3982,44 +3982,8 @@ test('eliminates the reviewed generic cache and contact transaction callbacks', 
         'withDbTransaction',
       ],
       [
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:39217d2483ca',
-        'withDbTransaction',
-      ],
-      [
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:57243fd8d6bd',
-        'transaction-coordinator',
-      ],
-      [
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>:mutator-call:2c9931e83a2f',
-        'withDbTransaction',
-      ],
-      [
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:4d11d05b9300',
-        'transaction-coordinator',
-      ],
-      [
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:85a839fda316',
-        'withDbTransaction',
-      ],
-      [
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>:mutator-call:6e98f3765bbd',
-        'withDbTransaction',
-      ],
-      [
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:03929b5466d2',
-        'transaction-coordinator',
-      ],
-      [
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:1394e1a87db1',
-        'withDbTransaction',
-      ],
-      [
         'src/db/repositories/contacts.ts#matchContactsToHandles:drizzle-update:39efd42dac33',
         'withDbTransaction',
-      ],
-      [
-        'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:909eb19064>:mutator-call:95c779ab9d88',
-        'transaction-coordinator',
       ],
     ].sort(),
   );
@@ -4179,26 +4143,26 @@ test('certifies exactly the DEV-only disposable PERF-02 Android benchmark path',
       'app/(app)/home.tsx#Home:mutator-reference:2c3804b5d218',
       'src/db/devHarness/perfInboxFixtures.ts#deletePerf02BenchmarkDatabase:mutator-call:052bd7a90925',
       'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark.bump.<callback:b9bbd67d96>:mutator-call:8bc00f7240ca',
-      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:9126cd586d02',
       'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:12f0875cd661',
-      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d91ceb55b2b7',
-      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:ed2045296265',
-      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:e0303b85ed91',
       'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:12f0875cd661:2',
-      'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:mutator-call:2d9a4382f5e3',
-      'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:mutator-call:a1193f95efba',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:9126cd586d02',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:e0303b85ed91',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:mutator-call:ed2045296265',
+      'src/db/devHarness/perfInboxFixtures.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d91ceb55b2b7',
+      'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:mutator-call:3be9f01cfd2f',
+      'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:mutator-call:8146d730e60e',
       'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:sql-insert:365869a94c0b',
       'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:sql-update:a57808001967',
-      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:1678bfc56fc9',
-      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:eae4b93f3a8c',
-      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:6e5c9de934e3',
-      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:5745bda7cb08',
-      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:ae0c929d63d0',
-      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:d5daeec433fb',
-      'src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture:mutator-call:fe340ba6909e',
-      'src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture:sql-pragma:93bcca4be38e',
       'src/db/performance/deviceInboxBenchmark.ts#runDeviceInboxBenchmarkFixture:mutator-call:5cf65cbe9fcc',
       'src/db/performance/deviceInboxBenchmark.ts#runDeviceInboxBenchmarkFixture:mutator-call:d977bfc6d9a9',
+      'src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture:mutator-call:fe340ba6909e',
+      'src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture:sql-pragma:93bcca4be38e',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:72419bf955ed',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:b7ba42675507',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:5745bda7cb08',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:6e5c9de934e3',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:ae0c929d63d0',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:d5daeec433fb',
       'src/services/index.ts#runDevPerf02InboxBenchmark:mutator-call:b2d669af8e3f',
       'src/ui/conversations/PerfInboxBenchmarkScreen.tsx#PerfInboxBenchmarkScreen.<callback:06033cb5f4>:mutator-call:ca3cce143976',
     ].sort(),
@@ -5109,32 +5073,32 @@ test('certifies exactly the DB-02C runtime-concurrency writes and exclusive hand
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2:2',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:067538acf7d3',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:46ae37afbaa9',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:21e300faa0ed',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:2c5121e200af',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:30c2f020a0fe',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:3509064feb66',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:f924d42870b7',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:45f44e962bfd',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:6f56de572180',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:46ae37afbaa9',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:6fa4b9d0433f',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:75b6613ec9c7',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:95d97cd77af9',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:b78b41da9526',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:bcdace9d293d',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:d1d57ee78997',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:da8a7a29ea3f',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:da8a7a29ea3f:2',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:d1d57ee78997',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:f924d42870b7',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:sql-insert:c225ba9768f7',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:250c3794fc>:mutator-call:55ffe792a557',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:1d0bfbce31>:mutator-call:100591a9a500',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:1d0bfbce31>:mutator-call:bc8e8f7ce7a5',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:5dd1b37d20>:mutator-call:5bb337046f32',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:174fecc4a09b',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:283c09516aa5',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:2b56f206c62d',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:4a366d318873',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:76fee672d036',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:d47cc381aaf6',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:53f5e929f07d',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:6395b5094423',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:a8582564276c',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:c22febfc7213',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:d60d21c42996',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:e1a5e8843d07',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:d723e8e4cce7',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:dbff19af25c2',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:268fc51a1761',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:7418c90170ea',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:9266b8d70936',
@@ -5208,31 +5172,31 @@ test('certifies exactly the BACKUP-02 restore-abort writes and exclusive handoff
       'src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:54c11a09ee78',
       'src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:ca31be8c7204',
       'src/services/boot/dbBackupRestoreWave.ts#count:raw-dynamic:6f394c5ac20a',
-      'src/services/boot/dbBackupRestoreWave.ts#dropFaultTrigger:mutator-call:3f51204be524',
-      'src/services/boot/dbBackupRestoreWave.ts#dropFaultTrigger:mutator-call:da616667e33c',
+      'src/services/boot/dbBackupRestoreWave.ts#dropFaultTrigger:mutator-call:c8e97d5972bb',
+      'src/services/boot/dbBackupRestoreWave.ts#dropFaultTrigger:mutator-call:e867f4fdabae',
       'src/services/boot/dbBackupRestoreWave.ts#dropFaultTrigger:raw-dynamic:6c62449e4c75',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:0fcd2d2f5094',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:0fcd2d2f5094:2',
-      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:105813101b72',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:1a10c3ca4f56',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:1a10c3ca4f56:2',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:1da9191d9e9a',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:293e014fc561',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:36b06cf976dc',
-      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:3a35f836e17c',
-      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:3b85e66136cf',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:3753a0f3d61f',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:417b82c280c6',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:4a262ec5b929',
-      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:4bcc56ea4cd8',
-      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:5fc18d376832',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:72897b3d1d3f',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:76ff5573094a',
-      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:789a035b74f6',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:91505eff66b4',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:91505eff66b4:2',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:a84f26f0b7e2',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:af5f9360c89c',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:c08d312c2674',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:cc8cfdcea4fb',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:e08041276f2c',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:f420b4a7f2cf',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:f68b4e575308',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:fe50fd39d870',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:raw-dynamic:5e90223b1071',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:sql-insert:039be53fec3f',
       'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:sql-insert:28b766c0be7c',
@@ -5346,7 +5310,7 @@ fullOnlyTest('BACKUP-02 restore-abort proof fails closed on native and lifetime 
       before:
         '  const applied = await withDbTransaction(\n' +
         '    db,\n' +
-        '    async (context) => {\n' +
+        '    async (db, context) => {\n' +
         '      const result = await restorePreparedBackupWithinTransaction(context, prepared);\n' +
         '      // Checked inside the transaction so an impossible result rolls back instead of being\n' +
         '      // reported as a failed restore after it was already committed.\n' +
@@ -5366,7 +5330,7 @@ fullOnlyTest('BACKUP-02 restore-abort proof fails closed on native and lifetime 
         '  const applied = await Promise.resolve().then(() =>\n' +
         '    withDbTransaction(\n' +
         '    db,\n' +
-        '    async (context) => {\n' +
+        '    async (db, context) => {\n' +
         '      const result = await restorePreparedBackupWithinTransaction(context, prepared);\n' +
         '      // Checked inside the transaction so an impossible result rolls back instead of being\n' +
         '      // reported as a failed restore after it was already committed.\n' +
@@ -5577,9 +5541,9 @@ fullOnlyTest(
         label: 'image-send callee detaches its optimistic DB owner',
         path: 'src/services/send/sendAttachmentService.ts',
         before:
-          '    const admission = await withDbTransaction(\n      db,\n      async (context) => {',
+          '    const admission = await withDbTransaction(\n      db,\n      async (db, context) => {',
         after:
-          '    const admission = void withDbTransaction(\n      db,\n      async (context) => {',
+          '    const admission = void withDbTransaction(\n      db,\n      async (db, context) => {',
       },
       {
         label: 'image-send callee weakens capability-fenced DB admission',
@@ -7181,11 +7145,11 @@ test('certifies exactly the reviewed server-search adoption transaction', () => 
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
     [
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>:mutator-call:7dc7fa3db20e',
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>:mutator-call:98315c753c9e',
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:eff11cf61723',
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:2778da0a94b7',
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:c5a2deb38ff2',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:9f60d71c81>.<callback:8e1bb5774f>:mutator-call:02abc5499b35',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:9f60d71c81>.<callback:8e1bb5774f>:mutator-call:1e085e70f2b2',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:9f60d71c81>.<callback:8e1bb5774f>:mutator-call:e036c9b3c879',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:9f60d71c81>:mutator-call:5c214e92a4a1',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:9f60d71c81>:mutator-call:cb1120eb154c',
     ].sort(),
   );
   assert.equal(
@@ -7607,81 +7571,81 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/backup/backup.ts#restoreBackup.<callback:210239e086>:mutator-call:a89d928180be',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:36cf4f4647c4',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:f6c5d92a4da2',
+      'src/services/backup/backup.ts#restoreBackup.<callback:bdbefaf4f6>:mutator-call:b62598998fe4',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:4684cc02b27a',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:7cd9cf4a9e83',
     ].sort(),
   );
   assert.deepEqual(
     clearLocalCacheMarkerTransaction.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/maintenance.ts#clearLocalCache.<callback:f5b3fd4c12>:mutator-call:7571dbda310a',
-      'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:2ffb1910cfce',
-      'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:7ff9694f91da',
+      'src/db/repositories/maintenance.ts#clearLocalCache.<callback:209c59ba10>:mutator-call:3a83815d8c9e',
+      'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:534cc1063645',
+      'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:6c367e64c9eb',
     ].sort(),
   );
   assert.deepEqual(
     chatDraftTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#saveChatDraft.<callback:9ae03f03fc>.<callback:126fc1e56e>:mutator-call:bc0d1a9ae9ce',
-      'src/services/chatActions.ts#saveChatDraft.<callback:9ae03f03fc>:mutator-call:641f69856a73',
-      'src/services/chatActions.ts#saveChatDraft.<callback:9ae03f03fc>:mutator-call:6d954968e9f8',
+      'src/services/chatActions.ts#saveChatDraft.<callback:83ab1f1f2d>.<callback:3be5de435e>:mutator-call:89bf5f38c69f',
+      'src/services/chatActions.ts#saveChatDraft.<callback:83ab1f1f2d>:mutator-call:3cf7f33d6169',
+      'src/services/chatActions.ts#saveChatDraft.<callback:83ab1f1f2d>:mutator-call:47943e620c20',
     ].sort(),
   );
   assert.deepEqual(
     serverAvatarTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>.<callback:f60ab1f80c>:mutator-call:41ca6c4297af',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>:mutator-call:e3874437fe75',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>:mutator-call:e8f26a3863e3',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>:mutator-call:560760fae756',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:5b53f755ddd8',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:b52fdca006d4',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>:mutator-call:05e6050537bf',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>:mutator-call:8ece3083bfa0',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:05f21e2abc>.<callback:5902d5c1a3>:mutator-call:3c28455dae55',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:05f21e2abc>:mutator-call:5648fcc38861',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:05f21e2abc>:mutator-call:fb009fd2886f',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:3337d7b73b>:mutator-call:29d68d3a84bf',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:3337d7b73b>:mutator-call:b81ffb9d8230',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:7102329a9e>.<callback:0426bf0c7e>:mutator-call:98798c47ef44',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:7102329a9e>:mutator-call:817a93f9491c',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:7102329a9e>:mutator-call:d7ab3427b36b',
     ].sort(),
   );
   assert.deepEqual(
     sendSuccessOwnerTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:a142c06cb1>:mutator-call:dd151c6d7808',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:3512d97f02>:mutator-call:bb8ac1d4582d',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:73a6a7ceb3de',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9efd07b3e6a8',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:6a3664104d66',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:dc16ee7659f0',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:d0290dfade>:mutator-call:39d40c4aa782',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:d72891e8c9>:mutator-call:b444972bfd7f',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:1c942f9a41e8',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:41c71fa6f00a',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:7e1a36fc5972',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9ab0932607c2',
     ].sort(),
   );
   assert.deepEqual(
     retryClaimTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:1d21b95537>:mutator-call:df1e48ce3efe',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:ea4f20927bb8',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:dbf95f3e0abb',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:9c55910574>:mutator-call:c42d4347e019',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:aa15bbd6b8cb',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:c90e6dcb7ea6',
     ].sort(),
   );
   assert.deepEqual(
     discardOutgoingTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:8d83cb9fc1>:mutator-call:0be1e09bf5c4',
-      'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:6218930bffa9',
-      'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:d96cda348479',
+      'src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:75ca3d03dd>:mutator-call:006a875dd377',
+      'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:2fdae4b8b911',
+      'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:a43df3af8ab1',
     ].sort(),
   );
   assert.deepEqual(
     insertOutgoingReactionTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:f1bafaf13b>:mutator-call:72bc76227c21',
-      'src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:64518fc230a9',
-      'src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:9142aa33dfcf',
+      'src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:4fb94bc11a>:mutator-call:2cb118202182',
+      'src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:5aaf4a0bb042',
+      'src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:7dae1a413ed7',
     ].sort(),
   );
   assert.deepEqual(
     revertLocalEditTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/messages.ts#revertLocalEdit.<callback:db18ec7032>:mutator-call:2c433275da29',
-      'src/db/repositories/messages.ts#revertLocalEdit:mutator-call:a093dbcecc09',
-      'src/db/repositories/messages.ts#revertLocalEdit:mutator-call:bf0de4f4d033',
+      'src/db/repositories/messages.ts#revertLocalEdit.<callback:291d88ce74>:mutator-call:da137b238f32',
+      'src/db/repositories/messages.ts#revertLocalEdit:mutator-call:773c9d2ee5fa',
+      'src/db/repositories/messages.ts#revertLocalEdit:mutator-call:df4bfac58a4c',
     ].sort(),
   );
   assert.equal(
@@ -7867,13 +7831,13 @@ function incomingIngressMutationCases() {
       path: 'src/services/realtimeControl.ts',
       transform: (source) => {
         const start = source.indexOf(
-          'function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {',
+          'function realtimeSink(db: ReadDb, accountGeneration: number): EventSink {',
         );
         const marker = '\n}\n\n// One normalizer/sink chain per account generation.';
         const end = source.indexOf(marker, start);
         assert.notEqual(start, -1);
         assert.notEqual(end, -1);
-        return `${source.slice(0, start)}function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {\n  void db;\n  void accountGeneration;\n  return { handle: async () => undefined };\n}${source.slice(end + 2)}`;
+        return `${source.slice(0, start)}function realtimeSink(db: ReadDb, accountGeneration: number): EventSink {\n  void db;\n  void accountGeneration;\n  return { handle: async () => undefined };\n}${source.slice(end + 2)}`;
       },
     },
     {
@@ -9853,6 +9817,78 @@ test('rejects a same-shape rekey when the write expression changed or cannot be 
   );
 });
 
+function twoEdgeCallbackScan(siblingValue, secondArgument = 'primaryDb') {
+  // Two mutator-call edges to one target from one anonymous owner callback: they share a
+  // reconciliation group, so a changed callback fingerprint used to be an "ambiguous many-to-many
+  // rekey" even though neither call expression changed.
+  const root = fixture({
+    'src/db/schema.ts': `export const messages = {};`,
+    'src/db/repositories/writer.ts': `
+      import { messages } from '../schema';
+      export function writeRows(db) { return db.delete(messages); }
+    `,
+    'src/services/owner.ts': `
+      import { withDbTransaction } from '../db/transaction';
+      import { writeRows } from '../db/repositories/writer';
+      export function ownWrite(db) {
+        return withDbTransaction(db, async () => {
+          const primaryDb = db;
+          await writeRows(db);
+          await writeRows(${secondArgument});
+          return ${siblingValue};
+        });
+      }
+    `,
+    'src/db/transaction.ts': `
+      export async function withDbTransaction(db, callback) { return callback(db); }
+    `,
+  });
+  try {
+    return scanDbWrites({ root });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test('proves many-to-many callback-fingerprint rekeys per entry when only the callback changed', () => {
+  const original = twoEdgeCallbackScan(1);
+  const renamedCallback = twoEdgeCallbackScan(2);
+  const edges = (findings) =>
+    findings.filter((finding) =>
+      finding.target.endsWith('src/db/repositories/writer.ts#writeRows'),
+    );
+  assert.equal(edges(original).length, 2);
+  assert.match(edges(original)[0].symbol, /<callback:[0-9a-f]{10}>/);
+  assert.notEqual(edges(original)[0].symbol, edges(renamedCallback)[0].symbol);
+
+  // Only the two inner edges: the outer withDbTransaction call edge's snippet legitimately changed
+  // (its callback text is part of it) and is carried over separately.
+  const result = reconcileDbWriteInventory({
+    findings: edges(renamedCallback),
+    inventory: reviewedInventory(edges(original)),
+  });
+
+  const rekeyedEdges = edges(result.inventory.entries);
+  assert.deepEqual(
+    rekeyedEdges.map((entry) => entry.id).sort(),
+    edges(renamedCallback)
+      .map((finding) => finding.id)
+      .sort(),
+  );
+  assert.ok(rekeyedEdges.every((entry) => entry.owner === 'reviewed owner'));
+  assert.ok(result.rekeys.length >= 2);
+
+  // A call expression that changed as well cannot be proven and still fails closed.
+  assert.throws(
+    () =>
+      reconcileDbWriteInventory({
+        findings: edges(twoEdgeCallbackScan(2, 'db')),
+        inventory: reviewedInventory(edges(original)),
+      }),
+    /ambiguous many-to-many rekey/,
+  );
+});
+
 test('rejects a callback-fingerprint rekey when the mutator-call snippet also changed', () => {
   const original = callbackWriterFinding(1, 'db');
   const changedCallbackAndCall = callbackWriterFinding(2, 'primaryDb');
@@ -10179,94 +10215,94 @@ test('certifies exactly the reviewed ambiguous-contact writes', () => {
       detectedContext: 'startup-migration',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>:mutator-call:aa6ed0111bb6',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:987fb31008>:mutator-call:17b52cdcacde',
       target:
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>.<callback:e3562cb0fb>',
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:987fb31008>.<callback:7697d04f6d>',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>:mutator-call:e0cd6df731e7',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:987fb31008>:mutator-call:6dce3708b829',
       target: 'src/db/transaction.ts#withDbTransaction',
       detectedContext: 'transaction-coordinator',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>.<callback:e3562cb0fb>:mutator-call:5d75d48e30fb',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:987fb31008>.<callback:7697d04f6d>:mutator-call:22e60a9478b1',
       target: 'src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:39217d2483ca',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a2f65c86a6>:mutator-call:4ea1178bc4fe',
       target:
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>',
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a2f65c86a6>.<callback:e8e7e2e201>',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:57243fd8d6bd',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a2f65c86a6>:mutator-call:c7be6c99a0e9',
       target: 'src/db/transaction.ts#withDbTransaction',
       detectedContext: 'transaction-coordinator',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>:mutator-call:2c9931e83a2f',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a2f65c86a6>.<callback:e8e7e2e201>:mutator-call:8829ee97472c',
       target: 'src/db/repositories/contacts.ts#applyContactMatchWithinTransaction',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>:mutator-call:8608dbd04458',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:39a8e561ac>:mutator-call:58c2cbd5b7b2',
       target: 'src/db/transaction.ts#withDbTransaction',
       detectedContext: 'transaction-coordinator',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>:mutator-call:c4377ed5fa6c',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:39a8e561ac>:mutator-call:5def79a70e15',
       target:
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>.<callback:0869422901>',
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:39a8e561ac>.<callback:2151b3826b>',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>.<callback:0869422901>:mutator-call:2fb6405329f8',
-      target: 'src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction',
-      detectedContext: 'withDbTransaction',
-    },
-    {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:4d11d05b9300',
-      target: 'src/db/transaction.ts#withDbTransaction',
-      detectedContext: 'transaction-coordinator',
-    },
-    {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:85a839fda316',
-      target:
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>',
-      detectedContext: 'withDbTransaction',
-    },
-    {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>:mutator-call:6e98f3765bbd',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:39a8e561ac>.<callback:2151b3826b>:mutator-call:8de60db4428b',
       target: 'src/db/repositories/contacts.ts#applyContactMatchWithinTransaction',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>:mutator-call:3c1b1ed40fc9',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:7b11e9724e>:mutator-call:36bc086e31d2',
       target:
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>.<callback:f69677d089>',
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:7b11e9724e>.<callback:573e0fe4ee>',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>:mutator-call:dc535468b954',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:7b11e9724e>:mutator-call:a3272a9cbf21',
       target: 'src/db/transaction.ts#withDbTransaction',
       detectedContext: 'transaction-coordinator',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>.<callback:f69677d089>:mutator-call:ad9cfd394187',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:7b11e9724e>.<callback:573e0fe4ee>:mutator-call:df3352f225e6',
       target: 'src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:03929b5466d2',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:c0817978c5>:mutator-call:685f9bbd5014',
       target: 'src/db/transaction.ts#withDbTransaction',
       detectedContext: 'transaction-coordinator',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:1394e1a87db1',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:c0817978c5>:mutator-call:8ee8ac564885',
       target:
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>.<callback:032718c953>',
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:c0817978c5>.<callback:6283c2682d>',
+      detectedContext: 'withDbTransaction',
+    },
+    {
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:c0817978c5>.<callback:6283c2682d>:mutator-call:e2b00b2816c2',
+      target: 'src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction',
+      detectedContext: 'withDbTransaction',
+    },
+    {
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:cbff9c4fc9>:mutator-call:4a751483d9fb',
+      target: 'src/db/transaction.ts#withDbTransaction',
+      detectedContext: 'transaction-coordinator',
+    },
+    {
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:cbff9c4fc9>:mutator-call:53a5d2f62ff1',
+      target:
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:cbff9c4fc9>.<callback:ed1e772001>',
       detectedContext: 'withDbTransaction',
     },
     {
