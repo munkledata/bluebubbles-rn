@@ -339,7 +339,7 @@ const redirectContainmentPackageJson = {
   dependencies: {
     'expo-background-task': '57.0.21',
     'expo-file-system': '57.0.7',
-    'expo-router': '~57.0.24',
+    'expo-router': '~57.0.30',
     'expo-sharing': '~57.0.25',
     'expo-task-manager': '57.0.21',
     'react-native-screens': '~4.26.0',
@@ -365,7 +365,7 @@ const redirectContainmentPackageLock = {
       dependencies: {
         'expo-background-task': '57.0.21',
         'expo-file-system': '57.0.7',
-        'expo-router': '~57.0.24',
+        'expo-router': '~57.0.30',
         'expo-sharing': '~57.0.25',
         'expo-task-manager': '57.0.21',
         'react-native-screens': '~4.26.0',
@@ -374,7 +374,7 @@ const redirectContainmentPackageLock = {
     },
     'node_modules/expo-background-task': { version: '57.0.21' },
     'node_modules/expo-file-system': { version: '57.0.7' },
-    'node_modules/expo-router': { version: '57.0.24' },
+    'node_modules/expo-router': { version: '57.0.30' },
     'node_modules/expo-sharing': { version: '57.0.25' },
     'node_modules/expo': { version: '57.0.32' },
     'node_modules/expo-modules-core': { version: '57.0.25' },
@@ -926,8 +926,8 @@ function writeRedirectContainmentFixture(root) {
     taskManagerKeeperRuntimeSource,
   );
   writeFileSync(
-    join(root, 'patches/expo-router+57.0.24.patch'),
-    readFileSync(join(ROOT, 'patches/expo-router+57.0.24.patch'), 'utf8'),
+    join(root, 'patches/expo-router+57.0.30.patch'),
+    readFileSync(join(ROOT, 'patches/expo-router+57.0.30.patch'), 'utf8'),
   );
   writeFileSync(
     join(root, 'patches/expo-sharing+57.0.25.patch'),
@@ -1312,7 +1312,7 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
     packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
     appConfigSource: readFileSync(join(ROOT, 'app.config.ts'), 'utf8'),
-    patchSource: readFileSync(join(ROOT, 'patches/expo-router+57.0.24.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-router+57.0.30.patch'), 'utf8'),
     experimentalStackSource: readFileSync(
       join(
         ROOT,
