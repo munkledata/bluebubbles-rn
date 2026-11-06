@@ -7,6 +7,7 @@ Start with the root [`README.md`](../README.md) for the product and architecture
 
 - [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) is the remediation-task status authority.
   It owns 107 engineering, security, privacy, feature, and device-proof tasks.
+  Its dated status log lives in [`history/WORK_PLAN_2026-08-03_log.md`](./history/WORK_PLAN_2026-08-03_log.md).
 - [`RELEASE_PLAN.md`](./RELEASE_PLAN.md) is the release-task status authority. It owns `RELEASE-01`,
   `STORE-01`, `RELEASE-02`, and `RELEASE-GATE-01`.
 - [`POST_REMEDIATION_PLAN.md`](./POST_REMEDIATION_PLAN.md) preserves explicitly deferred product work. Its items are
