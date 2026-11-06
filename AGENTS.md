@@ -96,6 +96,21 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 - Transaction callbacks must be DB-only and bounded. Do not hold the mutex across network, native
   filesystem, media, UI, timers, or unbounded row work.
 
+### Handle types (compile-time ownership)
+
+- `getDatabase()` / `ensureDatabase()` return a `ReadDb`: reads only, branded "outside a
+  transaction". A `withDbTransaction(db, (tx, context) => …)` callback receives the same object as a
+  `WriteDb`; so does a `withDbWriteLock(db, (tx) => …)` callback. Writes go through `tx`, never
+  through a handle fetched inside the callback.
+- A helper that opens its own transaction takes `ReadDb`; a pure read helper takes `Queryable`
+  (works in both places); a helper that writes takes `WriteDb` and is only callable with a `tx`.
+  Passing a `WriteDb` to a `ReadDb` helper is a compile error: that is the nesting rule, enforced.
+- `TestDb` (test seeding, the dev throwaway doorway) satisfies every parameter kind. Only
+  `src/db/transaction.ts`, `src/db/database.ts` and tests may assert a `WriteDb`/`TestDb`;
+  `check:architecture` enforces that and the raw-driver, `getRawDatabase()`, `'gator.db'` and raw
+  write-statement boundaries. In Node tests a nested claim rejects with `DbTransactionNestedError`
+  within 1.5 s instead of hanging.
+
 ### Transaction-only helpers
 
 - A transaction-only helper accepts `DbTransactionContext`, not a raw database handle as proof.
