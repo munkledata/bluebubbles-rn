@@ -7,7 +7,14 @@ import {
   runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { resolveDisplayTitle } from '@utils/chat';
+import { avatarLetterSpec } from '@core/avatar';
+import {
+  avatarSeed,
+  isGroupRow,
+  participantAvatars,
+  primaryParticipantColor,
+  resolveDisplayTitle,
+} from '@utils/chat';
 
 const MAX_PUBLISHED_SHORTCUTS = 10;
 const MAX_RESOLUTION_CANDIDATES = 256;
@@ -119,13 +126,31 @@ function boundedLabel(row: InboxRow): string {
 }
 
 /**
+ * A chat shortcut's picture, from the same inputs and rules as the inbox avatar: a one-to-one chat
+ * shows the person's photo or letter circle; a group shows its own photo, else its name's letters
+ * (an unnamed group gets the person glyph, since initials of a member list mean nothing). Native
+ * accepts only contact-provider and app-private photos and falls back to these letters otherwise.
+ */
+function shortcutAvatar(row: InboxRow): Omit<ShareShortcutRow, 'guid' | 'label'> {
+  if (isGroupRow(row)) {
+    const name = (row.customName ?? row.displayName ?? '').trim();
+    const spec = avatarLetterSpec(name || avatarSeed(row));
+    return { photoUri: row.groupPhotoUri ?? null, ...spec, initials: name ? spec.initials : '' };
+  }
+  const spec = avatarLetterSpec(avatarSeed(row), primaryParticipantColor(row.participantColors));
+  return { photoUri: participantAvatars(row.participantAvatars)[0] ?? null, ...spec };
+}
+
+/**
  * Publish a bounded recent-chat prefix. App Lock policy intentionally publishes no account labels,
  * even while unlocked; enabling the feature removes existing personalized rows immediately.
  */
 export function publishShareShortcuts(rows: readonly InboxRow[], appLockEnabled: boolean): boolean {
-  const records = rows.slice(0, MAX_PUBLISHED_SHORTCUTS).map((row) => ({
+  // Under App Lock nothing personal crosses the bridge, not even a picture.
+  const records = rows.slice(0, MAX_PUBLISHED_SHORTCUTS).map((row): ShareShortcutRow => ({
     guid: row.guid,
     label: boundedLabel(row),
+    ...(appLockEnabled ? {} : shortcutAvatar(row)),
   }));
   const payload = JSON.stringify([appLockEnabled, records]);
   if (payload === lastPublished) return true;

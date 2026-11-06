@@ -1,3 +1,4 @@
+import { avatarLetterSpec } from '@core/avatar';
 import type { InboxRow } from '@db/repositories';
 import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 
@@ -199,7 +200,9 @@ describe('Direct Share shortcut mutation bridge', () => {
     expect(listInbox).toHaveBeenCalledWith(database, { limit: 10, archive: 'active' });
     expect(native.setShareShortcuts).toHaveBeenCalledWith(
       expect.any(Number),
-      rows.slice(0, 10).map((row) => ({ guid: row.guid, label: row.displayName })),
+      rows
+        .slice(0, 10)
+        .map((row) => expect.objectContaining({ guid: row.guid, label: row.displayName })),
       false,
     );
   });
@@ -510,4 +513,51 @@ it('keeps shortcut identity resolution independent from conversation send capabi
 
   await expect(resolveShareShortcutTarget(TARGET_TOKEN, lease())).resolves.toBe(row.guid);
   expect(native.reportShareShortcutUsed).toHaveBeenCalledWith(TARGET_TOKEN);
+});
+
+describe('shortcut pictures', () => {
+  const published = () =>
+    (native.setShareShortcuts.mock.calls.at(-1) as [number, Record<string, unknown>[], boolean])[1];
+
+  it("gives a one-to-one chat the person's photo and their in-app letter circle", () => {
+    const photo = 'content://com.android.contacts/contacts/7/photo';
+    publishShareShortcuts(
+      [
+        inboxRow({
+          participantNames: '["Jordan Lee"]',
+          participantAvatars: JSON.stringify([photo]),
+          participantColors: '["#000000"]',
+        }),
+      ],
+      false,
+    );
+    expect(published()[0]).toEqual(
+      expect.objectContaining({ photoUri: photo, ...avatarLetterSpec('Jordan Lee', '#000000') }),
+    );
+    expect(published()[0]).toMatchObject({ initials: 'JL', foreground: '#FFFFFF' });
+  });
+
+  it("gives a group its own photo, else its name's letters, else the person glyph", () => {
+    const group = { style: 43, participantCount: 3, participantNames: '["Ann","Bo","Cy"]' };
+    publishShareShortcuts(
+      [
+        inboxRow({ guid: 'g-photo', ...group, groupPhotoUri: 'file:///data/g.jpg' }),
+        inboxRow({ guid: 'g-named', ...group, displayName: 'Book Club' }),
+        inboxRow({ guid: 'g-unnamed', ...group, displayName: null }),
+      ],
+      false,
+    );
+    const [withPhoto, named, unnamed] = published();
+    expect(withPhoto).toMatchObject({ photoUri: 'file:///data/g.jpg' });
+    expect(named).toMatchObject({ photoUri: null, initials: 'BC' });
+    expect(unnamed).toMatchObject({ photoUri: null, initials: '' });
+  });
+
+  it('sends no picture at all under App Lock', () => {
+    publishShareShortcuts(
+      [inboxRow({ participantAvatars: '["content://com.android.contacts/contacts/7/photo"]' })],
+      true,
+    );
+    expect(Object.keys(published()[0]!).sort()).toEqual(['guid', 'label']);
+  });
 });
