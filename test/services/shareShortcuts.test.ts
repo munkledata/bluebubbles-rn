@@ -57,6 +57,7 @@ import {
   refreshShareShortcuts,
   resolveShareShortcutTarget,
   existingConversationShortcutId,
+  hideShareShortcutsForAppLock,
 } from '@/services/shortcuts/shareShortcuts';
 
 const getDb = getDatabase as jest.MockedFunction<typeof getDatabase>;
@@ -588,5 +589,27 @@ describe('existingConversationShortcutId', () => {
     expect(existingConversationShortcutId('chat-b')).toBeNull();
     moduleRef.current = { ...native, existingShareShortcutId: undefined } as never;
     expect(existingConversationShortcutId('chat-b')).toBeNull();
+  });
+});
+
+describe('hideShareShortcutsForAppLock', () => {
+  it('hides every shortcut without rotating ids, and forgets the published ids', () => {
+    const token = `gator-share-v2-${'7'.repeat(43)}`;
+    native.setShareShortcuts.mockReturnValueOnce([token]);
+    publishShareShortcuts([inboxRow({ guid: 'chat-a' })], false);
+    expect(existingConversationShortcutId('chat-a')).toBe(token);
+
+    expect(hideShareShortcutsForAppLock()).toBe(true);
+    // The App Lock publish (empty, locked) clears rows but keeps the namespace; no rotate call.
+    expect(native.setShareShortcuts).toHaveBeenLastCalledWith(expect.any(Number), [], true);
+    expect(native.clearCurrentShareShortcuts).not.toHaveBeenCalled();
+    expect(native.clearAllShareShortcuts).not.toHaveBeenCalled();
+    native.existingShareShortcutId.mockReturnValueOnce(null);
+    expect(existingConversationShortcutId('chat-a')).toBeNull();
+
+    // The next unlocked publish is not skipped as "unchanged".
+    native.setShareShortcuts.mockClear();
+    publishShareShortcuts([inboxRow({ guid: 'chat-a' })], false);
+    expect(native.setShareShortcuts).toHaveBeenCalledTimes(1);
   });
 });

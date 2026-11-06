@@ -309,8 +309,10 @@ Plus two correctness items:
   logo.
 - **Known edges.** A chat that drops out of the top 10 loses its shortcut, so a notice still in the
   tray stops being a conversation. Android keys a conversation's Priority and sound settings by
-  shortcut id, and enabling App Lock rotates the id namespace (`clearCurrentAndRotate`), so after
-  App Lock is turned off again those per-conversation settings start fresh.
+  shortcut id. Enabling App Lock **hides** the shortcuts without rotating the id namespace
+  (`hideShareShortcutsForAppLock`, owner decision 2026-11-05), so turning it off republishes the
+  same ids. Whether Android keeps a conversation's settings while its shortcut is absent is
+  device-only evidence (Phase 2 step 4). Disconnect and account changes still rotate.
 
 ## Historical regression tests
 

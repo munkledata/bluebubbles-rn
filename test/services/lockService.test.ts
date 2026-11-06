@@ -13,7 +13,7 @@ const isDevServer = jest.fn(() => false);
 const vaultGet = jest.fn(async () => null as string | null);
 const vaultSet = jest.fn<Promise<void>, [string, string]>(async () => undefined);
 const setNativeAppLockEnabled = jest.fn(() => true);
-const clearCurrentShareShortcuts = jest.fn(() => true);
+const hideShareShortcutsForAppLock = jest.fn(() => true);
 
 jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }));
 jest.mock('@/services/errors', () => ({ flushErrorReports }));
@@ -32,7 +32,7 @@ jest.mock('@native/screenSecurity', () => ({
   setNativeAppLockEnabled,
 }));
 jest.mock('@/services/shortcuts/shareShortcuts', () => ({
-  clearCurrentShareShortcuts,
+  hideShareShortcutsForAppLock,
 }));
 
 // Mock registration must precede the service import so no native notification module is loaded.
@@ -64,7 +64,7 @@ beforeEach(() => {
   vaultSet.mockReset().mockResolvedValue(undefined);
   vaultGet.mockReset().mockResolvedValue(null);
   setNativeAppLockEnabled.mockReset().mockReturnValue(true);
-  clearCurrentShareShortcuts.mockReset().mockReturnValue(true);
+  hideShareShortcutsForAppLock.mockReset().mockReturnValue(true);
   useLockStore.setState({
     enabled: true,
     locked: true,
@@ -228,7 +228,7 @@ describe('setAppLockEnabled', () => {
     await expect(hydrateLock()).resolves.toEqual({ notificationCleanupFailed: true });
 
     expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true, hydrated: true });
-    expect(clearCurrentShareShortcuts).toHaveBeenCalledTimes(1);
+    expect(hideShareShortcutsForAppLock).toHaveBeenCalledTimes(1);
     expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
     // The barrier stays up until a later sweep is verified.
     expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
@@ -266,9 +266,9 @@ describe('setAppLockEnabled', () => {
 
     await hydrateLock();
 
-    expect(clearCurrentShareShortcuts).toHaveBeenCalledTimes(1);
+    expect(hideShareShortcutsForAppLock).toHaveBeenCalledTimes(1);
     expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
-    expect(clearCurrentShareShortcuts.mock.invocationCallOrder[0]!).toBeLessThan(
+    expect(hideShareShortcutsForAppLock.mock.invocationCallOrder[0]!).toBeLessThan(
       setNativeAppLockEnabled.mock.invocationCallOrder[0]!,
     );
     expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true, hydrated: true });
@@ -288,7 +288,7 @@ describe('setAppLockEnabled', () => {
 
   it('refuses to enable App Lock when personalized Direct Share rows cannot be cleared', async () => {
     useLockStore.setState({ enabled: false, locked: false });
-    clearCurrentShareShortcuts.mockReturnValueOnce(false);
+    hideShareShortcutsForAppLock.mockReturnValueOnce(false);
 
     await expect(setAppLockEnabled(true)).rejects.toThrow(
       'App Lock requires Direct Share privacy cleanup.',
@@ -305,9 +305,9 @@ describe('setAppLockEnabled', () => {
     await setAppLockEnabled(true);
 
     expect(vaultSet).toHaveBeenCalledWith('appLockEnabled', 'true');
-    expect(clearCurrentShareShortcuts).toHaveBeenCalledTimes(1);
+    expect(hideShareShortcutsForAppLock).toHaveBeenCalledTimes(1);
     expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
-    expect(clearCurrentShareShortcuts.mock.invocationCallOrder[0]!).toBeLessThan(
+    expect(hideShareShortcutsForAppLock.mock.invocationCallOrder[0]!).toBeLessThan(
       setNativeAppLockEnabled.mock.invocationCallOrder[0]!,
     );
     expect(setNativeAppLockEnabled.mock.invocationCallOrder[0]!).toBeLessThan(

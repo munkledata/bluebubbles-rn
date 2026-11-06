@@ -13,7 +13,7 @@ import {
   commitAppLockNotificationPrivacy,
   releaseAppLockNotificationPrivacyBarrier,
 } from './notifications/notifeeService';
-import { clearCurrentShareShortcuts } from './shortcuts/shareShortcuts';
+import { hideShareShortcutsForAppLock } from './shortcuts/shareShortcuts';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -43,7 +43,8 @@ function syncNativeAppLockPolicy(enabled: boolean): void {
 }
 
 function clearPersonalizedShareTargets(): void {
-  if (!clearCurrentShareShortcuts()) {
+  // Hide, don't rotate: the same ids come back when App Lock is turned off (keeps Priority).
+  if (!hideShareShortcutsForAppLock()) {
     throw new Error('App Lock requires Direct Share privacy cleanup.');
   }
 }

@@ -112,6 +112,20 @@ export function clearAllShareShortcuts(): boolean {
   });
 }
 
+/**
+ * App Lock turned on: remove every current-account shortcut (labels and pictures leave Android's
+ * share sheet and conversation list at once) but KEEP the id namespace. When App Lock is turned off
+ * the inbox republishes the same ids, so Android can find each chat's Priority and sound settings
+ * again (owner decision, 2026-11-05). Account changes still rotate via the clear functions.
+ */
+export function hideShareShortcutsForAppLock(): boolean {
+  lastPublished = null;
+  publishedShortcutIds = new Map();
+  return runMutation('App Lock hide', (native, revision) => {
+    native.setShareShortcuts(revision, [], true);
+  });
+}
+
 /** Remove only current-account rows and rotate their opaque-id namespace. */
 export function clearCurrentShareShortcuts(): boolean {
   lastPublished = null;
