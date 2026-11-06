@@ -140,6 +140,10 @@ export function upsertAttachmentsWithinTransaction(
           // sync must be able to promote the row to hidden; once private plugin data is known to be
           // hidden, a leaner re-upsert must never expose it again.
           hideAttachment: sql`MAX(excluded.hide_attachment, ${attachments.hideAttachment})`,
+          // Live Photo: once a hydrated fetch says the still has a motion clip, keep it. Payloads that
+          // omit the key (a notification, an older server, the live socket echo) insert it as 0
+          // and must not hide a known clip again.
+          hasLivePhoto: sql`MAX(excluded.has_live_photo, ${attachments.hasLivePhoto})`,
           emojiImageContentIdentifier: sql`excluded.emoji_image_content_identifier`,
           emojiImageShortDescription: sql`excluded.emoji_image_short_description`,
         },

@@ -999,3 +999,29 @@ describe('upsertAttachments — width/height/transferName are COALESCE-preserved
     expect((await getAttachmentByGuid(db, 'att-lp'))!.localPath).toBe('file:///on-disk.jpg');
   });
 });
+
+describe('Live Photo flag on re-upsert', () => {
+  it('an existing still learns hasLivePhoto later, and a leaner payload never clears it', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db);
+    const id = await putMsg(db, chatId, { guid: 'm-live', dateCreated: 1 });
+    const flag = () =>
+      (
+        raw.prepare('SELECT has_live_photo AS v FROM attachments WHERE guid = ?').get('still') as {
+          v: number;
+        }
+      ).v;
+    const still = (extra: Record<string, unknown>) =>
+      Attachment.parse({ guid: 'still', mimeType: 'image/heic', ...extra });
+
+    // Synced before the server could tell: no key, stored as 0.
+    await upsertAttachments(db, [{ att: still({}), messageId: id }]);
+    expect(flag()).toBe(0);
+    // A later hydrated fetch from a Live-Photo-aware server.
+    await upsertAttachments(db, [{ att: still({ hasLivePhoto: true }), messageId: id }]);
+    expect(flag()).toBe(1);
+    // A notification-shaped or older-server payload omits the key: the clip stays known.
+    await upsertAttachments(db, [{ att: still({}), messageId: id }]);
+    expect(flag()).toBe(1);
+  });
+});
