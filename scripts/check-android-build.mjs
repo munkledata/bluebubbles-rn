@@ -62,7 +62,7 @@ const EXPO_BACKGROUND_TASK_VERSION = '57.0.21';
 const EXPO_TASK_MANAGER_VERSION = '57.0.21';
 const UNIMODULES_APP_LOADER_VERSION = '57.0.2';
 const EXPO_FILE_SYSTEM_VERSION = '57.0.7';
-const EXPO_ROUTER_VERSION = '57.0.24';
+const EXPO_ROUTER_VERSION = '57.0.30';
 const EXPO_SHARING_VERSION = '57.0.25';
 const REACT_NATIVE_SCREENS_VERSION = '4.26.2';
 const EXPO_MODULES_CORE_VERSION = '57.0.25';
@@ -764,7 +764,7 @@ export function validateExpoTaskManagerPreJsSettlement({
 /**
  * Keep SDK 57's experimental Router stack safe for Gator's predictive-Back contract.
  *
- * Upstream 57.0.24 does not redispatch a native dismissal that usePreventRemove blocked, so
+ * Upstream 57.0.30 still does not redispatch a native dismissal that usePreventRemove blocked, so
  * authored-work guards never receive the pending pop action. It also paints every scene white,
  * which flashes during the preview in this dark-only app. Every route layout must use the same
  * stack on Android; mixing the standard and experimental navigators disables the native preview
