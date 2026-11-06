@@ -97,7 +97,6 @@
     "expo-system-ui": "~57.0.4",
     "expo-task-manager": "57.0.21",
     "expo-video": "~57.0.5",
-    "jail-monkey": "3.0.0",
     "ky": "^1.7.2",
     "qrcode": "^1.5.4",
     "react": "19.2.3",

@@ -14,7 +14,6 @@ export const OPTIONAL_BOOT_STAGES = [
   'shortcut-cleanup',
   'persistent-logs',
   'error-reporting',
-  'device-integrity',
   'dev-self-tests',
   'background-task',
   'fcm',

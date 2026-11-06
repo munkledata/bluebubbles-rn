@@ -11,7 +11,6 @@ const mockIsForegroundBootAttempt = jest.fn();
 const mockRunCryptoSelfTest = jest.fn();
 const mockRunDbDriverSelfTest = jest.fn();
 const mockStartDevDbRelaunchContractIfRequested = jest.fn();
-const mockCheckDeviceIntegrity = jest.fn();
 const mockRegisterBackgroundSync = jest.fn();
 const mockInitErrorReporting = jest.fn();
 const mockInitPersistentLogs = jest.fn();
@@ -108,7 +107,6 @@ jest.mock('@db/database', () => ({
   DB_DRIVER_CONTRACT_INTERNAL_FAILURE: mockDbDriverInternalFailure,
   runDbDriverSelfTest: mockRunDbDriverSelfTest,
 }));
-jest.mock('@native/deviceIntegrity', () => ({ checkDeviceIntegrity: mockCheckDeviceIntegrity }));
 jest.mock('@state/lockStore', () => ({
   useLockStore: { getState: () => ({ locked: mockLockState.locked }) },
 }));
@@ -263,7 +261,6 @@ beforeEach(() => {
   mockRunCryptoSelfTest.mockResolvedValue({ ok: true });
   mockRunDbDriverSelfTest.mockResolvedValue(mockDbDriverPass);
   mockStartDevDbRelaunchContractIfRequested.mockReturnValue(undefined);
-  mockCheckDeviceIntegrity.mockResolvedValue({ compromised: false });
   mockRegisterBackgroundSync.mockResolvedValue('registered');
   mockInitErrorReporting.mockReturnValue(undefined);
   mockInitPersistentLogs.mockResolvedValue(undefined);
@@ -301,7 +298,6 @@ describe('production foreground boot singleton', () => {
     expect(mockClearShareShortcuts).not.toHaveBeenCalled();
     expect(mockInitErrorReporting).not.toHaveBeenCalled();
     expect(mockInitPersistentLogs).not.toHaveBeenCalled();
-    expect(mockCheckDeviceIntegrity).not.toHaveBeenCalled();
     expect(mockRegisterBackgroundSync).not.toHaveBeenCalled();
     expect(mockRunCryptoSelfTest).not.toHaveBeenCalled();
     expect(mockRunDbDriverSelfTest).not.toHaveBeenCalled();
@@ -476,7 +472,6 @@ describe('production foreground boot singleton', () => {
     expect(mockClearShareShortcuts).toHaveBeenCalledTimes(1);
     expect(mockInitErrorReporting).toHaveBeenCalledTimes(1);
     expect(mockInitPersistentLogs).toHaveBeenCalledTimes(1);
-    expect(mockCheckDeviceIntegrity).toHaveBeenCalledTimes(1);
     expect(mockRegisterBackgroundSync).toHaveBeenCalledTimes(1);
     expect(mockStartFcm).not.toHaveBeenCalled();
     expect(mockRunCryptoSelfTest).toHaveBeenCalledTimes(1);

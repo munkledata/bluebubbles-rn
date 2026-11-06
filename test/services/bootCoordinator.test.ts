@@ -616,7 +616,7 @@ describe('boot coordinator', () => {
     };
     const boot = coordinator(adapters);
     const issue = {
-      stage: 'device-integrity',
+      stage: 'shortcut-cleanup',
       level: 'diagnostic',
       code: 'check-unavailable',
     } as const;
