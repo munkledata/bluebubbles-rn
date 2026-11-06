@@ -33,6 +33,7 @@ const runnerPaths = [
   'src/utils/uploadFilename.ts',
   'src/core/api/http.ts',
   'src/services/send/index.ts',
+  'src/services/send/sendShared.ts',
   schedulePath,
 ];
 const validRunnerSources = runnerPaths.map((path) => ({

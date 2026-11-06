@@ -6,7 +6,11 @@ variables on the `lifecycle` object in `accountLifecycleState.ts` together with 
 area used; `bootstrap.ts` keeps the foreground boot stages and re-exports the public entry points, so
 no consumer changed. The move used an exact-block generator (every statement block byte-identical
 apart from added `export` keywords and the `lifecycle.` field prefix) and the forget and boot suites
-as the net. The `send/index.ts` split below is still pending. The original deferral: **deferred**
+as the net. `send/index.ts` **split the same day**: `index.ts` keeps the sub-service re-exports and the two
+guard-pinned due-schedule drains and re-exports everything moved; `sendShared.ts` holds the account-operation
+guards, argument snapshots, queue I/O and shared types; `messageSends.ts`, `scheduledSends.ts` and
+`outgoingRecovery.ts` hold their groups. The scheduled-recovery guard now pins `runScheduledAccountOperation`
+and the `runTrackedRealtimeWork` import at `sendShared.ts`. The original deferral: **deferred**
 (2026-10-14) by owner decision at the end of Phase 6 step 6 of the 2026-10-09 Codex-review remediation. Step 6 split the chat screen (`app/(app)/chat/[guid].tsx`, 2,501 → 1,030
 lines) and the media viewer (1,400 → 966) and retired the legacy `hydrateSession` boot from
 `src/services/bootstrap.ts` (2,188 → 2,026). The two remaining splits turned out to be mostly

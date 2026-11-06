@@ -115,7 +115,7 @@ failure needs its own path back into the ladder:
   chat's deleted history or the 5 minutes after it. Nothing may be recorded about the copy's guid
   (stored row, deletion record, server state, alias), and the send may have no deletion record.
   Pickers that report no size (gallery-tray picks in an RCS chat, RCS voice notes) are measured
-  before sending (`withMeasuredSize` in `src/services/send/index.ts`, `file://` paths only).
+  before sending (`withMeasuredSize` in `src/services/send/sendShared.ts`, `file://` paths only).
   Duplicates stored before this change are left alone. Known gaps, all stored as a second bubble
   rather than merged: a copy that arrives before the HTTP acknowledgement or more than 5 minutes
   after the send (a slow upload of a large video, a queue retry); a captioned picture that Google

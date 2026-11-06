@@ -55,7 +55,7 @@ describe('logical send queue production wiring', () => {
   it('keeps every low-level user send behind an approved queue owner or durable scheduler', () => {
     expect(filesCalling('sendTextMessage')).toEqual([
       'src/services/notifications/actions.ts',
-      'src/services/send/index.ts',
+      'src/services/send/messageSends.ts',
       'src/services/send/scheduleService.ts',
     ]);
     // The first caller is a scanner-certified fixed-file DEV harness that runs exclusively before
@@ -63,12 +63,12 @@ describe('logical send queue production wiring', () => {
     // sole production send owner.
     expect(filesCalling('sendImageMessage')).toEqual([
       'src/services/boot/dbRuntimeConcurrencyWave.ts',
-      'src/services/send/index.ts',
+      'src/services/send/messageSends.ts',
     ]);
-    expect(filesCalling('sendContactMessage')).toEqual(['src/services/send/index.ts']);
+    expect(filesCalling('sendContactMessage')).toEqual(['src/services/send/messageSends.ts']);
     expect(filesCalling('sendReactionMessage')).toEqual([
       'src/services/notifications/actions.ts',
-      'src/services/send/index.ts',
+      'src/services/send/messageSends.ts',
     ]);
   });
 
@@ -111,9 +111,12 @@ describe('logical send queue production wiring', () => {
         'src/services/notifications/actions.ts acquire chatGuid',
         'src/services/notifications/actions.ts acquire chatGuid',
         'src/services/notifications/actions.ts acquire chatGuid',
-        'src/services/send/index.ts run mode.logicalSendChat',
-        'src/services/send/index.ts chat chatGuid',
-        ...Array.from({ length: 12 }, () => 'src/services/send/index.ts chat snapshot.chatGuid'),
+        'src/services/send/sendShared.ts run mode.logicalSendChat',
+        'src/services/send/messageSends.ts chat chatGuid',
+        ...Array.from(
+          { length: 12 },
+          () => 'src/services/send/messageSends.ts chat snapshot.chatGuid',
+        ),
       ].sort(),
     );
   });

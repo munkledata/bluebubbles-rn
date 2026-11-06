@@ -20,6 +20,8 @@ const HOME_PATH = 'app/(app)/home.tsx';
 const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
 const SEND_COMPOSITION_PATH = 'src/services/send/index.ts';
+// The scheduled account-operation guard moved here with the send front door split (round 4, step 2).
+const SEND_SHARED_PATH = 'src/services/send/sendShared.ts';
 const BACKGROUND_SYNC_PATH = 'src/services/background/backgroundSync.ts';
 const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   [
@@ -31,8 +33,9 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
     'c7829eb6a136c1aa36636da0c7e1e6dd3d03fb593d123e62f6381d5c0d9ae933',
   ],
   [
-    `${SEND_COMPOSITION_PATH}#runScheduledAccountOperation`,
-    'a6932a4ec4fa73ff4c0211e0899a67999aae43b3e1ec890f7a6d40ddbc2706bd',
+    `${SEND_SHARED_PATH}#runScheduledAccountOperation`,
+    // Same function body; the hash moved with the `export` keyword the send split added.
+    'fb0b7ed952c16bd9ae87ebf686300bafc987f3fcb75b748ab482a7be3fb7b494',
   ],
   [
     `${BACKGROUND_SYNC_PATH}#recoverAndDrainBackgroundSchedules`,
@@ -2821,7 +2824,7 @@ function reviewedScheduledOwnerErrors(sourceFiles) {
     [SEND_COMPOSITION_PATH, 'getDatabase', '@db/database'],
     [SEND_COMPOSITION_PATH, 'accountHttp', '../clients'],
     [SEND_COMPOSITION_PATH, 'captureRealtimeDeliveryLease', '../realtime/deliveryCoordinator'],
-    [SEND_COMPOSITION_PATH, 'runTrackedRealtimeWork', '../realtime/deliveryCoordinator'],
+    [SEND_SHARED_PATH, 'runTrackedRealtimeWork', '../realtime/deliveryCoordinator'],
     [SEND_COMPOSITION_PATH, 'captureSessionRcsCapabilityLease', './rcsAttemptCapability'],
     [BACKGROUND_SYNC_PATH, 'runTrackedRealtimeWork', '../realtime/deliveryCoordinator'],
     [BACKGROUND_SYNC_PATH, 'runBackgroundSync', './backgroundSyncOrchestrator'],
