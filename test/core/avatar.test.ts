@@ -1,9 +1,4 @@
-import {
-  AVATAR_PALETTE,
-  avatarColorFor,
-  avatarInitials,
-  avatarLetterSpec,
-} from '@core/avatar';
+import { AVATAR_PALETTE, avatarColorFor, avatarInitials, avatarLetterSpec } from '@core/avatar';
 
 describe('avatar letter rules', () => {
   it('takes the first letter of the first and last words, in any script', () => {
