@@ -12,8 +12,13 @@ import {
   scheduledReserveRunBodyHash,
   scheduledRunDueBodyHash,
   scheduledSendTextBodyHash,
+  scheduledCallFindings,
   scheduledCallFindingsFromSources,
+  scheduledCallSiteErrors,
+  scheduledCallSiteKey,
+  EXPECTED_SCHEDULED_CALL_SITES,
 } from './check-scheduled-recovery.mjs';
+import { scanDbWrites } from './check-db-writes.mjs';
 
 const schedulePath = 'src/services/send/scheduleService.ts';
 const sendPath = 'src/services/send/sendService.ts';
@@ -1158,6 +1163,15 @@ test('reads the scheduled/outgoing call graph from import bindings: calls, callb
       `,
     },
     {
+      path: 'src/db/repositories/outgoing.ts',
+      source: `
+        export async function insertOutgoingTextWithinTransaction(context, tx) { return 1; }
+        export async function insertOutgoingText(db) {
+          return withDbTransaction(db, async (tx, context) => insertOutgoingTextWithinTransaction(context, tx));
+        }
+      `,
+    },
+    {
       path: 'src/services/legacy/other.ts',
       source: `
         import { claimScheduled as broadClaim } from '../../db/repositories/scheduled';
@@ -1181,6 +1195,7 @@ test('reads the scheduled/outgoing call graph from import bindings: calls, callb
     'src/services/send/scheduleService.ts|runDueScheduled|mutator-call|claimDueScheduled',
     'src/services/send/sendService.ts|sendTextMessage|mutator-call|handoverScheduledTextToOutgoing',
     'src/services/send/sendService.ts|sendTextMessage.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+    'src/db/repositories/outgoing.ts|insertOutgoingText.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
     'src/services/legacy/other.ts|<module>|mutator-reference|handoverScheduledTextToOutgoing',
     'src/services/legacy/other.ts|<module>|mutator-reference|claimScheduled',
     'src/services/legacy/other.ts|useRepos|mutator-call|insertOutgoingText',
@@ -1195,4 +1210,48 @@ test('reads the scheduled/outgoing call graph from import bindings: calls, callb
     errors.some((e) => /broad claimScheduled helper.*found 1/.test(e)),
     errors.join('\n'),
   );
+});
+
+test('the reviewed call-site set fails on a missing owner and on an unreviewed caller', () => {
+  const live = scheduledCallFindings(process.cwd());
+  assert.deepEqual(scheduledCallSiteErrors(live), []);
+  const withoutHandoff = live.filter((f) => !f.target.endsWith('#handoverScheduledTextToOutgoing'));
+  assertErrors(
+    scheduledCallSiteErrors(withoutHandoff),
+    /missing: src\/services\/send\/sendService\.ts\|sendTextMessage\|mutator-call\|handoverScheduledTextToOutgoing/,
+  );
+  const extra = [
+    ...live,
+    {
+      path: 'src/services/send/newService.ts',
+      symbol: 'sendNew.<callback:0123456789>',
+      operation: 'mutator-call',
+      target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
+    },
+  ];
+  assertErrors(
+    scheduledCallSiteErrors(extra),
+    /unreviewed scheduled\/outgoing helper use: src\/services\/send\/newService\.ts\|sendNew\.<callback>/,
+  );
+});
+
+// Parity with the DB-write scanner while it still exists: the import-binding reader must report the
+// same production uses of the six helpers (callback fingerprints differ by construction and are
+// wildcarded). Delete this test together with the scanner.
+test('the import-binding reader matches the DB-write scanner for the six scheduled/outgoing helpers', () => {
+  const helpers = new Set(EXPECTED_SCHEDULED_CALL_SITES.map((key) => key.split('|')[3]));
+  const fromScanner = new Set(
+    scanDbWrites({ root: process.cwd() })
+      .filter(
+        (finding) =>
+          typeof finding.target === 'string' &&
+          helpers.has(finding.target.split('#')[1]) &&
+          /^mutator-(?:call|reference)$/.test(finding.operation) &&
+          !finding.path.startsWith('test/'),
+      )
+      .map(scheduledCallSiteKey),
+  );
+  const fromReader = new Set(scheduledCallFindings(process.cwd()).map(scheduledCallSiteKey));
+  assert.deepEqual([...fromReader].sort(), [...fromScanner].sort());
+  assert.ok(fromReader.size >= 11);
 });

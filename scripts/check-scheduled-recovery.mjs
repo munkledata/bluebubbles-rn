@@ -3060,6 +3060,10 @@ const SCHEDULED_CALL_TARGETS = new Map([
   ['insertOutgoingTextWithinTransaction', TRANSACTION_TEXT_INSERT_TARGET],
 ]);
 
+const SCHEDULED_CALL_NAME_PATTERN = new RegExp(
+  `\\b(?:${[...SCHEDULED_CALL_TARGETS.keys()].join('|')})\\b`,
+);
+
 function isRepositoriesSpecifier(specifier, importerPath) {
   if (/^@db\/repositories(?:\/|$)/.test(specifier)) return true;
   if (!specifier.startsWith('.')) return false;
@@ -3107,13 +3111,7 @@ function ownerSymbol(node, sourceFile) {
 export function scheduledCallFindingsFromSources(sources) {
   const findings = [];
   for (const { path, source } of sources) {
-    if (
-      !/\b(?:resetStuckScheduled|claimDueScheduled|claimScheduled|handoverScheduledTextToOutgoing|insertOutgoingText)\b/.test(
-        source,
-      )
-    ) {
-      continue;
-    }
+    if (!SCHEDULED_CALL_NAME_PATTERN.test(source)) continue;
     const sourceFile = ts.createSourceFile(
       path,
       source,
@@ -3123,6 +3121,11 @@ export function scheduledCallFindingsFromSources(sources) {
     );
     const bindings = new Map(); // local name → target
     const namespaces = new Set(); // `import * as ns` of the repositories
+    for (const [name, target] of SCHEDULED_CALL_TARGETS) {
+      // The defining module's own calls have no import binding (e.g. insertOutgoingText calling
+      // insertOutgoingTextWithinTransaction inside outgoing.ts).
+      if (target.startsWith(`${path}#`)) bindings.set(name, target);
+    }
     for (const statement of sourceFile.statements) {
       if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
         if (!isRepositoriesSpecifier(statement.moduleSpecifier.text, path)) continue;
@@ -3169,8 +3172,14 @@ export function scheduledCallFindingsFromSources(sources) {
           (ts.isPropertyAssignment(parent) && parent.name === node) ||
           ts.isImportSpecifier(parent) ||
           ts.isExportSpecifier(parent);
+        const isDeclarationName =
+          (ts.isFunctionDeclaration(parent) ||
+            ts.isVariableDeclaration(parent) ||
+            ts.isParameter(parent) ||
+            ts.isBindingElement(parent)) &&
+          parent.name === node;
         const target = bindings.get(node.text);
-        if (target && !isPropertyName) record(node, target);
+        if (target && !isPropertyName && !isDeclarationName) record(node, target);
       } else if (
         ts.isPropertyAccessExpression(node) &&
         ts.isIdentifier(node.expression) &&
@@ -3184,6 +3193,53 @@ export function scheduledCallFindingsFromSources(sources) {
     visit(sourceFile);
   }
   return findings;
+}
+
+/**
+ * The complete reviewed set of production uses of the six helpers (path | owner symbol with callback
+ * fingerprints wildcarded | call or reference | helper). A missing entry means the reader regressed
+ * or an owner was removed; an extra entry is an unreviewed caller. Both fail. Update this list only
+ * after reviewing the new or removed call site.
+ */
+export const EXPECTED_SCHEDULED_CALL_SITES = Object.freeze([
+  'src/db/repositories/outgoing.ts|insertOutgoingText.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+  'src/db/repositories/scheduled.ts|handoverScheduledTextToOutgoing.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+  'src/features/conversations/devSeed.ts|devSendFake.<callback>|mutator-call|insertOutgoingText',
+  'src/services/send/scheduleService.ts|recoverInterruptedScheduledRows|mutator-call|resetStuckScheduled',
+  'src/services/send/scheduleService.ts|runDueScheduled|mutator-call|claimDueScheduled',
+  'src/services/send/sendEffectService.ts|sendIMessageEffect.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+  'src/services/send/sendFormattedService.ts|sendIMessageFormatted.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+  'src/services/send/sendMentionService.ts|sendIMessageMention.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+  'src/services/send/sendService.ts|sendTextMessage.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+  'src/services/send/sendService.ts|sendTextMessage|mutator-call|handoverScheduledTextToOutgoing',
+  'src/services/send/sendSubjectService.ts|sendIMessageSubject.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+]);
+
+/** `path|symbol|operation|helper` with every callback fingerprint replaced by `<callback>`. */
+export function scheduledCallSiteKey(finding) {
+  return [
+    finding.path,
+    finding.symbol.replace(/<callback:[a-f0-9]+>/g, '<callback>'),
+    finding.operation,
+    finding.target.split('#')[1],
+  ].join('|');
+}
+
+export function scheduledCallSiteErrors(findings, expected = EXPECTED_SCHEDULED_CALL_SITES) {
+  const actual = new Set(findings.map(scheduledCallSiteKey));
+  const wanted = new Set(expected);
+  const errors = [];
+  for (const key of wanted) {
+    if (!actual.has(key)) {
+      errors.push(
+        `reviewed scheduled/outgoing helper use is missing: ${key} (reader regression or removed owner; review before editing EXPECTED_SCHEDULED_CALL_SITES)`,
+      );
+    }
+  }
+  for (const key of actual) {
+    if (!wanted.has(key)) errors.push(`unreviewed scheduled/outgoing helper use: ${key}`);
+  }
+  return errors;
 }
 
 export function scheduledCallFindings(root) {
@@ -3229,6 +3285,7 @@ export function runScheduledRecoveryCheck({ root = process.cwd() } = {}) {
       expectedBodyHash: REVIEWED_SEND_TEXT_BODY_HASH,
     }),
     ...scheduledRecoveryCallGraphErrors(findings),
+    ...scheduledCallSiteErrors(findings),
     ...scheduledRunnerUsageErrors(productionSources(root)),
   ];
   if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
