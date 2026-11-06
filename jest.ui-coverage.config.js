@@ -3,7 +3,8 @@ const { resolve } = require('node:path');
 const baseConfig = require('./jest.config');
 
 const uiRoot = resolve(__dirname, 'src/ui');
-// Ratchet floors beyond src/ui (review M004), set on 2026-10-16 one point below the measured value.
+// Ratchet floors beyond src/ui (review M004), set on 2026-10-16 and re-measured on 2026-11-06, each one
+// point below the measured value (measured: app 85.21/79.49/86.84/88.95, src/features 83.50/79.67/85.87/86.79).
 // Raise one when coverage improves; never lower one to let a change pass.
 //
 // src/core, db, services, state, utils and native are not gated yet. Files that both Jest projects
@@ -11,8 +12,8 @@ const uiRoot = resolve(__dirname, 'src/ui');
 // two runs of the same code gave src/native 71.8% and 67.9% statements, and 126 files different
 // statement totals. A floor there would make CI flaky until each file has one instrumentation.
 const directoryFloors = {
-  app: { statements: 81, branches: 75, functions: 83, lines: 85 },
-  'src/features': { statements: 80, branches: 73, functions: 83, lines: 84 },
+  app: { statements: 84, branches: 78, functions: 85, lines: 87 },
+  'src/features': { statements: 82, branches: 78, functions: 84, lines: 85 },
 };
 const criticalFileThreshold = {
   statements: 70,
@@ -36,10 +37,10 @@ module.exports = {
   coverageReporters: ['text', 'json-summary'],
   coverageThreshold: {
     [`${uiRoot}/`]: {
-      statements: 82,
-      branches: 76,
-      functions: 78,
-      lines: 84,
+      statements: 88,
+      branches: 83,
+      functions: 89,
+      lines: 91,
     },
     ...Object.fromEntries(
       Object.entries(directoryFloors).map(([directory, floor]) => [
