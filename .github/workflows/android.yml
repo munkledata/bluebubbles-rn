@@ -128,6 +128,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # D-3: ccache for the NDK/Hermes C++ build. CMake ≥ 3.17 reads CMAKE_<LANG>_COMPILER_LAUNCHER from
+      # the environment, so the generated Gradle project needs no edit. Each run saves its own
+      # cache (sha suffix) and restores the nearest one for the same lockfile and patches.
+      - name: Install ccache
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ccache
+
+      - name: Restore ccache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('package-lock.json', 'patches/*.patch') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ hashFiles('package-lock.json', 'patches/*.patch') }}-
+            ccache-${{ runner.os }}-
+
       - name: Clean Expo prebuild
         env:
           # Compile-only sentinel. Release builds require the restricted production key.
@@ -177,11 +192,25 @@ jobs:
 
       - name: Assemble debug APK
         working-directory: android
+        env:
+          CCACHE_DIR: /home/runner/.cache/ccache
+          CCACHE_MAXSIZE: 3G
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon
 
       - name: Bundle release AAB
         working-directory: android
+        env:
+          CCACHE_DIR: /home/runner/.cache/ccache
+          CCACHE_MAXSIZE: 3G
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
         run: ./gradlew :app:bundleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+
+      - name: ccache statistics
+        if: always()
+        run: ccache -s
 
       - name: Verify Android native path hygiene
         run: npm run check:android-native-paths
