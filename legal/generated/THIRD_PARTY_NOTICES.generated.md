@@ -39,7 +39,7 @@
 | `modules/gator-power` | 3 | `0619f15dc9e511160439b3cd8f183f4fcbfd4c329c880fafa4cdf98627ec8316` | unresolved |
 | `modules/gator-screen-security` | 5 | `442b19c3ed829f92255447c78e4b3c7501a793188b3d9e5913bc497fee19eaeb` | unresolved |
 | `modules/gator-share-intake` | 10 | `573ff6a31e63d35144254fdfdb6ff1723ce1f31b4df55c57a347b955ecbd8201` | unresolved |
-| `modules/gator-share-shortcuts` | 6 | `22f00c362e8888d226f1a3c9001b43dce3871214122ddf2de1e5f48c9a78c82c` | unresolved |
+| `modules/gator-share-shortcuts` | 8 | `812db4fb4b7a389d42606dbd34b20d0147d931bf2dbb62db0d81c11ff8eafafc` | unresolved |
 | `plugins/withArm64Only.js` | 1 | `7365aa0dc24051a64451abacbe4cbbd7d0dc00f80cad10bee60d84ef6aaa24c5` | unresolved |
 | `plugins/withGradleJvmMemory.js` | 1 | `787bf4b374439e3d3736d996c2fe0d04a65147c11b68e05b8002d06039ebb838` | unresolved |
 | `plugins/withNoWebSocketRedirects.js` | 1 | `f88271c524b03fa67d07d636fc1eda298c3f3de470c50af2a3df7dc9cf9932b6` | unresolved |

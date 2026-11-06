@@ -20549,8 +20549,8 @@
     {
       "path": "modules/gator-share-shortcuts",
       "provenanceStatus": "unresolved",
-      "files": 6,
-      "sha256": "22f00c362e8888d226f1a3c9001b43dce3871214122ddf2de1e5f48c9a78c82c",
+      "files": 8,
+      "sha256": "812db4fb4b7a389d42606dbd34b20d0147d931bf2dbb62db0d81c11ff8eafafc",
       "issue": null
     },
     {
