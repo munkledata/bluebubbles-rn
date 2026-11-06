@@ -9,7 +9,7 @@ import { Chat, ServerInfo } from '@core/models';
 import type { HttpClient } from '@core/api/http';
 import { getScheduledById, listAllScheduled, upsertChats, upsertHandles } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
+import type { AppDatabase, ReadDb, TestDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import { createTestDb } from '../support/testDb';
 
@@ -66,6 +66,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { claimScheduled, insertScheduled } from '../support/repositoryWrappers';
+import { seedChat } from '../support/chatFixtures';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -86,15 +87,6 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
     await Promise.resolve();
   }
   throw new Error('deferred operation did not reach its test seam');
-}
-
-async function seedChat(db: ReadDb): Promise<void> {
-  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
-  await upsertChats(
-    db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@b.com' }] })],
-    handles,
-  );
 }
 
 async function seedProvenImessageChat(db: ReadDb): Promise<void> {

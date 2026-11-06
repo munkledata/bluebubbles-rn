@@ -1,18 +1,18 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo } from '@core/models';
 import {
   claimFailedOutgoingForRetry,
   insertOutgoingText,
   OUTGOING_MAX_ATTEMPTS,
 } from '@db/repositories';
-import type { AppDatabase, TestDb } from '@db/types';
+import type { TestDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { sendIMessageSubject } from '@/services/send/sendSubjectService';
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
+import { fakeHttpPost as fakeHttp } from '../support/fakeHttp';
 
 const DIRECT = 'iMessage;-;+15551234567';
 const GROUP = 'any;+;chat-subject-1';
@@ -38,27 +38,6 @@ function capability(enabled = true) {
   return fixedRcsCapabilitySource(
     ServerInfo.parse({ version: 'test', supports_imessage_subject: enabled }),
   );
-}
-
-function fakeHttp(impl: (options: RequestOptions) => Promise<unknown>): {
-  http: HttpClient;
-  post: jest.Mock;
-} {
-  const post = jest.fn((_path: string, _schema: unknown, options: RequestOptions) => impl(options));
-  let http!: HttpClient;
-  http = {
-    post,
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    snapshotTransport: () => ({
-      origin: 'https://subject.test',
-      headers: {},
-      password: 'test',
-      transportRevision: 1,
-      buildUrl: (path: string) => `https://subject.test/api/v1${path}`,
-    }),
-  } as unknown as HttpClient;
-  return { http, post };
 }
 
 function one(raw: Database.Database, sql: string): Record<string, unknown> {

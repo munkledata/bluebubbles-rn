@@ -1,18 +1,18 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo, serverSendCapabilityKey } from '@core/models';
 import {
   claimFailedOutgoingForRetry,
   insertOutgoingText,
   OUTGOING_MAX_ATTEMPTS,
 } from '@db/repositories';
-import type { AppDatabase, TestDb } from '@db/types';
+import type { TestDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { sendIMessageFormatted } from '@/services/send/sendFormattedService';
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
+import { fakeHttpPost as fakeHttp } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;-;+15551234567';
 const TEXT = 'Hello world';
@@ -35,27 +35,6 @@ function capability(enabled = true) {
   return fixedRcsCapabilitySource(
     ServerInfo.parse({ version: 'test', supports_imessage_formatted_messages: enabled }),
   );
-}
-
-function fakeHttp(impl: (options: RequestOptions) => Promise<unknown>): {
-  http: HttpClient;
-  post: jest.Mock;
-} {
-  const post = jest.fn((_path: string, _schema: unknown, options: RequestOptions) => impl(options));
-  let http!: HttpClient;
-  http = {
-    post,
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    snapshotTransport: () => ({
-      origin: 'https://formatted.test',
-      headers: {},
-      password: 'test',
-      transportRevision: 1,
-      buildUrl: (path: string) => `https://formatted.test/api/v1${path}`,
-    }),
-  } as unknown as HttpClient;
-  return { http, post };
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {

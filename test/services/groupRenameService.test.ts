@@ -2,13 +2,14 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ServerInfo } from '@core/models';
-import type { AppDatabase, TestDb } from '@db/types';
+import type { TestDb } from '@db/types';
 import {
   fixedRcsCapabilitySource,
   type RcsCapabilityLease,
 } from '@/services/send/rcsAttemptCapability';
 import { renameExactIMessageGroup } from '@/services/groupRenameService';
 import { createTestDb } from '../support/testDb';
+import { fakeHttpPost } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;+;chat123456789';
 
@@ -34,21 +35,7 @@ function fakeHttp(impl: (options: RequestOptions) => Promise<unknown>): {
   http: HttpClient;
   post: jest.Mock;
 } {
-  const post = jest.fn((_path: string, _schema: unknown, options: RequestOptions) => impl(options));
-  let http!: HttpClient;
-  http = {
-    post,
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    snapshotTransport: () => ({
-      origin: 'https://rename.test',
-      headers: {},
-      password: 'test',
-      transportRevision: 1,
-      buildUrl: (path: string) => `https://rename.test/api/v1${path}`,
-    }),
-  } as unknown as HttpClient;
-  return { http, post };
+  return fakeHttpPost(impl, 'https://rename.test');
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {

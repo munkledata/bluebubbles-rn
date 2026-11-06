@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
 import {
@@ -11,7 +10,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import {
   sendIMessageReactionMessage,
   sendReactionMessage,
@@ -25,12 +24,8 @@ import {
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
+import { fakeHttpJsonClient as fakeHttp } from '../support/fakeHttp';
 
-function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
-  return {
-    post: (_p: string, _s: unknown, opts?: { json?: unknown }) => impl(opts?.json),
-  } as unknown as HttpClient;
-}
 const one = (raw: Database.Database, sql: string) =>
   raw.prepare(sql).get() as Record<string, unknown>;
 

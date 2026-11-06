@@ -5,7 +5,6 @@
  * the glyph so the cluster badge renders it before the echo.
  */
 import type Database from 'better-sqlite3';
-import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
 import {
@@ -14,15 +13,10 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 import { createTestDb } from '../support/testDb';
-
-function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
-  return {
-    post: (_p: string, _s: unknown, opts?: { json?: unknown }) => impl(opts?.json),
-  } as unknown as HttpClient;
-}
+import { fakeHttpJsonClient as fakeHttp } from '../support/fakeHttp';
 
 async function seed(db: ReadDb) {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);

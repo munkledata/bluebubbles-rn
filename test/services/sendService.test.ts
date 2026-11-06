@@ -12,7 +12,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import {
   captureSessionRcsCapabilityLease,
@@ -21,6 +21,8 @@ import {
 import { generateTempGuid, sendTextMessage } from '@/services/send/sendService';
 import { createTestDb } from '../support/testDb';
 import { claimScheduled, insertScheduled } from '../support/repositoryWrappers';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
+import { fakeHttpJsonClient as fakeHttp } from '../support/fakeHttp';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const rcsChatGuid = (sourceId: string): string =>
@@ -33,18 +35,6 @@ const currentRcsInfo = (extra: Record<string, unknown> = {}): ServerInfo =>
     rcs_provider_epoch: RCS_PROVIDER_EPOCH,
     ...extra,
   });
-
-/** Minimal fake HttpClient: only `post` is used (by sendText). */
-function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
-  let http!: HttpClient;
-  http = {
-    post: (_path: string, _schema: unknown, opts: { json?: unknown }) => impl(opts?.json),
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    assertTransportCurrent: () => undefined,
-  } as unknown as HttpClient;
-  return http;
-}
 
 function revisionPinnedHttp(options: {
   get?: () => Promise<unknown>;
@@ -79,12 +69,7 @@ function revisionPinnedHttp(options: {
 }
 
 async function seedChat(db: ReadDb, guid: string) {
-  const handles = await upsertHandles(db, [{ address: 'craig@apple.com' }]);
-  await upsertChats(
-    db,
-    [Chat.parse({ guid, participants: [{ address: 'craig@apple.com' }] })],
-    handles,
-  );
+  await seedChatFixture(db, guid, { participants: [{ address: 'craig@apple.com' }] });
 }
 
 async function seedProvenIMessageChat(db: ReadDb, guid: string) {

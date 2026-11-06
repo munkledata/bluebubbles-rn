@@ -1,14 +1,7 @@
 import type Database from 'better-sqlite3';
 import { sql } from 'drizzle-orm';
-import { Chat } from '@core/models';
 import { logger } from '@core/secure';
-import {
-  getChatIdByGuid,
-  insertOutgoingText,
-  reconcileEchoByContent,
-  upsertChats,
-  upsertHandles,
-} from '@db/repositories';
+import { insertOutgoingText, reconcileEchoByContent } from '@db/repositories';
 import {
   captureDbWriteFence,
   type DbTransactionContext,
@@ -18,19 +11,9 @@ import {
   withDbTransaction,
   withDbWriteLock,
 } from '@db/transaction';
-import type { AppDatabase, Queryable, ReadDb, TestDb, WriteDb } from '@db/types';
+import type { TestDb, WriteDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
-
-// withDbTransaction exists for ONE call site today: DbEventSink wraps
-// reconcileEchoByContent + upsertMessages so the queue-delete and the temp→real guid promote
-// commit atomically (a crash in the gap used to strand a queue-less unpromoted temp row — a
-// permanent duplicate bubble). These tests exercise that exact pair through the helper.
-
-async function seedChat(db: ReadDb, guid: string): Promise<number> {
-  const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], handles);
-  return (await getChatIdByGuid(db, guid))!;
-}
+import { seedChat } from '../support/chatFixtures';
 
 function count(raw: Database.Database, table: string, where: string, ...args: unknown[]): number {
   return (

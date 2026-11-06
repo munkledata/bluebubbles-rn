@@ -1,16 +1,12 @@
 import { sendEffect } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
+import type { HttpClient } from '@core/api/http';
 import { IMESSAGE_EFFECT_OPTIONS } from '@core/effects';
+import { fakeHttpResolving as fakeHttp } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;-;+15551234567';
 const TEMP_GUID = 'temp-effect-1';
 const SLAM = 'com.apple.MobileSMS.expressivesend.impact';
-
-function fakeHttp(result: unknown): { http: HttpClient; post: jest.Mock } {
-  const post = jest.fn<Promise<unknown>, [string, unknown, RequestOptions]>(async () => result);
-  return { http: { post } as unknown as HttpClient, post };
-}
 
 describe('message effect endpoint', () => {
   it('owns exactly the twelve reviewed IDs and POSTs the exact idempotent body once', async () => {

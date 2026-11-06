@@ -1,4 +1,4 @@
-import { Chat, Message } from '@core/models';
+import { Message } from '@core/models';
 import {
   getMessagePreviewByGuid,
   getVisibleAttachmentByGuid,
@@ -7,27 +7,20 @@ import {
   listChatImageAttachmentsByAttachmentGuid,
   listChatsForInbox,
   listMessagesWithSenders,
-  upsertChats,
-  upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { listMessageNotificationTruth } from '@/services/notifications/notificationRouting';
 import { interactiveMessageLabel } from '@utils';
 import { createTestDb } from '../support/testDb';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
 
 const HANDWRITING = 'com.apple.Handwriting.HandwritingProvider';
 const PHOTOS_APP =
   'com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.mobileslideshow.PhotosMessagesApp';
 
 async function seedChat(db: ReadDb): Promise<number> {
-  const handles = await upsertHandles(db, [{ address: 'a@example.com' }]);
-  const chats = await upsertChats(
-    db,
-    [Chat.parse({ guid: 'chat-balloon', participants: [{ address: 'a@example.com' }] })],
-    handles,
-  );
-  return chats.get('chat-balloon')!;
+  return seedChatFixture(db, 'chat-balloon', { participants: [{ address: 'a@example.com' }] });
 }
 
 describe('balloon bundle identity persistence', () => {

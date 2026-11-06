@@ -1,15 +1,15 @@
 import type Database from 'better-sqlite3';
 import type { HttpClient } from '@core/api/http';
-import { Chat, ServerInfo } from '@core/models';
+import { ServerInfo } from '@core/models';
 import {
   captureSessionRcsCapabilityLease,
   fixedRcsCapabilitySource,
 } from '@/services/send/rcsAttemptCapability';
 import { sendTextMessage } from '@/services/send/sendService';
-import { upsertChats, upsertHandles } from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
 import { createTestDb } from '../support/testDb';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
 
 const EPOCH_A = `gpe1_${'A'.repeat(43)}`;
 const EPOCH_B = `gpe1_${'B'.repeat(42)}A`;
@@ -38,9 +38,7 @@ function fakeHttp(post: jest.Mock): HttpClient {
 }
 
 async function seedChat(db: ReadDb, guid: string): Promise<void> {
-  const participants = [{ address: '+15550000001', service: 'RCS' }];
-  const handles = await upsertHandles(db, participants);
-  await upsertChats(db, [Chat.parse({ guid, participants })], handles);
+  await seedChatFixture(db, guid, { participants: [{ address: '+15550000001', service: 'RCS' }] });
 }
 
 function count(raw: Database.Database, table: 'messages' | 'outgoing_queue'): number {

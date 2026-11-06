@@ -1,18 +1,15 @@
 import type Database from 'better-sqlite3';
-import { Chat, Message } from '@core/models';
+import { Message } from '@core/models';
 import { EventRouter } from '@core/realtime';
 import { deliverRaw } from '../support/realtimeRouter';
 import {
-  getChatIdByGuid,
   insertOutgoingText,
   listAttachmentsByMessageIds,
   reconcileOutgoingAttachmentByContent,
   reconcileOutgoingSuccess,
-  upsertChats,
-  upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { createTestDb } from '../support/testDb';
 import {
@@ -21,17 +18,7 @@ import {
   markMessageSendError,
   markOutgoingSentNoGuid,
 } from '../support/repositoryWrappers';
-
-// Gator's `new-message` echo carries NO tempGuid (chat.db ROWID-watcher emission), so the
-// live echo of our own send is correlated to its optimistic `temp-…` row by CONTENT
-// (reconcileEchoByContent) and promoted in place. These tests lock that path against the
-// orphan / echo-race / no-guid-requeue bugs an adversarial review surfaced.
-
-async function seedChat(db: ReadDb, guid: string): Promise<number> {
-  const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], handles);
-  return (await getChatIdByGuid(db, guid))!;
-}
+import { seedChat } from '../support/chatFixtures';
 
 function count(raw: Database.Database, table: string, where: string, ...args: unknown[]): number {
   return (

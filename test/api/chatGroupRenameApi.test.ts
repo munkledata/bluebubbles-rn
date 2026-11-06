@@ -1,14 +1,10 @@
 import { renameIMessageGroup } from '@core/api/endpoints/chats';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient, RequestOptions } from '@core/api/http';
+import type { HttpClient } from '@core/api/http';
+import { fakeHttpResolving as fakeHttp } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;+;chat123456789';
 const TEMP_GUID = 'temp-rename1';
-
-function fakeHttp(result: unknown): { http: HttpClient; post: jest.Mock } {
-  const post = jest.fn<Promise<unknown>, [string, unknown, RequestOptions]>(async () => result);
-  return { http: { post } as unknown as HttpClient, post };
-}
 
 describe('iMessage group rename endpoint', () => {
   it('POSTs the exact idempotent body once and requires an exact success acknowledgement', async () => {

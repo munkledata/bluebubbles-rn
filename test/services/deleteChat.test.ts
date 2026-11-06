@@ -27,7 +27,6 @@
  * boundary, mirroring `markUnread.test.ts`.
  */
 import type Database from 'better-sqlite3';
-import { Chat } from '@core/models';
 import { logger } from '@core/secure';
 import {
   getAttachmentCacheEntry,
@@ -35,11 +34,9 @@ import {
   listChatsForInbox,
   listReminders,
   listScheduledByChat,
-  upsertChats,
-  upsertHandles,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
+import type { Queryable, ReadDb, TestDb } from '@db/types';
 import { deleteNativeAttachmentCacheFile } from '@native/boundedDownload';
 import { createTestDb } from '../support/testDb';
 
@@ -111,6 +108,7 @@ import {
   insertScheduled,
   recordAttachmentCacheEntry,
 } from '../support/repositoryWrappers';
+import { seedChat } from '../support/chatFixtures';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -118,11 +116,6 @@ function deferred<T>() {
     resolve = r;
   });
   return { promise, resolve };
-}
-
-async function seedChat(db: ReadDb, guid: string): Promise<void> {
-  const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
 }
 
 async function seedReminder(db: ReadDb, chatGuid: string, id: string): Promise<void> {

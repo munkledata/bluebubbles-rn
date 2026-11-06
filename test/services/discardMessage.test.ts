@@ -15,7 +15,6 @@
 import type Database from 'better-sqlite3';
 import { Chat, Message, ServerInfo } from '@core/models';
 import {
-  getChatIdByGuid,
   insertOutgoingText,
   listAttachmentsByMessageIds,
   listMessagesWithSenders,
@@ -63,18 +62,9 @@ import {
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
 import { deleteMessageLocal, insertOutgoingAttachment } from '../support/repositoryWrappers';
+import { seedChat } from '../support/chatFixtures';
 
 jest.setTimeout(120_000);
-
-async function seedChat(db: ReadDb): Promise<number> {
-  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
-  await upsertChats(
-    db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@b.com' }] })],
-    handles,
-  );
-  return (await getChatIdByGuid(db, 'c1'))!;
-}
 
 const count = (raw: Database.Database, where: string, ...args: unknown[]): number =>
   (raw.prepare(`SELECT COUNT(*) c FROM messages WHERE ${where}`).get(...args) as { c: number }).c;

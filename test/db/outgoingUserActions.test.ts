@@ -13,7 +13,6 @@
  * Everything below therefore asserts on what the WRITE matched, not on what a prior read saw.
  */
 import type Database from 'better-sqlite3';
-import { Chat } from '@core/models';
 import {
   cancelOutgoing,
   claimFailedOutgoingForRetry,
@@ -26,11 +25,9 @@ import {
   OUTGOING_MAX_ATTEMPTS,
   reconcileEchoByContent,
   reconcileOutgoingError,
-  upsertChats,
-  upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import {
   claimOutgoingForSend,
@@ -38,19 +35,10 @@ import {
   retireOutgoing,
 } from '../support/repositoryWrappers';
 import { nextEventLoopTurn } from '../support/async';
+import { seedChat } from '../support/chatFixtures';
 
 const OUTGOING_RETRY_LEASE_MS = 120_000;
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
-
-async function seedChat(db: ReadDb, guid: string): Promise<number> {
-  const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  const map = await upsertChats(
-    db,
-    [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })],
-    handles,
-  );
-  return map.get(guid)!;
-}
 
 function count(raw: Database.Database, table: string, where: string, ...args: unknown[]): number {
   return (

@@ -11,16 +11,10 @@
  * are real, and the HTTP client is a fake whose POSTs are recorded.
  */
 import type Database from 'better-sqlite3';
-import { Chat, Message } from '@core/models';
+import { Message } from '@core/models';
 import { logger } from '@core/secure';
-import {
-  getChatIdByGuid,
-  insertOutgoingText,
-  upsertChats,
-  upsertHandles,
-  upsertMessages,
-} from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import { insertOutgoingText, upsertHandles, upsertMessages } from '@db/repositories';
+import type { ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
@@ -54,19 +48,14 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { insertOutgoingContact } from '../support/repositoryWrappers';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
 
 type JsonBody = Record<string, unknown>;
 /** Every POST the retry made: `{ path, body }` (body = the request's `json` payload). */
 const posts: Array<{ path: string; body: JsonBody }> = [];
 
 async function seedChat(db: ReadDb): Promise<number> {
-  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
-  await upsertChats(
-    db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@b.com' }] })],
-    handles,
-  );
-  return (await getChatIdByGuid(db, 'c1'))!;
+  return seedChatFixture(db, 'c1', { participants: [{ address: 'a@b.com' }] });
 }
 
 async function seedExactTextTarget(

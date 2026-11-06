@@ -16,21 +16,20 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { Chat } from '@core/models';
 import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
   getScheduledById,
   insertOutgoingText,
   outgoingBackoffMs,
-  upsertChats,
-  upsertHandles,
 } from '@db/repositories';
-import type { AppDatabase, Queryable, ReadDb, TestDb } from '@db/types';
+import type { AppDatabase, Queryable, TestDb } from '@db/types';
 import { runDueScheduled } from '@/services/send/scheduleService';
 import { runOutgoingQueue, type OutgoingQueueIO } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
 import { insertScheduled } from '../support/repositoryWrappers';
+import { seedChat } from '../support/chatFixtures';
+import { fakeHttpJsonClient } from '../support/fakeHttp';
 
 const noHttp = {} as unknown as HttpClient;
 
@@ -48,18 +47,9 @@ function deferred<T>(): Deferred<T> {
 }
 
 function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
-  let http!: HttpClient;
-  http = {
-    get: async () => ({
-      private_api: true,
-      supports_message_part_topology: true,
-    }),
-    post: (_path: string, _schema: unknown, options: { json?: unknown }) => impl(options.json),
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    assertTransportCurrent: () => undefined,
-  } as unknown as HttpClient;
-  return http;
+  return fakeHttpJsonClient(impl, {
+    get: async () => ({ private_api: true, supports_message_part_topology: true }),
+  });
 }
 
 const noAttachmentIo: OutgoingQueueIO = {
@@ -68,11 +58,6 @@ const noAttachmentIo: OutgoingQueueIO = {
   },
   fileExists: async () => true,
 };
-
-async function seedChat(db: ReadDb, guid: string): Promise<void> {
-  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
-  await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@b.com' }] })], handles);
-}
 
 /** Run one synchronous edit after the due SELECT returns but before runDueScheduled can claim it. */
 function raceAfterDueSnapshot(db: Queryable, edit: () => void): TestDb {

@@ -1,10 +1,9 @@
-import { Chat } from '@core/models';
-import { upsertChats, upsertHandles } from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import type { ReadDb } from '@db/types';
 import { restoreBackup } from '@/services/backup/backup';
 import { buildV2Backup } from '../support/backupFixtures';
 import { createTestDb } from '../support/testDb';
 import { setChatCustomization } from '../support/repositoryWrappers';
+import { seedChat as seedChatFixture } from '../support/chatFixtures';
 
 const EPOCH_A = `gpe1_${'A'.repeat(43)}`;
 const EPOCH_B = `gpe1_${'B'.repeat(42)}A`;
@@ -13,19 +12,11 @@ const chatGuid = (epoch: string): string => `RCS;-;g1.${epoch}.${SOURCE_ID}`;
 const PARTICIPANTS = [{ address: '+15550000001', service: 'RCS' }];
 
 async function seedChat(db: ReadDb, guid: string): Promise<void> {
-  const handles = await upsertHandles(db, PARTICIPANTS);
-  await upsertChats(
-    db,
-    [
-      Chat.parse({
-        guid,
-        chatIdentifier: 'stable-conversation-a',
-        style: 45,
-        participants: PARTICIPANTS,
-      }),
-    ],
-    handles,
-  );
+  await seedChatFixture(db, guid, {
+    participants: PARTICIPANTS,
+    chatIdentifier: 'stable-conversation-a',
+    style: 45,
+  });
 }
 
 describe('RCS provider-epoch backup identity', () => {

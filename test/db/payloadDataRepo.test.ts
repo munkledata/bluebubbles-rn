@@ -4,15 +4,10 @@
  * parsePayloadData), and — like messageSummaryInfo — is COALESCE-preserved when a later
  * flagless re-upsert (delivery/read receipt) omits it.
  */
-import { Chat, Message, parsePayloadData } from '@core/models';
-import {
-  listMessagesWithSenders,
-  upsertChats,
-  upsertHandles,
-  upsertMessages,
-} from '@db/repositories';
-import type { Queryable, ReadDb } from '@db/types';
+import { Message, parsePayloadData } from '@core/models';
+import { listMessagesWithSenders, upsertMessages } from '@db/repositories';
 import { createTestDb } from '../support/testDb';
+import { seedChat } from '../support/chatFixtures';
 
 const PAYLOAD = {
   urlData: [
@@ -29,16 +24,6 @@ const PAYLOAD = {
     },
   ],
 };
-
-async function seedChat(db: ReadDb): Promise<number> {
-  const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  const map = await upsertChats(
-    db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@x.com' }] })],
-    hm,
-  );
-  return map.get('c1')!;
-}
 
 describe('payloadData persistence (rich-link previews)', () => {
   it('round-trips the JSON blob through write → read', async () => {

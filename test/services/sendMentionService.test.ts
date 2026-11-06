@@ -7,7 +7,7 @@ import {
   insertOutgoingText,
   OUTGOING_MAX_ATTEMPTS,
 } from '@db/repositories';
-import type { AppDatabase, TestDb } from '@db/types';
+import type { TestDb } from '@db/types';
 import { ClientErrorCode } from '@utils';
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import {
@@ -16,6 +16,7 @@ import {
 } from '@/services/send/rcsAttemptCapability';
 import { sendIMessageMention } from '@/services/send/sendMentionService';
 import { createTestDb } from '../support/testDb';
+import { fakeHttpPost } from '../support/fakeHttp';
 
 const CHAT_GUID = 'iMessage;+;chat-mention-service';
 /** How macOS 26+ stores the same group; bbd takes it only while its FP-006 gate is open. */
@@ -51,21 +52,7 @@ function fakeHttp(impl: (options: RequestOptions) => Promise<unknown>): {
   http: HttpClient;
   post: jest.Mock;
 } {
-  const post = jest.fn((_path: string, _schema: unknown, options: RequestOptions) => impl(options));
-  let http!: HttpClient;
-  http = {
-    post,
-    pinTransport: () => http,
-    isTransportCurrent: () => true,
-    snapshotTransport: () => ({
-      origin: 'https://mention.test',
-      headers: {},
-      password: 'test',
-      transportRevision: 1,
-      buildUrl: (path: string) => `https://mention.test/api/v1${path}`,
-    }),
-  } as unknown as HttpClient;
-  return { http, post };
+  return fakeHttpPost(impl, 'https://mention.test');
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { Chat, Message } from '@core/models';
+import { Message } from '@core/models';
 import {
   cancelOutgoing,
   insertOutgoingText,
@@ -7,23 +7,11 @@ import {
   reconcileEchoByContent,
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
-  upsertChats,
-  upsertHandles,
   upsertMessages,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
-import type { Queryable, ReadDb } from '@db/types';
 import { createTestDb } from '../support/testDb';
-
-async function seedChat(db: ReadDb, guid: string): Promise<number> {
-  const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
-  const map = await upsertChats(
-    db,
-    [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })],
-    handles,
-  );
-  return map.get(guid)!;
-}
+import { seedChat } from '../support/chatFixtures';
 
 function count(raw: Database.Database, table: string, where: string, ...args: unknown[]): number {
   return (
