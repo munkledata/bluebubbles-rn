@@ -24,6 +24,7 @@
     "benchmark:inbox": "GATOR_INBOX_BENCHMARK=1 node --expose-gc node_modules/jest/bin/jest.js --selectProjects node --runInBand --no-cache --runTestsByPath test/performance/inboxBenchmark.test.ts",
     "coverage:ui": "jest --config jest.ui-coverage.config.js --coverage",
     "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.test-all.json",
     "lint": "eslint src app",
     "check:toolchain": "node --test scripts/check-toolchain.test.mjs scripts/release-android.test.mjs && node scripts/check-toolchain.mjs",
     "check:architecture": "node --test scripts/check-core-boundaries.test.mjs scripts/check-scheduled-recovery.test.mjs && node scripts/check-core-boundaries.mjs && node scripts/check-scheduled-recovery.mjs",

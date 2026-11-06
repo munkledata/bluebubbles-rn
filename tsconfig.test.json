@@ -3,7 +3,9 @@
   "compilerOptions": {
     "module": "commonjs",
     "moduleResolution": "node",
-    "isolatedModules": false,
+    "ignoreDeprecations": "6.0",
+    "rootDir": ".",
+    "isolatedModules": true,
     "jsx": "react-jsx",
     "types": ["node", "jest"],
     "noEmit": true
