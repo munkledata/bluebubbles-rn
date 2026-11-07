@@ -49,12 +49,28 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.76` / version code `99` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.77` / version code `100` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-07 — not a checklist rebind:** **`0.1.76` / code `99`** was built
+**Latest live artifact, 2026-11-07 — not a checklist rebind:** **`0.1.77` / code `100`** was built
+from source `8faf32ea26c5d95fae7d290bd3010f41be92d72f` (0.1.76 plus Expo SDK 58.0.23 / React Native 0.88.1 /
+RNFB 27.1.0 / Jest 30 with R8 still off, several iMessage pictures sent as one message, the RCS catch-up
+after a server restart, the dormant RCS identity re-read behind `rcs_identity_version` 2, the BB2 backup
+tamper tests and two-worker UI coverage; CI run `42344435717` green and branch Android run `42341057310`
+green on the same commit) and promoted as release commit `73c30e84b71f33bddf10e5a38f0f72e32cecce11` on
+local branch `release/android-0.1.77`. Run `android-0.1.77-8faf32e-20261107061316` produced
+`gator-release-0.1.77-v100-73c30e8.aab`, **51,737,410 bytes**, SHA-256
+`47e1ff49efd82c5e10e520f1563b12068267abdacb7187f13658064ad6bcde73`. The owner asked for this release directly
+on 2026-11-07 ("yes" to building 0.1.77 with SDK 58); the agent submitted with `--execute --confirm` and the
+exact phrase `SUBMIT 0.1.77 v100 47e1ff49efd8 TO PLAY INTERNAL` (completed about 06:24Z); the Maps key came
+from the login Keychain. Android Publisher readback confirms Internal release `0.1.77`, code `100`,
+`completed`. Device proof is owed per `~/github/BB/gator-sdk58-device-checks-2026-11-07.md` (21 checks),
+including the several-picture send. No task status or frozen v77 checklist row is changed by this Internal
+release.
+
+**Historical v99 artifact, 2026-11-07:** **`0.1.76` / code `99`** was built
 from source `cc1b2deb36694cfab1cfcf61a1b772f68a60d669` (0.1.75 plus the macOS 27 round-5a group work, tapback
 notifications, video posters, storage analyzer, backup v5, Live Photos (dormant until the server ships
 `supports_live_photo`), the architecture-review fixes, migration `0061`, the ReadDb/WriteDb handle split,
