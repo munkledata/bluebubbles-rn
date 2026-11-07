@@ -42,6 +42,7 @@ import {
   extractRuntimeConcurrencyMarkers,
   extractWalWriteDeathMarkers,
   isMissingProcessResult,
+  launchUntilAccepted,
   LAUNCH_APP_ADB_ARGS,
   logsAfterRelaunchBoundary,
   MIGRATION_RELAUNCH_PRIVATE_TEST_FILES,
@@ -80,6 +81,7 @@ import {
   walFileGrewBeyondHeader,
   waitForMarkerCount,
   waitForNoProcess,
+  waitForActivityRelease,
   waitForProcess,
 } from './run-android-db-relaunch.mjs';
 import { APP_ACTIVITY, APP_PACKAGE, HarnessError } from './run-android-db-contract.mjs';
@@ -1415,6 +1417,7 @@ test('crashes exact process A only after WAL growth, then proves process B and p
       calls.push(`crash-${pid}`);
       identity = undefined;
     },
+    awaitActivityRelease: async () => calls.push('activity-released'),
     readLogs: async () => {
       calls.push(`logs-${String(launchCount)}`);
       return launchCount === 1
@@ -1446,6 +1449,7 @@ test('crashes exact process A only after WAL growth, then proves process B and p
     'logs-1',
     'wal-grown',
     'crash-101',
+    'activity-released',
     'launch-2',
     'logs-2',
     'private-state-clean',
@@ -1536,6 +1540,7 @@ test('checks active-migration WAL before and after exact process A crash, then b
       calls.push(`crash-${pid}`);
       identity = undefined;
     },
+    awaitActivityRelease: async () => calls.push('activity-released'),
     proveWalPresentAfterCrash: async () => {
       calls.push('wal-after-crash');
       assert.equal(identity, undefined);
@@ -1574,6 +1579,7 @@ test('checks active-migration WAL before and after exact process A crash, then b
     'wal-before-crash',
     'crash-101',
     'wal-after-crash',
+    'activity-released',
     'launch-2',
     'logs-2',
     'private-state-clean',
@@ -2552,4 +2558,91 @@ test('failures outside the process and marker waits carry no diagnostics', async
       error.diagnostics === undefined,
   );
   assert.equal(collected, false);
+});
+
+// DB-03 fix: relaunch after kill -9 only once the activity manager released the dead activity, and
+// relaunch an `am start` whose answer says the intent was swallowed.
+test('relaunches only while am start reports a swallowed intent, within a bound', async () => {
+  const sleeps = [];
+  const sleep = async (ms) => void sleeps.push(ms);
+  const missing = { sleep, isProcessMissing: async () => true };
+  const answers = (list) => {
+    const queue = [...list];
+    return async () => queue.shift();
+  };
+
+  assert.deepEqual(await launchUntilAccepted(answers(['started']), missing), ['started']);
+  assert.deepEqual(sleeps, []);
+
+  assert.deepEqual(
+    await launchUntilAccepted(answers(['delivered-to-top-instance', 'started']), {
+      ...missing,
+      delayMs: 7,
+    }),
+    ['delivered-to-top-instance', 'started'],
+  );
+  assert.deepEqual(sleeps, [7]);
+
+  sleeps.length = 0;
+  const swallowed = Array(4).fill('task-brought-to-front');
+  assert.deepEqual(await launchUntilAccepted(answers(swallowed), { ...missing, attempts: 3 }), [
+    'task-brought-to-front',
+    'task-brought-to-front',
+    'task-brought-to-front',
+  ]);
+  assert.equal(sleeps.length, 2, 'no sleep after the last attempt');
+
+  // Only a swallowed intent is retried; an error or an unknown answer is left to the process wait.
+  for (const answer of ['error', 'warning', 'unrecognized']) {
+    assert.deepEqual(await launchUntilAccepted(answers([answer, 'started']), missing), [answer]);
+  }
+
+  // A live process after the pause means the intent reached a real instance or Android restarted
+  // the app; a second delivery could restart its JavaScript, so there is no retry.
+  let checks = 0;
+  assert.deepEqual(
+    await launchUntilAccepted(answers(['delivered-to-top-instance', 'started']), {
+      sleep,
+      isProcessMissing: async () => ((checks += 1), false),
+    }),
+    ['delivered-to-top-instance'],
+  );
+  assert.equal(checks, 1);
+  await assert.rejects(launchUntilAccepted(answers(['started'])), TypeError);
+});
+
+test('waits for the dead activity to be released, bounded, and treats unreadable state as held', async () => {
+  let clock = 0;
+  const timing = { now: () => clock, sleep: async (ms) => void (clock += ms), pollMs: 100 };
+  const tops = (list) => {
+    const queue = [...list];
+    return async () => (queue.length > 1 ? queue.shift() : queue[0]);
+  };
+
+  assert.equal(
+    await waitForActivityRelease(
+      tops([
+        'com.bluegreengatorapps.messages/.MainActivity',
+        undefined,
+        'com.google.android.apps.nexuslauncher/.NexusLauncherActivity',
+      ]),
+      { ...timing, timeoutMs: 1_000 },
+    ),
+    true,
+  );
+  assert.equal(clock, 200);
+
+  clock = 0;
+  assert.equal(await waitForActivityRelease(tops(['none']), { ...timing, timeoutMs: 1_000 }), true);
+  assert.equal(clock, 0);
+
+  clock = 0;
+  assert.equal(
+    await waitForActivityRelease(tops(['com.bluegreengatorapps.messages/.MainActivity']), {
+      ...timing,
+      timeoutMs: 1_000,
+    }),
+    false,
+  );
+  assert.ok(clock > 1_000, 'stops at the bound instead of waiting forever');
 });

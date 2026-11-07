@@ -6612,9 +6612,10 @@ Task status, dependencies, acceptance, blockers, and evidence remain authoritati
   The relaunch lane ends process A with a synchronous `am force-stop` instead, which fits it never failing this way.
   Both wait changes lengthened the wait after a launch, which cannot help once the launch itself was swallowed. An
   earlier version of this note inferred from lane duration that process A was missing; process A reaches READY within
-  seconds, so duration cannot tell A from B, and the diagnostics show B. Proposed next step, not yet made: before the
-  post-crash launch, wait until the activity manager no longer reports Gator's activity as resumed, and retry a launch
-  that reports a delivered-to-top-instance answer.
+  seconds, so duration cannot tell A from B, and the diagnostics show B. The fix (owner OK 2026-11-07): before the
+  post-crash launch of both crash lanes, wait (at most 10 s) until the activity manager no longer reports Gator's
+  activity as resumed, and relaunch, at most five times 500 ms apart, an `am start` whose answer says the intent was
+  swallowed while no app process exists. It still needs repeated green CI lanes before this item can close.
 
   `DB-03` remains open for recurring scheduled-CI stability, power-loss/torn-write recovery, spontaneous
   or uncontrolled OS death, statement-in-flight migration interruption, the production database, actual historical

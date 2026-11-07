@@ -485,6 +485,17 @@ const DIAGNOSED_FAILURE_CODES = Object.freeze([
 ]);
 const EXIT_INFO_LIMIT = 5;
 const EXIT_LABEL_PATTERN = /^[A-Z0-9 _()]{1,48}$/;
+// DB-03 fix: after `kill -9`, pidof empties at once but the activity manager handles the death
+// asynchronously; an `am start` inside that window is "delivered to currently running top-most
+// instance" (the dead activity) and starts nothing (CI run 42314773636). Wait for the activity to be
+// released, and relaunch an `am start` whose answer says the intent was swallowed.
+const ACTIVITY_RELEASE_TIMEOUT_MS = 10_000;
+const LAUNCH_ATTEMPTS = 5;
+const LAUNCH_RETRY_DELAY_MS = 500;
+const SWALLOWED_LAUNCH_OUTCOMES = Object.freeze([
+  'delivered-to-top-instance',
+  'task-brought-to-front',
+]);
 /** Classified `am start` answers of this harness process, in launch order. */
 const launchOutcomes = [];
 const MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -1779,6 +1790,56 @@ async function attachFailureDiagnostics(error, collect) {
   }
 }
 
+/**
+ * Launches until `am start` stops reporting a swallowed intent, at most `attempts` times. Returns
+ * every classified answer; a launch that is never accepted is left for the process wait (and its
+ * diagnostics) to report. A swallowed intent is retried only while no app process exists: a live
+ * process means the intent reached a real instance or Android restarted the app itself, and a second
+ * delivery of the development URL could restart its JavaScript.
+ */
+export async function launchUntilAccepted(launchOnce, options = {}) {
+  const {
+    attempts = LAUNCH_ATTEMPTS,
+    delayMs = LAUNCH_RETRY_DELAY_MS,
+    sleep = delay,
+    isProcessMissing,
+  } = options;
+  if (typeof isProcessMissing !== 'function') {
+    throw new TypeError('launchUntilAccepted needs an isProcessMissing check');
+  }
+  const outcomes = [];
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const outcome = await launchOnce();
+    outcomes.push(outcome);
+    if (!SWALLOWED_LAUNCH_OUTCOMES.includes(outcome) || attempt === attempts) break;
+    await sleep(delayMs);
+    if (!(await isProcessMissing())) break;
+  }
+  return outcomes;
+}
+
+/**
+ * Waits until the top resumed activity no longer belongs to `appPackage`. Returns true once
+ * released, false at the bound; a false result is not an error here, since the launch retry and
+ * the process wait still decide the lane.
+ */
+export async function waitForActivityRelease(readTopActivity, options = {}) {
+  const {
+    appPackage = APP_PACKAGE,
+    timeoutMs = ACTIVITY_RELEASE_TIMEOUT_MS,
+    pollMs = POLL_MS,
+    now = Date.now,
+    sleep = delay,
+  } = options;
+  const deadline = now() + timeoutMs;
+  while (now() <= deadline) {
+    const top = await readTopActivity();
+    if (typeof top === 'string' && !top.startsWith(`${appPackage}/`)) return true;
+    await sleep(pollMs);
+  }
+  return false;
+}
+
 /** Dependency-injected lifecycle proof; host unit tests never need adb or an Android device. */
 export async function executeRelaunchSequence(operations, timing = {}) {
   const { resetTestState, createRequest, launchApp, stopApp, readLogs, getProcessIdentity } =
@@ -1944,6 +2005,7 @@ export async function executeWalWriteDeathSequence(operations, timing = {}) {
 
     await crashApp(processA.pid);
     await waitForNoProcess(getProcessIdentity, timing);
+    await operations.awaitActivityRelease?.();
     await launchApp();
     const processB = await waitForProcess(getProcessIdentity, { ...timing, phase: 'B' });
     if (processB.pid === processA.pid) {
@@ -2060,6 +2122,7 @@ export async function executeActiveMigrationDeathSequence(operations, timing = {
         'The uncommitted migration WAL was not present after the no-process gap.',
       );
     }
+    await operations.awaitActivityRelease?.();
     await launchApp();
     const processB = await waitForProcess(getProcessIdentity, { ...timing, phase: 'B' });
     if (processB.pid === processA.pid) {
@@ -2692,14 +2755,38 @@ function currentProcessIdentity(serial) {
   return { pid, ...(startTicks ? { startTicks } : {}) };
 }
 
-function launchApp(serial) {
-  const output = runAdb(serial, LAUNCH_APP_ADB_ARGS, {
-    code: 'app-launch-failed',
-    label: 'Gator DEV launch',
-    timeoutMs: LAUNCH_TIMEOUT_MS,
-    includeStderr: true,
-  });
-  launchOutcomes.push(classifyActivityStartOutput(output));
+async function launchApp(serial) {
+  const outcomes = await launchUntilAccepted(
+    () => {
+      const output = runAdb(serial, LAUNCH_APP_ADB_ARGS, {
+        code: 'app-launch-failed',
+        label: 'Gator DEV launch',
+        timeoutMs: LAUNCH_TIMEOUT_MS,
+        includeStderr: true,
+      });
+      return classifyActivityStartOutput(output);
+    },
+    {
+      isProcessMissing: () =>
+        countProcessIds(
+          runAdb(serial, ['shell', 'pidof', APP_PACKAGE], {
+            code: 'process-lookup-failed',
+            label: 'Gator process lookup',
+            allowMissingProcess: true,
+          }),
+        ) === 0,
+    },
+  );
+  launchOutcomes.push(outcomes.join(' then '));
+}
+
+function readTopResumedActivity(serial) {
+  return parseTopResumedActivity(
+    runAdb(serial, ['shell', 'dumpsys', 'activity', 'activities'], {
+      code: 'activity-state-unavailable',
+      label: 'Top resumed activity',
+    }),
+  );
 }
 
 function collectProcessDiagnostics(serial) {
@@ -2953,6 +3040,14 @@ export async function runAndroidDbWalWriteDeath() {
       }),
     launchApp: () => launchApp(serial),
     crashApp: (pid) => crashApp(serial, pid),
+    awaitActivityRelease: () =>
+      waitForActivityRelease(() => {
+        try {
+          return readTopResumedActivity(serial);
+        } catch {
+          return undefined; // An unreadable state counts as not yet released; the wait is bounded.
+        }
+      }),
     proveWalGrew: () => proveWalFileGrew(serial),
     verifyPrivateStateClean: () =>
       privateTestStateClean(serial, WAL_WRITE_DEATH_PRIVATE_TEST_FILES),
@@ -3038,6 +3133,14 @@ export async function runAndroidDbActiveMigrationDeath() {
       }),
     launchApp: () => launchApp(serial),
     crashApp: (pid) => crashApp(serial, pid),
+    awaitActivityRelease: () =>
+      waitForActivityRelease(() => {
+        try {
+          return readTopResumedActivity(serial);
+        } catch {
+          return undefined; // An unreadable state counts as not yet released; the wait is bounded.
+        }
+      }),
     proveWalGrewBeforeCrash: proveActiveMigrationWal,
     proveWalPresentAfterCrash: proveActiveMigrationWal,
     verifyPrivateStateClean: () =>
