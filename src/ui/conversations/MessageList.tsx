@@ -308,9 +308,12 @@ export function MessageList({
   const rowCountRef = useRef(rows.length);
   rowCountRef.current = rows.length;
   const focusEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Until this time, content growth re-lands a newest-row search jump at the end (see below).
+  const focusFollowEndUntil = useRef(0);
   useEffect(() => {
     if (!focusReady || focusedRef.current === focusKey) return;
     focusedRef.current = focusKey;
+    focusFollowEndUntil.current = 0;
     setHighlightGuid(focusedMessageGuid ?? null);
     if (highlightTimer.current) clearTimeout(highlightTimer.current);
     highlightTimer.current = setTimeout(() => setHighlightGuid(null), 3000);
@@ -333,8 +336,17 @@ export function MessageList({
       // footer spacer was ignored the same way, and a follow-up scrollToEnd reached the true end
       // and cleared the button). Only the newest two rows need it, so an older match keeps its
       // centered position.
+      //
+      // One scrollToEnd is not enough when pictures above the match are still sizing: it lands at
+      // the end of the list as it is THEN, and the rows that grow afterwards push the match back off
+      // screen (0.1.76 on the S25; the probe with pictures growing at 700/900 ms reproduced it, and
+      // following each content-size change fixed it). So for a short settle window, every
+      // content-size change re-lands at the end, the same convergence the pinned mode uses. It is
+      // bounded and a finger drag ends it, because an anchored session never unpins: an open-ended
+      // follow would yank a reader who scrolled up back to the bottom whenever a row grew.
       if (index >= rowCountRef.current - 2) {
         focusEndTimer.current = setTimeout(() => {
+          focusFollowEndUntil.current = Date.now() + FOCUS_END_FOLLOW_MS;
           listRef.current?.scrollToEnd({ animated: false });
         }, 50);
       }
@@ -373,6 +385,8 @@ export function MessageList({
   // A finger-down drag is the only signal that can lead to an unpin — programmatic scrolls and
   // FlashList's own autoscroll never emit it, so a short-landing scrollToEnd can't self-unpin.
   const onScrollBeginDrag = useCallback((): void => {
+    // The reader took over: a search jump's settle follow must not pull them back.
+    focusFollowEndUntil.current = 0;
     if (!focusReadyRef.current) applyPin(pinOnDragStart(pinRef.current));
   }, [applyPin]);
   // Momentum end closes the drag session. Android fires momentum for ANIMATED programmatic
@@ -387,7 +401,9 @@ export function MessageList({
   // popping in, an image box) re-lands the list at the bottom. Native scrollToEnd recomputes
   // from the CURRENT content height, so repeated calls converge where one-shots landed short.
   const onContentSizeChange = useCallback((): void => {
-    if (pinRef.current.pinned) listRef.current?.scrollToEnd({ animated: false });
+    if (pinRef.current.pinned || Date.now() < focusFollowEndUntil.current) {
+      listRef.current?.scrollToEnd({ animated: false });
+    }
   }, []);
 
   // The list's viewport RESIZES from the bottom — keyboard open/close (the chat screen's
@@ -637,6 +653,13 @@ export function MessageList({
 
 /** Room under the newest message for the 40px jump button (at bottom 16) plus a small gap. */
 const FAB_CLEARANCE = 48;
+/**
+ * How long a newest-row search jump keeps re-landing at the end while rows above it finish
+ * sizing. The probe's pictures settled by 900 ms, but a picture still downloading takes longer, so
+ * this is generous; a finger drag ends the follow at once, which is what keeps a reader from being
+ * pulled back down. Device timing is not measured.
+ */
+const FOCUS_END_FOLLOW_MS = 10_000;
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },

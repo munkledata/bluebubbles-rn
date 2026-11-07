@@ -18,6 +18,8 @@ import React from 'react';
 // `mock`-prefixed so jest's hoisted factory may reference them (temporal-dead-zone rule).
 const mockScrollToIndex = jest.fn();
 const mockScrollToEnd = jest.fn();
+// The latest props FlashList received, so a test can fire its layout and drag callbacks.
+const mockListProps: { current: Record<string, unknown> } = { current: {} };
 
 jest.mock('@shopify/flash-list', () => {
   const ReactLib = require('react');
@@ -31,6 +33,7 @@ jest.mock('@shopify/flash-list', () => {
     },
     ref: unknown,
   ) {
+    mockListProps.current = props as Record<string, unknown>;
     ReactLib.useImperativeHandle(ref, () => ({
       scrollToEnd: mockScrollToEnd,
       scrollToIndex: mockScrollToIndex,
@@ -264,6 +267,77 @@ describe('MessageList — anchored focus scroll', () => {
     await act(async () => {
       jest.advanceTimersByTime(END_FOLLOW_UP_MS);
     });
+    expect(mockScrollToEnd).not.toHaveBeenCalled();
+  });
+
+  // One scrollToEnd lands at the end of the list as it is THEN; pictures above the match that
+  // finish sizing afterwards pushed it back off screen (0.1.76, S25; reproduced in the probe with
+  // pictures growing at 700/900 ms). For a short settle window, content growth re-lands at the end.
+  const FOLLOW_MS = 10_000;
+  const growContent = async (): Promise<void> => {
+    await act(async () => {
+      (mockListProps.current.onContentSizeChange as (w: number, h: number) => void)(400, 3_000);
+    });
+  };
+  const renderNewestJump = async (): Promise<void> => {
+    await renderWithTheme(
+      <MessageList
+        chatGuid={GUID}
+        isGroup={false}
+        messages={STALE}
+        focusGuid="e"
+        onExitAnchor={onExitAnchor}
+      />,
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(NUDGE_MS + END_FOLLOW_UP_MS);
+    });
+    expect(mockScrollToEnd).toHaveBeenCalledTimes(1);
+  };
+
+  it('re-lands a newest-row match at the end while rows above it finish sizing', async () => {
+    await renderNewestJump();
+    await growContent();
+    await act(async () => {
+      jest.advanceTimersByTime(900);
+    });
+    await growContent();
+    expect(mockScrollToEnd).toHaveBeenCalledTimes(3);
+    expect(mockScrollToEnd).toHaveBeenLastCalledWith({ animated: false });
+  });
+
+  it('stops following once the settle window ends', async () => {
+    await renderNewestJump();
+    await act(async () => {
+      jest.advanceTimersByTime(FOLLOW_MS + 1);
+    });
+    await growContent();
+    expect(mockScrollToEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops following the moment the reader drags', async () => {
+    await renderNewestJump();
+    await act(async () => {
+      (mockListProps.current.onScrollBeginDrag as () => void)();
+    });
+    await growContent();
+    expect(mockScrollToEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it('never follows the end for an older, centered match', async () => {
+    await renderWithTheme(
+      <MessageList
+        chatGuid={GUID}
+        isGroup={false}
+        messages={ANCHORED}
+        focusGuid="a"
+        onExitAnchor={onExitAnchor}
+      />,
+    );
+    await act(async () => {
+      jest.advanceTimersByTime(NUDGE_MS + END_FOLLOW_UP_MS);
+    });
+    await growContent();
     expect(mockScrollToEnd).not.toHaveBeenCalled();
   });
 });
