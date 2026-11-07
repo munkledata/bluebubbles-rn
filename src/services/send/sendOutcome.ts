@@ -192,6 +192,8 @@ const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<s
   ]),
   503: new Set([
     'idempotency_persistence_unavailable',
+    // The upload deadline: the server stopped reading the body, so the helper never saw the file.
+    'upload_timeout',
     'imessage_contact_unavailable',
     'imessage_reply_unavailable',
     'staging_check_failed',
@@ -336,8 +338,11 @@ export async function handleSendFailure(
   // Local-file, cancellation, and client-side timeout failures have no HTTP status, so
   // `sendErrorCode` would call all three a connection refusal. Name them for what they are instead.
   const kind = err instanceof ApiError ? err.kind : null;
-  const code =
-    kind === 'local_file'
+  const uploadTooSlow =
+    err instanceof ApiError && err.status === 503 && err.serverErrorType === 'upload_timeout';
+  const code = uploadTooSlow
+    ? ClientErrorCode.uploadTooSlow
+    : kind === 'local_file'
       ? ClientErrorCode.attachmentUnreadable
       : kind === 'cancelled'
         ? // Cancel Sending removes the bubble, so a cancellation recorded here is a connection or

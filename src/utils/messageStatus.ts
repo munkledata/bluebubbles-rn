@@ -46,6 +46,8 @@ export const ClientErrorCode = {
   cannotBeSent: 10021,
   /** The connection or server configuration changed while sending; the owner did not cancel. */
   sendInterrupted: 10022,
+  /** The server stopped a large upload at its deadline; nothing was sent, and a retry is safe. */
+  uploadTooSlow: 10023,
 } as const;
 
 /** One-shot sends that may have reached Messages: never "not delivered", never retried. */
@@ -85,6 +87,7 @@ const CLIENT_ERROR_TITLES: Record<number, string> = {
   [ClientErrorCode.clientError]: 'Client Error',
   [ClientErrorCode.badGateway]: 'Bad Gateway',
   [ClientErrorCode.gatewayTimeout]: 'Network Timed Out',
+  [ClientErrorCode.uploadTooSlow]: 'Upload Took Too Long',
   // No HTTP answer at all (fetch threw, aborted, DNS): the phone never reached the server, so the
   // server did not "refuse" anything. Say what happened and let the sheet's hint say what to check.
   [ClientErrorCode.connectionRefused]: 'Couldn’t Reach Server',
@@ -147,6 +150,9 @@ export function errorTitleForCode(
   return 'Message Failed to Send';
 }
 
+/** What to do when the server stopped a large upload at its deadline. */
+export const UPLOAD_TOO_SLOW_HINT = 'Nothing was sent. Try again on Wi-Fi, or send a smaller file.';
+
 /** What to check when a send never got an answer from the server. */
 export const SERVER_UNREACHABLE_HINT =
   'Check that this phone is online and that the Mac running Gator is on and connected, then try again.';
@@ -156,6 +162,7 @@ export const SERVER_UNREACHABLE_HINT =
  * explanation of its own: no answer at all, or a proxy timeout. Null for every other code.
  */
 export function errorHintForCode(code: number | null | undefined): string | null {
+  if (code === ClientErrorCode.uploadTooSlow) return UPLOAD_TOO_SLOW_HINT;
   return code === ClientErrorCode.connectionRefused || code === ClientErrorCode.gatewayTimeout
     ? SERVER_UNREACHABLE_HINT
     : null;
