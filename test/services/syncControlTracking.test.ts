@@ -1407,13 +1407,56 @@ describe('maybeResumeSync — catch up again once a restarted server has RCS bac
     expect(syncRuns()).toBe(afterResume);
   });
 
-  it('never asks when RCS is off for this account', async () => {
+  it('with RCS off, asks once and shows a server upgrade’s new switches', async () => {
     connectSession('https://imessage-only.example', SERVER_INFO);
+    // The server was upgraded while the app stayed connected: the reconnect must pick that up.
+    fetchServerInfo.mockResolvedValue({ ...SERVER_INFO, supports_imessage_group_create: true });
 
     maybeResumeSync();
+    await flush();
+    const afterResume = syncRuns();
     await flush(30_000);
 
-    expect(fetchServerInfo).not.toHaveBeenCalled();
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+    expect(useSessionStore.getState().serverInfo?.supports_imessage_group_create).toBe(true);
+    expect(syncRuns()).toBe(afterResume);
+  });
+
+  it('publishes the ready answer, so new switches show without a cold restart', async () => {
+    connectSession('https://rcs-upgraded.example', RCS_READY);
+    fetchServerInfo.mockResolvedValue({ ...RCS_READY, supports_imessage_group_create: true });
+
+    maybeResumeSync();
+    await flush();
+
+    expect(useSessionStore.getState().serverInfo?.supports_imessage_group_create).toBe(true);
+    expect(useSessionStore.getState().serverInfo?.rcs_provider_epoch).toBe(epoch);
+  });
+
+  it('never publishes an answer for a transport that was replaced while it was asked', async () => {
+    connectSession('https://rcs-replaced.example', RCS_READY);
+    let answer!: (info: ServerInfo) => void;
+    fetchServerInfo.mockImplementationOnce(
+      () =>
+        new Promise<ServerInfo>((resolve) => {
+          answer = resolve;
+        }),
+    );
+
+    maybeResumeSync();
+    await flush();
+    // A newer transport (here: the same account's credential replaced) supersedes the question.
+    const session = useSessionStore.getState();
+    session.replaceCredentialForTransport(
+      session.origin!,
+      session.password!,
+      session.transportRevision,
+      'rotated-credential',
+    );
+    answer({ ...RCS_READY, supports_imessage_group_create: true });
+    await flush();
+
+    expect(useSessionStore.getState().serverInfo?.supports_imessage_group_create).not.toBe(true);
   });
 
   it('stops asking after a disconnect and never syncs the next account', async () => {

@@ -2,6 +2,7 @@ import { ApiError, isUnimplementedEndpoint } from '@core/api/errors';
 import { RepairSnapshotRcsActiveError } from '@core/api/endpoints/repairSnapshot';
 import { logger } from '@core/secure';
 import { currentRcsProviderEpoch } from '@core/rcs';
+import type { ServerInfo } from '@core/models';
 import type { SyncMarker } from '@core/sync';
 import {
   captureFullRepairPruneExposure,
@@ -496,18 +497,26 @@ let rcsReadyFollowUpEpoch: number | null = null;
  * restart then stayed out of date until a pull-to-refresh (device, 2026-11-06).
  *
  * Ask the server directly, every few seconds for up to two minutes, and run one more sync once RCS
- * is back with the same epoch. The answer is never published: a null epoch in the session would
- * mark live RCS events stale and drop them. The account lease and its invalidation are registered
- * before the first await, as for every account-scoped run here: Disconnect or a new account aborts
- * the pending probe and clears the timer at once. The sync it starts brings its own fences.
+ * is back with the same epoch. A not-yet-ready answer is never published: a null epoch in the
+ * session would mark live RCS events stale and drop them. The account lease and its invalidation
+ * are registered before the first await, as for every account-scoped run here: Disconnect or a new
+ * account aborts the pending probe and clears the timer at once. The sync it starts brings its own
+ * fences.
+ *
+ * The answer that is ready (RCS back with the same epoch, or no RCS pairing to wait for) IS
+ * published, for this exact transport only: a server upgraded while the app was connected then
+ * shows its new switches on the next reconnect instead of after a cold restart (seen with 2.0.58,
+ * 2026-11-07). Without an RCS pairing there is nothing to wait for, so one answer is enough.
  */
 function followUpWhenRcsReady(): void {
   const epoch = sessionAccessors.getEpoch();
   const expected = currentRcsProviderEpoch(sessionAccessors.getServerInfo());
-  if (expected == null || rcsReadyFollowUpEpoch === epoch) return;
+  if (rcsReadyFollowUpEpoch === epoch) return;
   const api = httpSyncApi(http);
   if (api.serverInfo == null) return;
   const askServer = api.serverInfo;
+  const { origin, transportRevision } = useSessionStore.getState();
+  if (!origin) return;
   const lease = captureRealtimeDeliveryLease();
   const abortController = new AbortController();
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -535,18 +544,24 @@ function followUpWhenRcsReady(): void {
   const probe = async (): Promise<void> => {
     timer = null;
     if (!stillOurs()) return finish();
-    let ready = false;
+    let answer: ServerInfo | null = null;
     try {
-      ready = currentRcsProviderEpoch(await askServer(abortController.signal)) === expected;
+      answer = await askServer(abortController.signal);
     } catch {
       // Unreachable or aborted counts as not ready yet; `stillOurs` decides whether to ask again.
     }
     if (!stillOurs()) return finish();
+    // No pairing to wait for: one answer settles it. Otherwise RCS must be back with this epoch.
+    const ready =
+      answer != null && (expected == null || currentRcsProviderEpoch(answer) === expected);
     if (ready) {
       finish();
+      // Only for the transport that asked; a newer connection or origin rotation wins.
+      useSessionStore.getState().setServerInfoForTransport(origin, transportRevision, answer!);
       if (sawStarting) void startSync();
       return;
     }
+    if (expected == null) return finish();
     sawStarting = true;
     if (Date.now() - startedAt >= RCS_READY_PROBE_LIMIT_MS) return finish();
     timer = setTimeout(() => void probe(), RCS_READY_PROBE_INTERVAL_MS);
