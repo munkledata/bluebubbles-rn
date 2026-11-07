@@ -1302,3 +1302,117 @@ describe('maybeResumeSync — a failed sync does not hold back the retry', () =>
     expect(incrementalSync.mock.calls.length).toBe(callsAfterSuccess + 1);
   });
 });
+
+describe('maybeResumeSync — catch up again once a restarted server has RCS back', () => {
+  // A restarted server lists no RCS chats until its RCS store is back. Sync reuses the cached
+  // server info, so the reconnect's one catch-up cannot tell and an RCS chat that got a message
+  // during the restart stayed out of date until a pull-to-refresh (device, 2026-11-06).
+  const epoch = `gpe1_${'Q'.repeat(43)}`;
+  const RCS_READY: ServerInfo = {
+    server_version: '2.0.54',
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: epoch,
+  };
+  const RCS_STARTING: ServerInfo = { ...RCS_READY, rcs_provider_epoch: null };
+  const syncRuns = (): number =>
+    incrementalSync.mock.calls.length + syncProviderMessages.mock.calls.length;
+  const flush = async (ms = 0): Promise<void> => {
+    await jest.advanceTimersByTimeAsync(ms);
+    await awaitSyncIdle();
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    // Far past every lastSyncAt stamp the other tests left in module state.
+    jest.setSystemTime(Date.now() + 2_000_000_000);
+  });
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it('runs one more sync as soon as the server reports RCS ready again', async () => {
+    connectSession('https://rcs-restart.example', RCS_READY);
+    fetchServerInfo.mockResolvedValueOnce(RCS_STARTING).mockResolvedValue(RCS_READY);
+
+    maybeResumeSync();
+    await flush();
+    const afterResume = syncRuns();
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+    // The "not ready" answer is never published: a null epoch in the session would mark live RCS
+    // events stale and drop them.
+    expect(useSessionStore.getState().serverInfo?.rcs_provider_epoch).toBe(epoch);
+
+    await flush(5_000);
+    expect(fetchServerInfo).toHaveBeenCalledTimes(2);
+    expect(syncRuns()).toBe(afterResume + 1);
+
+    await flush(30_000);
+    expect(fetchServerInfo).toHaveBeenCalledTimes(2);
+    expect(syncRuns()).toBe(afterResume + 1);
+  });
+
+  it('adds nothing when RCS was already ready at the reconnect', async () => {
+    connectSession('https://rcs-ready.example', RCS_READY);
+    fetchServerInfo.mockResolvedValue(RCS_READY);
+
+    maybeResumeSync();
+    await flush();
+    const afterResume = syncRuns();
+    await flush(30_000);
+
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+    expect(syncRuns()).toBe(afterResume);
+  });
+
+  it('never asks when RCS is off for this account', async () => {
+    connectSession('https://imessage-only.example', SERVER_INFO);
+
+    maybeResumeSync();
+    await flush(30_000);
+
+    expect(fetchServerInfo).not.toHaveBeenCalled();
+  });
+
+  it('stops asking after a disconnect and never syncs the next account', async () => {
+    connectSession('https://rcs-gone.example', RCS_READY);
+    fetchServerInfo.mockResolvedValueOnce(RCS_STARTING).mockResolvedValue(RCS_READY);
+
+    maybeResumeSync();
+    await flush();
+    disconnectSession();
+    const runsAtDisconnect = syncRuns();
+    await flush(30_000);
+
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+    expect(syncRuns()).toBe(runsAtDisconnect);
+  });
+
+  it('gives up after two minutes of RCS still starting', async () => {
+    connectSession('https://rcs-slow.example', RCS_READY);
+    fetchServerInfo.mockResolvedValue(RCS_STARTING);
+
+    maybeResumeSync();
+    await flush();
+    const afterResume = syncRuns();
+    await flush(125_000);
+    const asked = fetchServerInfo.mock.calls.length;
+    await flush(60_000);
+
+    expect(asked).toBeLessThanOrEqual(26);
+    expect(fetchServerInfo.mock.calls.length).toBe(asked);
+    expect(syncRuns()).toBe(afterResume);
+  });
+
+  it('asks once per reconnect, not once per caller', async () => {
+    connectSession('https://rcs-twice.example', RCS_READY);
+    fetchServerInfo.mockResolvedValueOnce(RCS_STARTING).mockResolvedValue(RCS_READY);
+
+    maybeResumeSync();
+    maybeResumeSync();
+    await flush();
+
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+  });
+});

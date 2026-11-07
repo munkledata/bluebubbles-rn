@@ -485,11 +485,65 @@ export async function awaitSyncIdle(): Promise<void> {
   }
 }
 
+const RCS_READY_PROBE_INTERVAL_MS = 5_000;
+const RCS_READY_PROBE_LIMIT_MS = 120_000;
+/** The session epoch whose RCS-ready follow-up is running, so one reconnect asks only once. */
+let rcsReadyFollowUpEpoch: number | null = null;
+
+/**
+ * A restarted server lists no RCS chats until its RCS store is back, and sync reuses the cached
+ * server info, so the reconnect's catch-up cannot tell. An RCS chat that got a message during a
+ * restart then stayed out of date until a pull-to-refresh (device, 2026-11-06).
+ *
+ * Ask the server directly, every few seconds for up to two minutes, and run one more sync once RCS
+ * is back with the same epoch. The answer is never published: a null epoch in the session would
+ * mark live RCS events stale and drop them. Stops when the account or its RCS epoch changes; the
+ * sync it starts brings its own fences.
+ */
+function followUpWhenRcsReady(): void {
+  const epoch = sessionAccessors.getEpoch();
+  const expected = currentRcsProviderEpoch(sessionAccessors.getServerInfo());
+  if (expected == null || rcsReadyFollowUpEpoch === epoch) return;
+  const api = httpSyncApi(http);
+  if (api.serverInfo == null) return;
+  const askServer = api.serverInfo;
+  rcsReadyFollowUpEpoch = epoch;
+  const startedAt = Date.now();
+  let sawStarting = false;
+  const stop = (): void => {
+    if (rcsReadyFollowUpEpoch === epoch) rcsReadyFollowUpEpoch = null;
+  };
+  const stillOurs = (): boolean =>
+    sessionAccessors.getEpoch() === epoch &&
+    currentRcsProviderEpoch(sessionAccessors.getServerInfo()) === expected;
+  const probe = async (): Promise<void> => {
+    if (!stillOurs()) return stop();
+    let ready = false;
+    try {
+      ready = currentRcsProviderEpoch(await askServer()) === expected;
+    } catch {
+      // Unreachable counts as not ready yet; the next probe asks again.
+    }
+    if (!stillOurs()) return stop();
+    if (ready) {
+      stop();
+      if (sawStarting) void startSync();
+      return;
+    }
+    sawStarting = true;
+    if (Date.now() - startedAt >= RCS_READY_PROBE_LIMIT_MS) return stop();
+    setTimeout(() => void probe(), RCS_READY_PROBE_INTERVAL_MS);
+  };
+  void probe();
+}
+
 /**
  * Auto-resume hook (reachability watch / socket reconnect): kick a sync unless one is already in
- * flight or just finished — so connectivity coming back re-syncs without a manual pull.
+ * flight or just finished — so connectivity coming back re-syncs without a manual pull. Whether or
+ * not that sync runs, a reconnect also checks that RCS is back on a restarted server.
  */
 export function maybeResumeSync(): void {
+  followUpWhenRcsReady();
   if (syncInFlight || trackedInFlight || targetedRepairInFlight) return;
   if (Date.now() - lastSyncAt < RESUME_MIN_INTERVAL_MS) return;
   void startSync();
