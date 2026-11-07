@@ -27,6 +27,7 @@ import {
   startChatRepair,
 } from '@/services';
 import { canonicalIMessageGroupMembers } from '@core/api/endpoints/chats';
+import { isIMessagePlainTextMessage } from '@core/api/endpoints/messages';
 import type { NewChatService } from '@/services/chatActions';
 import {
   consumeShareIntakeBatchIfComplete,
@@ -102,6 +103,8 @@ function existingChatLabel(match: ExistingChatMatch): string {
   return when ? `${name} · ${when}` : name;
 }
 
+/** How long New Message waits for a new group's chat to arrive before opening it anyway. */
+const GROUP_CHAT_FETCH_WAIT_MS = 5_000;
 const MAX_INITIAL_IMESSAGE_TEXT_BYTES = 64 * 1024;
 
 /** The SMS green the old app used for a recipient who isn't on iMessage. */
@@ -674,6 +677,11 @@ export default function NewChatScreen(): React.JSX.Element {
   const groupMembers = createsGroup
     ? canonicalIMessageGroupMembers(effectiveRecipients.map((r) => r.address))
     : null;
+  // A new group needs every member as a full email or a number with its country code, each person
+  // once, 2 to 32 of them; and a plain-text first message. Say which, rather than only grey Start.
+  const groupMembersInvalid = createsGroup && groupMembers === null;
+  const groupMessageInvalid =
+    createsGroup && message.trim().length > 0 && !isIMessagePlainTextMessage(message.trim());
   const tooManyRecipients = effectiveRecipients.length > 1 && !groupUsesOpenIt && !createsGroup;
 
   // The server refuses RCS media over this limit, and Start creates the thread with its text before
@@ -701,6 +709,7 @@ export default function NewChatScreen(): React.JSX.Element {
     message.trim().length > 0 &&
     rcsFileTooLarge === null &&
     !(createsGroup && anyNotOnIMessage) &&
+    !groupMessageInvalid &&
     (selectedService !== 'iMessage' ||
       (staged.length === 0 &&
         (sendsToExisting || imessageAddressValid || groupMembers !== null) &&
@@ -851,8 +860,17 @@ export default function NewChatScreen(): React.JSX.Element {
       );
       if (!accountLease.isCurrent() || abandonedRef.current) return;
       if (result?.status === 'accepted') {
-        // Best effort: when the fetch fails the chat still arrives with the next sync.
-        await startChatRepair(result.guid).catch(() => null);
+        // Best effort, and bounded: the fetch waits behind any running sync, and a long first sync
+        // must not keep this screen busy after the group exists. When it fails or is slow, the
+        // chat still arrives with the sync.
+        let fetchWait: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          startChatRepair(result.guid).catch(() => null),
+          new Promise<void>((resolve) => {
+            fetchWait = setTimeout(resolve, GROUP_CHAT_FETCH_WAIT_MS);
+          }),
+        ]);
+        clearTimeout(fetchWait);
         if (!accountLease.isCurrent() || abandonedRef.current) return;
         navigateWithoutPrompt(() => router.replace(`/chat/${encodeURIComponent(result.guid)}`));
         return;
@@ -870,11 +888,13 @@ export default function NewChatScreen(): React.JSX.Element {
         'Group Not Started',
         result?.status === 'rejected' && result.notOnIMessage
           ? 'Someone in this group isn’t on iMessage, so Messages didn’t create it. Your draft is still here.'
-          : 'Messages didn’t create the group. Your draft is still here.',
+          : 'The group wasn’t created. Your draft is still here.',
       );
     } catch (e) {
       if (!accountLease.isCurrent() || abandonedRef.current) return;
-      logger.warn('[new-chat] group creation failed', e);
+      logger.warn('[new-chat] group creation failed', {
+        errorName: e instanceof Error ? e.name : 'UnknownError',
+      });
       showDialog(
         'Group Not Confirmed',
         'Gator couldn’t confirm whether the group was created. Check Messages on your Mac before trying again. Your draft is still here.',
@@ -1256,7 +1276,9 @@ export default function NewChatScreen(): React.JSX.Element {
           <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
             {selectedService === 'iMessage'
               ? imessageEnabled
-                ? 'New iMessage conversations support one recipient and text only.'
+                ? groupCreateSupported
+                  ? 'New iMessage conversations and groups support text only.'
+                  : 'New iMessage conversations support one recipient and text only.'
                 : 'Starting a new iMessage conversation requires the Messages helper.'
               : rcsEnabled
                 ? 'New conversations use RCS and support one recipient.'
@@ -1306,6 +1328,19 @@ export default function NewChatScreen(): React.JSX.Element {
           {groupUsesOpenIt ? (
             <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
               To send to this group, choose Open it. Your message goes with you as a draft.
+            </Text>
+          ) : null}
+
+          {groupMembersInvalid ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              A new group needs 2 to 32 people, each once, as a full email address or a number with
+              its country code.
+            </Text>
+          ) : null}
+
+          {groupMessageInvalid ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              A new group’s first message must be plain text under 64 KB.
             </Text>
           ) : null}
 

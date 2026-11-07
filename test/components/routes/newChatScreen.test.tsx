@@ -2679,6 +2679,57 @@ describe('NewChatScreen — new iMessage group (FP-006 group create)', () => {
     );
   });
 
+  it('explains why Start is off when a member is not a full address', async () => {
+    useGroupCreate(true);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15557770001');
+    await addRecipient('5551234');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi all');
+    });
+
+    expect(screen.getByText(/A new group needs 2 to 32 people/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
+  });
+
+  it('keeps Start off, with a reason, for a first message the server would refuse', async () => {
+    useGroupCreate(true);
+    await renderWithTheme(<NewChatScreen />);
+    await draftGroup('photo \uFFFC here');
+
+    expect(screen.getByText(/must be plain text/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
+    expect(mockCreateAppleGroup).not.toHaveBeenCalled();
+  });
+
+  it('opens the new group without waiting for a slow chat fetch', async () => {
+    useGroupCreate(true);
+    // The fetch waits behind a long running sync and never answers in this test.
+    mockStartChatRepair.mockReturnValueOnce(new Promise(() => undefined));
+    await renderWithTheme(<NewChatScreen />);
+    await draftGroup();
+    jest.useFakeTimers();
+    try {
+      await start();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockReplace).not.toHaveBeenCalled();
+      await act(async () => {
+        jest.advanceTimersByTime(5_000);
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith('/chat/iMessage%3B%2B%3Bchat-new-group'),
+    );
+  });
+
   it('admits a forwarded text as the new group’s first message', async () => {
     useGroupCreate(true);
     mockSearchParams = { forwardText: 'Hi' };
