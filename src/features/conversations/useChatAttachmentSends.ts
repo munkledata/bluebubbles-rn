@@ -1,6 +1,8 @@
 import { useCallback, useMemo } from 'react';
 import { logger } from '@core/secure';
 import { MAX_IMESSAGE_VOICE_UPLOAD_BYTES } from '@core/models/serverInfo';
+import { restoredAttachmentCaps } from '@core/models/imessageRestoredFeatures';
+import { useSessionStore } from '@state/sessionStore';
 import type { ShareIntakeManifestIdentity } from '@db/repositories';
 import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import {
@@ -128,6 +130,10 @@ export function useChatAttachmentSends({
     }),
     [imessageNarrowAttachmentsAvailable, imessageRestoredAttachmentsAvailable],
   );
+  // The restored route's size caps as this server advertises them (or the old 100 / 200 MiB). The
+  // send service checks again against the account-pinned server info when it sends.
+  const serverInfo = useSessionStore((s) => s.serverInfo);
+  const restoredCaps = useMemo(() => restoredAttachmentCaps(serverInfo), [serverInfo]);
 
   // The inline tray's "Files" button — pick documents and return them to STAGE as pending
   // previews (the tray handles photos/videos itself; this covers PDFs/other files). No popup
@@ -161,6 +167,7 @@ export function useChatAttachmentSends({
           items,
           imessagePdfFeaturesAvailable,
           imessageRoutes,
+          restoredCaps,
         );
         if (refusal !== null) {
           showToast(refusal);
@@ -240,6 +247,7 @@ export function useChatAttachmentSends({
       });
     },
     [
+      restoredCaps,
       accountLease,
       attachmentFeaturesAvailable,
       guid,
@@ -258,6 +266,7 @@ export function useChatAttachmentSends({
           [item],
           imessagePdfFeaturesAvailable,
           imessageRoutes,
+          restoredCaps,
         );
         if (refusal !== null) {
           showToast(refusal);
@@ -294,6 +303,7 @@ export function useChatAttachmentSends({
       );
     },
     [
+      restoredCaps,
       accountLease,
       attachmentFeaturesAvailable,
       chatService,

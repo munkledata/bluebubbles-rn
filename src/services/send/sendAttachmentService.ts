@@ -11,10 +11,12 @@ import {
 } from '@core/models/serverInfo';
 import {
   canSendRestoredIMessageAttachments,
+  CEILING_RESTORED_ATTACHMENT_CAPS,
   IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
-  IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES,
   isRestoredAttachmentFile,
   isValidRestoredText,
+  restoredAttachmentCaps,
+  type RestoredAttachmentCaps,
 } from '@core/models/imessageRestoredFeatures';
 import {
   commitAttachmentCacheReservation,
@@ -87,6 +89,11 @@ export interface SendImageMessageArgs {
 }
 
 /** These files cannot go together as one iMessage here; nothing was written or sent. */
+/** A byte cap as people read it: whole MiB. */
+function mib(bytes: number): string {
+  return `${Math.floor(bytes / (1024 * 1024))} MiB`;
+}
+
 export class SeveralFilesUnavailableError extends Error {
   constructor() {
     super('These files cannot be sent together as one iMessage here.');
@@ -143,6 +150,11 @@ export type AttachmentUploader = (args: {
    * or any file in a proven group. Only with `service: 'iMessage'`, never with `voice`.
    */
   restored?: true;
+  /**
+   * The restored route's size caps for this send, from the server's advertised caps. Missing means
+   * what a server without them enforces (100 / 200 MiB).
+   */
+  restoredCaps?: RestoredAttachmentCaps;
   /**
    * The ATTACHMENT row's guid — the key byte progress is published under. It is not the message
    * temp guid because the attachment components render under `att.guid`, so this is what lets the
@@ -278,8 +290,10 @@ export async function sendImageMessage(
       imessageVoice ||
       files.length > IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES ||
       !files.every(hasSafeUploadName) ||
-      !files.every((file) => isRestoredAttachmentFile(file)) ||
-      totalFileBytes(files) > IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES
+      // The server's own caps are not known yet: refuse only what no server could take here, and
+      // check its real caps once they are (below).
+      !files.every((file) => isRestoredAttachmentFile(file, CEILING_RESTORED_ATTACHMENT_CAPS)) ||
+      totalFileBytes(files) > CEILING_RESTORED_ATTACHMENT_CAPS.maxTotalBytes
     ) {
       throw new SeveralFilesUnavailableError();
     }
@@ -307,7 +321,8 @@ export async function sendImageMessage(
     // The restored route's own caps are checked again once the server's switches are known.
     const supportedFile = imessageVoice
       ? isSupportedImessageVoiceFile(args.image)
-      : isSupportedImessageAttachmentFile(args.image) || isRestoredAttachmentFile(args.image);
+      : isSupportedImessageAttachmentFile(args.image) ||
+        isRestoredAttachmentFile(args.image, CEILING_RESTORED_ATTACHMENT_CAPS);
     if (!supportedFile) {
       throw new Error(
         imessageVoice
@@ -374,6 +389,19 @@ export async function sendImageMessage(
     { requireServerInfo: true },
   );
   const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
+  // This server's own restored-route caps (its advertised ones, or the old 100 / 200 MiB).
+  const restoredCaps: RestoredAttachmentCaps = restoredAttachmentCaps(capability.serverInfo);
+  // A batch this server cannot take as one message goes back to the one-message-per-file path
+  // now, before any file is moved, exactly as the early check did when the caps were fixed.
+  if (
+    additionalImages.length > 0 &&
+    (![args.image, ...additionalImages].every((file) =>
+      isRestoredAttachmentFile(file, restoredCaps),
+    ) ||
+      totalFileBytes([args.image, ...additionalImages]) > restoredCaps.maxTotalBytes)
+  ) {
+    throw new SeveralFilesUnavailableError();
+  }
   // Which iMessage route carries this file: the live-tested narrow one-to-one route when it can,
   // otherwise the FP-006 restored route when its switches are on for this exact chat.
   let restoredRoute = false;
@@ -395,7 +423,7 @@ export async function sendImageMessage(
       (additionalImages.length > 0 || !narrowUsable) &&
       (oneToOne || isProvenIMessageGroupChat(header, { allowAnyGroupPrefix: true })) &&
       canSendRestoredIMessageAttachments(serverInfo, args.chatGuid) &&
-      isRestoredAttachmentFile(image) &&
+      isRestoredAttachmentFile(image, restoredCaps) &&
       (args.text === undefined || isValidRestoredText(args.text));
   }
   // Several files only ever go as one restored iMessage; otherwise they go one per message.
@@ -495,7 +523,7 @@ export async function sendImageMessage(
       (imessageVoice
         ? isSupportedImessageVoiceFile(image)
         : restoredRoute
-          ? isRestoredAttachmentFile(image)
+          ? isRestoredAttachmentFile(image, restoredCaps)
           : isSupportedImessageAttachmentFile(image));
     if (!preparedFileSupported) {
       await cacheReservation.release().catch(() => undefined);
@@ -540,16 +568,17 @@ export async function sendImageMessage(
       ) {
         throw new Error('Prepared attachment ownership is inconsistent.');
       }
-      if (!isRestoredAttachmentFile(extra.image)) {
-        throw new Error('Choose files of at most 100 MiB each that iMessage can send.');
+      if (!isRestoredAttachmentFile(extra.image, restoredCaps)) {
+        throw new Error(
+          `Choose files of at most ${mib(restoredCaps.maxFileBytes)} each that iMessage can send.`,
+        );
       }
     }
     if (
       extras.length > 0 &&
-      totalFileBytes([image, ...extras.map((extra) => extra.image)]) >
-        IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES
+      totalFileBytes([image, ...extras.map((extra) => extra.image)]) > restoredCaps.maxTotalBytes
     ) {
-      throw new Error('Choose files of at most 200 MiB together.');
+      throw new Error(`Choose files of at most ${mib(restoredCaps.maxTotalBytes)} together.`);
     }
   } catch (error) {
     await releaseExtras();
@@ -732,7 +761,7 @@ export async function sendImageMessage(
       text: args.text,
       ...(imessageAttachment ? { service: 'iMessage' as const } : {}),
       ...(imessageVoice ? { voice: true as const } : {}),
-      ...(restoredRoute ? { restored: true as const } : {}),
+      ...(restoredRoute ? { restored: true as const, restoredCaps } : {}),
       attachmentGuid,
       name: image.name,
       uri: image.uri,

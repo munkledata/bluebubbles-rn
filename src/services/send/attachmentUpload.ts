@@ -4,9 +4,8 @@ import { ApiError } from '@core/api/errors';
 import { parseServerErrorBody } from '@core/api/serverErrorDetail';
 import { apiResponse } from '@core/models/common';
 import {
-  IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES,
   IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES,
-  IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES,
+  LEGACY_RESTORED_ATTACHMENT_CAPS,
   isRestoredAttachmentFile,
   isValidRestoredText,
 } from '@core/models/imessageRestoredFeatures';
@@ -108,6 +107,11 @@ function hasSafeUploadName(name: string): boolean {
   }
 }
 
+/** A byte cap as people read it: whole MiB. */
+function mib(bytes: number): string {
+  return `${Math.floor(bytes / (1024 * 1024))} MiB`;
+}
+
 export const expoAttachmentUploader: AttachmentUploader = async ({
   http,
   chatGuid,
@@ -117,6 +121,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   service,
   voice,
   restored,
+  restoredCaps = LEGACY_RESTORED_ATTACHMENT_CAPS,
   assertNetworkStart,
   attachmentGuid,
   name,
@@ -157,7 +162,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       clientAttemptGeneration !== undefined ||
       assertNetworkStart === undefined ||
       !Number.isSafeInteger(totalBytes) ||
-      !isRestoredAttachmentFile({ name, size: totalBytes! })
+      !isRestoredAttachmentFile({ name, size: totalBytes! }, restoredCaps)
     ) {
       throw new Error('This file can’t be sent to this iMessage chat.');
     }
@@ -189,7 +194,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
     throw new Error('iMessage attachments require the narrow attachment-only capability.');
   }
   // Several files in one restored request: each is checked like the main file, and together they
-  // stay within the server's ten files and 200 MiB.
+  // stay within the server's ten files and its total cap.
   const extraFiles = additionalFiles ?? [];
   if (
     extraFiles.length > 0 &&
@@ -199,10 +204,10 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
         (file) =>
           !hasSafeUploadName(file.name) ||
           !Number.isSafeInteger(file.totalBytes) ||
-          !isRestoredAttachmentFile({ name: file.name, size: file.totalBytes }),
+          !isRestoredAttachmentFile({ name: file.name, size: file.totalBytes }, restoredCaps),
       ) ||
       totalBytes! + extraFiles.reduce((sum, file) => sum + file.totalBytes, 0) >
-        IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES)
+        restoredCaps.maxTotalBytes)
   ) {
     throw new Error('These files can’t be sent together to this iMessage chat.');
   }
@@ -307,11 +312,11 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       imessageRestored &&
       (!Number.isSafeInteger(fileInfo.size) ||
         fileInfo.size <= 0 ||
-        !isRestoredAttachmentFile({ name, size: fileInfo.size }))
+        !isRestoredAttachmentFile({ name, size: fileInfo.size }, restoredCaps))
     ) {
       throw new ApiError(
         'local_file',
-        `Choose a file no larger than ${IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024)} MiB`,
+        `Choose a file no larger than ${mib(restoredCaps.maxFileBytes)}`,
       );
     }
     if (
@@ -342,22 +347,19 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       if (
         !Number.isSafeInteger(extraInfo.size) ||
         extraInfo.size <= 0 ||
-        !isRestoredAttachmentFile({ name: extra.name, size: extraInfo.size })
+        !isRestoredAttachmentFile({ name: extra.name, size: extraInfo.size }, restoredCaps)
       ) {
         throw new ApiError(
           'local_file',
-          `Choose a file no larger than ${IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024)} MiB`,
+          `Choose a file no larger than ${mib(restoredCaps.maxFileBytes)}`,
         );
       }
       extraBytes += extraInfo.size;
     }
-    if (
-      extraFiles.length > 0 &&
-      fileInfo.size + extraBytes > IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES
-    ) {
+    if (extraFiles.length > 0 && fileInfo.size + extraBytes > restoredCaps.maxTotalBytes) {
       throw new ApiError(
         'local_file',
-        `Choose files no larger than ${IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES / (1024 * 1024)} MiB together`,
+        `Choose files no larger than ${mib(restoredCaps.maxTotalBytes)} together`,
       );
     }
 

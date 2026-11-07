@@ -152,8 +152,53 @@ export function canSendRestoredIMessageSubject(
 
 /** Caps of the restored multi-file route (bbd `restoredAttachmentTypes.ts`, helper validation). */
 export const IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES = 10;
+/** The caps a server enforces when it does not advertise its own (every server before the fields). */
 export const IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
 export const IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+/** The app's own ceiling, whatever a server advertises (owner decision, 2026-11-07: 1000 MB). */
+export const IMESSAGE_RESTORED_ATTACHMENT_CEILING_BYTES = 1000 * 1024 * 1024;
+
+/** The restored route's size caps for one send. */
+export interface RestoredAttachmentCaps {
+  readonly maxFileBytes: number;
+  readonly maxTotalBytes: number;
+}
+
+/** What a server without the advertised caps enforces. */
+export const LEGACY_RESTORED_ATTACHMENT_CAPS: RestoredAttachmentCaps = {
+  maxFileBytes: IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES,
+  maxTotalBytes: IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES,
+};
+
+/**
+ * The loosest caps any server could have. Only for checks that run before the server's caps are
+ * known; the send path checks again with {@link restoredAttachmentCaps} once they are.
+ */
+export const CEILING_RESTORED_ATTACHMENT_CAPS: RestoredAttachmentCaps = {
+  maxFileBytes: IMESSAGE_RESTORED_ATTACHMENT_CEILING_BYTES,
+  maxTotalBytes: IMESSAGE_RESTORED_ATTACHMENT_CEILING_BYTES,
+};
+
+/**
+ * The caps this server enforces: its advertised `imessage_restored_attachment_max_file_bytes` and
+ * `_max_total_bytes`, each clamped to the app's 1000 MB ceiling. A server that advertises neither
+ * enforces the old 100 / 200 MiB, so the app never lets through a file the server would refuse.
+ */
+export function restoredAttachmentCaps(
+  info: ServerInfo | null | undefined,
+): RestoredAttachmentCaps {
+  const clamp = (value: number | null | undefined, fallback: number): number =>
+    value == null ? fallback : Math.min(value, IMESSAGE_RESTORED_ATTACHMENT_CEILING_BYTES);
+  const maxFileBytes = clamp(
+    info?.imessage_restored_attachment_max_file_bytes,
+    IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES,
+  );
+  const maxTotalBytes = clamp(
+    info?.imessage_restored_attachment_max_total_bytes,
+    IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES,
+  );
+  return { maxFileBytes, maxTotalBytes };
+}
 /** A txt/csv must be wholly valid UTF-8 and at most 1 MiB. */
 export const IMESSAGE_RESTORED_TEXT_FILE_MAX_BYTES = 1024 * 1024;
 /** Subject: one nonblank line of at most 1 KiB UTF-8 with no control characters. */
@@ -212,11 +257,13 @@ export type RestoredAttachmentRefusal =
 
 /**
  * Check one picked batch against the restored route's caps before any byte is read: 1–10 files,
- * each an allowlisted extension, each 1 byte to 100 MiB (txt/csv at most 1 MiB), 200 MiB in all,
- * and no two files with the same name ignoring case (the server refuses duplicates).
+ * each an allowlisted extension, each 1 byte to the per-file cap (txt/csv at most 1 MiB), within
+ * the total cap, and no two files with the same name ignoring case (the server refuses duplicates).
+ * The caps default to what a server without advertised caps enforces.
  */
 export function restoredAttachmentBatchRefusal(
   files: readonly { name: string; size: number }[],
+  caps: RestoredAttachmentCaps = LEGACY_RESTORED_ATTACHMENT_CAPS,
 ): RestoredAttachmentRefusal | null {
   if (files.length === 0) return 'none';
   if (files.length > IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES) return 'too-many';
@@ -226,7 +273,7 @@ export function restoredAttachmentBatchRefusal(
     const extension = restoredAttachmentExtension(file.name);
     if (extension === undefined) return 'type';
     if (!Number.isSafeInteger(file.size) || file.size <= 0) return 'empty';
-    if (file.size > IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES) return 'file-too-large';
+    if (file.size > caps.maxFileBytes) return 'file-too-large';
     if (
       (extension === 'txt' || extension === 'csv') &&
       file.size > IMESSAGE_RESTORED_TEXT_FILE_MAX_BYTES
@@ -237,7 +284,7 @@ export function restoredAttachmentBatchRefusal(
     if (names.has(key)) return 'duplicate-name';
     names.add(key);
     total += file.size;
-    if (total > IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES) return 'total-too-large';
+    if (total > caps.maxTotalBytes) return 'total-too-large';
   }
   return null;
 }
@@ -284,10 +331,13 @@ export function isValidRestoredText(value: string): boolean {
 }
 
 /** One file the restored route accepts when sent on its own: an allowlisted name within its caps. */
-export function isRestoredAttachmentFile(file: { name: string; size: number }): boolean {
+export function isRestoredAttachmentFile(
+  file: { name: string; size: number },
+  caps: RestoredAttachmentCaps = LEGACY_RESTORED_ATTACHMENT_CAPS,
+): boolean {
   return (
     typeof file.name === 'string' &&
-    restoredAttachmentBatchRefusal([{ name: file.name, size: file.size }]) === null
+    restoredAttachmentBatchRefusal([{ name: file.name, size: file.size }], caps) === null
   );
 }
 

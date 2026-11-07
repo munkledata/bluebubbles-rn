@@ -4,6 +4,10 @@ import {
   canSendRestoredIMessageSubject,
   canSendRestoredIMessageTapback,
   canUseRestoredIMessageGroupFeature,
+  CEILING_RESTORED_ATTACHMENT_CAPS,
+  IMESSAGE_RESTORED_ATTACHMENT_CEILING_BYTES,
+  LEGACY_RESTORED_ATTACHMENT_CAPS,
+  restoredAttachmentCaps,
   IMESSAGE_RESTORED_ATTACHMENT_MAX_FILE_BYTES,
   IMESSAGE_RESTORED_ATTACHMENT_MAX_TOTAL_BYTES,
   IMESSAGE_RESTORED_FEATURES,
@@ -286,5 +290,70 @@ describe('restoredGroupCommandsAcceptAnyPrefix', () => {
         ServerInfo.parse({ version: 't', supports_imessage_attachments_v2: true }),
       ),
     ).toBe(true);
+  });
+});
+
+describe('restored attachment caps from the server', () => {
+  const info = (extra: Record<string, unknown>) => ServerInfo.parse({ version: 'test', ...extra });
+
+  it('assumes the old 100 / 200 MiB when the server advertises nothing', () => {
+    expect(restoredAttachmentCaps(info({}))).toEqual(LEGACY_RESTORED_ATTACHMENT_CAPS);
+    expect(restoredAttachmentCaps(null)).toEqual(LEGACY_RESTORED_ATTACHMENT_CAPS);
+    expect(LEGACY_RESTORED_ATTACHMENT_CAPS).toEqual({
+      maxFileBytes: 100 * MIB,
+      maxTotalBytes: 200 * MIB,
+    });
+  });
+
+  it('follows what the server advertises, up to the app’s 1000 MB ceiling', () => {
+    expect(
+      restoredAttachmentCaps(
+        info({
+          imessage_restored_attachment_max_file_bytes: 500 * MIB,
+          imessage_restored_attachment_max_total_bytes: 600 * MIB,
+        }),
+      ),
+    ).toEqual({ maxFileBytes: 500 * MIB, maxTotalBytes: 600 * MIB });
+    expect(
+      restoredAttachmentCaps(
+        info({
+          imessage_restored_attachment_max_file_bytes: 5 * 1024 * MIB,
+          imessage_restored_attachment_max_total_bytes: 5 * 1024 * MIB,
+        }),
+      ),
+    ).toEqual({
+      maxFileBytes: IMESSAGE_RESTORED_ATTACHMENT_CEILING_BYTES,
+      maxTotalBytes: IMESSAGE_RESTORED_ATTACHMENT_CEILING_BYTES,
+    });
+    expect(IMESSAGE_RESTORED_ATTACHMENT_CEILING_BYTES).toBe(1000 * MIB);
+  });
+
+  it('reads a malformed advertised cap as absent', () => {
+    expect(
+      restoredAttachmentCaps(
+        info({
+          imessage_restored_attachment_max_file_bytes: -1,
+          imessage_restored_attachment_max_total_bytes: 'big',
+        }),
+      ),
+    ).toEqual(LEGACY_RESTORED_ATTACHMENT_CAPS);
+  });
+
+  it('lets a file through only within the caps it is given', () => {
+    const video = { name: 'trip.mov', size: 300 * MIB };
+    expect(restoredAttachmentBatchRefusal([video])).toBe('file-too-large');
+    expect(
+      restoredAttachmentBatchRefusal([video], {
+        maxFileBytes: 500 * MIB,
+        maxTotalBytes: 500 * MIB,
+      }),
+    ).toBeNull();
+    expect(restoredAttachmentBatchRefusal([video], CEILING_RESTORED_ATTACHMENT_CAPS)).toBeNull();
+    expect(
+      restoredAttachmentBatchRefusal([video, { name: 'b.mov', size: 300 * MIB }], {
+        maxFileBytes: 500 * MIB,
+        maxTotalBytes: 500 * MIB,
+      }),
+    ).toBe('total-too-large');
   });
 });

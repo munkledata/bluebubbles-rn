@@ -2033,6 +2033,83 @@ describe('sendImageMessage', () => {
       expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
     });
 
+    // The server may advertise larger caps (owner decision, 2026-11-07: up to 1000 MB).
+    const MIB = 1024 * 1024;
+    const MOVIE = {
+      uri: 'file:///cache/trip.mov',
+      name: 'trip.mov',
+      mimeType: 'video/quicktime',
+      size: 300 * MIB,
+    };
+    const advertisedCapability = (maxFileBytes: number, maxTotalBytes: number) =>
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({
+          version: '2.0.60-bbd',
+          private_api: true,
+          supports_imessage_attachment_upload: true,
+          supports_imessage_attachments_v2: true,
+          imessage_restored_attachment_max_file_bytes: maxFileBytes,
+          imessage_restored_attachment_max_total_bytes: maxTotalBytes,
+        }),
+      );
+
+    it('sends a file above 100 MiB when the server advertises larger caps, and hands them on', async () => {
+      const { db } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => ({ guid: 'movie-guid', viaPrivateApi: true }));
+
+      await send(
+        db,
+        chatGuid,
+        MOVIE as unknown as typeof HEIC,
+        up.upload,
+        advertisedCapability(1000 * MIB, 1000 * MIB),
+      );
+
+      expect(up.captured).toMatchObject({
+        restored: true,
+        name: 'trip.mov',
+        restoredCaps: { maxFileBytes: 1000 * MIB, maxTotalBytes: 1000 * MIB },
+      });
+    });
+
+    it('still refuses a file above 100 MiB on a server that advertises no caps', async () => {
+      const { db } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+      await expect(
+        send(
+          db,
+          chatGuid,
+          MOVIE as unknown as typeof HEIC,
+          up.upload,
+          restoredCapability({ v2: true }),
+        ),
+      ).rejects.toThrow();
+      expect(up.captured).toBeUndefined();
+    });
+
+    it('refuses a file above the server’s advertised cap', async () => {
+      const { db } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+      await expect(
+        send(
+          db,
+          chatGuid,
+          MOVIE as unknown as typeof HEIC,
+          up.upload,
+          advertisedCapability(250 * MIB, 250 * MIB),
+        ),
+      ).rejects.toThrow();
+      expect(up.captured).toBeUndefined();
+    });
+
     it('refuses a restored file over 100 MiB and a caption with a control character', async () => {
       const { db } = await createTestDb();
       const chatGuid = 'any;-;+15551234567';
@@ -2157,6 +2234,26 @@ describe('sendImageMessage: several files as one iMessage (FP-006 restored route
       text: 'Trip',
       parts: 4,
     });
+    expect(count(raw, 'outgoing_queue')).toBe(0);
+  });
+
+  it('declines a batch over a server’s caps before anything moves, so it goes one file per message', async () => {
+    // Three 90 MiB videos: each is within every cap, but together (270 MiB) they pass the app's
+    // 1000 MB ceiling (the early check) and exceed the 200 MiB a server without advertised caps
+    // takes. The batch must still go back to the per-file path before any file is moved.
+    const { db, raw } = await createTestDb();
+    await seedProvenImessageChat(db, ONE_TO_ONE);
+    const big = (name: string) => file(name, 'video/quicktime', 90 * 1024 * 1024);
+    const prepare = jest.fn();
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+    await expect(
+      sendSeveral(db, ONE_TO_ONE, big('a.mov'), [big('b.mov'), big('c.mov')], up.upload, {
+        prepare: prepare as unknown as AttachmentOwnershipPreparer,
+      }),
+    ).rejects.toBeInstanceOf(SeveralFilesUnavailableError);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(up.captured).toBeUndefined();
+    expect(count(raw, 'messages')).toBe(0);
     expect(count(raw, 'outgoing_queue')).toBe(0);
   });
 

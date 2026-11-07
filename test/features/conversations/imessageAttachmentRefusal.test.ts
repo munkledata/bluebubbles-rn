@@ -130,6 +130,24 @@ describe('the FP-006 restored route in the refusal check', () => {
     expect(
       imessageAttachmentRefusal([{ ...HEIC, size: 100 * 1024 * 1024 + 1 }], false, groupOnly),
     ).toBe('This iMessage chat can send files up to 100 MiB. Choose a smaller file.');
+    // A server that advertises larger caps lets the bigger file through, and names its own cap.
+    const advertised = { maxFileBytes: 1000 * 1024 * 1024, maxTotalBytes: 1000 * 1024 * 1024 };
+    expect(
+      imessageAttachmentRefusal(
+        [{ ...HEIC, size: 100 * 1024 * 1024 + 1 }],
+        false,
+        groupOnly,
+        advertised,
+      ),
+    ).toBeNull();
+    expect(
+      imessageAttachmentRefusal(
+        [{ ...HEIC, size: 1000 * 1024 * 1024 + 1 }],
+        false,
+        groupOnly,
+        advertised,
+      ),
+    ).toBe('This iMessage chat can send files up to 1000 MiB. Choose a smaller file.');
     expect(
       imessageAttachmentRefusal(
         [{ ...JPEG, name: 'notes.txt', mimeType: 'text/plain', size: 2 * 1024 * 1024 }],

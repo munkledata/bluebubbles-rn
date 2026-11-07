@@ -115,6 +115,14 @@ export const ServerInfo = z
      */
     supports_live_photo: z.boolean().nullish(),
     /**
+     * The restored iMessage attachment route's size caps, in bytes: one file, and one send in all.
+     * Additive; older servers omit them and enforce 100 MiB / 200 MiB, which is what the app then
+     * assumes. The app clamps either one to its own 1000 MB ceiling. A malformed value reads as
+     * absent rather than rejecting the reply.
+     */
+    imessage_restored_attachment_max_file_bytes: z.number().int().positive().nullish().catch(null),
+    imessage_restored_attachment_max_total_bytes: z.number().int().positive().nullish().catch(null),
+    /**
      * Whether the server exposes bounded text search over its live Messages database. Additive;
      * absent/false on older servers, so global search remains local-only until support is explicit.
      */
