@@ -49,12 +49,26 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.78` / version code `101` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.79` / version code `102` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-07 — not a checklist rebind:** **`0.1.78` / code `101`** was built
+**Latest live artifact, 2026-11-07 — not a checklist rebind:** **`0.1.79` / code `102`** was built
+from source `12084b9cc787bf833adceabf2ac167fe4bc25292` (0.1.78 plus iMessage attachment caps followed from
+the server's `imessage_restored_attachment_max_file_bytes` / `_max_total_bytes` up to 1000 MB, server info
+republished on reconnect, and Discard no longer reopening the same prompt; CI run green on that commit, no
+native change since 0.1.77's green Android run) and promoted as release commit
+`fe843b27eb3000f825909863469d8b69547b3d40` on local branch `release/android-0.1.79`. Run
+`android-0.1.79-12084b9-20261107200748` produced `gator-release-0.1.79-v102-fe843b2.aab`, **51,746,478 bytes**, SHA-256
+`10a5146f8d898b863d516b021d0d88103246faa9407ead404d5d11328370a80d`. The owner asked for this release directly on 2026-11-07
+("Both + release"); the agent submitted with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.79 v102 10a5146f8d89 TO PLAY INTERNAL` (completed about 20:19Z); the Maps key came from the login
+Keychain. Android Publisher readback confirms Internal release `0.1.79`, code `102`, `completed`. Device proof
+owed: Discard on a New Message draft leaves the screen, and a large file once server 2.0.60 advertises its
+caps. No task status or frozen v77 checklist row is changed by this Internal release.
+
+**Historical v101 artifact, 2026-11-07:** **`0.1.78` / code `101`** was built
 from source `49d9c0801df7d7b479f828d8bc21d999b7f7bb6b` (0.1.77 plus the round-4 file splits with no behaviour
 change, the battery button opening App info first, the search jump following the end while pictures settle,
 and the dormant iMessage group create / Remove Name behind `supports_imessage_group_create` /
