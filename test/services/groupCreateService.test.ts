@@ -110,6 +110,14 @@ describe('createExactIMessageGroup', () => {
       [{ addresses: MEMBERS, message: 'hi', tempGuid: TEMP }, capability(false)],
       [{ addresses: MEMBERS, message: '   ', tempGuid: TEMP }, capability()],
       [{ addresses: MEMBERS, message: 'hi', tempGuid: 'group-1' }, capability()],
+      // Everything the server would refuse before sending never reaches the network.
+      [{ addresses: MEMBERS, message: 'photo \uFFFC', tempGuid: TEMP }, capability()],
+      [{ addresses: MEMBERS, message: 'bell \u0007', tempGuid: TEMP }, capability()],
+      [{ addresses: MEMBERS, message: 'x'.repeat(65_537), tempGuid: TEMP }, capability()],
+      [
+        { addresses: ['A@example.com', 'a@example.com'], message: 'hi', tempGuid: TEMP },
+        capability(),
+      ],
     ] as const) {
       await expect(
         createExactIMessageGroup(transport.http, args, undefined, source),
@@ -123,6 +131,11 @@ describe('createExactIMessageGroup', () => {
     ['imessage_group_create_unavailable', 503, {}],
     ['imessage_group_create_rejected', 409, {}],
     ['imessage_group_create_recipient_unavailable', 409, { notOnIMessage: true }],
+    // The server's shared framework and send ledger also refuse before anything is sent.
+    ['validation', 400, {}],
+    ['idempotency_key_invalid', 400, {}],
+    ['idempotency_capacity_exhausted', 503, {}],
+    ['idempotency_persistence_unavailable', 503, {}],
   ])('returns a definite %s refusal after one attempt', async (type, status, extra) => {
     const transport = fakeHttp(async () => {
       throw ApiError.fromStatus(status, 'not created', undefined, type);
@@ -148,6 +161,15 @@ describe('createExactIMessageGroup', () => {
     [
       'another command family refusal',
       ApiError.fromStatus(409, 'x', undefined, 'imessage_group_rename_rejected'),
+    ],
+    // The id already belongs to a different request body: that earlier attempt may have run.
+    [
+      'a reused idempotency key',
+      ApiError.fromStatus(409, 'x', undefined, 'idempotency_key_reused'),
+    ],
+    [
+      'the ledger’s own unknown outcome',
+      ApiError.fromStatus(500, 'x', undefined, 'idempotency_outcome_unknown'),
     ],
   ])('treats %s as outcome unknown without retrying', async (_name, failure) => {
     const transport = fakeHttp(async () => {
@@ -236,5 +258,31 @@ describe('createExactIMessageGroup', () => {
     response.resolve(ok);
 
     await expect(result).resolves.toEqual({ status: 'outcome-unknown' });
+  });
+
+  it('keeps tab, newline and carriage return in the first message', async () => {
+    const transport = fakeHttp(async () => ok);
+    await expect(
+      createExactIMessageGroup(
+        transport.http,
+        { addresses: MEMBERS, message: 'line one\r\n\tline two', tempGuid: TEMP },
+        undefined,
+        capability(),
+      ),
+    ).resolves.toMatchObject({ status: 'accepted' });
+    expect(transport.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats emails that differ only in case as one person', async () => {
+    const transport = fakeHttp(async () => ok);
+    await expect(
+      createExactIMessageGroup(
+        transport.http,
+        { addresses: ['Pat@Example.com', 'pat@example.com'], message: 'hi', tempGuid: TEMP },
+        undefined,
+        capability(),
+      ),
+    ).resolves.toEqual({ status: 'rejected' });
+    expect(transport.post).not.toHaveBeenCalled();
   });
 });

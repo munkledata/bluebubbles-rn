@@ -105,6 +105,11 @@ describe('clearExactIMessageGroupName', () => {
     ['imessage_group_name_clear_invalid_target', 400],
     ['imessage_group_name_clear_unavailable', 503],
     ['imessage_group_name_clear_rejected', 409],
+    // The server's shared framework and send ledger also refuse before anything is sent.
+    ['validation', 400],
+    ['idempotency_key_invalid', 400],
+    ['idempotency_capacity_exhausted', 503],
+    ['idempotency_persistence_unavailable', 503],
   ])('returns a definite %s refusal after exactly one attempt', async (serverErrorType, status) => {
     const transport = fakeHttp(async () => {
       throw ApiError.fromStatus(status, 'not cleared', undefined, serverErrorType);
@@ -125,6 +130,8 @@ describe('clearExactIMessageGroupName', () => {
   it.each([
     'imessage_group_name_clear_outcome_unknown',
     'idempotency_outcome_unknown',
+    // The id already belongs to a different request body: that earlier attempt may have run.
+    'idempotency_key_reused',
     // A rename-family refusal is not proof for this command.
     'imessage_group_rename_rejected',
   ])('returns %s as outcome unknown without replaying it', async (serverErrorType) => {

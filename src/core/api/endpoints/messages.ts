@@ -317,6 +317,18 @@ export interface SendIMessagePlainTextParams {
   tempGuid: string;
 }
 
+/**
+ * The server's iMessage plain-text rule (send-imessage-text, and a new group's first message):
+ * nonblank, tab/LF/CR as the only controls, no U+FFFC, at most 64 KiB of well-formed UTF-8.
+ */
+export function isIMessagePlainTextMessage(message: string): boolean {
+  return (
+    message.trim().length > 0 &&
+    !IMESSAGE_PLAIN_TEXT_DISALLOWED_CHARACTER.test(message) &&
+    isWellFormedBoundedUtf8(message, IMESSAGE_REPLY_TEXT_MAX_BYTES)
+  );
+}
+
 /** Validate the exact helper envelope before optimistic admission and again at the endpoint. */
 export function requireIMessagePlainTextRequest(params: SendIMessagePlainTextParams): void {
   if (
@@ -327,11 +339,7 @@ export function requireIMessagePlainTextRequest(params: SendIMessagePlainTextPar
     throw new Error('A narrow iMessage text needs an exact existing iMessage conversation.');
   }
   requireWellFormedBoundedUtf8(params.chatGuid, IMESSAGE_REPLY_ID_MAX_BYTES, 'chatGuid');
-  if (
-    params.message.trim().length === 0 ||
-    IMESSAGE_PLAIN_TEXT_DISALLOWED_CHARACTER.test(params.message) ||
-    !isWellFormedBoundedUtf8(params.message, IMESSAGE_REPLY_TEXT_MAX_BYTES)
-  ) {
+  if (!isIMessagePlainTextMessage(params.message)) {
     throw new UnsupportedIMessageTextError(
       'A narrow iMessage text cannot be blank, contain unsupported control or attachment characters, or exceed 65,536 well-formed UTF-8 bytes.',
     );

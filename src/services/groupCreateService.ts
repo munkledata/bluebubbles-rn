@@ -2,6 +2,7 @@ import {
   canonicalIMessageGroupMembers,
   createIMessageGroup as postIMessageGroupCreate,
 } from '@core/api/endpoints/chats';
+import { isIMessagePlainTextMessage } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
@@ -12,12 +13,22 @@ import {
 } from './send/rcsAttemptCapability';
 import { pinSendTransport } from './send/sendTransport';
 
-/** Refusals that prove the server sent nothing (its reviewed pre-dispatch checks). */
+/**
+ * Refusals that prove the server sent nothing: the route's own pre-dispatch checks, plus the shared
+ * request framework's and send ledger's (server-77, 2026-11-07). `idempotency_key_reused` is
+ * deliberately NOT here: it means this tempGuid already belongs to a different request body, and
+ * that earlier attempt may have created the group, so the draft keeps its id and stays "may have
+ * been sent".
+ */
 const DEFINITE_GROUP_CREATE_FAILURES = new Set([
   'imessage_group_create_invalid_target',
   'imessage_group_create_unavailable',
   'imessage_group_create_rejected',
   'imessage_group_create_recipient_unavailable',
+  'validation',
+  'idempotency_key_invalid',
+  'idempotency_capacity_exhausted',
+  'idempotency_persistence_unavailable',
 ]);
 
 export interface CreateAppleGroupArgs {
@@ -55,7 +66,13 @@ export async function createExactIMessageGroup(
   capabilitySource?: RcsCapabilitySource,
 ): Promise<CreateAppleGroupResult> {
   const addresses = canonicalIMessageGroupMembers(args.addresses);
-  if (!addresses || args.message.trim().length === 0 || !args.tempGuid.startsWith('temp-')) {
+  // Every request the server would refuse before sending is refused here, so it never reaches the
+  // network and can never come back as an unknown outcome.
+  if (
+    !addresses ||
+    !isIMessagePlainTextMessage(args.message) ||
+    !args.tempGuid.startsWith('temp-')
+  ) {
     return { status: 'rejected' };
   }
   if (activeGroupCreate) return { status: 'rejected' };

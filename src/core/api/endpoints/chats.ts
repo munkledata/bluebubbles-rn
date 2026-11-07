@@ -5,6 +5,7 @@ import { apiResponse } from '@core/models/common';
 import { isRcsProviderEpoch } from '@core/rcs/providerIdentity';
 import { utf8Decode, utf8Encode } from '@utils/bytes';
 import { ApiError } from '../errors';
+import { isIMessagePlainTextMessage } from './messages';
 import type { HttpClient, HttpUrlBuilder } from '../http';
 
 export interface ChatQuery {
@@ -262,7 +263,6 @@ export interface ClearIMessageGroupNameAck {
 /** The helper's create command takes 2 to 32 distinct members besides the owner. */
 export const IMESSAGE_GROUP_CREATE_MIN_ADDRESSES = 2;
 export const IMESSAGE_GROUP_CREATE_MAX_ADDRESSES = 32;
-const IMESSAGE_GROUP_CREATE_MESSAGE_MAX_BYTES = 64 * 1024;
 
 const IMessageGroupCreateAck = z
   .object({
@@ -296,8 +296,10 @@ export function canonicalIMessageGroupMembers(addresses: readonly string[]): str
   ) {
     return null;
   }
-  const sorted = [...new Set(addresses)].sort();
-  return sorted.length === addresses.length ? sorted : null;
+  // The server treats emails that differ only in case as the same person.
+  const people = new Set(addresses.map((address) => address.toLowerCase()));
+  if (people.size !== addresses.length) return null;
+  return [...addresses].sort();
 }
 
 export interface RenameIMessageGroupParams {
@@ -879,10 +881,9 @@ export async function createIMessageGroup(
   if (!addresses || addresses.some((address, index) => address !== params.addresses[index])) {
     throw new Error('A new Apple group needs 2 to 32 distinct, sorted iMessage addresses.');
   }
-  if (params.message.trim().length === 0) {
-    throw new Error('A new Apple group needs a first message.');
+  if (!isIMessagePlainTextMessage(params.message)) {
+    throw new Error('A new Apple group needs a plain-text first message.');
   }
-  requireRoundTripUtf8(params.message, IMESSAGE_GROUP_CREATE_MESSAGE_MAX_BYTES, 'group message');
   if (
     !params.tempGuid.startsWith('temp-') ||
     params.tempGuid.trim() !== params.tempGuid ||

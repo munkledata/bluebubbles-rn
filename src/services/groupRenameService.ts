@@ -25,10 +25,20 @@ const DEFINITE_GROUP_RENAME_FAILURES = new Set([
   'imessage_group_rename_rejected',
 ]);
 
+/**
+ * Refusals from the server's shared request framework and send ledger that prove THIS request sent
+ * nothing (server-77, 2026-11-07). `idempotency_key_reused` is deliberately NOT here: it means this
+ * tempGuid already belongs to a different request body, and that earlier attempt may have run, so
+ * the draft keeps its id and stays "may have been sent".
+ */
 const DEFINITE_GROUP_NAME_CLEAR_FAILURES = new Set([
   'imessage_group_name_clear_invalid_target',
   'imessage_group_name_clear_unavailable',
   'imessage_group_name_clear_rejected',
+  'validation',
+  'idempotency_key_invalid',
+  'idempotency_capacity_exhausted',
+  'idempotency_persistence_unavailable',
 ]);
 
 export interface RenameAppleGroupArgs {
