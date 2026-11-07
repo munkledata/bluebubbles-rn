@@ -55,6 +55,12 @@ import {
   type SyncProgress,
 } from './engine';
 import { syncMessageState, MESSAGE_STATE_FOREGROUND_MAX_PAGES } from './messageStateSync';
+import {
+  beginRcsIdentityRefresh,
+  finishRcsIdentityRefreshIfComplete,
+  noteRcsIdentityChatDone,
+  saveRcsIdentityProgress,
+} from './rcsIdentityRefresh';
 import type { SyncApi } from './types';
 
 /** All four advertisements must hold for message-state sync (and its delete ownership) to run. */
@@ -701,6 +707,7 @@ export async function syncProviderMessages(
   // from the incremental sync below. A first sync or Full Repair still needs the whole listing.
   const listingOptional = !refreshAll && hasSyncPosition(await getSyncMarker(db));
   let chats: Awaited<ReturnType<typeof syncAllChats>> = [];
+  let listingComplete = false;
   try {
     chats = await syncAllChats(db, api, {
       shouldAbort,
@@ -727,6 +734,7 @@ export async function syncProviderMessages(
       },
       rcsProviderInfo: serverInfo,
     });
+    listingComplete = true;
   } catch (error) {
     if (!listingOptional || error instanceof DbCommitGuardRejectedError) throw error;
     logger.debug('[sync] chat-list refresh failed; the iMessage catch-up continues', error);
@@ -780,19 +788,28 @@ export async function syncProviderMessages(
   // conversations the listing shows something new in (every one on a user-started repair), and let
   // one conversation's failure skip just that conversation. It used to re-read up to 100 messages
   // of every RCS chat on each sync, before iMessage, and one failure failed the whole run.
+  //
+  // When the server has switched how it names RCS people (Google display names → numbers), each
+  // conversation is also re-read once for that switch, so its stored messages move to the number
+  // handles; members already moved with the listing above. See rcsIdentityRefresh.ts for when the
+  // pass counts as finished.
+  const identity = await beginRcsIdentityRefresh(db, serverInfo, () => !shouldAbort());
   for (const chat of chats) {
     if (shouldAbort()) return progress;
     if (!looksLikeRcsChatGuid(chat.guid)) continue;
     const seenNewest = rcsNewestBefore.get(chat.guid) ?? null;
     const listedNewest = rcsNewestListed.get(chat.guid) ?? null;
+    const owed = identity != null && !identity.done.has(chat.guid);
     if (
       !options.repair &&
+      !owed &&
       seenNewest != null &&
       (listedNewest == null || listedNewest === seenNewest)
     )
       continue;
+    let read: number;
     try {
-      await syncChatMessages(db, api, chat.guid, {
+      read = await syncChatMessages(db, api, chat.guid, {
         maxMessages: 100,
         shouldAbort,
         signal,
@@ -801,7 +818,30 @@ export async function syncProviderMessages(
     } catch (error) {
       if (error instanceof DbCommitGuardRejectedError) throw error;
       logger.debug('[sync] an RCS conversation could not be refreshed; the rest continue', error);
+      continue;
     }
+    // It counts as re-read when its history came back, or when there is nothing to move: the phone
+    // holds none of its messages, or the server lists it without any (its RCS cache prunes old
+    // messages). An empty answer for one listed WITH a last message — the Mac's RCS bridge dropping
+    // between the listing and this read — is tried again on a later sync.
+    if (
+      identity != null &&
+      owed &&
+      !shouldAbort() &&
+      (read > 0 || seenNewest == null || listedNewest == null)
+    )
+      await noteRcsIdentityChatDone(db, identity, chat.guid, () => !shouldAbort());
+  }
+  if (identity != null && !shouldAbort()) {
+    const finished = await finishRcsIdentityRefreshIfComplete(
+      db,
+      identity,
+      serverInfo,
+      rcsNewestBefore,
+      { complete: listingComplete, rcsChats: new Set(rcsNewestListed.keys()) },
+      () => !shouldAbort(),
+    );
+    if (!finished) await saveRcsIdentityProgress(db, identity, () => !shouldAbort());
   }
   // Message-state catch-up needs a usable authority of this exact provider. One whose repair failed
   // in this run is known to be stale, so it waits for the next attempt instead of failing the run.

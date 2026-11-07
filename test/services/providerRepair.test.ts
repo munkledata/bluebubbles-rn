@@ -16,6 +16,8 @@ import {
   kvGet,
   clearLocalCache,
   localCacheDirty,
+  RCS_IDENTITY_APPLIED_KEY,
+  RCS_IDENTITY_PROGRESS_KEY,
 } from '@db/repositories';
 import {
   getMessageStateAuthority,
@@ -920,6 +922,271 @@ describe('provider-scoped repair', () => {
       expect(catchUp.mock.invocationCallOrder[0]!).toBeLessThan(
         history.mock.invocationCallOrder[0]!,
       );
+    });
+
+    describe('once the server names RCS people by number', () => {
+      const numberInfo: ServerInfo = { ...rcsInfo, rcs_identity_version: 2 };
+      const applied = () => kvGet(db, RCS_IDENTITY_APPLIED_KEY);
+      const progress = async () => {
+        const raw = await kvGet(db, RCS_IDENTITY_PROGRESS_KEY);
+        return raw == null ? null : (JSON.parse(raw) as { version: number; done: string[] });
+      };
+      const newestOf = (chat: string) => rcsMessage(chat, `${chat}-last`, 100);
+      /**
+       * Stored conversations whose newest message the phone already holds, so routine sync skips
+       * them; the server lists them and answers each history with that message.
+       */
+      async function quiet(f: ReturnType<typeof fixture>, names: string[]): Promise<string[]> {
+        const chats = names.map(rcsChat);
+        for (const chat of chats) await storeRcs(chat, `${chat}-last`, 100);
+        listing(
+          f,
+          chats.map((chat) => ({ chat, newest: newestOf(chat) })),
+        );
+        f.base.fetchChatMessages = async (chat, offset) => (offset === 0 ? [newestOf(chat)] : []);
+        return chats;
+      }
+      const readChats = (spy: { mock: { calls: unknown[][] } }) =>
+        spy.mock.calls.map(([chat]) => chat as string).sort();
+
+      it('re-reads every conversation once, then records the version', async () => {
+        await ordinaryRun();
+        const f = fixture();
+        const chats = await quiet(f, ['a', 'b']);
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(readChats(history)).toEqual([...chats].sort());
+        expect(await applied()).toBe('2');
+        expect(await progress()).toBeNull();
+
+        history.mockClear();
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(history).not.toHaveBeenCalled();
+      });
+
+      it('moves a re-read message from its Google-name sender to the number handle', async () => {
+        await ordinaryRun();
+        const chat = rcsChat('friend');
+        const hello = rcsMessage(chat, 'hello', 100);
+        const from = (address: string, displayName?: string) =>
+          Message.parse({ ...hello, handle: { address, service: 'RCS', displayName } });
+        const sender = () =>
+          raw
+            .prepare(
+              `SELECT h.address AS address, h.display_name AS displayName
+                 FROM messages m JOIN handles h ON h.id = m.handle_id
+                WHERE m.guid = ?`,
+            )
+            .get(hello.guid) as { address: string; displayName: string | null } | undefined;
+        const f = fixture();
+        listing(f, [{ chat, newest: hello }]);
+
+        // The old server names the sender by their Google display name.
+        f.base.fetchChatMessages = async (_chat, offset) =>
+          offset === 0 ? [from('Jane Google')] : [];
+        await f.runAuto({ serverInfo: rcsInfo });
+        expect(sender()?.address).toBe('Jane Google');
+
+        // After the switch, the same message names its sender by number, the Google name alongside.
+        f.base.fetchChatMessages = async (_chat, offset) =>
+          offset === 0 ? [from('+15550000002', 'Jane Google')] : [];
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(sender()).toEqual({ address: '+15550000002', displayName: 'Jane Google' });
+        expect(await applied()).toBe('2');
+      });
+
+      it('remembers finished conversations, so a later sync re-reads only the rest', async () => {
+        await ordinaryRun();
+        const f = fixture();
+        const [a, b] = (await quiet(f, ['a', 'b'])) as [string, string];
+        f.base.fetchChatMessages = async (chat, offset) => {
+          if (chat === a) throw new ApiError('no_connection', 'RCS bridge unreachable');
+          return offset === 0 ? [newestOf(chat)] : [];
+        };
+        await expect(f.runAuto({ serverInfo: numberInfo })).resolves.toBeDefined();
+        expect(await applied()).toBeNull();
+        expect(await progress()).toEqual({ version: 2, done: [b] });
+
+        f.base.fetchChatMessages = async (chat, offset) => (offset === 0 ? [newestOf(chat)] : []);
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(readChats(history)).toEqual([a]);
+        expect(await applied()).toBe('2');
+        expect(await progress()).toBeNull();
+      });
+
+      it('does not finish while the listing names no RCS conversation', async () => {
+        // A server whose RCS bridge is still starting lists only its iMessage chats.
+        await ordinaryRun();
+        const f = fixture();
+        await quiet(f, ['a', 'b']);
+        listing(f, []);
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(history).not.toHaveBeenCalled();
+        expect(await applied()).toBeNull();
+      });
+
+      it('skips stored conversations the server no longer lists', async () => {
+        // The server's RCS cache drops quiet conversations; a listing naming others shows it answered.
+        await ordinaryRun();
+        const f = fixture();
+        const [a] = (await quiet(f, ['a', 'gone'])) as [string, string];
+        listing(f, [{ chat: a, newest: newestOf(a) }]);
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(readChats(history)).toEqual([a]);
+        expect(await applied()).toBe('2');
+      });
+
+      it('counts a conversation the server lists without any messages', async () => {
+        // Its messages were pruned on the server, so there is nothing left to move.
+        await ordinaryRun();
+        const f = fixture();
+        const [a] = (await quiet(f, ['a'])) as [string];
+        f.base.fetchChats = async (offset) =>
+          offset === 0
+            ? [Chat.parse({ guid: a, participants: [{ address: '+15550000001', service: 'RCS' }] })]
+            : [];
+        f.base.fetchChatMessages = async () => [];
+
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(await applied()).toBe('2');
+      });
+
+      it('does not count a conversation whose history comes back empty', async () => {
+        await ordinaryRun();
+        const f = fixture();
+        await quiet(f, ['a']);
+        f.base.fetchChatMessages = async () => [];
+
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(await applied()).toBeNull();
+        expect(await progress()).toBeNull();
+      });
+
+      it('finishes at once when the phone holds no RCS conversation', async () => {
+        await ordinaryRun();
+        const f = fixture();
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(await applied()).toBe('2');
+      });
+
+      it('does not record the pass when the chat list cannot be read', async () => {
+        await ordinaryRun();
+        const f = fixture();
+        await quiet(f, ['a']);
+        f.base.fetchChats = async () => {
+          throw new ApiError('no_connection', 'chat list unavailable');
+        };
+        await expect(f.runAuto({ serverInfo: numberInfo })).resolves.toBeDefined();
+        expect(await applied()).toBeNull();
+      });
+
+      it('does not record the pass when the run stops during its last conversation', async () => {
+        await ordinaryRun();
+        const f = fixture();
+        const [only] = (await quiet(f, ['only'])) as [string];
+        let stopped = false;
+        f.base.fetchChatMessages = async (_chat, offset) => {
+          stopped = true;
+          return offset === 0 ? [newestOf(only)] : [];
+        };
+        await expect(
+          f.runAuto({ serverInfo: numberInfo, shouldAbort: () => stopped }),
+        ).resolves.toBeDefined();
+        expect(await applied()).toBeNull();
+        expect(await progress()).toBeNull();
+      });
+
+      it.each([
+        ['omits the version', rcsInfo],
+        ['still reports version 1', { ...rcsInfo, rcs_identity_version: 1 }],
+      ])('keeps the routine refresh when the server %s', async (_label, info) => {
+        await ordinaryRun();
+        const f = fixture();
+        await quiet(f, ['a', 'b']);
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+
+        await f.runAuto({ serverInfo: info as ServerInfo });
+        expect(history).not.toHaveBeenCalled();
+        expect(await applied()).toBeNull();
+      });
+
+      it.each([
+        ['omits the version', rcsInfo],
+        ['reports version 1', { ...rcsInfo, rcs_identity_version: 1 }],
+      ])('forgets the refresh when the server %s again', async (_label, info) => {
+        // A rollback: the old server re-points re-read messages to Google names, so the next switch
+        // to numbers must run the pass again.
+        await ordinaryRun();
+        await kvSet(db, RCS_IDENTITY_APPLIED_KEY, '2');
+        await kvSet(db, RCS_IDENTITY_PROGRESS_KEY, JSON.stringify({ version: 3, done: [] }));
+        const f = fixture();
+        await f.runAuto({ serverInfo: info as ServerInfo });
+        expect(await applied()).toBeNull();
+        expect(await progress()).toBeNull();
+      });
+
+      it('ignores a version too large to compare exactly', async () => {
+        await ordinaryRun();
+        await kvSet(db, RCS_IDENTITY_APPLIED_KEY, '2');
+        const f = fixture();
+        await quiet(f, ['a']);
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+
+        await f.runAuto({ serverInfo: { ...numberInfo, rcs_identity_version: 2 ** 60 } });
+        expect(history).not.toHaveBeenCalled();
+        expect(await applied()).toBe('2');
+      });
+
+      it('waits for a current Google pairing before counting a pass', async () => {
+        await ordinaryRun();
+        const f = fixture();
+        await quiet(f, ['a']);
+        await f.runAuto({ serverInfo: { ...numberInfo, rcs_provider_epoch: null } });
+        expect(await applied()).toBeNull();
+        expect(await progress()).toBeNull();
+      });
+
+      it('runs again when the server reports a newer identity version', async () => {
+        await ordinaryRun();
+        await kvSet(db, RCS_IDENTITY_APPLIED_KEY, '2');
+        const f = fixture();
+        const chats = await quiet(f, ['a', 'b']);
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+
+        await f.runAuto({ serverInfo: { ...numberInfo, rcs_identity_version: 3 } });
+        expect(readChats(history)).toEqual([...chats].sort());
+        expect(await applied()).toBe('3');
+      });
+
+      it('starts over when the server moves to a newer version mid-pass', async () => {
+        await ordinaryRun();
+        const f = fixture();
+        const chats = await quiet(f, ['a', 'b']);
+        await kvSet(db, RCS_IDENTITY_PROGRESS_KEY, JSON.stringify({ version: 2, done: chats }));
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+
+        await f.runAuto({ serverInfo: { ...numberInfo, rcs_identity_version: 3 } });
+        expect(readChats(history)).toEqual([...chats].sort());
+        expect(await applied()).toBe('3');
+      });
+
+      it('starts the pass again when its saved progress is unreadable', async () => {
+        await ordinaryRun();
+        await kvSet(db, RCS_IDENTITY_PROGRESS_KEY, 'not json');
+        const f = fixture();
+        const chats = await quiet(f, ['a', 'b']);
+        const history = jest.spyOn(f.base, 'fetchChatMessages');
+
+        await f.runAuto({ serverInfo: numberInfo });
+        expect(readChats(history)).toEqual([...chats].sort());
+        expect(await applied()).toBe('2');
+      });
     });
   });
 

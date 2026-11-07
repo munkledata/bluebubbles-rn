@@ -78,6 +78,14 @@ export const ServerInfo = z
      */
     rcs_provider_epoch: z.string().refine(isRcsProviderEpoch).nullable().optional().catch(null),
     /**
+     * How the server names RCS people. Absent or 1: by Google's display name, which no phone
+     * contact can match. 2: by E.164 number (a business keeps its `.goog` id), with Google's name
+     * as the handle's displayName. The first sync that sees a version this phone has not applied
+     * re-reads every RCS conversation once, so stored messages move to the new handles. A
+     * malformed value reads as absent rather than rejecting the whole reply.
+     */
+    rcs_identity_version: z.number().int().nonnegative().nullish().catch(null),
+    /**
      * Whether the server can detect message deletions (macOS "Recently Deleted") and emit the
      * `message-deleted` event. Additive; absent/false on older servers, which simply never emit the
      * event. Reflects a LIVE capability (the table+column must exist on the Mac), so it can flip

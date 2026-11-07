@@ -2,6 +2,7 @@ import { inArray, sql } from 'drizzle-orm';
 import { kv } from '../schema';
 import { withDbTransaction, withDbWriteLock } from '../transaction';
 import type { Queryable, ReadDb } from '../types';
+import { RCS_IDENTITY_APPLIED_KEY, RCS_IDENTITY_PROGRESS_KEY } from './kv';
 import { SHARE_INTAKE_RECEIPT_KV_PREFIX } from './shareIntakeReceipts';
 import { setSyncMarkerWithinTransaction } from './sync';
 import {
@@ -403,7 +404,8 @@ export async function clearLocalCache(db: ReadDb): Promise<void> {
   // The cursor and its old-server timestamp fallback are relative to one account. Removing the
   // whole versioned state makes the next account establish its own continuation from zero. The
   // stable-snapshot proof is account-relative too; retaining it would skip that initialization for
-  // the next server.
+  // the next server. So is the RCS identity refresh state (applied version and unfinished progress):
+  // kept, it would skip or half-skip the next account's one-time RCS refresh.
   await withDbWriteLock(db, async (tx) =>
     tx
       .delete(kv)
@@ -415,6 +417,8 @@ export async function clearLocalCache(db: ReadDb): Promise<void> {
           MESSAGE_STATE_PENDING_REPAIR_KEY,
           PROVIDER_REPAIR_BACKOFF_KEY,
           MESSAGE_STATE_AUDIT_KEY,
+          RCS_IDENTITY_APPLIED_KEY,
+          RCS_IDENTITY_PROGRESS_KEY,
         ]),
       ),
   );
@@ -551,6 +555,8 @@ export async function localCacheDirty(db: Queryable): Promise<boolean> {
                           OR key = ${MESSAGE_STATE_PENDING_REPAIR_KEY}
                           OR key = ${PROVIDER_REPAIR_BACKOFF_KEY}
                           OR key = ${MESSAGE_STATE_AUDIT_KEY}
+                          OR key = ${RCS_IDENTITY_APPLIED_KEY}
+                          OR key = ${RCS_IDENTITY_PROGRESS_KEY}
                           OR key LIKE ${`${DRAFT_KV_PREFIX}%`}
                           OR key LIKE ${`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}%`}
                           OR key LIKE ${`${NOTIFICATION_ROUTE_KV_PREFIX}%`}

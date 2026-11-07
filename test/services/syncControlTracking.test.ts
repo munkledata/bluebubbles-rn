@@ -329,6 +329,47 @@ describe('ensureChatSynced — on-demand work participates in account teardown',
     await waiting;
     expect(idle).toBe(true);
   });
+
+  it('stops an RCS backfill that began before the server switched to number identities', async () => {
+    // A page read while the server named people by Google name must not land after the switch:
+    // it would move those messages back to the old handles once the one-time refresh is done.
+    const request = gate();
+    let shouldAbort: (() => boolean) | undefined;
+    syncChatMessages.mockImplementation(
+      async (_db: unknown, _api: unknown, _guid: string, opts: { shouldAbort?: () => boolean }) => {
+        shouldAbort = opts.shouldAbort;
+        await request.promise;
+        return shouldAbort?.() ? 0 : 7;
+      },
+    );
+    const epoch = `gpe1_${'A'.repeat(43)}`;
+    const named: ServerInfo = {
+      ...SNAPSHOT_SERVER_INFO,
+      rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: epoch,
+    };
+    const origin = 'https://rcs-identity.example';
+    const chat = `RCS;-;g1.${epoch}.${Buffer.from('friend', 'utf8').toString('base64url')}`;
+
+    connectSession(origin, named);
+    const backfill = ensureChatSynced(chat);
+    await settle();
+    expect(syncChatMessages).toHaveBeenCalledTimes(1);
+    expect(shouldAbort?.()).toBe(false);
+
+    const { transportRevision } = useSessionStore.getState();
+    expect(
+      useSessionStore.getState().setServerInfoForTransport(origin, transportRevision, {
+        ...named,
+        rcs_identity_version: 2,
+      }),
+    ).toBe(true);
+    expect(shouldAbort?.()).toBe(true);
+
+    request.open();
+    await expect(backfill).resolves.toBe(0);
+  });
 });
 
 describe('runTrackedSync — the background task participates in the coalescing slot', () => {

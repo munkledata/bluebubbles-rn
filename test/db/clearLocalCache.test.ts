@@ -14,6 +14,8 @@ import {
   DRAFT_KV_PREFIX,
   MESSAGE_STATE_PENDING_REPAIR_KEY,
   NOTIFICATION_ROUTE_KV_PREFIX,
+  RCS_IDENTITY_APPLIED_KEY,
+  RCS_IDENTITY_PROGRESS_KEY,
   clearLocalCache,
   enqueueAttachmentMediaExport,
   enqueueIncomingEvent,
@@ -403,6 +405,22 @@ describe('clearLocalCache', () => {
     await clearLocalCache(db);
 
     expect(await kvGet(db, MESSAGE_STATE_PENDING_REPAIR_KEY)).toBeNull();
+    expect(await localCacheDirty(db)).toBe(false);
+  });
+
+  it.each([
+    ['the applied RCS identity version', RCS_IDENTITY_APPLIED_KEY, '2'],
+    ['an unfinished RCS identity refresh', RCS_IDENTITY_PROGRESS_KEY, '{"version":2,"done":[]}'],
+  ])('drops %s with the account', async (_label, key, value) => {
+    // Kept, it would skip or half-skip the next account's one-time RCS refresh when that server
+    // later switches RCS people to numbers.
+    const { db } = await createTestDb();
+    await kvSet(db, key, value);
+    expect(await localCacheDirty(db)).toBe(true);
+
+    await clearLocalCache(db);
+
+    expect(await kvGet(db, key)).toBeNull();
     expect(await localCacheDirty(db)).toBe(false);
   });
 

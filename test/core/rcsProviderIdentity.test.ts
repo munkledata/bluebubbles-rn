@@ -121,3 +121,15 @@ describe('Google provider-scoped RCS identities', () => {
     ).toBe('current');
   });
 });
+
+describe('RCS identity version', () => {
+  it('reads a whole non-negative version and treats a malformed one as absent', () => {
+    const parse = (value: unknown) =>
+      ServerInfo.parse({ version: '2.0.0', rcs_identity_version: value }).rcs_identity_version;
+    expect(parse(2)).toBe(2);
+    expect(parse(1)).toBe(1);
+    expect(ServerInfo.parse({ version: '2.0.0' }).rcs_identity_version).toBeUndefined();
+    // A bad value must not reject the whole reply, which would block connecting.
+    for (const bad of ['2', 1.5, -1, true, {}]) expect(parse(bad)).toBeNull();
+  });
+});

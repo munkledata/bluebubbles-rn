@@ -576,11 +576,17 @@ interface SyncRunOptions {
 
 type SyncRunOutcome = 'running' | 'completed' | 'cancelled' | 'stale' | 'failed';
 
+/**
+ * The RCS shape a run starts under. A run stops as stale when it changes. That includes
+ * `rcs_identity_version`: a page read while the server named people by Google name, written
+ * after the one-time number refresh, would move those messages back to the old handles for good.
+ */
 function rcsProviderCapabilityKey(info: ReturnType<typeof sessionAccessors.getServerInfo>): string {
   return JSON.stringify([
     info?.rcs === true,
     info?.supports_rcs_epoch_qualified_ids === true,
     info?.rcs_provider_epoch ?? null,
+    info?.rcs_identity_version ?? null,
   ]);
 }
 

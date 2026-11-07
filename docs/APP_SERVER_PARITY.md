@@ -696,8 +696,69 @@ Accepted residuals:
   failure, so a 503 or timeout waits 30 seconds (doubling to 10 minutes), and a 404 is never asked
   again this session. Tiles keep their blurhash/▶ look until a poster arrives; the ▶ stays drawn
   over the poster.
-- **Status:** app source ready for 0.1.76; the server route is being built on the server's
-  `feat/video-poster` branch. Device proof needs both.
+- **Status:** shipped. The server route went live in 2.0.49 (2026-11-05) and the app in 0.1.76 / v99
+  (Play Internal, 2026-11-07 02:55Z). The device proof is still pending.
+
+## 🟡 App source ready (2026-11-07) — RCS people by phone number (`rcs_identity_version`)
+
+- **Server → App (planned, not built):** `ServerInfoV1.rcs_identity_version: 2` would mean:
+  - RCS handles carry the E.164 number as `address` (a business keeps its `.goog` id), with
+    Google's name as `displayName`;
+  - chat members, message senders and reaction senders all share that one address;
+  - the self-chat member is the SIM's number;
+  - RCS chat guids do not change, and a 1:1 chat's `chatIdentifier` becomes the number;
+  - the server advertises 2 only once every row it serves uses numbers, including rows stored in
+    rcs.db before the upgrade;
+  - reaction guids stay the same across the switch.
+
+  The contract is proposed in `~/github/BB/gator-rcs-identity-plan-2026-11-05.md` and is waiting for
+  the RCS server session to confirm it.
+- **App: the one-time refresh** (`src/services/sync/rcsIdentityRefresh.ts`, driven from the RCS
+  loop in `syncProviderMessages`).
+  - It runs while the server reports a version of 2 or more that this phone has not applied, and
+    only while a current Google pairing exists. A version too large to compare exactly is ignored.
+  - Each listed RCS conversation not yet re-read for that version gets its newest 100 messages
+    re-read, the same bounded read a user-started repair does.
+  - The message upsert re-points `handle_id`, so the stored messages move to the number handles,
+    and contact matching then supplies names and photos. Members move with the ordinary chat
+    listing.
+- **App: counting it finished.**
+  - A conversation counts as re-read when its history came back, or when there is nothing to move:
+    the phone holds none of its messages, or the server lists it without any. The server's RCS
+    cache prunes messages about 90 days after storing them.
+  - An error, or an empty answer for a conversation listed with a last message, tries again on a
+    later sync.
+  - Finished conversations are kept in kv `rcs.identityRefreshProgress`, so a later sync re-reads
+    only the rest. The record is written every 10 conversations and at the end of a run.
+  - The pass finishes, and kv `rcs.identityVersionApplied` is set, when every stored conversation
+    of the current pairing that holds messages has been re-read or is gone from the server. The
+    cache drops emptied old conversations, so they stop being listed.
+  - "Gone" needs a complete listing that names other current RCS conversations. A listing taken
+    while the Mac's RCS bridge is still starting names none, so it can never finish the pass.
+- **App: forgetting it.**
+  - While the server reports no version, or a version below 2 (a rollback), both keys are deleted,
+    so the next switch to numbers runs the pass again.
+  - Both keys are account-scoped (`clearLocalCache`, `localCacheDirty`) and are not backup keys, so
+    a restored phone runs the pass again.
+- **App: stopping stale runs.** The version is part of the RCS capability key, so a run that began
+  under Google-name identities stops as stale instead of moving messages back.
+- **Limits:**
+  - Stored reactions keep their Google-name sender. The server sends reactions only live (its REST
+    pages carry no reactions), so nothing re-reads them.
+  - Messages older than a chat's newest 100 keep their old sender until that chat opens (opening
+    re-reads 500).
+  - A queued event from the old server that is applied after the pass can re-point that one
+    message back. This is rare, and the next re-read of that chat fixes it.
+  - A conversation that keeps failing costs one re-read per sync and keeps the pass from finishing.
+    The other conversations are not read again.
+  - If every stored RCS conversation is gone from the server, no listing can show that the bridge
+    answered, so the pass never formally finishes. It costs nothing.
+  - A rollback and a re-upgrade within one app session can go unnoticed. The app forgets the
+    refresh only when a sync sees server info from the rolled-back server, and reconnects keep the
+    cached info.
+  - Leftover Google-name handles are not deleted. No screen shows a handle that no chat or message
+    points to (owner decision, 2026-11-06).
+- **Status:** the app part stays off until a server ships version 2. The device proof needs both.
 
 ## 🟡 App source ready (2026-10-29) — Apple screening flags (`isFiltered` / `isSpam`)
 
