@@ -285,4 +285,20 @@ describe('createExactIMessageGroup', () => {
     ).resolves.toEqual({ status: 'rejected' });
     expect(transport.post).not.toHaveBeenCalled();
   });
+
+  it('sends emails lowercase, sorted with the numbers, so they match Messages’ own spelling', async () => {
+    const transport = fakeHttp(async () => ok);
+    await expect(
+      createExactIMessageGroup(
+        transport.http,
+        { addresses: ['Pat@Example.com', '+15557770001'], message: 'hi', tempGuid: TEMP },
+        undefined,
+        capability(),
+      ),
+    ).resolves.toMatchObject({ status: 'accepted' });
+    expect(transport.post).toHaveBeenCalledTimes(1);
+    expect(transport.post.mock.calls[0]?.[2]).toMatchObject({
+      json: { addresses: ['+15557770001', 'pat@example.com'] },
+    });
+  });
 });

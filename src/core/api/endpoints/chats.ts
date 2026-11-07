@@ -296,10 +296,15 @@ export function canonicalIMessageGroupMembers(addresses: readonly string[]): str
   ) {
     return null;
   }
-  // The server treats emails that differ only in case as the same person.
-  const people = new Set(addresses.map((address) => address.toLowerCase()));
-  if (people.size !== addresses.length) return null;
-  return [...addresses].sort();
+  // Emails are sent lowercase. The server treats emails that differ only in case as one person,
+  // and the helper requires each address to equal IMCore's own handle spelling exactly, which for
+  // email is normally lowercase: a mixed-case email would come back as "not on iMessage" (server-77,
+  // 2026-11-07; the casing is likely, not proven on a device). Phone numbers are already E.164.
+  const members = addresses.map((address) =>
+    E164_IMESSAGE_ADDRESS.test(address) ? address : address.toLowerCase(),
+  );
+  if (new Set(members).size !== members.length) return null;
+  return members.sort();
 }
 
 export interface RenameIMessageGroupParams {
