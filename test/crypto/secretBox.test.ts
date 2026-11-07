@@ -1,5 +1,11 @@
-import { decodeEnvelope, encodeEnvelope, ENVELOPE_VERSION, SecretBox } from '@core/crypto';
-import { fromBase64 } from '@utils/bytes';
+import {
+  CHUNKED_SECRET_BOX_CHUNK_BYTES,
+  decodeEnvelope,
+  encodeEnvelope,
+  ENVELOPE_VERSION,
+  SecretBox,
+} from '@core/crypto';
+import { fromBase64, toBase64 } from '@utils/bytes';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 
 describe('SecretBox (XChaCha20-Poly1305 + Argon2id)', () => {
@@ -85,5 +91,78 @@ describe('SecretBox (XChaCha20-Poly1305 + Argon2id)', () => {
     for (const [params] of deriveKey.mock.calls) {
       expect(params).toEqual(expect.objectContaining(cheapArgon));
     }
+  });
+});
+
+// I-5: BB2 frames authenticate their position, their final marker and the whole header (nonce
+// counter plus AAD). Each forgery below passes the structural preflight, so the spy proves that
+// authenticated decryption, not parsing, rejects it.
+describe('SecretBox BB2 chunked envelope: authenticated frame binding', () => {
+  const cheapArgon = { opsLimit: 1, memLimit: 8 * 1024 * 1024 };
+  const LIMIT = 4 * CHUNKED_SECRET_BOX_CHUNK_BYTES;
+  const MARKER = 'gator-plaintext-marker';
+
+  async function boxWithDecryptSpy() {
+    const backend = await createLibsodiumBackend();
+    const decrypt = jest.spyOn(backend, 'aeadDecrypt');
+    return { box: new SecretBox(backend, cheapArgon), decrypt };
+  }
+
+  async function expectAuthenticationFailure(
+    box: SecretBox,
+    decrypt: jest.SpyInstance,
+    forged: string,
+  ): Promise<void> {
+    decrypt.mockClear();
+    const error: unknown = await box.openChunked(forged, 'pass', LIMIT).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(String((error as Error).message)).not.toContain(MARKER);
+    expect(String((error as Error).message)).not.toContain('pass');
+    // Parsing accepted the forgery; the first authenticated decryption threw.
+    expect(decrypt).toHaveBeenCalledTimes(1);
+    await expect(decrypt.mock.results[0]!.value).rejects.toBeDefined();
+  }
+
+  it('rejects two full frames swapped into each other position', async () => {
+    const { box, decrypt } = await boxWithDecryptSpy();
+    const plaintext = `${MARKER}${'a'.repeat(2 * CHUNKED_SECRET_BOX_CHUNK_BYTES)}`;
+    const sealed = await box.sealChunked(plaintext, 'pass');
+    const [magic, header, first, second, last] = sealed.split('.');
+    expect(last).toBeDefined();
+    expect(await box.openChunked(sealed, 'pass', LIMIT)).toBe(plaintext);
+
+    await expectAuthenticationFailure(box, decrypt, [magic, header, second, first, last].join('.'));
+  });
+
+  it('rejects a truncated envelope whose header is rewritten to look complete', async () => {
+    const { box, decrypt } = await boxWithDecryptSpy();
+    const plaintext = `${MARKER}${'b'.repeat(CHUNKED_SECRET_BOX_CHUNK_BYTES)}`;
+    const sealed = await box.sealChunked(plaintext, 'pass');
+    const [magic, header, first, last] = sealed.split('.');
+    expect(last).toBeDefined();
+
+    // Drop the real final frame and claim exactly one full frame, so the first frame now parses
+    // as the final one under a different header token.
+    const headerBytes = fromBase64(header!);
+    new DataView(headerBytes.buffer, headerBytes.byteOffset, headerBytes.byteLength).setUint32(
+      headerBytes.length - 4,
+      CHUNKED_SECRET_BOX_CHUNK_BYTES,
+    );
+    await expectAuthenticationFailure(
+      box,
+      decrypt,
+      [magic, toBase64(headerBytes), first].join('.'),
+    );
+  });
+
+  it('rejects one flipped tag byte in a frame', async () => {
+    const { box, decrypt } = await boxWithDecryptSpy();
+    const sealed = await box.sealChunked(`${MARKER} short`, 'pass');
+    const parts = sealed.split('.');
+    const frame = fromBase64(parts[2]!);
+    frame[frame.length - 1] = frame[frame.length - 1]! ^ 0x01;
+    parts[2] = toBase64(frame);
+
+    await expectAuthenticationFailure(box, decrypt, parts.join('.'));
   });
 });
