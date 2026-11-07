@@ -49,12 +49,28 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.77` / version code `100` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.78` / version code `101` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-07 — not a checklist rebind:** **`0.1.77` / code `100`** was built
+**Latest live artifact, 2026-11-07 — not a checklist rebind:** **`0.1.78` / code `101`** was built
+from source `49d9c0801df7d7b479f828d8bc21d999b7f7bb6b` (0.1.77 plus the round-4 file splits with no behaviour
+change, the battery button opening App info first, the search jump following the end while pictures settle,
+and the dormant iMessage group create / Remove Name behind `supports_imessage_group_create` /
+`supports_imessage_group_name_clear`; CI run green on that commit, no native change since 0.1.77's green
+Android run) and promoted as release commit `cb944412abc6e65974db8604e06dd121808f429b` on local branch
+`release/android-0.1.78`. Run `android-0.1.78-49d9c08-20261107081733` produced
+`gator-release-0.1.78-v101-cb94441.aab`, **51,745,336 bytes**, SHA-256
+`4dba86ede39404b2321234231e207dbd7e64fe8546aa5ddb096a0d0eded4e5c1`. The owner asked for this release directly on 2026-11-07
+("build and deploy the newest mobile app as soon as possible"); the agent submitted with `--execute --confirm`
+and the exact phrase `SUBMIT 0.1.78 v101 4dba86ede394 TO PLAY INTERNAL` (completed about 08:28Z); the Maps key
+came from the login Keychain. Android Publisher readback confirms Internal release `0.1.78`, code `101`,
+`completed`. Device proof owed: the search jump with pictures above the newest match, the battery button, and
+group create / Remove Name once server 2.0.58 is live. No task status or frozen v77 checklist row is changed by
+this Internal release.
+
+**Historical v100 artifact, 2026-11-07:** **`0.1.77` / code `100`** was built
 from source `8faf32ea26c5d95fae7d290bd3010f41be92d72f` (0.1.76 plus Expo SDK 58.0.23 / React Native 0.88.1 /
 RNFB 27.1.0 / Jest 30 with R8 still off, several iMessage pictures sent as one message, the RCS catch-up
 after a server restart, the dormant RCS identity re-read behind `rcs_identity_version` 2, the BB2 backup
