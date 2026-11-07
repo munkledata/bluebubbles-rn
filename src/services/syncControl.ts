@@ -497,8 +497,9 @@ let rcsReadyFollowUpEpoch: number | null = null;
  *
  * Ask the server directly, every few seconds for up to two minutes, and run one more sync once RCS
  * is back with the same epoch. The answer is never published: a null epoch in the session would
- * mark live RCS events stale and drop them. Stops when the account or its RCS epoch changes; the
- * sync it starts brings its own fences.
+ * mark live RCS events stale and drop them. The account lease and its invalidation are registered
+ * before the first await, as for every account-scoped run here: Disconnect or a new account aborts
+ * the pending probe and clears the timer at once. The sync it starts brings its own fences.
  */
 function followUpWhenRcsReady(): void {
   const epoch = sessionAccessors.getEpoch();
@@ -507,32 +508,48 @@ function followUpWhenRcsReady(): void {
   const api = httpSyncApi(http);
   if (api.serverInfo == null) return;
   const askServer = api.serverInfo;
+  const lease = captureRealtimeDeliveryLease();
+  const abortController = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let finished = false;
+  // Assigned right below; `finish` can only run after it, from the probe or the invalidation.
+  let releaseInvalidation: () => void = () => undefined;
+  const finish = (): void => {
+    if (finished) return;
+    finished = true;
+    if (timer != null) clearTimeout(timer);
+    timer = null;
+    abortController.abort();
+    releaseInvalidation();
+    if (rcsReadyFollowUpEpoch === epoch) rcsReadyFollowUpEpoch = null;
+  };
+  releaseInvalidation = subscribeRealtimeGenerationInvalidation(lease.generation, finish);
   rcsReadyFollowUpEpoch = epoch;
   const startedAt = Date.now();
   let sawStarting = false;
-  const stop = (): void => {
-    if (rcsReadyFollowUpEpoch === epoch) rcsReadyFollowUpEpoch = null;
-  };
   const stillOurs = (): boolean =>
+    !finished &&
+    lease.isCurrent() &&
     sessionAccessors.getEpoch() === epoch &&
     currentRcsProviderEpoch(sessionAccessors.getServerInfo()) === expected;
   const probe = async (): Promise<void> => {
-    if (!stillOurs()) return stop();
+    timer = null;
+    if (!stillOurs()) return finish();
     let ready = false;
     try {
-      ready = currentRcsProviderEpoch(await askServer()) === expected;
+      ready = currentRcsProviderEpoch(await askServer(abortController.signal)) === expected;
     } catch {
-      // Unreachable counts as not ready yet; the next probe asks again.
+      // Unreachable or aborted counts as not ready yet; `stillOurs` decides whether to ask again.
     }
-    if (!stillOurs()) return stop();
+    if (!stillOurs()) return finish();
     if (ready) {
-      stop();
+      finish();
       if (sawStarting) void startSync();
       return;
     }
     sawStarting = true;
-    if (Date.now() - startedAt >= RCS_READY_PROBE_LIMIT_MS) return stop();
-    setTimeout(() => void probe(), RCS_READY_PROBE_INTERVAL_MS);
+    if (Date.now() - startedAt >= RCS_READY_PROBE_LIMIT_MS) return finish();
+    timer = setTimeout(() => void probe(), RCS_READY_PROBE_INTERVAL_MS);
   };
   void probe();
 }

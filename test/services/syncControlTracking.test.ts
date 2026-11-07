@@ -1405,6 +1405,80 @@ describe('maybeResumeSync — catch up again once a restarted server has RCS bac
     expect(syncRuns()).toBe(afterResume);
   });
 
+  /** The invalidation listener the follow-up registered for its account, as Disconnect fires it. */
+  const latestInvalidation = (): (() => void) => {
+    const call = mockSubscribeRealtimeGenerationInvalidation.mock.calls.at(-1);
+    if (!call) throw new Error('no invalidation subscription');
+    return call[1];
+  };
+
+  it('registers its account before asking, and Disconnect stops a waiting probe at once', async () => {
+    connectSession('https://rcs-disconnect.example', RCS_READY);
+    fetchServerInfo.mockResolvedValueOnce(RCS_STARTING).mockResolvedValue(RCS_READY);
+    mockSubscribeRealtimeGenerationInvalidation.mockClear();
+    mockReleaseInvalidation.mockClear();
+
+    maybeResumeSync();
+    expect(mockSubscribeRealtimeGenerationInvalidation).toHaveBeenCalledWith(
+      mockAccountLease.generation,
+      expect.any(Function),
+    );
+    await flush();
+    const runsBefore = syncRuns();
+
+    latestInvalidation()();
+    disconnectSession();
+    expect(mockReleaseInvalidation).toHaveBeenCalledTimes(1);
+    await flush(30_000);
+
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+    expect(syncRuns()).toBe(runsBefore);
+  });
+
+  it('releases its subscription on every way out', async () => {
+    connectSession('https://rcs-release.example', RCS_READY);
+    fetchServerInfo.mockResolvedValueOnce(RCS_STARTING).mockResolvedValue(RCS_READY);
+    mockReleaseInvalidation.mockClear();
+
+    maybeResumeSync();
+    await flush(5_000);
+
+    expect(fetchServerInfo).toHaveBeenCalledTimes(2);
+    expect(mockReleaseInvalidation).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops when the account lease is no longer current', async () => {
+    connectSession('https://rcs-lease.example', RCS_READY);
+    fetchServerInfo.mockResolvedValueOnce(RCS_STARTING).mockResolvedValue(RCS_READY);
+
+    maybeResumeSync();
+    await flush();
+    const runsBefore = syncRuns();
+    mockAccountLeaseCurrent = false;
+    await flush(30_000);
+
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+    expect(syncRuns()).toBe(runsBefore);
+  });
+
+  it("never lets account A's pending chain probe or sync once account B has connected", async () => {
+    connectSession('https://rcs-account-a.example', RCS_READY);
+    fetchServerInfo.mockResolvedValueOnce(RCS_STARTING).mockResolvedValue(RCS_READY);
+
+    maybeResumeSync();
+    await flush();
+    const accountAInvalidation = latestInvalidation();
+    const runsBefore = syncRuns();
+
+    disconnectSession();
+    accountAInvalidation();
+    connectSession('https://rcs-account-b.example', RCS_READY);
+    await flush(30_000);
+
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+    expect(syncRuns()).toBe(runsBefore);
+  });
+
   it('asks once per reconnect, not once per caller', async () => {
     connectSession('https://rcs-twice.example', RCS_READY);
     fetchServerInfo.mockResolvedValueOnce(RCS_STARTING).mockResolvedValue(RCS_READY);
