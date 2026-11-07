@@ -163,11 +163,11 @@ const manifestNode = xmlNode(
           'android:exported': 'false',
         }),
         xmlNode('receiver', {
-          'android:name': 'expo.modules.taskManager.TaskBroadcastReceiver',
+          'android:name': 'expo.modules.taskmanager.TaskBroadcastReceiver',
           'android:exported': 'false',
         }),
         xmlNode('service', {
-          'android:name': 'expo.modules.taskManager.TaskJobService',
+          'android:name': 'expo.modules.taskmanager.TaskJobService',
           'android:enabled': 'true',
           'android:exported': 'false',
           'android:permission': 'android.permission.BIND_JOB_SERVICE',

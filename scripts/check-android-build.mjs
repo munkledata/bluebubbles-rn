@@ -1665,14 +1665,16 @@ const REQUIRED_COMPONENTS = [
     name: 'io.invertase.firebase.messaging.ReactNativeFirebaseMessagingService',
     attributes: { 'android:exported': 'false' },
   },
+  // Expo SDK 58 moved expo-task-manager's Java package to lowercase; its intent action string and
+  // oneAppId metadata key stay camel-case upstream.
   {
     tag: 'receiver',
-    name: 'expo.modules.taskManager.TaskBroadcastReceiver',
+    name: 'expo.modules.taskmanager.TaskBroadcastReceiver',
     attributes: { 'android:exported': 'false' },
   },
   {
     tag: 'service',
-    name: 'expo.modules.taskManager.TaskJobService',
+    name: 'expo.modules.taskmanager.TaskJobService',
     attributes: {
       'android:enabled': 'true',
       'android:exported': 'false',
