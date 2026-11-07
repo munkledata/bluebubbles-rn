@@ -2342,6 +2342,56 @@ describe('sendImageMessage: several files as one iMessage (FP-006 restored route
     },
   );
 
+  it('declines a partly sent shared batch before moving any staged file, so each file can still go alone', async () => {
+    const { db, raw } = await createTestDb();
+    await seedProvenImessageChat(db, ONE_TO_ONE);
+    const { identity, prepare, images } = sharedFiles(raw);
+    // Like the real share adoption, preparing a file moves its staged source away: preparing the
+    // same file a second time finds nothing to move.
+    const staged = new Set(images.map((image) => image.uri));
+    const consuming: AttachmentOwnershipPreparer = async (input) => {
+      if (!staged.delete(input.image.uri)) {
+        throw new Error('Staged attachment is no longer available.');
+      }
+      return prepare(input);
+    };
+    // Item 0 already went out alone (an earlier attempt, or a crash partway through this share).
+    await withDbTransaction(db, (db, context) =>
+      claimShareIntakeFileWithinTransaction(context, {
+        identity,
+        chatGuid: ONE_TO_ONE,
+        itemIndex: 0,
+        ownerGuid: 'temp-older-single',
+        appliedAtMs: 1,
+      }),
+    );
+    const together = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendSeveral(db, ONE_TO_ONE, images[0]!, images.slice(1), together.upload, {
+        shareIntake: identity,
+        prepare: consuming,
+      }),
+    ).rejects.toBeInstanceOf(SeveralFilesUnavailableError);
+    expect(together.captured).toBeUndefined();
+    expect([...staged]).toEqual(images.map((image) => image.uri));
+
+    // The one-file-per-message fallback still finds items 1 and 2 and sends each one.
+    for (const image of images.slice(1)) {
+      const alone = fakeUploader(async () => ({
+        guid: `alone-${image.shareItemIndex}`,
+        viaPrivateApi: true,
+      }));
+      await sendSeveral(db, ONE_TO_ONE, image, [], alone.upload, {
+        shareIntake: identity,
+        prepare: consuming,
+      });
+      expect(alone.captured?.name).toBe(image.name);
+    }
+    expect(staged).toEqual(new Set([images[0]!.uri]));
+    expect(count(raw, 'messages')).toBe(2);
+  });
+
   it('stops and releases what it protected when an extra file can no longer be protected', async () => {
     const { db, raw } = await createTestDb();
     await seedProvenImessageChat(db, ONE_TO_ONE);

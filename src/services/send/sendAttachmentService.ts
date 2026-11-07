@@ -20,7 +20,9 @@ import {
   commitAttachmentCacheReservation,
   claimShareIntakeFileWithinTransaction,
   getChatHeader,
+  getShareIntakeReceipt,
   insertOutgoingAttachmentWithinTransaction,
+  shareIntakeFileItemKey,
   type ShareIntakeManifestIdentity,
   type SendAttemptOwnerToken,
 } from '@db/repositories';
@@ -447,6 +449,28 @@ export async function sendImageMessage(
     const supported = capability.serverInfo?.supports_rcs_text_with_attachment === true;
     if (!supported) {
       throw new Error('This server cannot send text with an attachment for this chat service.');
+    }
+  }
+  // Preparing a shared file MOVES it out of the share staging area. A several-file share whose
+  // items are partly sent already (an earlier one-file attempt, or a crash partway) would roll back
+  // only after every file had moved, and the one-file-per-message fallback would then find each
+  // staged file gone. Decline before moving anything. The claim inside the transaction below stays
+  // the authority; this read only spares the files when the answer is already known.
+  if (args.shareIntake && extras.length > 0) {
+    const indexes = [image, ...extras.map((extra) => extra.image)].map(
+      (file) => file.shareItemIndex,
+    );
+    if (indexes.every((index) => Number.isInteger(index))) {
+      const receipt = await getShareIntakeReceipt(db, args.shareIntake);
+      const owners = indexes.map((index) => receipt?.items[shareIntakeFileItemKey(index!)] ?? null);
+      const allNew = owners.every((owner) => owner == null);
+      const firstOwner = owners[0];
+      const allOneEarlierMessage =
+        firstOwner != null &&
+        owners.every(
+          (owner) => owner?.ownerKind === 'outgoing' && owner.ownerId === firstOwner.ownerId,
+        );
+      if (!allNew && !allOneEarlierMessage) throw new SeveralFilesUnavailableError();
     }
   }
   if (image.origin === 'paste' || image.origin === 'share') {
