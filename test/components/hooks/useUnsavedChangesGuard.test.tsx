@@ -55,6 +55,40 @@ it('deduplicates removal attempts and replays the exact action only after explic
   expect(mockDispatch).toHaveBeenCalledWith(action);
 });
 
+it('turns the guard off before replaying the confirmed action, so it is not prevented again', async () => {
+  // On Expo SDK 58 a native Back reaches the guard through the stack's own pop; replaying that
+  // action while the guard was still on prevented it again and Discard reopened the same prompt.
+  let enabledAtDispatch: boolean | undefined;
+  mockDispatch.mockImplementation(() => {
+    const latest = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+    enabledAtDispatch = latest?.[0] as boolean;
+  });
+  await renderWithTheme(
+    <>
+      <GuardProbe />
+      <AppDialog />
+    </>,
+  );
+  const guardCall = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+  const action = { type: 'POP', source: 'new-chat:0-1-2' };
+  await act(async () => {
+    guardCall?.[1]({ data: { action } });
+  });
+  await act(async () => {
+    fireEvent.press(screen.getByText('Discard'));
+  });
+
+  expect(mockDispatch).toHaveBeenCalledTimes(1);
+  expect(mockDispatch).toHaveBeenCalledWith(action);
+  expect(enabledAtDispatch).toBe(false);
+  // A removal that did not happen leaves the guard on again for the authored state.
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const after = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+  expect(after?.[0]).toBe(true);
+});
+
 it('while blocked, explains once and never offers Discard or leaves', async () => {
   const onDiscard = jest.fn();
   function BlockedProbe(): React.JSX.Element {

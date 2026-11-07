@@ -1,5 +1,5 @@
 import { useNavigation, usePreventRemove } from 'expo-router';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { showConfirm, showDialog, useDialogStore } from '../dialog/dialogStore';
 
 export interface UnsavedChangesGuardOptions {
@@ -26,8 +26,13 @@ export interface UnsavedChangesGuard {
 
 /**
  * Protect user-authored route state from every removal path (system gesture, header Back,
- * replace, or parent reset). Re-dispatching the exact prevented action is Expo Router's supported
- * continuation path; the action carries its visited-route marker so it is not prevented twice.
+ * replace, or parent reset).
+ *
+ * After an explicit Discard the guard turns itself OFF and only then re-dispatches the exact
+ * prevented action. Re-dispatching while still enabled was prevented a second time on Expo SDK 58:
+ * Android's native Back reaches the guard through the stack's own pop, whose action carries no
+ * "already confirmed" marker, so Discard just opened the same prompt again (0.1.78, Galaxy S25,
+ * 2026-11-07: RNScreens logged one prevented dismiss, then a second dialog appeared).
  */
 export function useUnsavedChangesGuard({
   enabled,
@@ -42,6 +47,9 @@ export function useUnsavedChangesGuard({
   const confirmationPendingRef = useRef(false);
   const confirmationIdRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
+  // The confirmed action waits here while the guard turns off for the render that releases it.
+  const [releasing, setReleasing] = useState(false);
+  const releaseActionRef = useRef<Parameters<typeof navigation.dispatch>[0] | null>(null);
 
   const dismissOwnedConfirmation = useCallback((): void => {
     const id = confirmationIdRef.current;
@@ -60,7 +68,21 @@ export function useUnsavedChangesGuard({
     };
   }, [dismissOwnedConfirmation]);
 
-  usePreventRemove(enabled, ({ data }) => {
+  useEffect(() => {
+    if (!releasing) return;
+    const action = releaseActionRef.current;
+    releaseActionRef.current = null;
+    if (action && mountedRef.current) {
+      navigation.dispatch(action);
+      onAfterDiscardNavigation?.();
+    }
+    // A removal that did not happen (the route was already gone) must not leave the guard off.
+    queueMicrotask(() => {
+      if (mountedRef.current) setReleasing(false);
+    });
+  }, [releasing, navigation, onAfterDiscardNavigation]);
+
+  usePreventRemove(enabled && !releasing, ({ data }) => {
     if (bypassNextRemovalRef.current) {
       bypassNextRemovalRef.current = false;
       navigation.dispatch(data.action);
@@ -99,8 +121,9 @@ export function useUnsavedChangesGuard({
           .then(
             (discarded) => {
               if (discarded !== false && mountedRef.current) {
-                navigation.dispatch(data.action);
-                onAfterDiscardNavigation?.();
+                // Turn the guard off first; the effect above dispatches once that render lands.
+                releaseActionRef.current = data.action;
+                setReleasing(true);
               }
             },
             () => {
