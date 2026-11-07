@@ -49,12 +49,29 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.75` / version code `98` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.76` / version code `99` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-11-05 — not a checklist rebind:** **`0.1.75` / code `98`** was built
+**Latest live artifact, 2026-11-07 — not a checklist rebind:** **`0.1.76` / code `99`** was built
+from source `cc1b2deb36694cfab1cfcf61a1b772f68a60d669` (0.1.75 plus the macOS 27 round-5a group work, tapback
+notifications, video posters, storage analyzer, backup v5, Live Photos (dormant until the server ships
+`supports_live_photo`), the architecture-review fixes, migration `0061`, the ReadDb/WriteDb handle split,
+the DB-write scanner's retirement, prebuilt React Native, notify-kit 10.10.0, op-sqlite 19.0.5 with raw
+SQLCipher keys and a one-time rekey on first open, expo-router 57.0.30, FlashList 2.3.2 and Secure Screen on
+every Activity; push CI and Android runs `42327695832` green apart from the advisory DB-lanes job) and
+promoted as release commit `cebbeaf78473136f2af301b9cd8866b2a85d3717` on local branch
+`release/android-0.1.76`. Run `android-0.1.76-cc1b2de-20261107023854` produced
+`gator-release-0.1.76-v99-cebbeaf.aab`, **57,730,655 bytes**, SHA-256
+`dacbb05df5797ba269748127182b8df73d956641536f8f72e27c09fbc3f52d41`. The owner asked for this release directly
+on 2026-11-07 ("yes build 0.1.76"); the agent submitted with `--execute --confirm` and the exact phrase
+`SUBMIT 0.1.76 v99 dacbb05df579 TO PLAY INTERNAL` (completed about 02:55Z); the Maps key came from the login
+Keychain. Android Publisher readback confirms Internal release `0.1.76`, code `99`, `completed`. Device proof
+is still owed: the one-time rekey on an existing DB, killed-app push actions, list scrolling, keyboard image
+paste and Secure Screen. No task status or frozen v77 checklist row is changed by this Internal release.
+
+**Historical v98 artifact, 2026-11-05:** **`0.1.75` / code `98`** was built
 from source `b1e59c3a78be1d95680fcb580d14378f556fc15d` (0.1.74 plus group edit/unsend, group effects,
 the wallpaper edge fade, ♥ Love on iMessage notifications, `any;+;` mentions and Delete from Mac, any-part
 tapbacks, sync retry/group event/Find My names/`imessage:` links, migration `0060` auto-unarchive, reply
