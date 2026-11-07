@@ -6598,17 +6598,23 @@ Task status, dependencies, acceptance, blockers, and evidence remain authoritati
   tested that change, and the precise cause of the two failures remains unproven. Recurring CI stability stays open
   with parent `DB-03`.
 
-  **2026-11-06 follow-up.** A second change, a two-window process wait (10 s each), did not cure the active-WAL lane
+  **2026-11-06/07 follow-up.** A second change, a two-window process wait (10 s each), did not cure the active-WAL lane
   either. Across every completed lanes job since 2026-10-20 (19 runs) the contract and relaunch lanes always passed;
   the active-WAL lane passed 10 times and failed 9: four `relaunch-result-timeout`, four `app-process-missing` and one
-  `invalid-process-identity` (the active-migration lane failed once, after an active-WAL pass). In the two newest
-  failures ([run 42272165906](https://github.com/munkledata/bluebubbles-rn/actions/runs/42272165906) and
-  [run 42307594182](https://github.com/munkledata/bluebubbles-rn/actions/runs/42307594182)) the lane failed about 18 s
-  and 29 s after it started, which is its own reset, the first launch and the process wait: process A never appeared,
-  before any `kill -9`. Both wait changes treated slowness, which this contradicts, so no third timing change was made.
-  Instead every process or marker failure now prints, before cleanup and to the CI log only, how `am start` answered,
-  the app-process count, the top resumed activity and the newest `ApplicationExitInfo` reasons (fixed Android labels,
-  PIDs and times of day; no device free text), and names whether process A or B was missing.
+  `invalid-process-identity` (the active-migration lane failed once, after an active-WAL pass). Process and marker
+  failures now print pre-cleanup diagnostics to the CI log: how each `am start` answered, the app-process count, the
+  top resumed activity and the newest `ApplicationExitInfo` reasons (fixed Android labels, PIDs and times of day only).
+  Their first failure ([run 42314773636](https://github.com/munkledata/bluebubbles-rn/actions/runs/42314773636)) shows
+  the `app-process-missing` mechanism: process A launched, reported READY and was killed (`SIGNALED`); the `am start`
+  for process B was answered "delivered to currently running top-most instance", so no process B started; afterwards
+  no app process existed and the launcher was on top. `pidof` empties at once after `kill -9`, but the activity
+  manager handles the death asynchronously, and a launch inside that window goes to the dead activity and is lost.
+  The relaunch lane ends process A with a synchronous `am force-stop` instead, which fits it never failing this way.
+  Both wait changes lengthened the wait after a launch, which cannot help once the launch itself was swallowed. An
+  earlier version of this note inferred from lane duration that process A was missing; process A reaches READY within
+  seconds, so duration cannot tell A from B, and the diagnostics show B. Proposed next step, not yet made: before the
+  post-crash launch, wait until the activity manager no longer reports Gator's activity as resumed, and retry a launch
+  that reports a delivered-to-top-instance answer.
 
   `DB-03` remains open for recurring scheduled-CI stability, power-loss/torn-write recovery, spontaneous
   or uncontrolled OS death, statement-in-flight migration interruption, the production database, actual historical
