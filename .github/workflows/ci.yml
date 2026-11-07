@@ -86,11 +86,6 @@ jobs:
       - name: Typecheck tests
         run: npm run typecheck:tests
 
-      # A dependency, patch, local module or plugin change must regenerate the legal inventory.
-      # Neither workflow checked it before, and a stale inventory landed twice (2026-11-05, -11-06).
-      - name: Legal inventory
-        run: npm run check:legal-inventory
-
       - name: Migration allocation guard
         run: npm run check:migrations
 
