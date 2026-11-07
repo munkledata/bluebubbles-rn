@@ -64,7 +64,7 @@ const expectedFindings = [
     path: sendPath,
     symbol: 'sendTextMessage.<callback:abc123>',
     operation: 'mutator-call',
-    target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
+    target: 'src/db/repositories/outgoingInserts.ts#insertOutgoingTextWithinTransaction',
   },
 ];
 
@@ -972,7 +972,7 @@ test('reads the scheduled/outgoing call graph from import bindings: calls, callb
       `,
     },
     {
-      path: 'src/db/repositories/outgoing.ts',
+      path: 'src/db/repositories/outgoingInserts.ts',
       source: `
         export async function insertOutgoingTextWithinTransaction(context, tx) { return 1; }
         export async function insertOutgoingText(db) {
@@ -1004,7 +1004,7 @@ test('reads the scheduled/outgoing call graph from import bindings: calls, callb
     'src/services/send/scheduleService.ts|runDueScheduled|mutator-call|claimDueScheduled',
     'src/services/send/sendService.ts|sendTextMessage|mutator-call|handoverScheduledTextToOutgoing',
     'src/services/send/sendService.ts|sendTextMessage.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
-    'src/db/repositories/outgoing.ts|insertOutgoingText.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+    'src/db/repositories/outgoingInserts.ts|insertOutgoingText.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
     'src/services/legacy/other.ts|<module>|mutator-reference|handoverScheduledTextToOutgoing',
     'src/services/legacy/other.ts|<module>|mutator-reference|claimScheduled',
     'src/services/legacy/other.ts|useRepos|mutator-call|insertOutgoingText',
@@ -1035,7 +1035,7 @@ test('the reviewed call-site set fails on a missing owner and on an unreviewed c
       path: 'src/services/send/newService.ts',
       symbol: 'sendNew.<callback:0123456789>',
       operation: 'mutator-call',
-      target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
+      target: 'src/db/repositories/outgoingInserts.ts#insertOutgoingTextWithinTransaction',
     },
   ];
   assertErrors(

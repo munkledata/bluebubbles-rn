@@ -13,9 +13,11 @@ const RESET_TARGET = 'src/db/repositories/scheduled.ts#resetStuckScheduled';
 const CLAIM_TARGET = 'src/db/repositories/scheduled.ts#claimDueScheduled';
 const BROAD_CLAIM_TARGET = 'src/db/repositories/scheduled.ts#claimScheduled';
 const HANDOFF_TARGET = 'src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing';
-const PUBLIC_TEXT_INSERT_TARGET = 'src/db/repositories/outgoing.ts#insertOutgoingText';
+// The text inserts live in outgoingInserts.ts since the outgoing-repository split; outgoing.ts
+// star-re-exports them. A target's path is also where its local calls are read.
+const PUBLIC_TEXT_INSERT_TARGET = 'src/db/repositories/outgoingInserts.ts#insertOutgoingText';
 const TRANSACTION_TEXT_INSERT_TARGET =
-  'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction';
+  'src/db/repositories/outgoingInserts.ts#insertOutgoingTextWithinTransaction';
 const HOME_PATH = 'app/(app)/home.tsx';
 const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
@@ -3098,7 +3100,7 @@ export function scheduledCallFindingsFromSources(sources) {
  * after reviewing the new or removed call site.
  */
 export const EXPECTED_SCHEDULED_CALL_SITES = Object.freeze([
-  'src/db/repositories/outgoing.ts|insertOutgoingText.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
+  'src/db/repositories/outgoingInserts.ts|insertOutgoingText.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
   'src/db/repositories/scheduled.ts|handoverScheduledTextToOutgoing.<callback>|mutator-call|insertOutgoingTextWithinTransaction',
   'src/features/conversations/devSeed.ts|devSendFake.<callback>|mutator-call|insertOutgoingText',
   'src/services/send/scheduleService.ts|recoverInterruptedScheduledRows|mutator-call|resetStuckScheduled',

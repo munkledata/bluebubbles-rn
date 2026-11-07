@@ -1,5 +1,5 @@
 /**
- * Branch top-ups for src/db/repositories/outgoing.ts — the guard clauses, backstops, and
+ * Branch top-ups for the outgoing-message repository (src/db/repositories/outgoing*.ts) — the guard clauses, backstops, and
  * cancelled-send paths not exercised by echoReconcile/outgoingQueueService. Every case
  * asserts observable DB state (or a documented return value).
  */

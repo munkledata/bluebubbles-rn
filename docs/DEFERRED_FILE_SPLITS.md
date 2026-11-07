@@ -10,7 +10,11 @@ as the net. `send/index.ts` **split the same day**: `index.ts` keeps the sub-ser
 guard-pinned due-schedule drains and re-exports everything moved; `sendShared.ts` holds the account-operation
 guards, argument snapshots, queue I/O and shared types; `messageSends.ts`, `scheduledSends.ts` and
 `outgoingRecovery.ts` hold their groups. The scheduled-recovery guard now pins `runScheduledAccountOperation`
-and the `runTrackedRealtimeWork` import at `sendShared.ts`. The original deferral: **deferred**
+and the `runTrackedRealtimeWork` import at `sendShared.ts`. The outgoing-message repository `db/repositories/outgoing.ts` **split on
+2026-11-07** (fix plan, last file splits, step 1): the front door star-re-exports `outgoingTypes.ts`,
+`outgoingInserts.ts`, `outgoingClaims.ts`, `outgoingReconcile.ts` and `outgoingEcho.ts`, and
+`outgoingIdentity.ts` stays internal to reconciliation, so the public names are the same 61 as before.
+The scheduled-recovery guard's text-insert targets and reviewed callback now name `outgoingInserts.ts`. The original deferral: **deferred**
 (2026-10-14) by owner decision at the end of Phase 6 step 6 of the 2026-10-09 Codex-review remediation. Step 6 split the chat screen (`app/(app)/chat/[guid].tsx`, 2,501 → 1,030
 lines) and the media viewer (1,400 → 966) and retired the legacy `hydrateSession` boot from
 `src/services/bootstrap.ts` (2,188 → 2,026). The two remaining splits turned out to be mostly
