@@ -229,7 +229,7 @@ describe("the server's copy pairs each file with its own draft row", () => {
     ]);
   });
 
-  it('falls back to order when the server reports other names', async () => {
+  it('never guesses by order when the server reports other names and no part numbers', async () => {
     const { db, raw, id } = await sent([
       ['a.jpg', 10],
       ['b.jpg', 20],
@@ -238,13 +238,153 @@ describe("the server's copy pairs each file with its own draft row", () => {
       { att: real('real-1', 'IMG_0001.JPG', 11), messageId: id },
       { att: real('real-2'), messageId: id },
     ]);
+    // Both drafts keep their local files; the real files get rows of their own.
     expect(rows(raw)).toEqual([
-      { guid: 'real-1', localPath: 'file:///cache/a.jpg' },
-      { guid: 'real-2', localPath: 'file:///cache/b.jpg' },
+      { guid: 'temp-m-0-att', localPath: 'file:///cache/a.jpg' },
+      { guid: 'temp-m-1-att', localPath: 'file:///cache/b.jpg' },
+      { guid: 'real-1', localPath: null },
+      { guid: 'real-2', localPath: null },
     ]);
   });
 
-  it('pairs unique matches first, then the rest in order, including identical repeats', async () => {
+  describe('with the part numbers the server reports', () => {
+    // The shape sendImageMessage gives a several-file draft: file 0 is `<temp>-att`, file n is
+    // `<temp>-<n>-att`.
+    const T = 'temp-0123456789abcdef';
+    async function sentHeics(names: [string, number][]) {
+      const { db, raw } = await createTestDb();
+      const chatId = await seedChat(db);
+      const [first, ...rest] = names.map(([name, bytes], index) => ({
+        attachmentGuid: index === 0 ? `${T}-att` : `${T}-${index}-att`,
+        localPath: `file:///cache/${name}`,
+        mimeType: 'image/heic',
+        transferName: name,
+        totalBytes: bytes,
+      }));
+      await insertOutgoingAttachment(db, {
+        tempGuid: T,
+        chatId,
+        chatGuid: CHAT,
+        ...first!,
+        now: 1,
+        imessageAttachmentV1: true,
+        additionalFiles: rest,
+      });
+      return { db, raw, id: messageId(raw, T) };
+    }
+    function storeTopology(raw: Database.Database, id: number, owners: [string, number][]) {
+      const topology = {
+        complete: true,
+        originalPartIndexes: owners.map(([, part]) => part),
+        currentParts: owners.map(([guid, part]) => ({
+          index: part,
+          kind: 'attachment',
+          attachmentGuids: [guid],
+        })),
+        attachmentOwnership: owners.map(([guid, part]) => ({
+          attachmentGuid: guid,
+          partIndex: part,
+        })),
+      };
+      raw
+        .prepare('UPDATE messages SET message_part_topology = ? WHERE id = ?')
+        .run(JSON.stringify(topology), id);
+    }
+    // The server converted both HEICs to JPEG (new names and sizes) and lists them in reverse.
+    const converted = (id: number) => [
+      { att: real('real-2', 'IMG_0002.jpeg', 1_400), messageId: id },
+      { att: real('real-1', 'IMG_0001.jpeg', 1_500), messageId: id },
+    ];
+
+    it('pairs each converted file with its own draft whatever order the server lists them in', async () => {
+      const { db, raw, id } = await sentHeics([
+        ['IMG_0001.heic', 3_000],
+        ['IMG_0002.heic', 2_900],
+      ]);
+      storeTopology(raw, id, [
+        ['real-1', 0],
+        ['real-2', 1],
+      ]);
+      await upsertAttachments(db, converted(id));
+      expect(rows(raw, T)).toEqual([
+        { guid: 'real-1', localPath: 'file:///cache/IMG_0001.heic' },
+        { guid: 'real-2', localPath: 'file:///cache/IMG_0002.heic' },
+      ]);
+    });
+
+    it('settles drafts left unpaired once a later copy carries the part numbers', async () => {
+      const { db, raw, id } = await sentHeics([
+        ['IMG_0001.heic', 3_000],
+        ['IMG_0002.heic', 2_900],
+      ]);
+      await upsertAttachments(db, converted(id));
+      expect(rows(raw, T).map((row) => row.guid)).toEqual([
+        `${T}-att`,
+        `${T}-1-att`,
+        'real-2',
+        'real-1',
+      ]);
+      storeTopology(raw, id, [
+        ['real-1', 0],
+        ['real-2', 1],
+      ]);
+      await upsertAttachments(db, converted(id));
+      // Each draft met its own real row and was dropped: no file shows twice.
+      expect(rows(raw, T).map((row) => row.guid)).toEqual(['real-2', 'real-1']);
+    });
+
+    it('keeps a waiting draft when a later copy lists only a file that is already paired', async () => {
+      const { db, raw, id } = await sentHeics([
+        ['IMG_0001.heic', 3_000],
+        ['IMG_0002.heic', 2_900],
+        ['IMG_0003.heic', 2_800],
+      ]);
+      storeTopology(raw, id, [
+        ['real-1', 0],
+        ['real-2', 1],
+        ['real-3', 2],
+      ]);
+      await upsertAttachments(db, [
+        { att: real('real-1', 'IMG_0001.jpeg', 1_500), messageId: id },
+        { att: real('real-2', 'IMG_0002.jpeg', 1_400), messageId: id },
+      ]);
+      // A copy listing only the first file again must not take the third file's draft.
+      await upsertAttachments(db, [{ att: real('real-1', 'IMG_0001.jpeg', 1_500), messageId: id }]);
+      expect(rows(raw, T)).toEqual([
+        { guid: 'real-1', localPath: 'file:///cache/IMG_0001.heic' },
+        { guid: 'real-2', localPath: 'file:///cache/IMG_0002.heic' },
+        { guid: `${T}-2-att`, localPath: 'file:///cache/IMG_0003.heic' },
+      ]);
+      await upsertAttachments(db, [{ att: real('real-3', 'IMG_0003.jpeg', 1_300), messageId: id }]);
+      expect(rows(raw, T)).toEqual([
+        { guid: 'real-1', localPath: 'file:///cache/IMG_0001.heic' },
+        { guid: 'real-2', localPath: 'file:///cache/IMG_0002.heic' },
+        { guid: 'real-3', localPath: 'file:///cache/IMG_0003.heic' },
+      ]);
+    });
+
+    it('ignores part numbers that do not start at 0 and pairs by name and size instead', async () => {
+      const { db, raw, id } = await sentHeics([
+        ['a.heic', 10],
+        ['b.heic', 20],
+      ]);
+      // Numbered from 1, as if text came first: that proves nothing about pick order.
+      storeTopology(raw, id, [
+        ['real-a', 1],
+        ['real-b', 2],
+      ]);
+      await upsertAttachments(db, [
+        { att: real('real-b', 'b.heic', 20), messageId: id },
+        { att: real('real-a', 'a.heic', 10), messageId: id },
+      ]);
+      expect(rows(raw, T)).toEqual([
+        { guid: 'real-a', localPath: 'file:///cache/a.heic' },
+        { guid: 'real-b', localPath: 'file:///cache/b.heic' },
+      ]);
+    });
+  });
+
+  it('pairs the same name and size in order, including identical repeats', async () => {
     const { db, raw, id } = await sent([
       ['same.jpg', 10],
       ['unique.mov', 30],

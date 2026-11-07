@@ -1,5 +1,5 @@
 import { eq, inArray, sql } from 'drizzle-orm';
-import type { Attachment } from '@core/models';
+import { parseMessagePartTopology, type Attachment } from '@core/models';
 import { IMESSAGE_RESTORED_ATTACHMENT_MAX_FILES } from '@core/models/imessageRestoredFeatures';
 import { STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import { firstUrl, INLINE_IMAGE_MIME_TYPES, mediaSection, type MediaSection } from '@utils';
@@ -32,49 +32,86 @@ interface OptimisticAttachmentRow {
 }
 
 /**
- * Pair one message's real attachments with its optimistic temp rows. A real attachment takes the
- * temp row with the same name and size when exactly one of each carries that pair; the rest pair
- * in order (temp rows by id, which is pick order; real ones in payload order). Identical repeats
- * are interchangeable, so order is enough for them. The server's per-message attachment query has
- * no fixed order, which is why name and size come first. A temp row whose own guid is in the
- * payload is a refresh of itself and is never paired. One left over keeps its local file.
+ * A several-file draft's pick position, read from its temp guid: the first file is
+ * `temp-<16 hex>-att` (0) and file n is `temp-<16 hex>-<n>-att` (see sendImageMessage). Any other
+ * shape has no known position.
+ */
+function draftPosition(guid: string): number | null {
+  const match = /^temp-[0-9a-f]{16}(?:-([1-9]))?-att$/.exec(guid);
+  return match ? (match[1] ? Number(match[1]) : 0) : null;
+}
+
+/**
+ * Attachment guid → part number from the message's stored part topology, used only when the
+ * attachment parts are numbered 0, 1, 2, … without a gap or a repeat. That is how the Mac helper
+ * builds a Gator send: one attachment part per uploaded file, in upload order, before any caption.
+ * Any other numbering proves nothing about pick order, so it yields no part numbers at all.
+ */
+function attachmentPartNumbers(rawTopology: string | null | undefined): Map<string, number> {
+  const ownership = parseMessagePartTopology(rawTopology)?.attachmentOwnership ?? [];
+  const byGuid = new Map(ownership.map((entry) => [entry.attachmentGuid, entry.partIndex]));
+  const parts = [...byGuid.values()].sort((a, b) => a - b);
+  const contiguous = parts.every((part, index) => part === index);
+  return byGuid.size === ownership.length && contiguous ? byGuid : new Map();
+}
+
+/**
+ * Pair one message's real attachments with its optimistic temp rows, most exact proof first:
+ * 1. Part number: the server's part topology says which part each real file is, and a draft's
+ *    temp guid says which pick it was, so the pairing holds whatever order the server lists the
+ *    files in and whatever it renamed (a converted HEIC has a new name and size).
+ * 2. Same name and size, in order within each name+size group; identical repeats are
+ *    interchangeable.
+ * 3. One draft and one real file left over: they are the same file, unless a known part number
+ *    and a known pick position say otherwise.
+ * Anything else stays unpaired rather than paired by guessing: the server's per-message attachment
+ * query has no fixed order. An unpaired real file gets its own row, the draft keeps its local file,
+ * and a later copy of the message that carries the topology pairs them and drops the draft. A temp
+ * row whose own guid is in the payload is a refresh of itself and is never paired.
  */
 function pairOptimisticAttachments(
   temps: OptimisticAttachmentRow[],
   incoming: Attachment[],
+  partNumbers: ReadonlyMap<string, number>,
 ): Array<{ temp: OptimisticAttachmentRow; att: Attachment }> {
   const incomingGuids = new Set(incoming.map((att) => att.guid));
-  const freeTemps = temps.filter((temp) => !incomingGuids.has(temp.guid));
   const tempGuids = new Set(temps.map((temp) => temp.guid));
+  const freeTemps = temps.filter((temp) => !incomingGuids.has(temp.guid));
   const real = incoming.filter((att) => !tempGuids.has(att.guid));
+  const pairs: Array<{ temp: OptimisticAttachmentRow; att: Attachment }> = [];
+  const take = (temp: OptimisticAttachmentRow, att: Attachment) => {
+    pairs.push({ temp, att });
+    freeTemps.splice(freeTemps.indexOf(temp), 1);
+    real.splice(real.indexOf(att), 1);
+  };
+  for (const att of [...real]) {
+    const part = partNumbers.get(att.guid);
+    const temp =
+      part === undefined ? undefined : freeTemps.find((t) => draftPosition(t.guid) === part);
+    if (temp) take(temp, att);
+  }
+  // A known part number and a known pick position that differ are never the same file, so the
+  // weaker rules below must not pair them (a copy that lists only an already-paired file would
+  // otherwise take the one draft still waiting for its own).
+  const contradicts = (temp: OptimisticAttachmentRow, att: Attachment) => {
+    const part = partNumbers.get(att.guid);
+    const position = draftPosition(temp.guid);
+    return part !== undefined && position !== null && part !== position;
+  };
   const fileKey = (name: string | null | undefined, bytes: number | null | undefined) =>
     name != null && bytes != null ? `${bytes}:${name}` : null;
-  const counts = (keys: Array<string | null>) => {
-    const out = new Map<string, number>();
-    for (const key of keys) if (key != null) out.set(key, (out.get(key) ?? 0) + 1);
-    return out;
-  };
-  const tempKeys = freeTemps.map((temp) => fileKey(temp.transferName, temp.totalBytes));
-  const realKeys = real.map((att) => fileKey(att.transferName, att.totalBytes));
-  const tempCounts = counts(tempKeys);
-  const realCounts = counts(realKeys);
-  const pairs: Array<{ temp: OptimisticAttachmentRow; att: Attachment }> = [];
-  const pairedTemps = new Set<number>();
-  const unpaired: Attachment[] = [];
-  real.forEach((att, index) => {
-    const key = realKeys[index] ?? null;
-    const unique = key != null && tempCounts.get(key) === 1 && realCounts.get(key) === 1;
-    const tempIndex = unique ? tempKeys.indexOf(key) : -1;
-    if (tempIndex >= 0) {
-      pairs.push({ temp: freeTemps[tempIndex]!, att });
-      pairedTemps.add(tempIndex);
-    } else {
-      unpaired.push(att);
-    }
-  });
-  const leftTemps = freeTemps.filter((_, index) => !pairedTemps.has(index));
-  for (let index = 0; index < Math.min(leftTemps.length, unpaired.length); index += 1) {
-    pairs.push({ temp: leftTemps[index]!, att: unpaired[index]! });
+  for (const att of [...real]) {
+    const key = fileKey(att.transferName, att.totalBytes);
+    const temp =
+      key == null
+        ? undefined
+        : freeTemps.find(
+            (t) => fileKey(t.transferName, t.totalBytes) === key && !contradicts(t, att),
+          );
+    if (temp) take(temp, att);
+  }
+  if (freeTemps.length === 1 && real.length === 1 && !contradicts(freeTemps[0]!, real[0]!)) {
+    take(freeTemps[0]!, real[0]!);
   }
   return pairs;
 }
@@ -143,7 +180,13 @@ export function upsertAttachmentsWithinTransaction(
           WHERE message_id = ${messageId} AND guid LIKE 'temp-%-att'
           ORDER BY id ASC`,
       );
-      for (const { temp: t, att } of pairOptimisticAttachments(temps, incoming)) {
+      if (temps.length === 0) continue;
+      // The message row, with its part topology, is written before its attachments.
+      const [owner] = await db.all<{ topology: string | null }>(
+        sql`SELECT message_part_topology AS topology FROM messages WHERE id = ${messageId}`,
+      );
+      const partNumbers = attachmentPartNumbers(owner?.topology);
+      for (const { temp: t, att } of pairOptimisticAttachments(temps, incoming, partNumbers)) {
         // If the real guid already exists (a prior echo inserted it), just drop the temp row.
         const existing = await db.all<{ id: number }>(
           sql`SELECT id FROM attachments WHERE guid = ${att.guid} LIMIT 1`,
