@@ -677,10 +677,10 @@ index b1a4ff8..dc90ab3 100644
    List<Bundle> getEvents(String appScopeKey);
 diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java
 new file mode 100644
-index 0000000..a5f1f60
+index 0000000..22d5c93
 --- /dev/null
 +++ b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskmanager/TaskServiceContextLifetimeTest.java
-@@ -0,0 +1,384 @@
+@@ -0,0 +1,388 @@
 +package expo.modules.taskmanager;
 +
 +import static org.junit.Assert.assertFalse;
@@ -689,7 +689,6 @@ index 0000000..a5f1f60
 +import static org.junit.Assert.assertNull;
 +import static org.junit.Assert.assertSame;
 +import static org.junit.Assert.assertTrue;
-+import static org.robolectric.Shadows.shadowOf;
 +
 +import android.app.Application;
 +import android.content.Context;
@@ -717,6 +716,9 @@ index 0000000..a5f1f60
 +import org.junit.Test;
 +import org.junit.runner.RunWith;
 +import org.robolectric.RobolectricTestRunner;
++import org.robolectric.shadow.api.Shadow;
++import org.robolectric.shadows.ShadowLooper;
++import org.robolectric.shadows.ShadowPackageManager;
 +import org.robolectric.RuntimeEnvironment;
 +import org.robolectric.annotation.Config;
 +
@@ -751,13 +753,15 @@ index 0000000..a5f1f60
 +    Application application = RuntimeEnvironment.getApplication();
 +    // TaskService's repository factory expects manifest metadata. Mutate the shadow's
 +    // actual package record, rather than the copy returned by getApplicationInfo().
-+    ApplicationInfo applicationInfo = shadowOf(application.getPackageManager())
++    // Shadow.extract, not Shadows.shadowOf: resolving shadowOf's overloads needs
++    // android.hardware.fingerprint.FingerprintManager, which compileSdk 37 no longer ships.
++    ApplicationInfo applicationInfo = Shadow.<ShadowPackageManager>extract(application.getPackageManager())
 +        .getInternalMutablePackageInfo(application.getPackageName()).applicationInfo;
 +    Bundle originalMetadata = applicationInfo.metaData;
 +    restorations.add(() -> applicationInfo.metaData = originalMetadata);
 +    applicationInfo.metaData = originalMetadata == null
 +        ? new Bundle() : new Bundle(originalMetadata);
-+    applicationInfo.metaData.putBoolean("expo.modules.taskmanager.oneAppId", true);
++    applicationInfo.metaData.putBoolean("expo.modules.taskManager.oneAppId", true);
 +
 +    foregroundManagers = isolateMap(TaskService.class, "sTaskManagers");
 +    headlessManagers = isolateMap(TaskService.class, "sHeadlessTaskManagers");
@@ -923,7 +927,7 @@ index 0000000..a5f1f60
 +    Method finish = TaskService.class.getDeclaredMethod("maybeFinishHeadlessTask", String.class, Object.class);
 +    finish.setAccessible(true);
 +    finish.invoke(service, scopeA, generation);
-+    shadowOf(Looper.getMainLooper()).idle();
++    Shadow.<ShadowLooper>extract(Looper.getMainLooper()).idle();
 +    assertFalse(oldContext.isTaskRunning(7));
 +    assertTrue(newContext.isTaskRunning(7));
 +    newContext.finishTask(7);
