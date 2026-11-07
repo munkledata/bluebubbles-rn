@@ -5,13 +5,27 @@ jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: nu
 jest.mock('@/native/powerManager', () => ({
   isIgnoringBatteryOptimizations: () => mockIgnoring,
 }));
+const mockStartActivity = jest.fn<Promise<void>, [string, unknown?]>();
+jest.mock('expo-intent-launcher', () => ({
+  ActivityAction: {
+    APPLICATION_DETAILS_SETTINGS: 'APPLICATION_DETAILS_SETTINGS',
+    IGNORE_BATTERY_OPTIMIZATION_SETTINGS: 'IGNORE_BATTERY_OPTIMIZATION_SETTINGS',
+  },
+  startActivityAsync: (action: string, params?: unknown) => mockStartActivity(action, params),
+}));
 
 // eslint-disable-next-line import/first
-import { batteryOptimizationNote, getBatteryOptimizationStatus } from '@/services/battery';
+import {
+  batteryOptimizationNote,
+  getBatteryOptimizationStatus,
+  requestDisableBatteryOptimization,
+} from '@/services/battery';
 
 beforeEach(() => {
   mockPlatform.OS = 'android';
   mockIgnoring = null;
+  mockStartActivity.mockReset();
+  mockStartActivity.mockResolvedValue(undefined);
 });
 
 describe('getBatteryOptimizationStatus', () => {
@@ -36,5 +50,30 @@ describe('batteryOptimizationNote', () => {
     expect(batteryOptimizationNote('optimized')).toMatch(/may delay notifications/);
     expect(batteryOptimizationNote('optimized')).toMatch(/“Unrestricted”/);
     expect(batteryOptimizationNote('unknown')).toBeNull();
+  });
+});
+
+describe('requestDisableBatteryOptimization', () => {
+  it('opens Gator’s own App info page, where Battery is one tap away', async () => {
+    await expect(requestDisableBatteryOptimization()).resolves.toBe(true);
+    expect(mockStartActivity).toHaveBeenCalledTimes(1);
+    expect(mockStartActivity).toHaveBeenCalledWith('APPLICATION_DETAILS_SETTINGS', {
+      data: 'package:com.bluegreengatorapps.messages',
+    });
+  });
+
+  it('falls back to the general battery-optimization list when App info will not open', async () => {
+    mockStartActivity.mockRejectedValueOnce(new Error('no activity'));
+    await expect(requestDisableBatteryOptimization()).resolves.toBe(true);
+    expect(mockStartActivity).toHaveBeenLastCalledWith(
+      'IGNORE_BATTERY_OPTIMIZATION_SETTINGS',
+      undefined,
+    );
+  });
+
+  it('does nothing off Android', async () => {
+    mockPlatform.OS = 'ios';
+    await expect(requestDisableBatteryOptimization()).resolves.toBe(false);
+    expect(mockStartActivity).not.toHaveBeenCalled();
   });
 });

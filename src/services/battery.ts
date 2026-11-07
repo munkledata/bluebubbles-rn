@@ -17,6 +17,10 @@ const FALLBACK_PACKAGE = 'com.bluegreengatorapps.messages';
  * optimization settings screen ALWAYS opens, so the button is reliable and lets the user both grant
  * and later see/undo the exemption.
  *
+ * It opens Gator's own App info page first: Battery is one tap away there and uses the same word,
+ * "Unrestricted", as the Settings note. Android's general battery-optimization list comes second:
+ * on the Samsung the owner could not find Gator in it to switch the setting back (2026-11-07).
+ *
  * `expo-intent-launcher` is imported LAZILY so the JS bundle doesn't reference the native module on
  * any startup path; until it's linked (native rebuild) this throws and is caught (a no-op), keeping
  * the build green.
@@ -28,14 +32,13 @@ export async function requestDisableBatteryOptimization(): Promise<boolean> {
     const pkg = Constants.expoConfig?.android?.package ?? FALLBACK_PACKAGE;
     try {
       await IntentLauncher.startActivityAsync(
-        IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
-      );
-    } catch {
-      // Some OEM ROMs don't expose that screen — fall back to this app's system Info page, from
-      // which the user can reach Battery → Unrestricted.
-      await IntentLauncher.startActivityAsync(
         IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS,
         { data: `package:${pkg}` },
+      );
+    } catch {
+      // A ROM without a per-app Info page still has the general battery-optimization list.
+      await IntentLauncher.startActivityAsync(
+        IntentLauncher.ActivityAction.IGNORE_BATTERY_OPTIMIZATION_SETTINGS,
       );
     }
     return true;
@@ -65,7 +68,7 @@ export function batteryOptimizationNote(status: BatteryOptimizationStatus): stri
     case 'unrestricted':
       return 'Battery: Unrestricted. Android won’t hold back Gator’s notifications.';
     case 'optimized':
-      return 'Battery: Optimized. Android may delay notifications while the phone is idle. For prompt notifications, set Gator to “Unrestricted” in Battery Optimization Settings.';
+      return 'Battery: Optimized. Android may delay notifications while the phone is idle. For prompt notifications, open Battery Optimization Settings, tap Battery and choose “Unrestricted”.';
     case 'unknown':
       return null;
   }
