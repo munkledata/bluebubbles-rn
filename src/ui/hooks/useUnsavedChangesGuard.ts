@@ -43,13 +43,19 @@ export function useUnsavedChangesGuard({
   onAfterDiscardNavigation,
 }: UnsavedChangesGuardOptions): UnsavedChangesGuard {
   const navigation = useNavigation();
-  const bypassNextRemovalRef = useRef(false);
   const confirmationPendingRef = useRef(false);
   const confirmationIdRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
-  // The confirmed action waits here while the guard turns off for the render that releases it.
+  // A confirmed Discard's action, or a successful save's navigation, waits here while the guard
+  // turns off for the render that releases it.
   const [releasing, setReleasing] = useState(false);
-  const releaseActionRef = useRef<Parameters<typeof navigation.dispatch>[0] | null>(null);
+  const releaseRef = useRef<
+    | { kind: 'discard'; action: Parameters<typeof navigation.dispatch>[0] }
+    | { kind: 'navigate'; navigate: () => void }
+    | null
+  >(null);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
   const dismissOwnedConfirmation = useCallback((): void => {
     const id = confirmationIdRef.current;
@@ -63,18 +69,22 @@ export function useUnsavedChangesGuard({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      bypassNextRemovalRef.current = false;
+      releaseRef.current = null;
       dismissOwnedConfirmation();
     };
   }, [dismissOwnedConfirmation]);
 
   useEffect(() => {
     if (!releasing) return;
-    const action = releaseActionRef.current;
-    releaseActionRef.current = null;
-    if (action && mountedRef.current) {
-      navigation.dispatch(action);
-      onAfterDiscardNavigation?.();
+    const release = releaseRef.current;
+    releaseRef.current = null;
+    if (release && mountedRef.current) {
+      if (release.kind === 'discard') {
+        navigation.dispatch(release.action);
+        onAfterDiscardNavigation?.();
+      } else {
+        release.navigate();
+      }
     }
     // A removal that did not happen (the route was already gone) must not leave the guard off.
     queueMicrotask(() => {
@@ -83,11 +93,6 @@ export function useUnsavedChangesGuard({
   }, [releasing, navigation, onAfterDiscardNavigation]);
 
   usePreventRemove(enabled && !releasing, ({ data }) => {
-    if (bypassNextRemovalRef.current) {
-      bypassNextRemovalRef.current = false;
-      navigation.dispatch(data.action);
-      return;
-    }
     // A rapid second Back must not queue a second destructive confirmation behind the first.
     if (confirmationPendingRef.current) return;
     confirmationPendingRef.current = true;
@@ -122,7 +127,7 @@ export function useUnsavedChangesGuard({
             (discarded) => {
               if (discarded !== false && mountedRef.current) {
                 // Turn the guard off first; the effect above dispatches once that render lands.
-                releaseActionRef.current = data.action;
+                releaseRef.current = { kind: 'discard', action: data.action };
                 setReleasing(true);
               }
             },
@@ -139,16 +144,17 @@ export function useUnsavedChangesGuard({
       // A save can finish while its discard prompt is open. Remove only this guard's dialog so it
       // cannot remain over the destination; unrelated dialogs keep their place in the queue.
       dismissOwnedConfirmation();
-      bypassNextRemovalRef.current = true;
-      try {
+      // With nothing to protect there is no guard to pass: navigate now.
+      if (!enabledRef.current) {
         navigate();
-      } finally {
-        // Expo Router dispatches synchronously. Do not leave a stale bypass armed if the requested
-        // operation was a no-op (for example, Back on an already-root route).
-        queueMicrotask(() => {
-          bypassNextRemovalRef.current = false;
-        });
+        return;
       }
+      // Same as a confirmed Discard: the guard turns off for one render and the navigation runs
+      // then. Passing it through while the guard was still on (the old "bypass" flag) was prevented
+      // a second time on Expo SDK 58, so a successful Start showed "Discard new message?"
+      // (0.1.79, Galaxy S25, 2026-11-07).
+      releaseRef.current = { kind: 'navigate', navigate };
+      setReleasing(true);
     },
     [dismissOwnedConfirmation],
   );

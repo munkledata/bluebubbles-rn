@@ -199,11 +199,31 @@ it('removes its open discard prompt when a successful operation navigates', asyn
   });
   expect(screen.getByText('Discard changes?')).toBeTruthy();
 
+  // A successful save navigates with the guard OFF: on Expo SDK 58 passing it through while the
+  // guard was still on was prevented again, so a successful Start showed the discard prompt.
+  let enabledWhenNavigating: boolean | undefined;
+  const navigate = jest.fn(() => {
+    const latest = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+    enabledWhenNavigating = latest?.[0] as boolean;
+  });
   await act(async () => {
-    navigateWithoutPrompt?.(() => guardCall?.[1]({ data: { action } }));
+    navigateWithoutPrompt?.(navigate);
   });
 
   expect(screen.queryByText('Discard changes?')).toBeNull();
   expect(useDialogStore.getState().current).toBeNull();
-  expect(mockDispatch).toHaveBeenCalledWith(action);
+  expect(navigate).toHaveBeenCalledTimes(1);
+  expect(enabledWhenNavigating).toBe(false);
+  expect(mockDispatch).not.toHaveBeenCalled();
+});
+
+it('navigates at once when there is nothing to protect', async () => {
+  function IdleProbe(): React.JSX.Element {
+    ({ navigateWithoutPrompt } = useUnsavedChangesGuard({ enabled: false }));
+    return <View />;
+  }
+  await renderWithTheme(<IdleProbe />);
+  const navigate = jest.fn();
+  navigateWithoutPrompt?.(navigate);
+  expect(navigate).toHaveBeenCalledTimes(1);
 });
