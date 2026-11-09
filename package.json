@@ -125,7 +125,7 @@
     "eslint": "^9.39.4",
     "eslint-config-expo": "~58.0.4",
     "eslint-config-prettier": "^10.1.8",
-    "expo-doctor": "1.20.1",
+    "expo-doctor": "1.21.6",
     "jest": "~30.5.2",
     "jest-expo": "~58.0.14",
     "libsodium-wrappers": "^0.7.15",
