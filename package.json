@@ -98,7 +98,7 @@
     "qrcode": "^1.5.4",
     "react": "19.3.0",
     "react-native": "0.88.1",
-    "react-native-image-colors": "2.6.0",
+    "react-native-image-colors": "2.6.1",
     "react-native-libsodium": "1.7.0",
     "react-native-maps": "1.29.11",
     "react-native-notify-kit": "10.10.0",
