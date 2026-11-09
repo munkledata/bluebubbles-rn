@@ -133,7 +133,7 @@
     "patch-package": "8.0.1",
     "prettier": "^3.3.3",
     "ts-jest": "^29.2.5",
-    "typescript": "~6.0.3"
+    "typescript": "~7.0.2"
   },
   "overrides": {
     "@firebase/firestore": {
